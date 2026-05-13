@@ -1,19 +1,29 @@
 """SQLAlchemy declarative foundation.
 
-A single `Base` (SQLAlchemy 2.0 `DeclarativeBase`) plus reusable mixins.
-Models live in `app/db/models.py` (and any future submodules) and all
-inherit from `Base` so Alembic's autogenerate sees a single metadata.
+This module is the SINGLE source of truth for the project's ORM
+metadata. It owns:
+
+* `Base`                  — the one `DeclarativeBase` every model
+                            inherits from.
+* `MetaData` + naming     — deterministic constraint names so Alembic
+                            migrations are reproducible across machines.
+* Reusable column mixins  — composable building blocks
+                            (`TimestampMixin`, `UUIDPrimaryKeyMixin`)
+                            that entities opt into without ever defining
+                            a second `Base` or a second `MetaData`.
+
+No model definitions live here. Models live under `app/db/models/`.
 """
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-# A consistent naming convention keeps Alembic migrations deterministic
-# across machines and database backends.
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
     "uq": "uq_%(table_name)s_%(column_0_N_name)s",
@@ -26,18 +36,38 @@ NAMING_CONVENTION = {
 class Base(DeclarativeBase):
     """Project-wide declarative base.
 
-    All ORM models MUST inherit from this class so they share one
-    `MetaData` (required by Alembic autogenerate and by the naming
-    convention above).
+    All ORM models MUST inherit from this class. There is exactly one
+    `Base` and exactly one `MetaData` in the entire project — Alembic's
+    autogenerate, migration determinism, and runtime introspection all
+    depend on that invariant.
     """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
+class UUIDPrimaryKeyMixin:
+    """Reusable `id: uuid.UUID` primary key column.
+
+    * UUID v4, generated application-side so inserts never need a
+      round-trip just to learn their own identifier.
+    * Stored as the native PostgreSQL `UUID` type — indexed, compact,
+      and safe to expose at the API boundary.
+    * Lives on a mixin (not on `Base`) so entities that need a different
+      identity strategy (composite keys, natural keys) are free to opt
+      out without paying for an unused column.
+    """
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+
 class TimestampMixin:
     """Adds `created_at` / `updated_at` columns.
 
-    Server-side defaults (`func.now()`) so timestamps are correct even
+    Server-side defaults (`func.now()`) so timestamps remain correct
     when rows are inserted by tooling outside the ORM (psql, Alembic
     data migrations, COPY, etc.).
     """
@@ -55,4 +85,9 @@ class TimestampMixin:
     )
 
 
-__all__ = ["Base", "TimestampMixin", "NAMING_CONVENTION"]
+__all__ = [
+    "Base",
+    "NAMING_CONVENTION",
+    "TimestampMixin",
+    "UUIDPrimaryKeyMixin",
+]
