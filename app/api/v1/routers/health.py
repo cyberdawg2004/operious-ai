@@ -6,9 +6,8 @@ Three orthogonal probes:
 * `/live`   – liveness probe (process is up and not deadlocked)
 * `/ready`  – readiness probe (dependencies wired; safe to receive traffic)
 
-Right now `/ready` is dependency-free, but the signature is shaped so we
-can plug DB, cache, and AI-provider checks in later without changing the
-public contract.
+`/ready` actively pings PostgreSQL and Redis; `/health` and `/live` stay
+dependency-free so they can never be brought down by downstream issues.
 """
 
 from __future__ import annotations
@@ -16,41 +15,67 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 
 from app.core.config import Settings, get_settings
+from app.core.health import (
+    DependencyCheck,
+    aggregate_status,
+    check_database,
+    check_redis,
+)
+from app.core.redis import get_redis
+from app.db.session import AsyncSessionLocal
 
 router = APIRouter(tags=["health"])
+
+CheckName = Literal["health", "live", "ready"]
+ProbeStatus = Literal["ok", "degraded", "unavailable"]
+
+
+class DependencyResult(BaseModel):
+    name: str
+    status: Literal["ok", "unavailable"]
+    latency_ms: float
+    error: str | None = None
 
 
 class HealthResponse(BaseModel):
     """Stable JSON contract for all health probes."""
 
-    status: Literal["ok", "degraded", "unavailable"] = Field(
-        ..., description="Aggregated probe status."
-    )
-    check: Literal["health", "live", "ready"] = Field(
-        ..., description="Which probe produced this response."
-    )
+    status: ProbeStatus = Field(..., description="Aggregated probe status.")
+    check: CheckName = Field(..., description="Which probe produced this response.")
     app: str = Field(..., description="Service name.")
     version: str = Field(..., description="Service version.")
     environment: str = Field(..., description="Runtime environment.")
     timestamp: datetime = Field(..., description="UTC timestamp of the check.")
+    dependencies: list[DependencyResult] = Field(
+        default_factory=list,
+        description="Per-dependency results (populated for /ready).",
+    )
 
 
-def _build_response(
-    check: Literal["health", "live", "ready"],
+def _envelope(
+    check: CheckName,
     settings: Settings,
-    status: Literal["ok", "degraded", "unavailable"] = "ok",
+    status_value: ProbeStatus = "ok",
+    dependencies: list[DependencyCheck] | None = None,
 ) -> HealthResponse:
     return HealthResponse(
-        status=status,
+        status=status_value,
         check=check,
         app=settings.APP_NAME,
         version=settings.APP_VERSION,
         environment=settings.ENVIRONMENT,
         timestamp=datetime.now(timezone.utc),
+        dependencies=[
+            DependencyResult(
+                name=d.name, status=d.status, latency_ms=d.latency_ms, error=d.error
+            )
+            for d in (dependencies or [])
+        ],
     )
 
 
@@ -61,7 +86,7 @@ def _build_response(
     description="High-level health snapshot including app metadata.",
 )
 async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    return _build_response("health", settings)
+    return _envelope("health", settings)
 
 
 @router.get(
@@ -71,7 +96,7 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     description="Returns 200 as long as the process can serve requests.",
 )
 async def live(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    return _build_response("live", settings)
+    return _envelope("live", settings)
 
 
 @router.get(
@@ -79,10 +104,21 @@ async def live(settings: Settings = Depends(get_settings)) -> HealthResponse:
     response_model=HealthResponse,
     summary="Readiness probe",
     description=(
-        "Returns 200 when the service is ready to accept traffic. "
-        "Downstream dependency checks (DB, cache, AI providers) will be "
-        "wired in here as they come online."
+        "Returns 200 when PostgreSQL and Redis are reachable. Returns 503 "
+        "if any dependency check fails so orchestrators stop routing "
+        "traffic to this replica."
     ),
 )
-async def ready(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    return _build_response("ready", settings)
+async def ready(
+    response: Response,
+    settings: Settings = Depends(get_settings),
+    redis: Redis = Depends(get_redis),
+) -> HealthResponse:
+    checks: list[DependencyCheck] = [
+        await check_database(AsyncSessionLocal),
+        await check_redis(redis),
+    ]
+    overall = aggregate_status(checks)
+    if overall != "ok":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return _envelope("ready", settings, overall, checks)

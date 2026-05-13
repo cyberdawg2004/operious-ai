@@ -15,6 +15,8 @@ from fastapi import FastAPI
 from app.api.router import build_api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
+from app.core.redis import close_redis
+from app.db.session import dispose_engine
 
 
 @asynccontextmanager
@@ -33,6 +35,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await dispose_engine()
+        await close_redis()
         logger.info("application_shutdown", extra={"app": settings.APP_NAME})
 
 
