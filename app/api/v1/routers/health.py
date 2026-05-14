@@ -6,41 +6,21 @@ Three orthogonal probes:
 * `GET /live`   — liveness probe (process is up and responsive).
 * `GET /ready`  — readiness probe (dependencies wired; safe for traffic).
 
-This module is intentionally thin: it composes a `HealthService` from
-DI, calls one of three async methods, and maps the domain report to the
-versioned response schema. Orchestration, timeout policy, and
-aggregation semantics live entirely inside `HealthService`.
+Pure transport: each handler validates inputs, awaits a single service
+call, and maps the domain report to the versioned response schema.
+Service construction is centralised under `app.dependencies.services`;
+this module never builds a service.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response, status
-from redis.asyncio import Redis
 
 from app.api.v1.schemas.health import HealthResponse
-from app.core.config import Settings, get_settings
-from app.core.redis import get_redis
-from app.db.session import AsyncSessionLocal
+from app.dependencies.services import get_health_service
 from app.services.health_service import HealthService
 
 router = APIRouter(tags=["health"])
-
-
-def get_health_service(
-    settings: Settings = Depends(get_settings),
-    redis: Redis = Depends(get_redis),
-) -> HealthService:
-    """FastAPI dependency factory for `HealthService`.
-
-    Co-located with the router so the FastAPI-specific wiring stays out
-    of the service module. Each request constructs a fresh service
-    instance — services are cheap and stateless.
-    """
-    return HealthService(
-        settings=settings,
-        session_factory=AsyncSessionLocal,
-        redis=redis,
-    )
 
 
 @router.get(

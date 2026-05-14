@@ -7,6 +7,12 @@ Owns the *policy* layer of the readiness pipeline:
 * how individual results aggregate into an overall verdict,
 * what the domain shape of a health report is.
 
+Persistence access — actually running `SELECT 1` — is delegated to
+`SystemHealthRepository`. The service still owns session lifecycle for
+the probes because readiness must fail closed independently of the
+request session: an exhausted pool or a downed database has to surface
+as a degraded probe, not as a 500 from the dependency graph.
+
 Returns plain domain dataclasses, never Pydantic schemas. Transport
 mapping happens in the v1 schema layer.
 """
@@ -25,13 +31,16 @@ from app.core.config import Settings
 from app.core.health import (
     DependencyCheck,
     aggregate_status,
-    check_database,
     check_redis,
+    run_with_timeout,
 )
+from app.repositories.system_health_repository import SystemHealthRepository
 from app.services.base import BaseService
 
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
+
+_DB_PROBE_TIMEOUT_SECONDS = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +124,7 @@ class HealthService(BaseService):
         timeouts in orchestrators under partial-degradation conditions.
         """
         checks: Sequence[DependencyCheck] = await asyncio.gather(
-            check_database(self._session_factory),
+            self._probe_database(),
             check_redis(self._redis),
         )
         overall = aggregate_status(list(checks))
@@ -137,6 +146,25 @@ class HealthService(BaseService):
         )
 
     # ─── Internals ─────────────────────────────────────────────────────
+
+    async def _probe_database(self) -> DependencyCheck:
+        """Run a connectivity probe via the system-health repository.
+
+        Owns its own session lifecycle so a degraded pool surfaces as a
+        captured `DependencyCheck` rather than as an exception that
+        bubbles out of FastAPI's dependency graph.
+        """
+
+        async def _ping() -> None:
+            async with self._session_factory() as session:
+                repo = SystemHealthRepository(session)
+                await repo.ping()
+
+        return await run_with_timeout(
+            name="postgres",
+            coro_factory=_ping,
+            timeout=_DB_PROBE_TIMEOUT_SECONDS,
+        )
 
     def _build_report(
         self,

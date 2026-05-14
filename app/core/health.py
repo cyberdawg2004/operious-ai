@@ -1,15 +1,22 @@
-"""Dependency health checks.
+"""Health-probe primitives.
 
-Keeps the readiness logic out of the transport layer. Each check is:
+A tiny library of building blocks the service layer composes into
+readiness logic. Nothing here knows about HTTP, persistence policy, or
+business rules.
 
-* Async (non-blocking).
-* Bounded by a short timeout — a slow dependency must never block the
-  probe long enough for an orchestrator to mark the pod unhealthy.
-* Defensive: any exception is captured and surfaced as a structured
-  result, never propagated.
+After Sprint D the database probe lives in
+`app.repositories.system_health_repository` (query) and
+`app.services.health_service` (policy). What remains here:
 
-Used by `app/api/v1/routers/health.py`. Will be reused by future
-periodic background checks (Sprint D).
+* `DependencyCheck`   — frozen result type for a single probe.
+* `run_with_timeout`  — bounded-execution helper that turns any
+                        async coroutine into a `DependencyCheck`,
+                        capturing exceptions and timing.
+* `check_redis`       — the one external-system probe that doesn't
+                        justify its own repository (single primitive,
+                        no query surface).
+* `aggregate_status`  — rolls individual results into the overall
+                        ok / degraded / unavailable verdict.
 """
 
 from __future__ import annotations
@@ -19,8 +26,6 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal
 
 from redis.asyncio import Redis
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.logging import get_logger
 
@@ -37,11 +42,13 @@ class DependencyCheck:
     error: str | None = None
 
 
-async def _run_with_timeout(
+async def run_with_timeout(
+    *,
     name: str,
     coro_factory: Callable[[], Awaitable[None]],
     timeout: float,
 ) -> DependencyCheck:
+    """Run a probe coroutine, capturing latency, exceptions, and timeouts."""
     loop = asyncio.get_event_loop()
     started = loop.time()
     try:
@@ -62,34 +69,23 @@ async def _run_with_timeout(
         )
 
 
-async def check_database(
-    session_factory: async_sessionmaker,
-    timeout: float = 2.0,
-) -> DependencyCheck:
-    """`SELECT 1` against PostgreSQL through the async engine pool."""
-
-    async def _ping() -> None:
-        async with session_factory() as session:
-            await session.execute(text("SELECT 1"))
-
-    return await _run_with_timeout("postgres", _ping, timeout)
-
-
 async def check_redis(client: Redis, timeout: float = 2.0) -> DependencyCheck:
     """`PING` against the shared async Redis client."""
 
     async def _ping() -> None:
         await client.ping()
 
-    return await _run_with_timeout("redis", _ping, timeout)
+    return await run_with_timeout(name="redis", coro_factory=_ping, timeout=timeout)
 
 
-def aggregate_status(checks: list[DependencyCheck]) -> Literal["ok", "degraded", "unavailable"]:
+def aggregate_status(
+    checks: list[DependencyCheck],
+) -> Literal["ok", "degraded", "unavailable"]:
     """Roll individual dependency results into an overall status.
 
-    * all ok          → ok
-    * some failing    → degraded
-    * all failing     → unavailable
+    * all ok       → ok
+    * some failing → degraded
+    * all failing  → unavailable
     """
     if not checks:
         return "ok"
@@ -103,7 +99,7 @@ def aggregate_status(checks: list[DependencyCheck]) -> Literal["ok", "degraded",
 
 __all__ = [
     "DependencyCheck",
-    "check_database",
+    "run_with_timeout",
     "check_redis",
     "aggregate_status",
 ]

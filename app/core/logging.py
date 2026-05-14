@@ -4,6 +4,11 @@ Configures the root logger once at application startup. Local
 environments get a human-readable formatter; staging/production emit
 single-line JSON suitable for log aggregators (Datadog, Loki, CloudWatch,
 etc.). All other modules just call `get_logger(__name__)`.
+
+The handler also carries `RequestContextFilter`, which decorates every
+record with the current request id — established by the request-context
+middleware. Loggers do not need to know this; the filter sees every
+record regardless of call site.
 """
 
 from __future__ import annotations
@@ -15,11 +20,14 @@ from typing import Optional
 from pythonjsonlogger.json import JsonFormatter
 
 from app.core.config import Settings, get_settings
+from app.observability.logging import RequestContextFilter
 
 _CONFIGURED: bool = False
 
-_JSON_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
-_TEXT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+_JSON_FORMAT = "%(asctime)s %(levelname)s %(name)s %(request_id)s %(message)s"
+_TEXT_FORMAT = (
+    "%(asctime)s | %(levelname)-8s | req=%(request_id)s | %(name)s | %(message)s"
+)
 
 _NOISY_LOGGERS = (
     "uvicorn.access",
@@ -53,6 +61,7 @@ def configure_logging(settings: Optional[Settings] = None) -> None:
         formatter = logging.Formatter(_TEXT_FORMAT)
 
     handler.setFormatter(formatter)
+    handler.addFilter(RequestContextFilter())
 
     root = logging.getLogger()
     root.handlers.clear()
@@ -82,3 +91,6 @@ def get_logger(name: str) -> logging.Logger:
     """
 
     return logging.getLogger(name)
+
+
+__all__ = ["configure_logging", "get_logger"]

@@ -1,14 +1,13 @@
-"""Async SQLAlchemy engine, session factory, and FastAPI dependency.
+"""Async SQLAlchemy engine and session factory.
 
-A single async engine is built once at import time using settings from
-`app.core.config`. Sessions are short-lived, scoped to a single request
-or task, and produced by `AsyncSessionLocal`. Consumers in the transport
-layer obtain them via `Depends(get_db_session)`.
+Persistence primitives only. This module is intentionally
+transport-agnostic — background workers, CLI scripts, and request
+handlers all rely on the same engine and session factory. The
+FastAPI-facing request-scoped session provider lives in
+`app.dependencies.database`.
 """
 
 from __future__ import annotations
-
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -53,30 +52,6 @@ AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 )
 
 
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency yielding a request-scoped async session.
-
-    Lifecycle (per request):
-        1. Open a session from the pool.
-        2. Yield it to the handler / service layer.
-        3. On exception → rollback.
-        4. Always → close (returns the connection to the pool).
-
-    Commit is intentionally NOT performed here. Services own the unit of
-    work and decide when to commit so the transactional boundary stays
-    explicit.
-    """
-
-    session = AsyncSessionLocal()
-    try:
-        yield session
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
-
-
 async def dispose_engine() -> None:
     """Cleanly dispose the engine on application shutdown."""
     await engine.dispose()
@@ -85,6 +60,5 @@ async def dispose_engine() -> None:
 __all__ = [
     "engine",
     "AsyncSessionLocal",
-    "get_db_session",
     "dispose_engine",
 ]

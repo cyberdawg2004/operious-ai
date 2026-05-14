@@ -66,6 +66,62 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str | None = None
     REDIS_URL: str | None = None
 
+    # ─── AI providers (gateway-level) ────────────────────────────────
+    AI_DEFAULT_PROVIDER: str = "openai"
+    AI_TIMEOUT_SECONDS: float = 30.0
+    AI_MAX_ATTEMPTS: int = 3
+    AI_RETRY_BACKOFF_BASE: float = 0.5
+    AI_RETRY_BACKOFF_MAX: float = 8.0
+
+    # ─── OpenAI provider ─────────────────────────────────────────────
+    OPENAI_API_KEY: str | None = None
+    OPENAI_BASE_URL: str | None = None
+    OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # Optional; lets us reduce dimensions for `text-embedding-3-*` models.
+    # When None the provider returns the model's native dimensionality.
+    OPENAI_EMBEDDING_DIMENSIONS: int | None = None
+
+    # ─── Embedding gateway ───────────────────────────────────────────
+    EMBEDDING_DEFAULT_PROVIDER: str = "openai"
+    EMBEDDING_TIMEOUT_SECONDS: float = 30.0
+    EMBEDDING_MAX_ATTEMPTS: int = 3
+    EMBEDDING_RETRY_BACKOFF_BASE: float = 0.5
+    EMBEDDING_RETRY_BACKOFF_MAX: float = 8.0
+
+    # ─── Vector store ────────────────────────────────────────────────
+    VECTOR_DEFAULT_PROVIDER: str = "in_memory"
+    VECTOR_DEFAULT_INDEX: str = "operious_default"
+
+    # ─── Chunking ────────────────────────────────────────────────────
+    CHUNK_TARGET_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 100
+    CHUNK_MIN_SIZE: int = 50
+
+    # ─── RAG runtime ─────────────────────────────────────────────────
+    # Defaults applied when callers do not pass their own policy / budget.
+    # Every knob here is an OPERATIONAL default, not a hard ceiling — the
+    # retrieval and assembly services accept overrides per call.
+    RAG_DEFAULT_RETRIEVAL_STRATEGY: str = "single_query"
+    RAG_DEFAULT_RERANKER: str = "identity"
+    RAG_DEFAULT_GROUNDING_STRATEGY: str = "default"
+    RAG_DEFAULT_TOP_K: int = 8
+    RAG_DEFAULT_MIN_SCORE: float = 0.0
+    RAG_DEFAULT_MAX_CHUNKS_PER_DOCUMENT: int | None = None
+    RAG_DEFAULT_CONTEXT_TOKEN_BUDGET: int = 4000
+    RAG_DEFAULT_TOKEN_ESTIMATOR_RATIO: int = 4  # chars-per-token heuristic.
+
+    # ─── Governance runtime ──────────────────────────────────────────
+    # Operational defaults for the governance substrate. Empty
+    # allowlist / denylist values mean "permissive default" — production
+    # deployments override these at boot via environment variables.
+    # List values use comma-separated strings; the governance DI layer
+    # splits them at composition time.
+    GOVERNANCE_ENABLED: bool = True
+    GOVERNANCE_TENANT_ALLOWLIST: str = ""  # comma-separated tenant ids
+    GOVERNANCE_CONTENT_DENYLIST: str = ""  # comma-separated substrings
+    GOVERNANCE_MAX_QUERY_LENGTH: int = 4000
+
     # ─── Derived properties ──────────────────────────────────────────
     @property
     def is_production(self) -> bool:
