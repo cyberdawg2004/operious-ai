@@ -8,7 +8,7 @@ from the registry.
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterator
 
 from app.rag.reranking.base import BaseReranker
 
@@ -39,8 +39,12 @@ class RerankerRegistry:
     def names(self) -> tuple[str, ...]:
         return tuple(sorted(self._rerankers.keys()))
 
-    def __iter__(self) -> Iterable[BaseReranker]:
-        return iter(self._rerankers.values())
+    def __iter__(self) -> Iterator[BaseReranker]:
+        # Sorted-name iteration matches every other registry on the
+        # platform and removes insertion-order coupling for any future
+        # caller that fans out over the registry.
+        for name in sorted(self._rerankers.keys()):
+            yield self._rerankers[name]
 
 
 __all__ = ["RerankerRegistry"]

@@ -98,21 +98,52 @@ class GovernanceDecision:
 
     @property
     def is_allow(self) -> bool:
-        return self.decision is Decision.ALLOW
+        return is_allow_decision(self.decision)
 
     @property
     def is_blocking(self) -> bool:
         """True if the decision must halt execution.
 
-        DENY and REQUIRE_APPROVAL halt by default; ESCALATE typically
-        halts pending an out-of-band handler but is configurable per
-        deployment.
+        Delegates to `is_blocking_decision` — the **single** authority
+        for blocking semantics across the platform. Replay tools,
+        supervisor inspection views, and any future analytic surface
+        MUST consume the helper, never re-encode the set.
         """
-        return self.decision in {
-            Decision.DENY,
-            Decision.REQUIRE_APPROVAL,
-            Decision.ESCALATE,
-        }
+        return is_blocking_decision(self.decision)
+
+
+# ─── Pure semantic helpers ───────────────────────────────────────────
+#
+# These two functions are the canonical authority for "is this decision
+# blocking" / "is this decision permissive". Anything that has only a
+# `Decision` (e.g., replay paths reconstructing from persisted records
+# without a full `GovernanceDecision`) MUST consume the helpers so the
+# vocabulary stays single-sourced. Adding/removing a Decision from the
+# blocking set is a one-line change here that the whole platform sees.
+
+
+_BLOCKING_DECISIONS: frozenset[Decision] = frozenset(
+    {
+        Decision.DENY,
+        Decision.REQUIRE_APPROVAL,
+        Decision.ESCALATE,
+    }
+)
+
+
+def is_blocking_decision(decision: Decision) -> bool:
+    """Single source of truth: does this decision halt execution?
+
+    DENY and REQUIRE_APPROVAL halt by default; ESCALATE typically halts
+    pending an out-of-band handler but is configurable per deployment.
+    DEGRADE / REDACT / ALLOW are non-blocking.
+    """
+    return decision in _BLOCKING_DECISIONS
+
+
+def is_allow_decision(decision: Decision) -> bool:
+    """Single source of truth: is this decision the permissive baseline?"""
+    return decision is Decision.ALLOW
 
 
 # ─── Pure aggregation function ───────────────────────────────────────
@@ -219,4 +250,6 @@ __all__ = [
     "PolicyEvaluationResult",
     "GovernanceDecision",
     "build_decision",
+    "is_blocking_decision",
+    "is_allow_decision",
 ]

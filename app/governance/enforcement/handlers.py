@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from typing import ClassVar, Iterable
+from typing import ClassVar, Iterator
 
 from app.governance.decisions import GovernanceDecision
 from app.governance.enforcement.models import (
@@ -195,8 +195,13 @@ class EnforcementHandlerRegistry:
                 f"missing decisions: {missing}"
             )
 
-    def __iter__(self) -> Iterable[BaseEnforcementHandler]:
-        return iter(self._handlers.values())
+    def __iter__(self) -> Iterator[BaseEnforcementHandler]:
+        # Sorted by `Decision.value` so iteration is byte-stable across
+        # processes and replays. Aggregation precedence is owned by
+        # `Decision.precedence` — iteration order does NOT drive
+        # most-restrictive-wins; it just needs to be deterministic.
+        for decision in sorted(self._handlers.keys(), key=lambda d: d.value):
+            yield self._handlers[decision]
 
 
 __all__ = [

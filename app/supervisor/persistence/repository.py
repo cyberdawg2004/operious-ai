@@ -1,0 +1,85 @@
+"""Storage-agnostic supervisor repository contract.
+
+`BaseSupervisorRepository` is the **single Protocol** every backend
+implements. Sprint K ships:
+
+* the Protocol itself,
+* `InMemorySupervisorRepository` — the reference implementation.
+
+Future sprints add Postgres / Elasticsearch / S3 backends behind the
+same Protocol. The runtime substrate is untouched.
+
+Three method groups:
+
+* `record_*` — durable writes (write-once; records are immutable),
+* `get_*`    — point reads by primary identity,
+* `query_*`  — paginated reads.
+
+Async throughout — every storage backend the platform integrates
+with is async-friendly.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from app.supervisor.persistence.models import InspectionQuery, RecordPage
+from app.supervisor.persistence.records import (
+    EscalationDecisionRecord,
+    InspectionRecord,
+    QAEvaluationRecord,
+    RuntimeFindingRecord,
+)
+
+
+class BaseSupervisorRepository(Protocol):
+    """Storage-agnostic contract for supervisor persistence."""
+
+    # ─── Writes ──────────────────────────────────────────────────────
+
+    async def record_inspection(self, record: InspectionRecord) -> None:
+        """Persist an inspection record. Records are write-once."""
+        ...
+
+    async def record_finding(self, record: RuntimeFindingRecord) -> None:
+        """Persist a finding record. Write-once."""
+        ...
+
+    async def record_evaluation(self, record: QAEvaluationRecord) -> None:
+        """Persist a per-evaluator record. Write-once."""
+        ...
+
+    async def record_escalation(
+        self, record: EscalationDecisionRecord
+    ) -> None:
+        """Persist an escalation record. Write-once."""
+        ...
+
+    # ─── Reads ───────────────────────────────────────────────────────
+
+    async def get_inspection(
+        self, inspection_id: str
+    ) -> InspectionRecord | None: ...
+
+    async def get_findings_for_inspection(
+        self, inspection_id: str
+    ) -> tuple[RuntimeFindingRecord, ...]: ...
+
+    async def get_evaluations_for_inspection(
+        self, inspection_id: str
+    ) -> tuple[QAEvaluationRecord, ...]: ...
+
+    async def get_escalations_for_inspection(
+        self, inspection_id: str
+    ) -> tuple[EscalationDecisionRecord, ...]: ...
+
+    # ─── Queries ─────────────────────────────────────────────────────
+
+    async def query_inspections(
+        self, query: InspectionQuery
+    ) -> RecordPage[InspectionRecord]:
+        """Paginated inspection lookup."""
+        ...
+
+
+__all__ = ["BaseSupervisorRepository"]
