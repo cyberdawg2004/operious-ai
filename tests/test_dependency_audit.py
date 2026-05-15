@@ -621,6 +621,188 @@ def test_governance_substrate_only_raises_typed_governance_errors() -> None:
     )
 
 
+# ─── 16. Agent substrate is a LEAF (Sprint J) ────────────────────────────
+
+
+def test_agents_layer_does_not_import_vendor_sdks() -> None:
+    """Sprint J: substrate is pure runtime infrastructure."""
+    offenders: list[tuple[str, str]] = []
+    for path in _iter_py_files(_APP_ROOT / "agents"):
+        for imp in _imports_of(path):
+            head = imp.split(".", 1)[0]
+            if head in _VENDOR_SDKS:
+                offenders.append((str(path.relative_to(_REPO_ROOT)), imp))
+    assert not offenders, (
+        "The agent substrate is pure runtime infrastructure and may not "
+        f"import vendor SDKs. Offenders: {offenders}"
+    )
+
+
+def test_agents_layer_does_not_import_concrete_providers() -> None:
+    concretes = {
+        "app.providers.openai_provider",
+        "app.providers.openai_embedding_provider",
+        "app.providers.in_memory_vector_provider",
+    }
+    offenders: list[str] = []
+    for path in _iter_py_files(_APP_ROOT / "agents"):
+        for imp in _imports_of(path):
+            if imp in concretes:
+                offenders.append(f"{path.relative_to(_REPO_ROOT)} → {imp}")
+    assert not offenders, (
+        "Agents substrate must depend on substrate vocabulary only — never "
+        f"on concrete providers. Offenders: {offenders}"
+    )
+
+
+def test_agents_substrate_does_not_import_rag_or_memory_runtimes() -> None:
+    """The agent substrate is a LEAF in the dependency graph.
+
+    Tools wired into a deployment may legitimately depend on RAG /
+    memory / embeddings (a `RetrievalTool` calls `RetrievalService`),
+    but those concrete tools live OUTSIDE the substrate package — the
+    substrate ships only `BaseTool` + the runtime around it. Anything
+    under `app/agents/` MUST be unaware of RAG / memory / embeddings /
+    AI runtime entirely.
+
+    Governance integration is the one cross-substrate import — the
+    agent runtime's tool invoker composes `GovernanceRuntime`. That
+    is permitted and locked at the bridge module
+    (`app/agents/tools/invoker.py`).
+    """
+    forbidden_prefixes = (
+        "app.rag",
+        "app.memory",
+        "app.embeddings",
+        "app.ai",
+    )
+    offenders: list[str] = []
+    for path in _iter_py_files(_APP_ROOT / "agents"):
+        for imp in _imports_of(path):
+            for prefix in forbidden_prefixes:
+                if imp == prefix or imp.startswith(prefix + "."):
+                    offenders.append(f"{path.relative_to(_REPO_ROOT)} → {imp}")
+                    break
+    assert not offenders, (
+        "Agents substrate must be a LEAF — RAG / memory / embeddings / "
+        "AI runtime imports are not permitted. Concrete tools that need "
+        "those subsystems live OUTSIDE the substrate. "
+        f"Offenders: {offenders}"
+    )
+
+
+def test_agents_persistence_layer_is_storage_agnostic() -> None:
+    """The agent persistence package defines CONTRACTS only.
+
+    Same discipline as `app/governance/persistence/` — no ORM, no
+    DB drivers, no runtime-repository coupling. Future production
+    backends ship in new modules behind the same Protocol.
+    """
+    forbidden_prefixes = (
+        "sqlalchemy",
+        "asyncpg",
+        "psycopg2",
+        "app.repositories",
+        "app.db",
+        "app.models",
+    )
+    offenders: list[str] = []
+    persistence_dir = _APP_ROOT / "agents" / "persistence"
+    for path in _iter_py_files(persistence_dir):
+        for imp in _imports_of(path):
+            head = imp.split(".", 1)[0]
+            for prefix in forbidden_prefixes:
+                if imp == prefix or imp.startswith(prefix + "."):
+                    offenders.append(f"{path.relative_to(_REPO_ROOT)} → {imp}")
+                    break
+            if head in {"sqlalchemy", "asyncpg", "psycopg2"}:
+                offenders.append(f"{path.relative_to(_REPO_ROOT)} → {imp}")
+    assert not offenders, (
+        "Agent persistence is contracts only — no ORM, DB driver, or "
+        f"runtime repository coupling. Offenders: {offenders}"
+    )
+
+
+def test_agents_substrate_only_raises_typed_agent_errors() -> None:
+    """Every `raise` inside `app/agents/` uses a class from
+    `app.agents.exceptions` or a narrow stdlib built-in.
+
+    Mirrors the governance discipline: closed exception vocabulary so
+    callers can pattern-match on typed errors.
+    """
+    import ast as _ast
+
+    allowed_stdlib = {
+        "ValueError",
+        "KeyError",
+        "RuntimeError",
+        "TypeError",
+        "NotImplementedError",
+    }
+    allowed_agent_prefixes = ("Agent", "Tool", "State", "Capability", "Constraint")
+    offenders: list[str] = []
+    for path in _iter_py_files(_APP_ROOT / "agents"):
+        tree = _ast.parse(path.read_text(encoding="utf-8"))
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Raise) and node.exc is not None:
+                call = node.exc
+                if isinstance(call, _ast.Call):
+                    name = (
+                        call.func.id
+                        if isinstance(call.func, _ast.Name)
+                        else (
+                            call.func.attr
+                            if isinstance(call.func, _ast.Attribute)
+                            else None
+                        )
+                    )
+                elif isinstance(call, _ast.Name):
+                    name = call.id
+                else:
+                    name = None
+                if name is None:
+                    continue
+                if name in allowed_stdlib:
+                    continue
+                if any(name.startswith(p) for p in allowed_agent_prefixes):
+                    continue
+                offenders.append(
+                    f"{path.relative_to(_REPO_ROOT)}:{node.lineno} → raise {name}"
+                )
+    assert not offenders, (
+        "Agents substrate may only raise typed Agent/Tool/State/Capability/"
+        "Constraint errors or narrow stdlib errors. "
+        f"Offenders: {offenders}"
+    )
+
+
+def test_agents_runtime_does_not_import_governance_internals() -> None:
+    """Governance integration is bounded to `app/agents/tools/invoker.py`.
+
+    The agent runtime layer (`app/agents/runtime/*`) and every other
+    substrate module MUST NOT import governance directly. The invoker
+    is the single integration seam.
+    """
+    offenders: list[str] = []
+    for path in _iter_py_files(_APP_ROOT / "agents"):
+        # The invoker IS the bounded integration seam.
+        if path.name == "invoker.py" and "tools" in path.parts:
+            continue
+        # Envelopes carry GovernanceEnvelope as a typed field — that's
+        # vocabulary, not coupling.
+        if path.name == "envelopes.py":
+            continue
+        for imp in _imports_of(path):
+            if imp.startswith("app.governance"):
+                offenders.append(f"{path.relative_to(_REPO_ROOT)} → {imp}")
+    assert not offenders, (
+        "Governance integration is confined to "
+        "`app/agents/tools/invoker.py` (and envelope vocabulary in "
+        "`app/agents/envelopes.py`). Other substrate modules must "
+        f"compose, not import. Offenders: {offenders}"
+    )
+
+
 # ─── 15. RAG retrieval runtime does not reach vector providers ──────────
 
 
