@@ -1,0 +1,183 @@
+# Operious AI — backend pinned dependencies.
+#
+# Phase 2.2 — dependency constitutionalization.
+#
+# ─── PERMANENTLY FORBIDDEN ────────────────────────────────────────────
+#
+# The following package families are FORBIDDEN by the constitution and
+# must never re-appear in this file. CI invariant
+# `tests/test_forbidden_dependencies.py` enforces this:
+#
+# * autonomous-agent / orchestration frameworks:
+#     crewai, instructor, langchain, langchain-core,
+#     langchain-protocol, langgraph, langgraph-checkpoint,
+#     langgraph-prebuilt, langgraph-sdk, langsmith, mcp
+# * vector-store duplicates (pre-constitution memory pipeline):
+#     chromadb, lancedb, lance-namespace,
+#     lance-namespace-urllib3-client, pyiceberg
+# * runtime cluster SDK at the application layer:
+#     kubernetes
+# * BaaS coupling:
+#     supabase, supabase-auth, supabase-functions, postgrest,
+#     realtime, storage3
+# * implicit telemetry exfiltration:
+#     posthog
+#
+# Their transitives (appdirs, mmh3, onnxruntime, pdfminer.six,
+# pdfplumber, pypdfium2, pillow, openpyxl, et_xmlfile, pybase64,
+# pyroaring, flatbuffers, ormsgpack, xxhash, sse-starlette, durationpy,
+# websocket-client, requests-oauthlib, oauthlib, PyPika, jsonref,
+# json_repair, docstring_parser) were also dropped because they had no
+# constitutional consumer.
+#
+# ─── TRANSITIONAL — RESTRICTED CONSUMPTION ────────────────────────────
+#
+# The following packages are kept ONLY so the quarantined modules under
+# `app/_deprecated/` remain syntactically loadable as forensic dead
+# code. They are FORBIDDEN from being imported by any constitutional
+# substrate (agents, arbitration, boundary, coordination, governance,
+# hardening, organizational_intelligence, session, supervisor, plus
+# future event_fabric / identity / replay-federation substrates). CI
+# invariant `tests/test_transitional_vendor_isolation.py` enforces this.
+#
+# * vendor LLM SDKs:           openai, anthropic
+# * retry libraries:           tenacity, backoff
+#
+# These pins will be removed in a future phase when `app/_deprecated/`
+# is itself deleted.
+#
+# ─── BASELINE — CONSTITUTIONAL INFRASTRUCTURE ─────────────────────────
+#
+# Everything else is either (a) used directly by the constitutional
+# substrates / FastAPI transport / persistence layer or (b) a
+# transitive dependency of (a). The list is alphabetically sorted and
+# fully pinned (`pip freeze` output) for byte-stable reproducibility.
+
+aiofiles==24.1.0
+aiohappyeyeballs==2.6.1
+aiohttp==3.13.5
+aiosignal==1.4.0
+aiosqlite==0.21.0
+alembic==1.14.1
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anthropic==0.101.0
+anyio==4.13.0
+asyncpg==0.30.0
+attrs==26.1.0
+backoff==2.2.1
+bcrypt==5.0.0
+black==26.3.1
+build==1.5.0
+cachetools==6.2.6
+certifi==2026.4.22
+cffi==2.0.0
+charset-normalizer==3.4.7
+click==8.1.8
+cryptography==48.0.0
+deprecation==2.1.0
+distro==1.9.0
+fastapi==0.136.1
+filelock==3.29.0
+frozenlist==1.8.0
+fsspec==2026.4.0
+googleapis-common-protos==1.75.0
+greenlet==3.5.0
+grpcio==1.80.0
+h11==0.16.0
+h2==4.3.0
+hf-xet==1.5.0
+hpack==4.1.0
+httpcore==1.0.9
+httptools==0.7.1
+httpx==0.28.1
+httpx-sse==0.4.3
+huggingface_hub==1.14.0
+hyperframe==6.1.0
+idna==3.15
+importlib_metadata==8.7.1
+importlib_resources==7.1.0
+Jinja2==3.1.6
+jiter==0.13.0
+json5==0.10.0
+jsonpatch==1.33
+jsonpointer==3.1.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+linkify-it-py==2.1.0
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdit-py-plugins==0.6.1
+mdurl==0.1.2
+multidict==6.7.1
+mypy_extensions==1.1.0
+numpy==2.4.4
+openai==2.36.0
+opentelemetry-api==1.34.1
+opentelemetry-exporter-otlp-proto-common==1.34.1
+opentelemetry-exporter-otlp-proto-grpc==1.34.1
+opentelemetry-exporter-otlp-proto-http==1.34.1
+opentelemetry-proto==1.34.1
+opentelemetry-sdk==1.34.1
+opentelemetry-semantic-conventions==0.55b1
+orjson==3.11.9
+overrides==7.7.0
+packaging==26.2
+pathspec==1.1.1
+platformdirs==4.9.6
+portalocker==2.7.0
+propcache==0.5.2
+protobuf==5.29.6
+psycopg2-binary==2.9.12
+pyarrow==24.0.0
+pycparser==3.0
+pydantic==2.12.5
+pydantic-settings==2.10.1
+pydantic_core==2.41.5
+Pygments==2.20.0
+PyJWT==2.12.1
+pyparsing==3.3.2
+pyproject_hooks==1.2.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-json-logger==4.1.0
+python-multipart==0.0.28
+pytest==9.0.3
+pytest-asyncio==1.3.0
+pytokens==0.4.1
+PyYAML==6.0.3
+redis==5.2.1
+referencing==0.37.0
+regex==2026.1.15
+requests==2.34.0
+requests-toolbelt==1.0.0
+rich==14.3.4
+rpds-py==0.30.0
+ruff==0.15.12
+shellingham==1.5.4
+six==1.17.0
+sniffio==1.3.1
+SQLAlchemy==2.0.49
+starlette==1.0.0
+StrEnum==0.4.15
+strictyaml==1.7.3
+tenacity==9.1.4
+textual==8.2.6
+tokenizers==0.23.1
+tomli==2.0.2
+tomli_w==1.1.0
+tqdm==4.67.3
+typer==0.23.1
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+uc-micro-py==2.0.0
+urllib3==2.7.0
+uuid_utils==0.15.0
+uv==0.11.14
+uvicorn==0.46.0
+uvloop==0.22.1
+watchfiles==1.1.1
+websockets==15.0.1
+yarl==1.23.0
+zipp==3.23.1
+zstandard==0.25.0

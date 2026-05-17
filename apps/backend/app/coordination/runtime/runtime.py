@@ -1,0 +1,1012 @@
+"""`CoordinationRuntime` — apex dispatch orchestrator.
+
+One public method (`dispatch`) drives one coordination operation
+end-to-end:
+
+    CoordinationRuntime.dispatch(request)
+        → validate request (sender + recipient against registry)
+        → (Sprint L3) when composed, invoke
+          `CoordinationTopologyRuntime.evaluate(...)` to obtain a
+          structural-authority verdict. Any blocking verdict
+          (DENIED / ESCALATED / DEPTH_EXCEEDED / BOUNDARY_VIOLATION)
+          short-circuits dispatch with the matching
+          `TOPOLOGY_*` outcome and status `TOPOLOGY_DENIED`.
+          ALLOWED continues.
+        → (Sprint L2) when composed, invoke
+          `CoordinationPolicyRuntime.evaluate(...)` to obtain a
+          topology-authorisation-rule verdict. DENY / ESCALATE
+          short-circuit dispatch with `POLICY_DENIED` /
+          `POLICY_ESCALATED` outcomes; ALLOW / ANNOTATE / RESTRICT
+          continue.
+        → build governance context (deterministic from message)
+        → invoke `GovernanceRuntime.evaluate(context)`
+        → build `CoordinationEnvelope` (assign deterministic sequence)
+        → persist via `CoordinationPersistenceProtocol`
+        → return `CoordinationDispatchResult`
+
+Sprint L3 added a coordination-topology phase BEFORE policy
+(topology constrains structure; policy then applies rule-level
+authorisation; governance then applies operational restrictions).
+**Topology denial, policy denial, and governance denial remain
+DISTINCT semantics** across the dispatch outcome enum and the
+envelope status enum.
+
+The runtime is the **single** producer of `CoordinationEnvelope`. It
+NEVER raises — every failure mode lands on the returned
+`CoordinationDispatchResult`.
+
+Architectural disciplines preserved (sprint L1 rules):
+
+* Rule 1 — agents MUST NOT communicate directly. The runtime is the
+  only mediator; it validates both endpoints against the registry.
+* Rule 2 — envelopes are immutable runtime artifacts.
+* Rule 3 — coordination is replay-safe. Identical inputs (with a
+  pinned `coordination_id_override` + pinned `created_at` on the
+  message) produce byte-identical envelopes modulo the substrate's
+  wall-clock `dispatched_at` field, which callers may override via
+  test fixtures.
+* Rule 4 — no asynchronous orchestration explosions. The dispatch
+  loop is sequential. Sequence numbers are assigned under a lock so
+  concurrent dispatchers still receive a deterministic total order.
+* Rule 5 — `dispatch()` ONLY validates, invokes governance, builds
+  the envelope, persists the artifact, and returns the result. It
+  does NOT execute the recipient, invoke tools, mutate runtime state
+  elsewhere, retry, or schedule.
+* Rule 6 — governance composition is explicit; `GovernanceRuntime`
+  is injected and called once per dispatch. The runtime does NOT
+  absorb governance semantics — the apex verdict is preserved
+  verbatim on the envelope (`governance_decision_id`).
+* Rule 7 — supervisors are unaffected; this runtime emits no
+  supervisor mutations.
+
+What the runtime DOES NOT do (also pinned by the architectural
+contract):
+
+* execute recipient agents,
+* invoke tools,
+* mutate registries / governance / agent runtimes,
+* retry,
+* spawn background tasks,
+* schedule asynchronous fanout,
+* perform autonomous routing.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime, timezone
+
+from app.coordination.contracts.requests import CoordinationDispatchRequest
+from app.coordination.contracts.results import (
+    CoordinationDispatchOutcome,
+    CoordinationDispatchResult,
+)
+from app.coordination.envelopes import CoordinationEnvelope
+from app.coordination.enums import (
+    CoordinationDirection,
+    CoordinationMessageType,
+    CoordinationPriority,
+    CoordinationStatus,
+)
+from app.coordination.exceptions import (
+    CoordinationGovernanceDeniedError,
+    CoordinationPersistenceError,
+    CoordinationValidationError,
+)
+from app.coordination.identity import (
+    CoordinationCorrelationId,
+    CoordinationId,
+    CoordinationMessageId,
+    generate_coordination_id,
+)
+from app.coordination.models.payload import CoordinationPayload
+from app.coordination.persistence.models import (
+    CoordinationQuery,
+    RecordPage,
+)
+from app.coordination.persistence.records import CoordinationRecord
+from app.coordination.persistence.repository import (
+    CoordinationPersistenceProtocol,
+)
+from app.coordination.persistence.serializers import (
+    envelope_to_record,
+    record_to_envelope,
+)
+from app.coordination.policy.contracts.requests import (
+    CoordinationPolicyEvaluationRequest,
+)
+from app.coordination.policy.enums import CoordinationPolicyDecision
+from app.coordination.policy.envelopes import (
+    CoordinationPolicyEnvelope,
+)
+from app.coordination.policy.runtime.runtime import (
+    CoordinationPolicyRuntime,
+)
+from app.coordination.policy.taxonomy import (
+    CoordinationPolicyMetadataKey,
+    is_blocking_policy_decision,
+)
+from app.coordination.registry.registry import CoordinationRegistry
+from app.coordination.taxonomy import (
+    CoordinationGovernanceAction,
+    CoordinationMetadataKey,
+)
+from app.coordination.topology.contracts.requests import (
+    CoordinationTopologyEvaluationRequest,
+)
+from app.coordination.topology.enums import (
+    CoordinationTopologyDecision,
+)
+from app.coordination.topology.envelopes import (
+    CoordinationTopologyEnvelope,
+)
+from app.coordination.topology.runtime.runtime import (
+    CoordinationTopologyRuntime,
+)
+from app.coordination.topology.taxonomy import (
+    CoordinationTopologyMetadataKey,
+    is_blocking_topology_decision,
+)
+from app.coordination.tracing import CoordinationTrace
+from app.governance.context import GovernanceContext
+from app.governance.decisions import is_blocking_decision
+from app.governance.enforcement.runtime import GovernanceRuntime
+from app.governance.enums import Decision
+from app.governance.subjects.communication import (
+    CommunicationGovernanceSubject,
+)
+from app.observability.context import get_request_id
+
+
+class CoordinationRuntime:
+    """Apex coordination dispatcher. Produces one result per call."""
+
+    def __init__(
+        self,
+        *,
+        governance_runtime: GovernanceRuntime,
+        persistence: CoordinationPersistenceProtocol,
+        registry: CoordinationRegistry,
+        policy_runtime: CoordinationPolicyRuntime | None = None,
+        topology_runtime: CoordinationTopologyRuntime | None = None,
+    ) -> None:
+        self._governance = governance_runtime
+        self._persistence = persistence
+        self._registry = registry
+        # Sprint L3 — coordination-topology substrate. SEPARATE
+        # substrate composed by injection. Evaluated BEFORE policy.
+        # Optional for backward-compat; when None, dispatch skips the
+        # topology phase entirely (no implicit-allow assumption — the
+        # absence of topology means no structural constraints are
+        # evaluated). Topology denial, policy denial, and governance
+        # denial are distinct semantic authorities.
+        self._topology_runtime = topology_runtime
+        # Sprint L2 — coordination-policy substrate. SEPARATE substrate
+        # composed by injection. Evaluated AFTER topology and BEFORE
+        # governance. Optional for backward-compat.
+        self._policy_runtime = policy_runtime
+        self._instance_id: uuid.UUID = uuid.uuid4()
+        self._sequence: int = 0
+        # The sequence assignment + envelope construction happen under
+        # a single lock so that concurrent dispatch() callers still
+        # observe a deterministic total order on (instance_id, sequence).
+        self._lock = asyncio.Lock()
+
+    # ─── Inspection helpers ──────────────────────────────────────────
+
+    @property
+    def runtime_instance_id(self) -> uuid.UUID:
+        return self._instance_id
+
+    @property
+    def policy_runtime(self) -> CoordinationPolicyRuntime | None:
+        """Injected coordination-policy substrate, or ``None``.
+
+        Exposed for audit / supervisor introspection. The
+        coordination runtime does NOT delegate dispatch decisions
+        through this accessor — it invokes the policy runtime
+        directly inside `dispatch()`.
+        """
+        return self._policy_runtime
+
+    @property
+    def topology_runtime(self) -> CoordinationTopologyRuntime | None:
+        """Injected coordination-topology substrate, or ``None``.
+
+        Exposed for audit / supervisor introspection. The
+        coordination runtime does NOT delegate dispatch decisions
+        through this accessor — it invokes the topology runtime
+        directly inside `dispatch()`.
+        """
+        return self._topology_runtime
+
+    def known_participants(self) -> tuple[str, ...]:
+        return self._registry.names()
+
+    # ─── Public API ───────────────────────────────────────────────────
+
+    async def dispatch(
+        self, request: CoordinationDispatchRequest
+    ) -> CoordinationDispatchResult:
+        """Run one coordination dispatch end-to-end. Never raises."""
+        loop = asyncio.get_event_loop()
+        started_at = datetime.now(timezone.utc)
+        loop_start = loop.time()
+        coordination_id = (
+            request.coordination_id_override or generate_coordination_id()
+        )
+        request_id = request.request_id or get_request_id()
+
+        # 1. Validate.
+        try:
+            self._validate(request)
+        except CoordinationValidationError as exc:
+            return self._fail_fast_result(
+                coordination_id=coordination_id,
+                request=request,
+                request_id=request_id,
+                started_at=started_at,
+                loop_start=loop_start,
+                outcome=CoordinationDispatchOutcome.VALIDATION_ERROR,
+                error=exc,
+                status=CoordinationStatus.FAILED,
+                envelope=None,
+            )
+
+        # 2. Invoke coordination-topology (structural authority) when
+        # a topology runtime is composed. Sprint L3 — topology denial,
+        # policy denial, and governance denial are DISTINCT semantics.
+        topology_metadata: dict[str, object] = {}
+        if self._topology_runtime is not None:
+            topology_envelope = await self._topology_runtime.evaluate(
+                self._build_topology_request(
+                    request=request,
+                    request_id=request_id,
+                    coordination_id=coordination_id,
+                )
+            )
+            topology_metadata = self._topology_metadata_for(
+                topology_envelope
+            )
+            if not topology_envelope.is_ok:
+                # Topology substrate itself failed — TOPOLOGY_ERROR.
+                return await self._build_and_persist(
+                    request=request,
+                    request_id=request_id,
+                    coordination_id=coordination_id,
+                    status=CoordinationStatus.FAILED,
+                    outcome=CoordinationDispatchOutcome.TOPOLOGY_ERROR,
+                    governance_decision_id=None,
+                    governance_chain_id=None,
+                    error=(
+                        topology_envelope.trace.error
+                        or "coordination-topology substrate failed"
+                    ),
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    extra_metadata=topology_metadata,
+                )
+            topology_result = topology_envelope.unwrap()
+            topology_apex = topology_result.aggregate_decision
+            if is_blocking_topology_decision(topology_apex):
+                # Map each distinct topology blocking verdict to its
+                # own coordination dispatch outcome so the audit trail
+                # records WHICH structural failure mode tripped.
+                outcome = self._map_topology_blocking(topology_apex)
+                return await self._build_and_persist(
+                    request=request,
+                    request_id=request_id,
+                    coordination_id=coordination_id,
+                    status=CoordinationStatus.TOPOLOGY_DENIED,
+                    outcome=outcome,
+                    governance_decision_id=None,
+                    governance_chain_id=None,
+                    error=topology_result.reason
+                    or f"coordination topology {topology_apex.value}",
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    extra_metadata=topology_metadata,
+                )
+            # ALLOWED — continue to policy.
+
+        # 3. Invoke coordination-policy (topology authorisation rules)
+        # when a policy runtime is composed. Sprint L2 Rule 2 — policy
+        # denial and governance denial remain DISTINCT semantics.
+        policy_envelope: CoordinationPolicyEnvelope | None = None
+        substrate_metadata: dict[str, object] = dict(topology_metadata)
+        if self._policy_runtime is not None:
+            policy_envelope = await self._policy_runtime.evaluate(
+                self._build_policy_request(
+                    request=request,
+                    request_id=request_id,
+                    coordination_id=coordination_id,
+                )
+            )
+            policy_metadata = self._policy_metadata_for(policy_envelope)
+            substrate_metadata.update(policy_metadata)
+            if not policy_envelope.is_ok:
+                return await self._build_and_persist(
+                    request=request,
+                    request_id=request_id,
+                    coordination_id=coordination_id,
+                    status=CoordinationStatus.FAILED,
+                    outcome=CoordinationDispatchOutcome.POLICY_ERROR,
+                    governance_decision_id=None,
+                    governance_chain_id=None,
+                    error=(
+                        policy_envelope.trace.error
+                        or "coordination-policy substrate failed"
+                    ),
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    extra_metadata=substrate_metadata,
+                )
+            policy_result = policy_envelope.unwrap()
+            policy_apex = policy_result.aggregate_decision
+            if is_blocking_policy_decision(policy_apex):
+                outcome = (
+                    CoordinationDispatchOutcome.POLICY_DENIED
+                    if policy_apex is CoordinationPolicyDecision.DENY
+                    else CoordinationDispatchOutcome.POLICY_ESCALATED
+                )
+                return await self._build_and_persist(
+                    request=request,
+                    request_id=request_id,
+                    coordination_id=coordination_id,
+                    status=CoordinationStatus.POLICY_DENIED,
+                    outcome=outcome,
+                    governance_decision_id=None,
+                    governance_chain_id=None,
+                    error=policy_result.reason
+                    or f"coordination policy {policy_apex.value}",
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    extra_metadata=substrate_metadata,
+                )
+
+        # 4. Invoke governance.
+        gov_context = self._build_governance_context(
+            request=request, request_id=request_id
+        )
+        gov_envelope = await self._governance.evaluate(gov_context)
+
+        if not gov_envelope.is_ok:
+            return await self._build_and_persist(
+                request=request,
+                request_id=request_id,
+                coordination_id=coordination_id,
+                status=CoordinationStatus.FAILED,
+                outcome=CoordinationDispatchOutcome.GOVERNANCE_ERROR,
+                governance_decision_id=gov_envelope.trace.decision_id,
+                governance_chain_id=gov_envelope.trace.policy_chain_id or None,
+                error=gov_envelope.trace.error or "governance evaluation failed",
+                started_at=started_at,
+                loop_start=loop_start,
+                extra_metadata=substrate_metadata,
+            )
+
+        decision = gov_envelope.unwrap()
+
+        # 5. Map governance verdict → coordination status / outcome.
+        try:
+            status, outcome = self._map_governance(decision.decision)
+        except CoordinationGovernanceDeniedError:
+            return await self._build_and_persist(
+                request=request,
+                request_id=request_id,
+                coordination_id=coordination_id,
+                status=CoordinationStatus.DENIED,
+                outcome=CoordinationDispatchOutcome.DENIED,
+                governance_decision_id=decision.decision_id,
+                governance_chain_id=decision.policy_chain_id,
+                error=decision.reason or "governance denied",
+                started_at=started_at,
+                loop_start=loop_start,
+                extra_metadata=substrate_metadata,
+            )
+
+        # 6. Accepted (or DEGRADED) — persist DISPATCHED / DEGRADED envelope.
+        return await self._build_and_persist(
+            request=request,
+            request_id=request_id,
+            coordination_id=coordination_id,
+            status=status,
+            outcome=outcome,
+            governance_decision_id=decision.decision_id,
+            governance_chain_id=decision.policy_chain_id,
+            error=None,
+            started_at=started_at,
+            loop_start=loop_start,
+            extra_metadata=substrate_metadata,
+        )
+
+    async def get_message(
+        self, coordination_id: CoordinationId | str
+    ) -> CoordinationEnvelope | None:
+        """Return the envelope for `coordination_id`, or ``None``."""
+        record = await self._persistence.get_envelope(str(coordination_id))
+        if record is None:
+            return None
+        return record_to_envelope(record)
+
+    async def list_messages(
+        self,
+        *,
+        correlation_id: CoordinationCorrelationId | str | None = None,
+        sender_id: str | None = None,
+        recipient_id: str | None = None,
+        tenant_id: str | None = None,
+        runtime_instance_id: uuid.UUID | str | None = None,
+        direction: CoordinationDirection | None = None,
+        message_type: CoordinationMessageType | None = None,
+        status: CoordinationStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[CoordinationEnvelope, ...]:
+        """List envelopes matching the supplied filters.
+
+        Order: ``(runtime_instance_id, sequence)`` ascending. This is
+        the canonical replay-safe global order.
+        """
+        query = CoordinationQuery(
+            correlation_id=str(correlation_id)
+            if correlation_id is not None
+            else None,
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            tenant_id=tenant_id,
+            runtime_instance_id=str(runtime_instance_id)
+            if runtime_instance_id is not None
+            else None,
+            direction=direction.value if direction is not None else None,
+            message_type=message_type.value
+            if message_type is not None
+            else None,
+            status=status.value if status is not None else None,
+            limit=limit,
+            offset=offset,
+        )
+        page: RecordPage[CoordinationRecord] = (
+            await self._persistence.query_envelopes(query)
+        )
+        return tuple(record_to_envelope(r) for r in page.items)
+
+    # ─── Internals ───────────────────────────────────────────────────
+
+    def _build_topology_request(
+        self,
+        *,
+        request: CoordinationDispatchRequest,
+        request_id: str | None,
+        coordination_id: CoordinationId,
+    ) -> CoordinationTopologyEvaluationRequest:
+        """Compose a `CoordinationTopologyEvaluationRequest` from `request`.
+
+        Deterministic mapping — every field is pulled straight from
+        the dispatch request, the message, and the substrate-pinned
+        `coordination_id`. The topology substrate never sees the
+        dispatch payload; only the structural axes propagate.
+        """
+        msg = request.message
+        return CoordinationTopologyEvaluationRequest(
+            sender_id=msg.sender_id,
+            recipient_id=msg.recipient.recipient_id,
+            recipient_kind=msg.recipient.kind,
+            direction=request.direction,
+            message_type=msg.message_type,
+            priority=msg.priority,
+            coordination_id=coordination_id,
+            coordination_message_id=msg.message_id,
+            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            sender_tenant_id=request.tenant_id,
+            recipient_tenant_id=msg.recipient.tenant_id,
+            correlation_id=request.correlation_id,
+            parent_coordination_id=request.parent_coordination_id,
+            parent_message_id=request.parent_message_id,
+            request_id=request_id,
+            chain_depth=request.chain_depth,
+            metadata=dict(request.metadata),
+        )
+
+    @staticmethod
+    def _topology_metadata_for(
+        envelope: CoordinationTopologyEnvelope,
+    ) -> dict[str, object]:
+        """Extract topology lineage keys for embedding into the coordination envelope.
+
+        Always produces a deterministic, JSON-coercible mapping —
+        even when the topology envelope failed at the framework
+        layer (still carries the trace metadata).
+        """
+        meta: dict[str, object] = {
+            CoordinationTopologyMetadataKey.TOPOLOGY_ID.value: str(
+                envelope.trace.topology_id
+            ),
+            CoordinationTopologyMetadataKey.TOPOLOGY_NAME.value: envelope.trace.topology_name,
+            CoordinationTopologyMetadataKey.TOPOLOGY_VERSION.value: envelope.trace.topology_version,
+            CoordinationTopologyMetadataKey.CHAIN_ID.value: str(
+                envelope.trace.chain_id
+            ),
+            CoordinationTopologyMetadataKey.EVALUATION_ID.value: str(
+                envelope.trace.evaluation_id
+            ),
+            CoordinationTopologyMetadataKey.AGGREGATE_DECISION.value: envelope.trace.aggregate_decision.value,
+            CoordinationTopologyMetadataKey.FINDING_COUNT.value: envelope.trace.finding_count,
+            CoordinationTopologyMetadataKey.EVALUATOR_NAMES.value: list(
+                envelope.trace.evaluator_names
+            ),
+            CoordinationTopologyMetadataKey.CHAIN_DEPTH.value: envelope.trace.chain_depth,
+            CoordinationTopologyMetadataKey.MAX_CHAIN_DEPTH.value: envelope.trace.max_chain_depth,
+        }
+        if envelope.trace.matched_edge_id is not None:
+            meta[
+                CoordinationTopologyMetadataKey.MATCHED_EDGE_ID.value
+            ] = str(envelope.trace.matched_edge_id)
+        if envelope.trace.matched_path_id is not None:
+            meta[
+                CoordinationTopologyMetadataKey.MATCHED_PATH_ID.value
+            ] = envelope.trace.matched_path_id
+        if envelope.result is not None and envelope.result.reason:
+            meta["coordination.topology.reason"] = envelope.result.reason
+        return meta
+
+    @staticmethod
+    def _map_topology_blocking(
+        decision: CoordinationTopologyDecision,
+    ) -> CoordinationDispatchOutcome:
+        """Map a blocking topology verdict → coordination dispatch outcome.
+
+        Each blocking verdict has its OWN dispatch outcome so that
+        the audit trail records the precise structural failure mode
+        (not just a generic "topology denied"). Caller must ensure
+        the decision is in fact blocking (use
+        `is_blocking_topology_decision` first).
+        """
+        return {
+            CoordinationTopologyDecision.DENIED: CoordinationDispatchOutcome.TOPOLOGY_DENIED,
+            CoordinationTopologyDecision.ESCALATED: CoordinationDispatchOutcome.TOPOLOGY_ESCALATED,
+            CoordinationTopologyDecision.DEPTH_EXCEEDED: CoordinationDispatchOutcome.TOPOLOGY_DEPTH_EXCEEDED,
+            CoordinationTopologyDecision.BOUNDARY_VIOLATION: CoordinationDispatchOutcome.TOPOLOGY_BOUNDARY_VIOLATION,
+        }[decision]
+
+    def _build_policy_request(
+        self,
+        *,
+        request: CoordinationDispatchRequest,
+        request_id: str | None,
+        coordination_id: CoordinationId,
+    ) -> CoordinationPolicyEvaluationRequest:
+        """Compose a `CoordinationPolicyEvaluationRequest` from `request`.
+
+        Deterministic mapping — every field is pulled straight from
+        the dispatch request, the message, and the substrate-pinned
+        `coordination_id`. The policy substrate never sees the
+        dispatch payload; only the topology axes are propagated.
+        """
+        msg = request.message
+        return CoordinationPolicyEvaluationRequest(
+            sender_id=msg.sender_id,
+            recipient_id=msg.recipient.recipient_id,
+            recipient_kind=msg.recipient.kind,
+            direction=request.direction,
+            message_type=msg.message_type,
+            priority=msg.priority,
+            coordination_id=coordination_id,
+            coordination_message_id=msg.message_id,
+            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            sender_tenant_id=request.tenant_id,
+            recipient_tenant_id=msg.recipient.tenant_id,
+            correlation_id=request.correlation_id,
+            parent_coordination_id=request.parent_coordination_id,
+            parent_message_id=request.parent_message_id,
+            request_id=request_id,
+            metadata=dict(request.metadata),
+        )
+
+    @staticmethod
+    def _policy_metadata_for(
+        envelope: CoordinationPolicyEnvelope,
+    ) -> dict[str, object]:
+        """Extract policy lineage keys for embedding into the coordination envelope.
+
+        Always produces a deterministic, JSON-coercible mapping —
+        empty when the policy envelope failed at the framework layer.
+        """
+        result = envelope.result
+        meta: dict[str, object] = {
+            CoordinationPolicyMetadataKey.CHAIN_ID.value: str(
+                envelope.trace.chain_id
+            ),
+            CoordinationPolicyMetadataKey.EVALUATION_ID.value: str(
+                envelope.trace.evaluation_id
+            ),
+            CoordinationPolicyMetadataKey.AGGREGATE_DECISION.value: (
+                envelope.trace.aggregate_decision.value
+            ),
+            CoordinationPolicyMetadataKey.FINDING_COUNT.value: (
+                envelope.trace.finding_count
+            ),
+            CoordinationPolicyMetadataKey.RESTRICTION_COUNT.value: (
+                envelope.trace.restriction_count
+            ),
+            CoordinationPolicyMetadataKey.ESCALATION_COUNT.value: (
+                envelope.trace.escalation_count
+            ),
+            CoordinationPolicyMetadataKey.EVALUATOR_NAMES.value: list(
+                envelope.trace.evaluator_names
+            ),
+        }
+        if result is not None and result.reason:
+            meta["coordination.policy.reason"] = result.reason
+        return meta
+
+    def _validate(self, request: CoordinationDispatchRequest) -> None:
+        """Pre-governance validation. Raises `CoordinationValidationError`."""
+        msg = request.message
+        if not msg.sender_id:
+            raise CoordinationValidationError(
+                "CoordinationMessage.sender_id must be a non-empty string"
+            )
+        if not msg.recipient.recipient_id:
+            raise CoordinationValidationError(
+                "CoordinationRecipient.recipient_id must be a non-empty string"
+            )
+        if not self._registry.has(msg.sender_id):
+            raise CoordinationValidationError(
+                f"unknown sender: {msg.sender_id!r}"
+            )
+        # Broadcast recipients (kind=broadcast) need NOT be registered —
+        # they are scope identifiers, not addressable participants. All
+        # other recipient kinds MUST be registered.
+        recipient_kind = msg.recipient.kind
+        if (
+            recipient_kind != "broadcast"
+            and not self._registry.has(msg.recipient.recipient_id)
+        ):
+            raise CoordinationValidationError(
+                f"unknown recipient: {msg.recipient.recipient_id!r}"
+            )
+        # in_reply_to MUST NOT equal message_id (no self-reply).
+        if msg.in_reply_to == msg.message_id:
+            raise CoordinationValidationError(
+                "CoordinationMessage.in_reply_to cannot equal message_id"
+            )
+
+    def _build_governance_context(
+        self,
+        *,
+        request: CoordinationDispatchRequest,
+        request_id: str | None,
+    ) -> GovernanceContext:
+        """Compose a `GovernanceContext` from the dispatch request.
+
+        Deterministic mapping:
+
+        * stage         ← request.enforcement_stage
+        * action        ← `CoordinationGovernanceAction[message_type]`
+        * resource      ← ``f"recipient:{recipient_id}"``
+        * actor         ← ``f"sender:{sender_id}"``
+        * subject       ← `CommunicationGovernanceSubject` (typed)
+        * correlation_id← request.correlation_id (NewType over UUID)
+        * metadata      ← substrate-namespaced fields + caller override
+        """
+        msg = request.message
+        action = _governance_action_for(msg.message_type)
+        resource = f"recipient:{msg.recipient.recipient_id}"
+        actor = f"sender:{msg.sender_id}"
+
+        subject = CommunicationGovernanceSubject(
+            channel=f"coordination/{request.direction.value}",
+            recipient_scope=msg.recipient.recipient_id,
+            content_summary=msg.payload.content_type,
+            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            request_id=request_id,
+        )
+
+        substrate_metadata: dict[str, object] = {
+            CoordinationMetadataKey.DIRECTION.value: request.direction.value,
+            CoordinationMetadataKey.MESSAGE_TYPE.value: msg.message_type.value,
+            CoordinationMetadataKey.PRIORITY.value: int(msg.priority),
+            CoordinationMetadataKey.SENDER.value: msg.sender_id,
+            CoordinationMetadataKey.RECIPIENT.value: msg.recipient.recipient_id,
+            CoordinationMetadataKey.RECIPIENT_KIND.value: msg.recipient.kind,
+        }
+        if msg.in_reply_to is not None:
+            substrate_metadata[
+                CoordinationMetadataKey.IN_REPLY_TO.value
+            ] = str(msg.in_reply_to)
+        if request.parent_coordination_id is not None:
+            substrate_metadata[
+                CoordinationMetadataKey.PARENT_COORDINATION_ID.value
+            ] = str(request.parent_coordination_id)
+        if request.parent_message_id is not None:
+            substrate_metadata[
+                CoordinationMetadataKey.PARENT_MESSAGE_ID.value
+            ] = str(request.parent_message_id)
+
+        # Caller-provided metadata is merged in BENEATH substrate keys
+        # so substrate keys are authoritative (avoids accidental
+        # shadowing of substrate lineage by callers).
+        merged: dict[str, object] = dict(request.governance_metadata)
+        merged.update(substrate_metadata)
+
+        return GovernanceContext(
+            stage=request.enforcement_stage,
+            action=action,
+            resource=resource,
+            actor=actor,
+            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            request_id=request_id,
+            subject=subject,
+            correlation_id=request.correlation_id,
+            metadata=merged,
+        )
+
+    def _map_governance(
+        self, decision: Decision
+    ) -> tuple[CoordinationStatus, CoordinationDispatchOutcome]:
+        """Translate a `Decision` → coordination status/outcome.
+
+        Blocking decisions raise `CoordinationGovernanceDeniedError`
+        (caught by `dispatch` and translated to a DENIED result).
+        Non-blocking decisions return (status, outcome).
+        """
+        if is_blocking_decision(decision):
+            raise CoordinationGovernanceDeniedError(
+                f"governance returned blocking decision: {decision.value}"
+            )
+        if decision is Decision.ALLOW:
+            return (
+                CoordinationStatus.DISPATCHED,
+                CoordinationDispatchOutcome.ACCEPTED,
+            )
+        # DEGRADE and REDACT — both non-blocking but restrictive.
+        return (
+            CoordinationStatus.DEGRADED,
+            CoordinationDispatchOutcome.DEGRADED,
+        )
+
+    async def _build_and_persist(
+        self,
+        *,
+        request: CoordinationDispatchRequest,
+        request_id: str | None,
+        coordination_id: CoordinationId,
+        status: CoordinationStatus,
+        outcome: CoordinationDispatchOutcome,
+        governance_decision_id: uuid.UUID | None,
+        governance_chain_id: str | None,
+        error: str | None,
+        started_at: datetime,
+        loop_start: float,
+        extra_metadata: dict[str, object] | None = None,
+    ) -> CoordinationDispatchResult:
+        """Assign sequence, build envelope, persist, build trace + result.
+
+        Sequence assignment + record write run under a single lock so
+        concurrent dispatchers observe a deterministic total order.
+        Persistence failures are caught and surfaced as a
+        ``PERSISTENCE_ERROR`` outcome.
+
+        `extra_metadata` (when supplied) is merged into the envelope
+        metadata BENEATH caller metadata, so substrate-added keys
+        (e.g. policy evaluation id, policy aggregate decision) are
+        not silently overridden by callers.
+        """
+        loop = asyncio.get_event_loop()
+        async with self._lock:
+            self._sequence += 1
+            sequence = self._sequence
+            dispatched_at = datetime.now(timezone.utc)
+
+            # Caller metadata is merged in BENEATH substrate-added
+            # keys so substrate lineage (policy evaluation id,
+            # aggregate decision, …) is authoritative.
+            envelope_metadata: dict[str, object] = dict(request.metadata)
+            if extra_metadata:
+                envelope_metadata.update(extra_metadata)
+
+            envelope = CoordinationEnvelope(
+                coordination_id=coordination_id,
+                message=request.message,
+                direction=request.direction,
+                status=status,
+                sequence=sequence,
+                runtime_instance_id=self._instance_id,
+                correlation_id=request.correlation_id,
+                parent_coordination_id=request.parent_coordination_id,
+                parent_message_id=request.parent_message_id,
+                request_id=request_id,
+                tenant_id=request.tenant_id
+                or request.message.recipient.tenant_id,
+                governance_decision_id=governance_decision_id,
+                governance_chain_id=governance_chain_id,
+                created_at=request.message.created_at,
+                dispatched_at=dispatched_at,
+                metadata=envelope_metadata,
+            )
+            record = envelope_to_record(envelope)
+            try:
+                await self._persistence.record_envelope(record)
+            except CoordinationPersistenceError as exc:
+                # Build a trace anyway so callers see the lineage.
+                ended_at = datetime.now(timezone.utc)
+                latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+                trace = self._build_trace(
+                    coordination_id=coordination_id,
+                    envelope=envelope,
+                    status=CoordinationStatus.FAILED,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    latency_ms=latency_ms,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                return CoordinationDispatchResult(
+                    coordination_id=coordination_id,
+                    outcome=CoordinationDispatchOutcome.PERSISTENCE_ERROR,
+                    trace=trace,
+                    envelope=None,
+                    error=str(exc),
+                    metadata=dict(request.metadata),
+                )
+            except Exception as exc:  # noqa: BLE001 — substrate never re-raises
+                ended_at = datetime.now(timezone.utc)
+                latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+                trace = self._build_trace(
+                    coordination_id=coordination_id,
+                    envelope=envelope,
+                    status=CoordinationStatus.FAILED,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    latency_ms=latency_ms,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                return CoordinationDispatchResult(
+                    coordination_id=coordination_id,
+                    outcome=CoordinationDispatchOutcome.PERSISTENCE_ERROR,
+                    trace=trace,
+                    envelope=None,
+                    error=f"persistence failed: {type(exc).__name__}: {exc}",
+                    metadata=dict(request.metadata),
+                )
+
+        ended_at = datetime.now(timezone.utc)
+        latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+        trace = self._build_trace(
+            coordination_id=coordination_id,
+            envelope=envelope,
+            status=status,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            error=error,
+        )
+        return CoordinationDispatchResult(
+            coordination_id=coordination_id,
+            outcome=outcome,
+            trace=trace,
+            envelope=envelope,
+            error=error,
+            metadata=dict(request.metadata),
+        )
+
+    def _build_trace(
+        self,
+        *,
+        coordination_id: CoordinationId,
+        envelope: CoordinationEnvelope,
+        status: CoordinationStatus,
+        started_at: datetime,
+        ended_at: datetime,
+        latency_ms: float,
+        error: str | None,
+    ) -> CoordinationTrace:
+        msg = envelope.message
+        return CoordinationTrace(
+            coordination_id=coordination_id,
+            message_id=msg.message_id,
+            runtime_instance_id=envelope.runtime_instance_id,
+            sequence=envelope.sequence,
+            sender_id=msg.sender_id,
+            recipient_id=msg.recipient.recipient_id,
+            recipient_kind=msg.recipient.kind,
+            message_type=msg.message_type,
+            direction=envelope.direction,
+            priority=msg.priority,
+            status=status,
+            correlation_id=envelope.correlation_id,
+            parent_coordination_id=envelope.parent_coordination_id,
+            parent_message_id=envelope.parent_message_id,
+            in_reply_to=msg.in_reply_to,
+            request_id=envelope.request_id,
+            tenant_id=envelope.tenant_id,
+            governance_decision_id=envelope.governance_decision_id,
+            governance_chain_id=envelope.governance_chain_id,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            error=error,
+            metadata=dict(envelope.metadata),
+        )
+
+    def _fail_fast_result(
+        self,
+        *,
+        coordination_id: CoordinationId,
+        request: CoordinationDispatchRequest,
+        request_id: str | None,
+        started_at: datetime,
+        loop_start: float,
+        outcome: CoordinationDispatchOutcome,
+        error: BaseException,
+        status: CoordinationStatus,
+        envelope: CoordinationEnvelope | None,
+    ) -> CoordinationDispatchResult:
+        """Build a trace + result for failures that occur before persistence.
+
+        Used for validation failures (no envelope ever constructed).
+        """
+        loop = asyncio.get_event_loop()
+        ended_at = datetime.now(timezone.utc)
+        latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+        msg = request.message
+        trace = CoordinationTrace(
+            coordination_id=coordination_id,
+            message_id=msg.message_id,
+            runtime_instance_id=self._instance_id,
+            sequence=0,
+            sender_id=msg.sender_id,
+            recipient_id=msg.recipient.recipient_id,
+            recipient_kind=msg.recipient.kind,
+            message_type=msg.message_type,
+            direction=request.direction,
+            priority=msg.priority,
+            status=status,
+            correlation_id=request.correlation_id,
+            parent_coordination_id=request.parent_coordination_id,
+            parent_message_id=request.parent_message_id,
+            in_reply_to=msg.in_reply_to,
+            request_id=request_id,
+            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            governance_decision_id=None,
+            governance_chain_id=None,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            error=f"{type(error).__name__}: {error}",
+            metadata=dict(request.metadata),
+        )
+        return CoordinationDispatchResult(
+            coordination_id=coordination_id,
+            outcome=outcome,
+            trace=trace,
+            envelope=envelope,
+            error=str(error),
+            metadata=dict(request.metadata),
+        )
+
+
+# ─── Pure helpers ────────────────────────────────────────────────────
+
+
+def _governance_action_for(
+    message_type: CoordinationMessageType,
+) -> str:
+    """Map a `CoordinationMessageType` to its governance action string."""
+    return {
+        CoordinationMessageType.REQUEST: CoordinationGovernanceAction.REQUEST,
+        CoordinationMessageType.RESPONSE: CoordinationGovernanceAction.RESPONSE,
+        CoordinationMessageType.NOTIFICATION: CoordinationGovernanceAction.NOTIFICATION,
+        CoordinationMessageType.HANDOFF: CoordinationGovernanceAction.HANDOFF,
+        CoordinationMessageType.SIGNAL: CoordinationGovernanceAction.SIGNAL,
+    }[message_type].value
+
+
+# Silence the unused-import warning for `CoordinationPayload` /
+# `CoordinationMessageId` / `CoordinationPriority` — referenced by
+# type-checker readers of the module surface.
+_ = (CoordinationPayload, CoordinationMessageId, CoordinationPriority)
+
+
+__all__ = ["CoordinationRuntime"]
