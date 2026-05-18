@@ -35,6 +35,8 @@ from __future__ import annotations
 import uuid
 from typing import NewType
 
+from app.identity import project_optional_str
+
 
 # ─── Type aliases ────────────────────────────────────────────────────
 
@@ -108,8 +110,12 @@ def derive_event_id(
             "derive_event_id requires a non-empty "
             "external_message_id"
         )
+    # ``project_optional_str`` disambiguates ``tenant_id=None`` from
+    # ``tenant_id=""`` in the seed (Wedge B4 closure of audit CO-1).
     seed = (
-        f"{source_type}|{tenant_id or ''}|{external_message_id}"
+        f"{source_type}|"
+        f"{project_optional_str(tenant_id)}|"
+        f"{external_message_id}"
     )
     return BoundaryEventId(uuid.uuid5(_EVENT_NAMESPACE, seed))
 
@@ -147,8 +153,12 @@ def derive_replay_key(
             "derive_replay_key requires non-empty source_type and "
             "external_message_id"
         )
+    # ``project_optional_str`` disambiguates ``tenant_id=None`` from
+    # ``tenant_id=""`` in the seed (Wedge B4 closure of audit CO-1).
     seed = (
-        f"{source_type}|{tenant_id or ''}|{external_message_id}"
+        f"{source_type}|"
+        f"{project_optional_str(tenant_id)}|"
+        f"{external_message_id}"
     )
     return uuid.uuid5(_REPLAY_KEY_NAMESPACE, seed)
 

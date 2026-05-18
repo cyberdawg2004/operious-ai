@@ -25,6 +25,7 @@ from app.identity.primitives import (
     coerce_principal_id,
     coerce_tenant_id,
 )
+from app.identity.projection import project_optional_str
 
 __all__ = [
     "EnvironmentId",
@@ -36,4 +37,5 @@ __all__ = [
     "coerce_organization_id",
     "coerce_principal_id",
     "coerce_tenant_id",
+    "project_optional_str",
 ]

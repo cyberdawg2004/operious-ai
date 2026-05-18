@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from typing import NewType
 
+from app.identity import project_optional_str
+
 
 # ─── Type aliases ───────────────────────────────────────────────────
 
@@ -186,10 +188,12 @@ def derive_sop_id(
         raise ValueError(
             "derive_sop_id requires a non-empty external_handle"
         )
+    # ``project_optional_str`` disambiguates ``tenant_id=None`` from
+    # ``tenant_id=""`` in the seed (Wedge B4 closure of audit CO-3).
     return SopId(
         uuid.uuid5(
             _SOP_NAMESPACE,
-            f"{tenant_id or ''}|{external_handle}",
+            f"{project_optional_str(tenant_id)}|{external_handle}",
         )
     )
 
@@ -257,10 +261,12 @@ def derive_communication_pattern_id(
         raise ValueError(
             "derive_communication_pattern_id requires pattern_handle"
         )
+    # ``project_optional_str`` disambiguates ``tenant_id=None`` from
+    # ``tenant_id=""`` in the seed (Wedge B4 closure of audit CO-3).
     return CommunicationPatternId(
         uuid.uuid5(
             _COMMUNICATION_NAMESPACE,
-            f"{tenant_id or ''}|{pattern_handle}",
+            f"{project_optional_str(tenant_id)}|{pattern_handle}",
         )
     )
 

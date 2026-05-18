@@ -33,6 +33,8 @@ from __future__ import annotations
 import uuid
 from typing import NewType
 
+from app.identity import project_optional_str
+
 
 # ─── Type aliases ────────────────────────────────────────────────────
 
@@ -122,9 +124,18 @@ def derive_session_id(
             "derive_session_id requires a non-empty "
             "`external_handle`"
         )
+    # ``project_optional_str`` disambiguates ``None`` from ``""`` for
+    # BOTH tenant_id and principal_id (Wedge B4 closure of audit
+    # CO-2). The same expression carried two collapse defects; both
+    # are repaired together for constitutional symmetry — a
+    # tenant-less session and an empty-tenant session must derive
+    # distinct ``SessionId``s, as must a principal-less session and
+    # an empty-principal session.
     seed = (
-        f"{scope}|{tenant_id or ''}|{principal_id or ''}"
-        f"|{external_handle}"
+        f"{scope}|"
+        f"{project_optional_str(tenant_id)}|"
+        f"{project_optional_str(principal_id)}|"
+        f"{external_handle}"
     )
     return SessionId(uuid.uuid5(_SESSION_NAMESPACE, seed))
 

@@ -18,6 +18,7 @@ import uuid
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 
+from app.identity import project_optional_str
 from app.organizational_intelligence.contracts.requests import (
     ApproveRecommendationRequest,
     GenerateRecommendationRequest,
@@ -113,8 +114,15 @@ class RecommendationRuntime:
                     "rationale": request.rationale.summary,
                 }
             )
+            # ``project_optional_str`` disambiguates
+            # ``tenant_id=None`` from ``tenant_id=""`` when composing
+            # the recommendation's deterministic scope (Wedge B4
+            # closure of audit CO-3 at the call-graph distance).
             rec_id = derive_recommendation_id(
-                scope=f"{request.scope.value}|{request.tenant_id or ''}",
+                scope=(
+                    f"{request.scope.value}|"
+                    f"{project_optional_str(request.tenant_id)}"
+                ),
                 content_fingerprint=seed_fp,
             )
             existing = await self._persistence.get_recommendation(
