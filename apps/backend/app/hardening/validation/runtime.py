@@ -11,6 +11,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.identity import request_authority_resolution
 from app.hardening.audits.recorder import (
     HardeningAuditRecorder,
 )
@@ -525,6 +526,8 @@ class HardeningRuntime:
     ) -> HardeningEnvelope:
         kind = HardeningTraceKind.RECORD_FAILURE
         started_at, monotonic = self._mark_start()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if not request.seed:
                 raise HardeningContainmentError(
@@ -545,7 +548,7 @@ class HardeningRuntime:
                     sorted(set(request.evidence))
                 ),
                 correlation_id=request.correlation_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 attributes=dict(request.metadata),
             )
             await self._persistence.write_failure_record(

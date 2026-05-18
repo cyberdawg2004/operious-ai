@@ -12,6 +12,10 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.boundary.translation.contracts.requests import (
     IngressTranslateRequest,
 )
@@ -129,6 +133,8 @@ class TranslationIngressRuntime:
         kind = TranslationTraceKind.INGRESS_TRANSLATE
         started_at = datetime.now(UTC)
         monotonic = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             self._validate_request(request)
 
@@ -191,7 +197,7 @@ class TranslationIngressRuntime:
                 validated_at=ended_at,
             )
 
-            identity = self._build_identity(request)
+            identity = self._build_identity(request, resolution=resolution)
             lineage_entry = TranslationLineageEntry(
                 sequence=0,
                 direction=TranslationDirection.INGRESS,
@@ -249,10 +255,12 @@ class TranslationIngressRuntime:
                 result,
                 provider_name=provider_response.provider_name,
                 error=None,
+                resolution=resolution,
             )
         except TranslationError as exc:
             return self._fail(
-                kind, started_at, monotonic, request, exc
+                kind, started_at, monotonic, request, exc,
+                resolution=resolution,
             )
 
     # ── helpers ─────────────────────────────────────────────────────
@@ -274,7 +282,10 @@ class TranslationIngressRuntime:
             )
 
     def _build_identity(
-        self, request: IngressTranslateRequest
+        self,
+        request: IngressTranslateRequest,
+        *,
+        resolution: AuthorityResolution,
     ) -> TranslationIdentity:
         translation_id = derive_translation_id(
             seed=f"ingress|{request.seed}"
@@ -291,7 +302,7 @@ class TranslationIngressRuntime:
             correlation_id=correlation_id,
             seed=request.seed,
             request_id=request.request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
         )
 
     def _next_sequence(self) -> int:
@@ -309,6 +320,7 @@ class TranslationIngressRuntime:
         *,
         provider_name: str | None,
         error: BaseException | None,
+        resolution: AuthorityResolution,
     ) -> TranslationEnvelope:
         sequence = self._sequence
         if request.correlation_id:
@@ -334,7 +346,7 @@ class TranslationIngressRuntime:
                 seed=request.seed,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 provider_name=provider_name,
                 error=type(error).__name__ if error else None,
             ),
@@ -349,6 +361,8 @@ class TranslationIngressRuntime:
         monotonic: float,
         request: IngressTranslateRequest,
         error: BaseException,
+        *,
+        resolution: AuthorityResolution,
     ) -> TranslationEnvelope:
         ended_at = datetime.now(UTC)
         sequence = self._next_sequence()
@@ -374,7 +388,7 @@ class TranslationIngressRuntime:
                 seed=request.seed,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 error=type(error).__name__,
             ),
             result=None,

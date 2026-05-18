@@ -168,6 +168,7 @@ def test_public_api_surface_is_stable() -> None:
         "get_request_authority",
         "get_request_authority_source",
         "project_optional_str",
+        "request_authority_resolution",
         "reset_request_authority",
         "reset_request_authority_source",
         "resolve_authority",

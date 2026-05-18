@@ -16,6 +16,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     ClassifyTonalityRequest,
 )
@@ -89,6 +90,8 @@ class TonalityRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if not request.content:
                 raise IntelligenceValidationError(
@@ -110,7 +113,7 @@ class TonalityRuntime:
                 analyzed_at=started_at,
                 analyzer_signature=self._classifier.signature,
                 correlation_hint=request.correlation_hint,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
             existing = await self._persistence.get_tonality_analysis(
                 analysis.analysis_id
@@ -128,7 +131,7 @@ class TonalityRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -140,7 +143,7 @@ class TonalityRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -167,7 +170,7 @@ class TonalityRuntime:
                 latency_ms=latency,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )

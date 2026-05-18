@@ -21,6 +21,7 @@ import uuid
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 
+from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     AnalyzeSopRequest,
     IngestSopRequest,
@@ -102,6 +103,8 @@ class SopRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if not request.body:
                 raise IntelligenceValidationError(
@@ -112,7 +115,7 @@ class SopRuntime:
                     "ingest_sop.title must be non-empty"
                 )
             sop_id = derive_sop_id(
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 external_handle=request.external_handle,
             )
             existing = await self._persistence.get_sop(sop_id)
@@ -146,7 +149,7 @@ class SopRuntime:
             )
             sop = StandardOperatingProcedure(
                 sop_id=sop_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 scope=request.scope,
                 external_handle=request.external_handle,
                 status=SopStatus.INGESTED,
@@ -176,7 +179,7 @@ class SopRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -189,7 +192,7 @@ class SopRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -215,7 +218,7 @@ class SopRuntime:
                 sequence=sequence,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )

@@ -34,6 +34,7 @@ import uuid
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 
+from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     ApprovePatternRequest,
     ListMemoryArtifactsRequest,
@@ -148,6 +149,8 @@ class MemoryEvolutionRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if not request.summary:
                 raise IntelligenceValidationError(
@@ -165,7 +168,7 @@ class MemoryEvolutionRuntime:
                 evidence=request.evidence,
                 extracted_at=started_at,
                 scope=request.scope,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 attributes=request.metadata,
             )
             proposal = MemoryEvolutionProposal(
@@ -205,7 +208,7 @@ class MemoryEvolutionRuntime:
                     artifact_id=artifact_id,
                     kind=request.kind,
                     scope=request.scope,
-                    tenant_id=request.tenant_id,
+                    tenant_id=resolution.tenant_id,
                     status=MemoryArtifactStatus.UNDER_REVIEW,
                     body=request.body,
                     content_fingerprint=(
@@ -236,7 +239,7 @@ class MemoryEvolutionRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -249,7 +252,7 @@ class MemoryEvolutionRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -276,7 +279,7 @@ class MemoryEvolutionRuntime:
                 sequence=sequence,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )
@@ -688,9 +691,11 @@ class MemoryEvolutionRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             query = MemoryArtifactQuery(
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 kind=request.kind,
                 eligibility=(
                     RetrievalEligibility.ELIGIBLE
@@ -714,7 +719,7 @@ class MemoryEvolutionRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -740,7 +745,7 @@ class MemoryEvolutionRuntime:
                 sequence=sequence,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )

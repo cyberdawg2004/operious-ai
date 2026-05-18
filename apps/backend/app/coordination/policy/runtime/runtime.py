@@ -39,6 +39,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.coordination.policy.contracts.requests import (
     CoordinationPolicyEvaluationRequest,
 )
@@ -134,6 +138,8 @@ class CoordinationPolicyRuntime:
         loop = asyncio.get_event_loop()
         started_at = datetime.now(timezone.utc)
         loop_start = loop.time()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         evaluation_id = (
             request.evaluation_id_override or generate_evaluation_id()
         )
@@ -146,6 +152,7 @@ class CoordinationPolicyRuntime:
             return self._fail_fast(
                 evaluation_id=evaluation_id,
                 request=request,
+                resolution=resolution,
                 request_id=request_id,
                 started_at=started_at,
                 loop_start=loop_start,
@@ -212,7 +219,7 @@ class CoordinationPolicyRuntime:
                 parent_coordination_id=request.parent_coordination_id,
                 parent_message_id=request.parent_message_id,
                 request_id=request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 error=error_message,
                 metadata=metadata,
             )
@@ -359,6 +366,7 @@ class CoordinationPolicyRuntime:
         *,
         evaluation_id: CoordinationPolicyEvaluationId,
         request: CoordinationPolicyEvaluationRequest,
+        resolution: AuthorityResolution,
         request_id: str | None,
         started_at: datetime,
         loop_start: float,
@@ -391,7 +399,7 @@ class CoordinationPolicyRuntime:
             parent_coordination_id=request.parent_coordination_id,
             parent_message_id=request.parent_message_id,
             request_id=request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
             started_at=started_at,
             ended_at=ended_at,
             latency_ms=latency_ms,

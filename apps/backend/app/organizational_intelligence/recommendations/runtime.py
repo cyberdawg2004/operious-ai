@@ -19,6 +19,7 @@ from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 
 from app.identity import project_optional_str
+from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     ApproveRecommendationRequest,
     GenerateRecommendationRequest,
@@ -96,6 +97,8 @@ class RecommendationRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if not request.title:
                 raise IntelligenceValidationError(
@@ -121,7 +124,7 @@ class RecommendationRuntime:
             rec_id = derive_recommendation_id(
                 scope=(
                     f"{request.scope.value}|"
-                    f"{project_optional_str(request.tenant_id)}"
+                    f"{project_optional_str(resolution.tenant_id)}"
                 ),
                 content_fingerprint=seed_fp,
             )
@@ -135,7 +138,7 @@ class RecommendationRuntime:
                     recommendation_id=rec_id,
                     kind=request.kind,
                     scope=request.scope,
-                    tenant_id=request.tenant_id,
+                    tenant_id=resolution.tenant_id,
                     status=RecommendationStatus.PROPOSED,
                     title=request.title,
                     body=request.body,
@@ -158,7 +161,7 @@ class RecommendationRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -171,7 +174,7 @@ class RecommendationRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -196,7 +199,7 @@ class RecommendationRuntime:
                 sequence=sequence,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )

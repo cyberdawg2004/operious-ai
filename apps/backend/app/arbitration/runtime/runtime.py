@@ -54,6 +54,10 @@ from app.arbitration.models.conflict import ArbitrationConflict
 from app.arbitration.models.deadlock import DeadlockWitness
 from app.arbitration.models.decision import ArbitrationDecision
 from app.arbitration.models.findings import ArbitrationFinding
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.arbitration.persistence.repository import (
     ArbitrationPersistenceProtocol,
 )
@@ -129,6 +133,11 @@ class OperationalArbitrationRuntime:
         """
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution at the runtime entry. The
+        # resolved ``tenant_id`` replaces every ``request.tenant_id`` read
+        # below so the typed-ingress surface (Branch A) is honored
+        # uniformly without per-site coalescing.
+        resolution = request_authority_resolution(request)
         evaluation_id = (
             request.evaluation_id_override
             if request.evaluation_id_override is not None
@@ -141,6 +150,7 @@ class OperationalArbitrationRuntime:
         except ArbitrationConfigurationError as exc:
             return self._failed_envelope(
                 request=request,
+                resolution=resolution,
                 evaluation_id=evaluation_id,
                 evaluators=(),
                 started_at=started_at,
@@ -247,7 +257,7 @@ class OperationalArbitrationRuntime:
             latency_ms=latency_ms,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
             error=(
                 str(framework_error)
                 if framework_error is not None
@@ -282,7 +292,7 @@ class OperationalArbitrationRuntime:
             max_iterations=request.case.max_iterations,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
             started_at=started_at,
             ended_at=ended_at,
             latency_ms=latency_ms,
@@ -473,6 +483,7 @@ class OperationalArbitrationRuntime:
         self,
         *,
         request: ArbitrationRequest,
+        resolution: AuthorityResolution,
         evaluation_id: ArbitrationEvaluationId,
         evaluators: Iterable[BaseArbitrationEvaluator],
         started_at: datetime,
@@ -514,7 +525,7 @@ class OperationalArbitrationRuntime:
             max_iterations=request.case.max_iterations,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
             started_at=started_at,
             ended_at=ended_at,
             latency_ms=latency_ms,

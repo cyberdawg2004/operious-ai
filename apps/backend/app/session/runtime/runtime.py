@@ -35,6 +35,10 @@ from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 from typing import Any
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.session.contracts.requests import (
     AppendEventRequest,
     OpenSessionRequest,
@@ -164,8 +168,13 @@ class SessionRuntime:
     ) -> SessionEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: collapse typed+legacy authority into a single
+        # AuthorityResolution at the runtime boundary.
+        resolution = request_authority_resolution(request)
         try:
-            session_id = self._resolve_open_session_id(request)
+            session_id = self._resolve_open_session_id(
+                request, resolution=resolution
+            )
             opened_at = (
                 request.opened_at_override
                 if request.opened_at_override is not None
@@ -179,7 +188,7 @@ class SessionRuntime:
                 session_id=session_id,
                 scope=request.scope,
                 external_handle=request.external_handle,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 principal_id=request.principal_id,
             )
             if request.parent_session_id is not None:
@@ -219,7 +228,7 @@ class SessionRuntime:
                 payload={
                     "scope": request.scope.value,
                     "external_handle": request.external_handle,
-                    "tenant_id": request.tenant_id,
+                    "tenant_id": resolution.tenant_id,
                     "principal_id": request.principal_id,
                     "parent_session_id": (
                         str(request.parent_session_id)
@@ -794,14 +803,17 @@ class SessionRuntime:
         return self._sequence
 
     def _resolve_open_session_id(
-        self, request: OpenSessionRequest
+        self,
+        request: OpenSessionRequest,
+        *,
+        resolution: AuthorityResolution,
     ) -> SessionId:
         if request.session_id_override is not None:
             return request.session_id_override
         if request.opened_at_override is not None:
             return derive_session_id(
                 scope=request.scope.value,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 principal_id=request.principal_id,
                 external_handle=(
                     f"{request.external_handle}|"

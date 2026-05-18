@@ -6,6 +6,10 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.boundary.voice.contracts.requests import (
     EgressSynthesizeRequest,
 )
@@ -92,6 +96,8 @@ class VoiceEgressRuntime:
         kind = VoiceTraceKind.EGRESS_SYNTHESIZE
         started_at = datetime.now(UTC)
         monotonic = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             self._validate_request(request)
 
@@ -134,7 +140,7 @@ class VoiceEgressRuntime:
                 audio=audio,
                 captured_at=ended_at,
             )
-            identity = self._build_identity(request)
+            identity = self._build_identity(request, resolution=resolution)
             lineage_entry = VoiceLineageEntry(
                 sequence=await self._next_lineage_sequence(
                     identity.correlation_id
@@ -185,10 +191,12 @@ class VoiceEgressRuntime:
                 result,
                 provider_name=response.provider_name,
                 error=None,
+                resolution=resolution,
             )
         except VoiceError as exc:
             return self._fail(
-                kind, started_at, monotonic, request, exc
+                kind, started_at, monotonic, request, exc,
+                resolution=resolution,
             )
 
     # ── helpers ─────────────────────────────────────────────────────
@@ -208,7 +216,10 @@ class VoiceEgressRuntime:
             )
 
     def _build_identity(
-        self, request: EgressSynthesizeRequest
+        self,
+        request: EgressSynthesizeRequest,
+        *,
+        resolution: AuthorityResolution,
     ) -> VoiceIdentity:
         event_id = derive_event_id(
             seed=f"egress|{request.seed}"
@@ -225,7 +236,7 @@ class VoiceEgressRuntime:
             correlation_id=correlation_id,
             seed=request.seed,
             request_id=request.request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
         )
 
     async def _next_lineage_sequence(
@@ -251,6 +262,7 @@ class VoiceEgressRuntime:
         *,
         provider_name: str | None,
         error: BaseException | None,
+        resolution: AuthorityResolution,
     ) -> VoiceEnvelope:
         sequence = self._sequence
         if request.correlation_id:
@@ -276,7 +288,7 @@ class VoiceEgressRuntime:
                 seed=request.seed,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 provider_name=provider_name,
                 error=type(error).__name__ if error else None,
             ),
@@ -291,6 +303,8 @@ class VoiceEgressRuntime:
         monotonic: float,
         request: EgressSynthesizeRequest,
         error: BaseException,
+        *,
+        resolution: AuthorityResolution,
     ) -> VoiceEnvelope:
         ended_at = datetime.now(UTC)
         sequence = self._next_sequence()
@@ -316,7 +330,7 @@ class VoiceEgressRuntime:
                 seed=request.seed,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 error=type(error).__name__,
             ),
             result=None,

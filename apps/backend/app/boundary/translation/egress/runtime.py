@@ -6,6 +6,10 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.boundary.translation.contracts.requests import (
     EgressLocalizeRequest,
 )
@@ -120,6 +124,8 @@ class TranslationEgressRuntime:
         kind = TranslationTraceKind.EGRESS_LOCALIZE
         started_at = datetime.now(UTC)
         monotonic = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             self._validate_request(request)
 
@@ -177,7 +183,7 @@ class TranslationEgressRuntime:
                 validated_at=ended_at,
             )
 
-            identity = self._build_identity(request)
+            identity = self._build_identity(request, resolution=resolution)
             canonical_fp = text_fingerprint(
                 normalised_canonical.text,
                 language=CANONICAL_LANGUAGE,
@@ -239,10 +245,12 @@ class TranslationEgressRuntime:
                 result,
                 provider_name=provider_response.provider_name,
                 error=None,
+                resolution=resolution,
             )
         except TranslationError as exc:
             return self._fail(
-                kind, started_at, monotonic, request, exc
+                kind, started_at, monotonic, request, exc,
+                resolution=resolution,
             )
 
     # ── helpers ─────────────────────────────────────────────────────
@@ -266,7 +274,10 @@ class TranslationEgressRuntime:
             )
 
     def _build_identity(
-        self, request: EgressLocalizeRequest
+        self,
+        request: EgressLocalizeRequest,
+        *,
+        resolution: AuthorityResolution,
     ) -> TranslationIdentity:
         translation_id = derive_translation_id(
             seed=f"egress|{request.seed}"
@@ -283,7 +294,7 @@ class TranslationEgressRuntime:
             correlation_id=correlation_id,
             seed=request.seed,
             request_id=request.request_id,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
         )
 
     async def _next_lineage_sequence(
@@ -313,6 +324,7 @@ class TranslationEgressRuntime:
         *,
         provider_name: str | None,
         error: BaseException | None,
+        resolution: AuthorityResolution,
     ) -> TranslationEnvelope:
         sequence = self._sequence
         if request.correlation_id:
@@ -338,7 +350,7 @@ class TranslationEgressRuntime:
                 seed=request.seed,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 provider_name=provider_name,
                 error=type(error).__name__ if error else None,
             ),
@@ -353,6 +365,8 @@ class TranslationEgressRuntime:
         monotonic: float,
         request: EgressLocalizeRequest,
         error: BaseException,
+        *,
+        resolution: AuthorityResolution,
     ) -> TranslationEnvelope:
         ended_at = datetime.now(UTC)
         sequence = self._next_sequence()
@@ -378,7 +392,7 @@ class TranslationEgressRuntime:
                 seed=request.seed,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 error=type(error).__name__,
             ),
             result=None,

@@ -20,6 +20,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     RegisterCommunicationPatternRequest,
     RetrieveCommunicationPatternsRequest,
@@ -99,6 +100,8 @@ class CommunicationRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if not request.handle:
                 raise IntelligenceValidationError(
@@ -118,12 +121,12 @@ class CommunicationRuntime:
                 target_kind=_TARGET_KIND,
             )
             pattern_id = derive_communication_pattern_id(
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 pattern_handle=request.handle,
             )
             pattern = CommunicationPattern(
                 pattern_id=pattern_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
                 scope=request.scope,
                 kind=request.kind,
                 handle=request.handle,
@@ -153,7 +156,7 @@ class CommunicationRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -166,7 +169,7 @@ class CommunicationRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -192,7 +195,7 @@ class CommunicationRuntime:
                 sequence=sequence,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )
@@ -204,6 +207,8 @@ class CommunicationRuntime:
     ) -> IntelligenceEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
+        # P2-A: singular authority resolution.
+        resolution = request_authority_resolution(request)
         try:
             if request.limit < 1:
                 raise IntelligenceValidationError(
@@ -211,7 +216,7 @@ class CommunicationRuntime:
                 )
             page = await self._persistence.list_communication_patterns(
                 CommunicationPatternQuery(
-                    tenant_id=request.tenant_id,
+                    tenant_id=resolution.tenant_id,
                     scope=request.scope,
                     applicable_class=request.primary_class,
                 )
@@ -252,7 +257,7 @@ class CommunicationRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -265,7 +270,7 @@ class CommunicationRuntime:
                 error=exc,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -290,7 +295,7 @@ class CommunicationRuntime:
                 sequence=sequence,
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
-                tenant_id=request.tenant_id,
+                tenant_id=resolution.tenant_id,
             ),
             result=result,
         )
