@@ -25,6 +25,52 @@ These exist to:
    aggregation paths).
 
 Real-world policies plug in behind the same contract.
+
+──────────────────────────────────────────────────────────────────
+Wedge B5 — Constitutional class taxonomy for policy fail-modes
+──────────────────────────────────────────────────────────────────
+
+Audit defects AP-1 + AP-3 (see ``docs/identity/tenant-propagation-audit.md``)
+exposed that this module previously contained an AUTHORITY policy
+(``TenantScopePolicy``) that ALLOWed when its allowlist was empty.
+A second AUTHORITY policy in another substrate
+(``app.coordination.policy.evaluators.builtin.TenantIsolationEvaluator``)
+already fail-closed when its tenant was missing — the two systems
+carried divergent doctrines for the same constitutional class.
+
+The unified doctrine, enforced by this module from Wedge B5 onward:
+
+**AUTHORITY policies** — policies that GATE operations against an
+allowlist or a required identity — MUST FAIL CLOSED on indeterminate
+configuration. An unconfigured allowlist is NOT consent to be
+permissive; it is an admission that the policy cannot decide. The
+constitutional class that includes:
+
+  * ``TenantScopePolicy``                       (this module)
+  * ``MaxQueryLengthPolicy.query_missing``      (this module, Phase 0)
+  * ``TenantIsolationEvaluator``                (coordination policy)
+  * ``build_decision`` empty-evaluations branch (Phase 0 Cluster F)
+
+ALL share the same rule: when the AUTHORITY axis is missing or the
+configuration is indeterminate, the result is ``Decision.DENY``.
+Operators who legitimately do NOT want tenant scoping MUST omit the
+policy from their chain entirely — explicit non-registration is the
+only way to opt out. Registering ``TenantScopePolicy()`` with no
+allowlist is now a configuration error, signalled by a DENY at
+evaluation time.
+
+**CONTENT policies** — policies that FILTER or REDACT content
+against a denylist — MAY remain permissive on empty configuration
+because their action shape is "filter, not gate". An empty denylist
+genuinely means "nothing to redact" and producing ALLOW is the
+correct verdict. The class includes:
+
+  * ``ContentDenylistPolicy`` (this module)
+
+This taxonomy is the contract every future builtin policy MUST
+declare against: a policy must self-classify as AUTHORITY or CONTENT
+in its own docstring and select its empty-config behaviour
+accordingly.
 """
 
 from __future__ import annotations
@@ -51,15 +97,31 @@ from app.governance.value_objects import RuntimeRestriction
 
 @dataclass(frozen=True, slots=True)
 class TenantScopePolicy(BaseGovernancePolicy):
-    """DENY when the subject's `tenant_id` is not in `allowed_tenants`.
+    """AUTHORITY-class policy. DENY when the subject's ``tenant_id``
+    is not in ``allowed_tenants``.
 
-    If `allowed_tenants` is empty, the policy ALLOWs every tenant —
-    the default permissive behaviour. Deployments pin a non-empty
-    allowlist at composition time when they need scoping.
+    Constitutional class: AUTHORITY (gates operations against an
+    allowlist). Per the module doctrine, this policy FAILS CLOSED on
+    every indeterminate input:
 
-    Reads `tenant_id` from the typed subject (Retrieval or Execution).
-    For other subject kinds, the policy falls back to
-    `context.tenant_id`.
+      * empty allowlist            → DENY (``tenant_scope_unconfigured``)
+      * missing ``tenant_id``       → DENY (``tenant_missing``)
+      * ``tenant_id`` not in allowlist → DENY (``tenant_not_allowed``)
+
+    Deployments that legitimately do not want tenant scoping MUST
+    omit the policy from their chain entirely — registering an
+    unconfigured ``TenantScopePolicy()`` is a configuration error
+    and the policy will refuse to allow anything until an allowlist
+    is supplied. This closes audit defect AP-1 (Wedge B1) and
+    unifies the policy's empty-config doctrine with
+    ``TenantIsolationEvaluator`` and ``MaxQueryLengthPolicy``
+    (audit defect AP-3 → Wedge B5).
+
+    Reads ``tenant_id`` from the typed subject (Retrieval or
+    Execution). For other subject kinds the policy falls back to
+    ``context.tenant_id``, which since Wedge B7 is itself the
+    output of ``resolve_authority`` (singular, attributed, no silent
+    coalescing).
     """
 
     allowed_tenants: FrozenSet[str] = frozenset()
@@ -83,23 +145,32 @@ class TenantScopePolicy(BaseGovernancePolicy):
         self,
         context: GovernanceContext,
     ) -> Sequence[PolicyEvaluationResult]:
-        # Empty allowlist = operator-explicit permissive default.
-        # The behaviour is retained (operators may deliberately
-        # configure no scoping), but the result is tagged with
-        # `permissive_default` metadata so audits can detect every
-        # ALLOW that came from an unconfigured allowlist — closing
-        # the "is this intentional or misconfigured?" forensic gap.
+        # Wedge B5 — closes audit defect AP-1 (governance fail-open).
+        # An empty allowlist is NOT operator consent to be
+        # permissive; it is an indeterminate configuration. Per the
+        # AUTHORITY-class doctrine declared at the top of this
+        # module, AUTHORITY policies fail closed on indeterminate
+        # configuration. Operators who legitimately do not want
+        # tenant scoping MUST omit the policy from their chain
+        # rather than registering it with no allowlist.
         if not self.allowed_tenants:
             return (
                 PolicyEvaluationResult(
                     policy_name=self.name,
-                    rule_id="open_allowlist",
-                    decision=Decision.ALLOW,
-                    severity=ViolationSeverity.LOW,
-                    reason="no tenant allowlist configured",
+                    rule_id="tenant_scope_unconfigured",
+                    decision=Decision.DENY,
+                    severity=ViolationSeverity.HIGH,
+                    reason=(
+                        "tenant_scope policy has no allowlist "
+                        "configured; AUTHORITY-class policies fail "
+                        "closed on indeterminate configuration. "
+                        "Omit this policy from the chain to opt out "
+                        "of tenant scoping."
+                    ),
                     metadata={
-                        "permissive_default": True,
                         "config_missing": "allowed_tenants",
+                        "fail_mode": "closed",
+                        "policy_class": "authority",
                     },
                 ),
             )
@@ -145,11 +216,21 @@ class TenantScopePolicy(BaseGovernancePolicy):
 
 @dataclass(frozen=True, slots=True)
 class MaxQueryLengthPolicy(BaseGovernancePolicy):
-    """DENY when the retrieval subject's `query` exceeds `max_length`.
+    """AUTHORITY-class policy. DENY when the retrieval subject's
+    ``query`` exceeds ``max_length`` OR is missing.
 
-    Reads `subject.query` directly — typed access, no dict lookups.
-    The policy is RETRIEVAL-only by `applicable_subject_kinds`; the
-    engine skips it for any other subject kind.
+    Constitutional class: AUTHORITY (gates retrieval against a
+    declared upper bound). Per the module doctrine, this policy
+    FAILS CLOSED on every indeterminate input — both ``query_missing``
+    and ``query_too_long`` produce DENY. The ``query_missing`` rule
+    was the original Phase 0 Cluster F symmetry anchor for the
+    unified AUTHORITY fail-closed doctrine that Wedge B5 extends
+    to ``TenantScopePolicy``.
+
+    Reads ``subject.query`` directly — typed access, no dict
+    lookups. The policy is RETRIEVAL-only by
+    ``applicable_subject_kinds``; the engine skips it for any other
+    subject kind.
     """
 
     max_length: int = 4000
@@ -218,18 +299,28 @@ class MaxQueryLengthPolicy(BaseGovernancePolicy):
 
 @dataclass(frozen=True, slots=True)
 class ContentDenylistPolicy(BaseGovernancePolicy):
-    """REDACT individual retrieval candidates with denylisted content.
+    """CONTENT-class policy. REDACT individual retrieval candidates
+    with denylisted content.
+
+    Constitutional class: CONTENT (filters/redacts content against a
+    denylist). Per the module doctrine, CONTENT-class policies MAY
+    remain permissive on empty configuration because their action
+    shape is "filter, not gate". An empty denylist genuinely means
+    "no content rules to apply" and producing ALLOW is the correct
+    verdict — this is NOT the same constitutional class as the
+    AUTHORITY-class fail-closed sites (``TenantScopePolicy``,
+    ``MaxQueryLengthPolicy.query_missing``).
 
     Operationally this is the **contract** — emitting REDACT plus
     matching restrictions. The actual filtering happens in the
-    `RedactionGuardrail` (separation: policies emit verdicts;
+    ``RedactionGuardrail`` (separation: policies emit verdicts;
     guardrails act). This separation matters because the same REDACT
     decision can be enforced differently depending on transport.
 
-    The policy reads `subject.retrieval_candidates` (a tuple of
-    `CandidateSummary`) directly. Empty candidates → ALLOW; non-empty
-    candidates → one REDACT per match plus a single ALLOW fallback if
-    nothing matched.
+    The policy reads ``subject.retrieval_candidates`` (a tuple of
+    ``CandidateSummary``) directly. Empty candidates → ALLOW;
+    non-empty candidates → one REDACT per match plus a single ALLOW
+    fallback if nothing matched.
     """
 
     denylist: tuple[str, ...] = ()

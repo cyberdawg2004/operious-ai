@@ -2,7 +2,10 @@
 
 Properties pinned (now on typed subjects):
 
-* `TenantScopePolicy` with empty allowlist is permissive,
+* `TenantScopePolicy` with empty allowlist is FAIL-CLOSED (Wedge B5
+  audit defect AP-1): empty allowlist → DENY ``tenant_scope_unconfigured``,
+  unifying the AUTHORITY-class doctrine with ``MaxQueryLengthPolicy``,
+  ``TenantIsolationEvaluator``, and ``build_decision``.
 * `TenantScopePolicy` DENYs missing / non-allowlisted tenants,
 * `MaxQueryLengthPolicy` DENYs over-long queries AND DENYs empty query
   (constitutional symmetry with `TenantScopePolicy.tenant_missing`),
@@ -62,11 +65,26 @@ def _ctx(
 
 
 @pytest.mark.asyncio
-async def test_tenant_scope_empty_allowlist_is_permissive() -> None:
+async def test_tenant_scope_empty_allowlist_fail_closes() -> None:
+    """Wedge B5 — audit defect AP-1 closed.
+
+    An empty ``allowed_tenants`` set is an INDETERMINATE
+    configuration, not operator consent to be permissive. The
+    AUTHORITY-class doctrine declared in
+    ``app.governance.policies.builtin`` requires DENY on
+    indeterminate config. Operators who legitimately do not want
+    tenant scoping MUST omit the policy from the chain entirely —
+    registering it with no allowlist is a configuration error and
+    is now caught at evaluation time.
+    """
     policy = TenantScopePolicy()
     results = await policy.evaluate(_ctx(tenant_id="anything"))
     assert len(results) == 1
-    assert results[0].decision is Decision.ALLOW
+    assert results[0].decision is Decision.DENY
+    assert results[0].rule_id == "tenant_scope_unconfigured"
+    assert results[0].metadata["config_missing"] == "allowed_tenants"
+    assert results[0].metadata["fail_mode"] == "closed"
+    assert results[0].metadata["policy_class"] == "authority"
 
 
 @pytest.mark.asyncio
