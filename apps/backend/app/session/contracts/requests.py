@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
 
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 from app.session.enums import (
     SessionContinuityMode,
     SessionCorrelationKind,
@@ -61,6 +65,14 @@ class OpenSessionRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="OpenSessionRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)

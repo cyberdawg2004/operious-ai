@@ -12,6 +12,10 @@ from app.hardening.enums import (
     SubstrateName,
 )
 from app.hardening.models.ownership import AuthorityOwnershipMap
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +152,14 @@ class RecordFailureRequest:
     tenant_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="RecordFailureRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -37,7 +37,10 @@ from app.coordination.identity import (
     CoordinationMessageId,
 )
 from app.governance.enums import EnforcementStage
-from app.identity import AuthorityContext
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,26 +127,11 @@ class CoordinationDispatchRequest:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # Wedge B7 coexistence invariant (mirrored from boundary +
-        # supervisor contracts): when both the typed ``authority``
-        # and the legacy ``tenant_id`` are supplied with values,
-        # they MUST agree. ``None`` on either side is permitted —
-        # legacy callers (tenant_id only) and typed callers
-        # (authority only) are both supported during the typed-
-        # ingress transition.
-        if (
-            self.authority is not None
-            and self.authority.tenant_id is not None
-            and self.tenant_id is not None
-            and self.authority.tenant_id != self.tenant_id
-        ):
-            raise ValueError(
-                "CoordinationDispatchRequest: authority.tenant_id "
-                "and tenant_id must agree when both are supplied "
-                f"(got authority.tenant_id="
-                f"{self.authority.tenant_id!r}, "
-                f"tenant_id={self.tenant_id!r})"
-            )
+        check_tenant_authority_coexistence(
+            contract_name="CoordinationDispatchRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 __all__ = ["CoordinationDispatchRequest"]

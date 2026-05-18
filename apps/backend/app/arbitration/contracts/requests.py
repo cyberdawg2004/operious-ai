@@ -21,11 +21,21 @@ from typing import Any, Mapping
 
 from app.arbitration.identity import ArbitrationEvaluationId
 from app.arbitration.models.case import ArbitrationCase
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class ArbitrationRequest:
-    """Input to one `OperationalArbitrationRuntime.evaluate()` call."""
+    """Input to one `OperationalArbitrationRuntime.evaluate()` call.
+
+    ``authority`` carries the typed :class:`AuthorityContext`
+    (Wedge B2 typed-ingress surface). When both ``authority`` and
+    ``tenant_id`` are supplied, they MUST agree (Branch A
+    coexistence invariant).
+    """
 
     case: ArbitrationCase
     correlation_id: str | None = None
@@ -34,6 +44,14 @@ class ArbitrationRequest:
     evaluator_names: tuple[str, ...] | None = None
     evaluation_id_override: ArbitrationEvaluationId | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="ArbitrationRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 __all__ = ["ArbitrationRequest"]

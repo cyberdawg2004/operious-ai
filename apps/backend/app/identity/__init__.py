@@ -20,6 +20,7 @@ from app.identity.authority import (
     AuthoritySource,
     resolve_authority,
 )
+from app.identity.coexistence import check_tenant_authority_coexistence
 from app.identity.primitives import (
     EnvironmentId,
     IdentityError,
@@ -47,6 +48,7 @@ __all__ = [
     "OrganizationId",
     "PrincipalId",
     "TenantId",
+    "check_tenant_authority_coexistence",
     "coerce_environment_id",
     "coerce_organization_id",
     "coerce_principal_id",

@@ -11,35 +11,10 @@ from app.boundary.translation.localization.context import (
 from app.boundary.translation.models.payload import (
     TranslationPayload,
 )
-from app.identity import AuthorityContext
-
-
-def _check_authority_tenant_consistency(
-    *,
-    contract_name: str,
-    authority: AuthorityContext | None,
-    tenant_id: str | None,
-) -> None:
-    """Enforce the Wedge B2 coexistence invariant.
-
-    Both fields may co-exist during the typed-ingress transition.
-    When BOTH carry a value, they must agree. ``None`` on either
-    side is permitted — legacy callers (tenant_id only) and typed
-    callers (authority only) are both supported until a later wedge
-    consolidates onto the typed surface.
-    """
-    if (
-        authority is not None
-        and authority.tenant_id is not None
-        and tenant_id is not None
-        and authority.tenant_id != tenant_id
-    ):
-        raise ValueError(
-            f"{contract_name}: authority.tenant_id and tenant_id "
-            f"must agree when both are supplied (got "
-            f"authority.tenant_id={authority.tenant_id!r}, "
-            f"tenant_id={tenant_id!r})"
-        )
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +48,7 @@ class IngressTranslateRequest:
             raise ValueError(
                 "IngressTranslateRequest.seed must be non-empty"
             )
-        _check_authority_tenant_consistency(
+        check_tenant_authority_coexistence(
             contract_name="IngressTranslateRequest",
             authority=self.authority,
             tenant_id=self.tenant_id,
@@ -113,7 +88,7 @@ class EgressLocalizeRequest:
             raise ValueError(
                 "EgressLocalizeRequest.seed must be non-empty"
             )
-        _check_authority_tenant_consistency(
+        check_tenant_authority_coexistence(
             contract_name="EgressLocalizeRequest",
             authority=self.authority,
             tenant_id=self.tenant_id,

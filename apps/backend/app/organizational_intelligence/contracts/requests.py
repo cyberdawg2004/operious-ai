@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 from app.organizational_intelligence.enums import (
     CommunicationPatternKind,
     IntelligenceScope,
@@ -52,6 +56,14 @@ class IngestSopRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="IngestSopRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +89,14 @@ class ClassifyTonalityRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="ClassifyTonalityRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +119,14 @@ class RegisterCommunicationPatternRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="RegisterCommunicationPatternRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +141,14 @@ class RetrieveCommunicationPatternsRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="RetrieveCommunicationPatternsRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 # ─── Memory evolution ─────────────────────────────────────────────
@@ -139,6 +175,14 @@ class MemoryEvolutionProposalRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="MemoryEvolutionProposalRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +252,14 @@ class ListMemoryArtifactsRequest:
     offset: int = 0
     correlation_id: str | None = None
     request_id: str | None = None
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="ListMemoryArtifactsRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 # ─── Operational patterns / recommendations ───────────────────────
@@ -250,6 +302,14 @@ class GenerateRecommendationRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="GenerateRecommendationRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)

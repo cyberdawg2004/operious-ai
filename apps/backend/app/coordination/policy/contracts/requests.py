@@ -55,6 +55,10 @@ from app.coordination.identity import (
 from app.coordination.policy.identity import (
     CoordinationPolicyEvaluationId,
 )
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +89,14 @@ class CoordinationPolicyEvaluationRequest:
     evaluator_names: tuple[str, ...] | None = None
     evaluation_id_override: CoordinationPolicyEvaluationId | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="CoordinationPolicyEvaluationRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
     @property
     def topology_key(self) -> tuple[str, str, str, str]:

@@ -42,6 +42,11 @@ HARDENING_ROOT = (
 
 _ALLOWED_INTERNAL_PREFIXES = (
     "app.hardening.",
+    # Wedge B2 / Branch A: typed identity primitives + the shared
+    # AuthorityContext/coexistence helper. Identity is a LEAF
+    # substrate (see app/identity/__init__.py); importing from it
+    # never introduces a cross-substrate dependency.
+    "app.identity",
 )
 
 _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (

@@ -52,6 +52,10 @@ from app.coordination.identity import (
 from app.coordination.topology.identity import (
     CoordinationTopologyEvaluationId,
 )
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +81,14 @@ class CoordinationTopologyEvaluationRequest:
     evaluator_names: tuple[str, ...] | None = None
     evaluation_id_override: CoordinationTopologyEvaluationId | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    authority: AuthorityContext | None = None
+
+    def __post_init__(self) -> None:
+        check_tenant_authority_coexistence(
+            contract_name="CoordinationTopologyEvaluationRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 __all__ = ["CoordinationTopologyEvaluationRequest"]

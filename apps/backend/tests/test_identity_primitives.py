@@ -160,6 +160,7 @@ def test_public_api_surface_is_stable() -> None:
         "OrganizationId",
         "PrincipalId",
         "TenantId",
+        "check_tenant_authority_coexistence",
         "coerce_environment_id",
         "coerce_organization_id",
         "coerce_principal_id",

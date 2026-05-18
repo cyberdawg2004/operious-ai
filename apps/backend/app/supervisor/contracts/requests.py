@@ -21,7 +21,10 @@ from app.agents.persistence.records import (
     ToolInvocationRecord,
 )
 from app.governance.persistence.records import GovernanceDecisionRecord
-from app.identity import AuthorityContext
+from app.identity import (
+    AuthorityContext,
+    check_tenant_authority_coexistence,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,25 +89,11 @@ class ExecutionInspectionRequest:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # Wedge B2 coexistence invariant (mirrored from the boundary
-        # request contracts): when both the typed ``authority`` and
-        # the legacy ``tenant_id`` are supplied with values, they
-        # MUST agree. ``None`` on either side is permitted — legacy
-        # callers (tenant_id only) and typed callers (authority only)
-        # are both supported.
-        if (
-            self.authority is not None
-            and self.authority.tenant_id is not None
-            and self.tenant_id is not None
-            and self.authority.tenant_id != self.tenant_id
-        ):
-            raise ValueError(
-                "ExecutionInspectionRequest: authority.tenant_id "
-                "and tenant_id must agree when both are supplied "
-                f"(got authority.tenant_id="
-                f"{self.authority.tenant_id!r}, "
-                f"tenant_id={self.tenant_id!r})"
-            )
+        check_tenant_authority_coexistence(
+            contract_name="ExecutionInspectionRequest",
+            authority=self.authority,
+            tenant_id=self.tenant_id,
+        )
 
 
 __all__ = ["ExecutionInspectionRequest"]
