@@ -51,13 +51,22 @@ class ClaimMapping:
     Each field names the JWT claim whose value is copied into the
     corresponding :class:`VerifiedIdentity` axis. ``None`` disables
     extraction for that axis (the verified identity carries
-    ``None`` on that axis).
+    ``None`` / empty on that axis).
+
+    The ``capabilities`` claim accepts:
+
+    * a JSON array of strings (preferred — RFC 8693 ``scopes``
+      style),
+    * a single space-separated string (OAuth2 ``scope`` style).
+
+    Either shape is normalised to a ``frozenset[str]``.
     """
 
     tenant_id: str | None = "tenant_id"
     principal_id: str | None = "sub"
     organization_id: str | None = "org_id"
     environment_id: str | None = "env"
+    capabilities: str | None = "capabilities"
 
 
 DEFAULT_CLAIM_MAPPING: Final[ClaimMapping] = ClaimMapping()
@@ -174,15 +183,44 @@ class JWTProvider:
         else:
             expires_at = None
 
+        capabilities = self._extract_capabilities(claims)
+
         return VerifiedIdentity(
             tenant_id=identity_axes["tenant_id"],
             principal_id=identity_axes["principal_id"],
             organization_id=identity_axes["organization_id"],
             environment_id=identity_axes["environment_id"],
+            capabilities=capabilities,
             issuer=self.name,
             issued_at=datetime.now(timezone.utc),
             expires_at=expires_at,
             claims=dict(claims),
+        )
+
+    def _extract_capabilities(
+        self, claims: dict[str, Any]
+    ) -> frozenset[str]:
+        claim_name = self._claim_mapping.capabilities
+        if claim_name is None:
+            return frozenset()
+        raw = claims.get(claim_name)
+        if raw is None:
+            return frozenset()
+        if isinstance(raw, str):
+            # OAuth2 ``scope`` style — space-separated.
+            return frozenset(token for token in raw.split() if token)
+        if isinstance(raw, (list, tuple)):
+            for item in raw:
+                if not isinstance(item, str):
+                    raise AuthenticationError(
+                        f"capabilities claim {claim_name!r} must be "
+                        f"a string or array of strings (got element "
+                        f"of type {type(item).__name__})"
+                    )
+            return frozenset(raw)
+        raise AuthenticationError(
+            f"capabilities claim {claim_name!r} must be a string or "
+            f"array of strings (got {type(raw).__name__})"
         )
 
 

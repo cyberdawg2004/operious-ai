@@ -37,6 +37,7 @@ class VerifiedIdentity:
     principal_id: str | None = None
     organization_id: str | None = None
     environment_id: str | None = None
+    capabilities: frozenset[str] = frozenset()
     issuer: str | None = None
     issued_at: datetime | None = None
     expires_at: datetime | None = None
@@ -68,6 +69,7 @@ def verified_identity_to_authority(
         principal_id=identity.principal_id,
         organization_id=identity.organization_id,
         environment_id=identity.environment_id,
+        capabilities=identity.capabilities,
     )
 
 

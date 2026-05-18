@@ -95,12 +95,22 @@ class AuthorityContext:
                          (sub-tenant scope).
         environment_id:  The deployment environment
                          (production / staging / sandbox).
+        capabilities:    Branch B — RBAC capabilities granted to this
+                         caller by the upstream auth provider (claims-
+                         derived). Empty when the caller is unverified
+                         or holds no explicit capabilities. Capability
+                         names are opaque strings; the substrate does
+                         not interpret them. Capability legality is
+                         evaluated by ``RBACPolicy`` against the
+                         ``CapabilityGovernanceSubject`` constructed
+                         per operation.
     """
 
     tenant_id: TenantId | None = None
     principal_id: PrincipalId | None = None
     organization_id: OrganizationId | None = None
     environment_id: EnvironmentId | None = None
+    capabilities: frozenset[str] = frozenset()
 
     @classmethod
     def from_raw(
@@ -110,6 +120,7 @@ class AuthorityContext:
         principal_id: str | None = None,
         organization_id: str | None = None,
         environment_id: str | None = None,
+        capabilities: frozenset[str] | None = None,
     ) -> "AuthorityContext":
         """Validate-and-construct gateway.
 
@@ -144,6 +155,11 @@ class AuthorityContext:
                 coerce_environment_id(environment_id)
                 if environment_id is not None
                 else None
+            ),
+            capabilities=(
+                capabilities
+                if capabilities is not None
+                else frozenset()
             ),
         )
 

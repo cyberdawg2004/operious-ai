@@ -41,6 +41,9 @@ from app.governance.subjects.base import (
     GenericGovernanceSubject,
     SubjectKind,
 )
+from app.governance.subjects.capability import (
+    CapabilityGovernanceSubject,
+)
 from app.governance.subjects.communication import (
     AttachmentSummary,
     CommunicationGovernanceSubject,
@@ -52,13 +55,14 @@ from app.governance.subjects.retrieval import (
 )
 
 __all__ = [
+    "AgentActionGovernanceSubject",
+    "AttachmentSummary",
     "BaseGovernanceSubject",
-    "SubjectKind",
+    "CandidateSummary",
+    "CapabilityGovernanceSubject",
+    "CommunicationGovernanceSubject",
+    "ExecutionGovernanceSubject",
     "GenericGovernanceSubject",
     "RetrievalGovernanceSubject",
-    "CandidateSummary",
-    "ExecutionGovernanceSubject",
-    "AgentActionGovernanceSubject",
-    "CommunicationGovernanceSubject",
-    "AttachmentSummary",
+    "SubjectKind",
 ]

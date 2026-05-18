@@ -88,6 +88,9 @@ from app.governance.enums import (
 )
 from app.governance.policies.base import BaseGovernancePolicy
 from app.governance.subjects.base import SubjectKind
+from app.governance.subjects.capability import (
+    CapabilityGovernanceSubject,
+)
 from app.governance.subjects.retrieval import RetrievalGovernanceSubject
 from app.governance.value_objects import RuntimeRestriction
 
@@ -413,6 +416,117 @@ class ContentDenylistPolicy(BaseGovernancePolicy):
         return tuple(results)
 
 
+# ─── RBACPolicy ──────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class RBACPolicy(BaseGovernancePolicy):
+    """AUTHORITY-class policy. DENY unless the caller holds the
+    capability the :class:`CapabilityGovernanceSubject` requires.
+
+    Constitutional class: AUTHORITY (gates an operation against a
+    capability requirement). Per the module doctrine, this policy
+    FAILS CLOSED on every indeterminate input:
+
+      * empty ``required_capability``           → DENY
+        (``capability_unspecified``)
+      * required NOT in held set                → DENY
+        (``capability_missing``)
+      * required IS in held set                 → ALLOW
+        (``capability_granted``)
+
+    Branch B positioning: capability legality is the substrate's
+    answer to "is this verified caller authorized for THIS
+    operation?". Identity verification is Branch C's responsibility
+    (auth providers populate ``AuthorityContext.capabilities``);
+    *evaluation* of capability legality lives here.
+
+    The policy reads exclusively from the typed
+    :class:`CapabilityGovernanceSubject` — it does NOT introspect
+    ``GovernanceContext.metadata`` or other ambient state. Callers
+    that construct the context are responsible for copying
+    ``AuthorityContext.capabilities`` into the subject's
+    ``held_capabilities``. This separation keeps RBACPolicy a
+    pure function of its subject (replay-safe).
+    """
+
+    name: ClassVar[str] = "rbac"
+    supported_stages: ClassVar[FrozenSet[EnforcementStage]] = frozenset(
+        {
+            EnforcementStage.PRE_REQUEST,
+            EnforcementStage.PRE_RETRIEVAL,
+            EnforcementStage.PRE_EXECUTION,
+        }
+    )
+    applicable_subject_kinds: ClassVar[FrozenSet[SubjectKind]] = frozenset(
+        {SubjectKind.CAPABILITY}
+    )
+
+    async def evaluate(
+        self,
+        context: GovernanceContext,
+    ) -> Sequence[PolicyEvaluationResult]:
+        subject = context.subject
+        assert isinstance(subject, CapabilityGovernanceSubject)
+        required = subject.required_capability
+        held = subject.held_capabilities
+
+        if not required:
+            return (
+                PolicyEvaluationResult(
+                    policy_name=self.name,
+                    rule_id="capability_unspecified",
+                    decision=Decision.DENY,
+                    severity=ViolationSeverity.HIGH,
+                    reason=(
+                        "RBACPolicy requires a non-empty "
+                        "`required_capability` on the subject; "
+                        "AUTHORITY-class policies fail closed on "
+                        "indeterminate configuration."
+                    ),
+                    metadata={
+                        "policy_class": "authority",
+                        "fail_mode": "closed",
+                        "config_missing": "required_capability",
+                    },
+                ),
+            )
+
+        if required not in held:
+            return (
+                PolicyEvaluationResult(
+                    policy_name=self.name,
+                    rule_id="capability_missing",
+                    decision=Decision.DENY,
+                    severity=ViolationSeverity.HIGH,
+                    reason=(
+                        f"caller does not hold required capability "
+                        f"{required!r}"
+                    ),
+                    metadata={
+                        "policy_class": "authority",
+                        "fail_mode": "closed",
+                        "required_capability": required,
+                        "held_count": len(held),
+                    },
+                ),
+            )
+
+        return (
+            PolicyEvaluationResult(
+                policy_name=self.name,
+                rule_id="capability_granted",
+                decision=Decision.ALLOW,
+                severity=ViolationSeverity.LOW,
+                reason=f"caller holds required capability {required!r}",
+                metadata={
+                    "policy_class": "authority",
+                    "required_capability": required,
+                },
+            ),
+        )
+
+
 # ─── Subject helpers ──────────────────────────────────────────────────
 
 
@@ -431,7 +545,8 @@ def _tenant_id_for(context: GovernanceContext) -> str | None:
 
 
 __all__ = [
-    "TenantScopePolicy",
-    "MaxQueryLengthPolicy",
     "ContentDenylistPolicy",
+    "MaxQueryLengthPolicy",
+    "RBACPolicy",
+    "TenantScopePolicy",
 ]

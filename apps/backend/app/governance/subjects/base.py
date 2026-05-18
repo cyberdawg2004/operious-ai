@@ -49,6 +49,7 @@ class SubjectKind(StrEnum):
     EXECUTION = "execution"
     AGENT_ACTION = "agent_action"
     COMMUNICATION = "communication"
+    CAPABILITY = "capability"
 
 
 class BaseGovernanceSubject:
