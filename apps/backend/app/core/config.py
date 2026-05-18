@@ -122,6 +122,16 @@ class Settings(BaseSettings):
     GOVERNANCE_CONTENT_DENYLIST: str = ""  # comma-separated substrings
     GOVERNANCE_MAX_QUERY_LENGTH: int = 4000
 
+    # ─── Survivability (P2-E) ────────────────────────────────────────
+    # Production-survivability knobs. These are operational
+    # defaults consumed by the ``app.survivability`` primitives; no
+    # orchestration wiring uses them yet (adoption deferred to a
+    # later wedge under explicit direction).
+    SURVIVABILITY_IDEMPOTENCY_TTL_SECONDS: int = 86_400  # 24h
+    SURVIVABILITY_IDEMPOTENCY_MAX_RECORDS: int | None = None
+    SURVIVABILITY_REQUEST_BODY_MAX_BYTES: int = 1_000_000  # 1 MiB
+    SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS: float = 2.0
+
     # ─── Derived properties ──────────────────────────────────────────
     @property
     def is_production(self) -> bool:
