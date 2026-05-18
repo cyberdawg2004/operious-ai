@@ -9,42 +9,82 @@ import type {
 /**
  * Coordination topology DTO mirror.
  *
- * Topology is DECLARATIVE. Edges describe authorized communication paths;
- * they NEVER imply runtime orchestration. The frontend renders the graph as
- * a static authority structure, not as a workflow.
+ * Wire-format pinning: every value in this file matches the backend
+ * `apps/backend/app/coordination/topology/enums.py` byte-for-byte
+ * (verified by `tests-frontend/src/wire-format-pinning.test.ts`).
+ *
+ * Topology is DECLARATIVE. Edges describe authorized communication
+ * paths; they NEVER imply runtime orchestration. The frontend
+ * renders the graph as a static authority structure, not as a
+ * workflow.
  */
 
-export const TopologyOutcome = {
-  ALLOWED: 'topology_allowed',
-  DENIED: 'topology_denied',
-  ESCALATED: 'topology_escalated',
-  DEPTH_EXCEEDED: 'topology_depth_exceeded',
-  BOUNDARY_VIOLATION: 'topology_boundary_violation',
-  ERROR: 'topology_error',
+/**
+ * Wire-pinned mirror of `CoordinationTopologyDecision`.
+ */
+export const CoordinationTopologyDecision = {
+  ALLOWED: 'allowed',
+  ESCALATED: 'escalated',
+  DENIED: 'denied',
+  DEPTH_EXCEEDED: 'depth_exceeded',
+  BOUNDARY_VIOLATION: 'boundary_violation',
 } as const;
-export type TopologyOutcome =
-  (typeof TopologyOutcome)[keyof typeof TopologyOutcome];
+export type CoordinationTopologyDecision =
+  (typeof CoordinationTopologyDecision)[keyof typeof CoordinationTopologyDecision];
 
-export const NodeKind = {
+/**
+ * Wire-pinned mirror of `TopologyNodeKind`.
+ */
+export const TopologyNodeKind = {
   AGENT: 'agent',
   SUPERVISOR: 'supervisor',
-  GOVERNANCE_DOMAIN: 'governance_domain',
-  AUTHORITY_BOUNDARY: 'authority_boundary',
-  ESCALATION_TARGET: 'escalation_target',
+  BROADCAST: 'broadcast',
+  SYSTEM: 'system',
+  EXTERNAL: 'external',
 } as const;
-export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];
+export type TopologyNodeKind =
+  (typeof TopologyNodeKind)[keyof typeof TopologyNodeKind];
 
-export const EdgeKind = {
-  COORDINATION: 'coordination',
+/**
+ * Wire-pinned mirror of `TopologyEdgeKind`.
+ */
+export const TopologyEdgeKind = {
+  PEER: 'peer',
+  HANDOFF: 'handoff',
   ESCALATION: 'escalation',
-  GOVERNANCE_ATTACHMENT: 'governance_attachment',
-  AUTHORITY_BOUNDARY: 'authority_boundary',
+  SUPERVISION: 'supervision',
+  BROADCAST: 'broadcast',
+  SYSTEM: 'system',
 } as const;
-export type EdgeKind = (typeof EdgeKind)[keyof typeof EdgeKind];
+export type TopologyEdgeKind =
+  (typeof TopologyEdgeKind)[keyof typeof TopologyEdgeKind];
+
+/**
+ * Wire-pinned mirror of `TopologyBoundaryKind`.
+ */
+export const TopologyBoundaryKind = {
+  TENANT: 'tenant',
+  GOVERNANCE_DOMAIN: 'governance_domain',
+  OPERATIONAL_DOMAIN: 'operational_domain',
+  ENVIRONMENT: 'environment',
+} as const;
+export type TopologyBoundaryKind =
+  (typeof TopologyBoundaryKind)[keyof typeof TopologyBoundaryKind];
+
+/**
+ * Wire-pinned mirror of `TopologyBoundaryCrossing`.
+ */
+export const TopologyBoundaryCrossing = {
+  FORBIDDEN: 'forbidden',
+  DECLARED_EDGES: 'declared_edges',
+  ALLOWLIST: 'allowlist',
+} as const;
+export type TopologyBoundaryCrossing =
+  (typeof TopologyBoundaryCrossing)[keyof typeof TopologyBoundaryCrossing];
 
 export interface TopologyNodeDto {
   readonly nodeId: TopologyNodeId;
-  readonly kind: NodeKind;
+  readonly kind: TopologyNodeKind;
   readonly label: string;
   readonly agentId?: AgentId;
   readonly tenantScope?: string;
@@ -53,7 +93,7 @@ export interface TopologyNodeDto {
 
 export interface TopologyEdgeDto {
   readonly edgeId: TopologyEdgeId;
-  readonly kind: EdgeKind;
+  readonly kind: TopologyEdgeKind;
   readonly source: TopologyNodeId;
   readonly target: TopologyNodeId;
   readonly label?: string;
@@ -69,7 +109,7 @@ export interface TopologyGraphDto {
 
 export interface TopologyEvaluationDto {
   readonly evaluationId: TopologyEvaluationId;
-  readonly outcome: TopologyOutcome;
+  readonly decision: CoordinationTopologyDecision;
   readonly chainDepth: number;
   readonly maxChainDepth: number;
   readonly observedAt: IsoTimestamp;

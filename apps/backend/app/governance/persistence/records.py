@@ -48,6 +48,10 @@ class PolicyEvaluationResultRecord:
     reason: str
     evaluated_at: str
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # 2.5-E: per-policy provenance. Round-trips through to_dict /
+    # from_dict; legacy records without the field deserialize as
+    # ``"unversioned"``.
+    policy_version: str = "unversioned"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +62,7 @@ class PolicyEvaluationResultRecord:
             "reason": self.reason,
             "evaluated_at": self.evaluated_at,
             "metadata": dict(self.metadata),
+            "policy_version": self.policy_version,
         }
 
     @classmethod
@@ -72,6 +77,7 @@ class PolicyEvaluationResultRecord:
             reason=str(data.get("reason", "")),
             evaluated_at=str(data["evaluated_at"]),
             metadata=dict(data.get("metadata") or {}),
+            policy_version=str(data.get("policy_version", "unversioned")),
         )
 
 
@@ -301,6 +307,26 @@ class GovernanceDecisionRecord:
     reason: str
     decided_at: str
     correlation_id: str | None = None
+    # 2.5-C1: query-axis parity with ``GovernanceTraceRecord``. The
+    # decision record was previously joinable only by
+    # ``decision_id`` / ``correlation_id`` / ``stage`` /
+    # ``policy_chain_id`` / ``final_decision``. The audit / supervisor
+    # surfaces need to query decisions by ``request_id`` (per-call
+    # lineage), ``tenant_id`` (multi-tenant isolation), and
+    # ``subject_kind`` (governance domain) just like traces. Without
+    # these fields the matcher in ``memory._matches_decision`` cannot
+    # honor those query dimensions even when callers ask for them,
+    # leaking cross-tenant rows. Added additively with safe defaults
+    # so legacy records continue to deserialize.
+    request_id: str | None = None
+    tenant_id: str | None = None
+    subject_kind: str = "generic"
+    # 2.5-E: governance build provenance. Caller-pinned at chain
+    # construction time and stamped here so audit / replay tools can
+    # answer *"which governance version evaluated this?"* without
+    # re-reading the live registry. Defaults to ``"unversioned"`` so
+    # legacy records continue to deserialize cleanly.
+    governance_version: str = "unversioned"
     violations: tuple[PolicyViolationRecord, ...] = ()
     restrictions: tuple[RuntimeRestrictionRecord, ...] = ()
     # Lossless replay anchor — every result the chain produced, in
@@ -318,6 +344,10 @@ class GovernanceDecisionRecord:
             "reason": self.reason,
             "decided_at": self.decided_at,
             "correlation_id": self.correlation_id,
+            "request_id": self.request_id,
+            "tenant_id": self.tenant_id,
+            "subject_kind": self.subject_kind,
+            "governance_version": self.governance_version,
             "violations": [v.to_dict() for v in self.violations],
             "restrictions": [r.to_dict() for r in self.restrictions],
             "evaluated_rules": [
@@ -336,6 +366,12 @@ class GovernanceDecisionRecord:
             reason=str(data.get("reason", "")),
             decided_at=str(data["decided_at"]),
             correlation_id=data.get("correlation_id"),
+            request_id=data.get("request_id"),
+            tenant_id=data.get("tenant_id"),
+            subject_kind=str(data.get("subject_kind", "generic")),
+            governance_version=str(
+                data.get("governance_version", "unversioned")
+            ),
             violations=tuple(
                 PolicyViolationRecord.from_dict(v)
                 for v in (data.get("violations") or ())

@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 from app.governance.context import GovernanceContext
+from app.identity import TenantId
 from app.governance.enums import (
     Decision,
     EnforcementStage,
@@ -49,7 +50,7 @@ def _ctx(
         stage=stage,
         action="rag.assemble_context",
         resource="r",
-        tenant_id=tenant_id,
+        tenant_id=TenantId(tenant_id) if tenant_id is not None else None,
         request_id="req-1",
         subject=RetrievalGovernanceSubject(
             query=query,

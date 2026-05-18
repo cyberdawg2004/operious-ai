@@ -135,11 +135,24 @@ class GovernanceRuntime:
                 "resource": context.resource,
                 "tenant_id": context.tenant_id,
                 "subject_kind": context.subject.kind.value,
+                # 2.5-C1: stamp request_id alongside the existing
+                # tenant/subject/correlation triple so the decision
+                # record can be queried by request_id at parity with
+                # the trace record.
+                "request_id": (
+                    str(context.request_id)
+                    if context.request_id is not None
+                    else None
+                ),
                 "correlation_id": (
                     str(context.correlation_id)
                     if context.correlation_id is not None
                     else None
                 ),
+                # 2.5-E: governance build provenance flows from the
+                # ``PolicyChain`` through here so the persisted
+                # decision record carries the version pin.
+                "governance_version": chain.governance_version,
             },
         )
 

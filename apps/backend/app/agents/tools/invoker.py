@@ -51,6 +51,7 @@ from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
 from app.governance.enums import EnforcementStage
 from app.governance.subjects.agent_actions import AgentActionGovernanceSubject
+from app.identity import TenantId
 
 
 class ToolInvoker:
@@ -281,7 +282,15 @@ def _build_governance_context(
         action="agent.tool_invocation",
         resource=f"tool:{request.tool_name}",
         actor=f"agent:{context.identity.agent_id}",
-        tenant_id=context.tenant_id,
+        # 2.5-F follow-up: ``GovernanceContext.tenant_id`` is now typed
+        # as ``TenantId | None``. ``AgentExecutionContext.tenant_id``
+        # is still the legacy ``str | None`` shape, so we project
+        # through the typed alias here without mutating bytes.
+        tenant_id=(
+            TenantId(context.tenant_id)
+            if context.tenant_id is not None
+            else None
+        ),
         request_id=context.execution.request_id,
         subject=subject,
         correlation_id=context.execution.correlation_id,

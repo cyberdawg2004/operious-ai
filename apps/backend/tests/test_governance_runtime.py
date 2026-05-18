@@ -25,6 +25,7 @@ from typing import ClassVar, FrozenSet, Sequence
 import pytest
 
 from app.governance.context import GovernanceContext
+from app.identity import TenantId
 from app.governance.decisions import GovernanceDecision, PolicyEvaluationResult
 from app.governance.enforcement.handlers import (
     AllowHandler,
@@ -118,7 +119,7 @@ def _ctx(
         action="rag.assemble_context",
         resource="tenant:t/resource:r",
         actor="system",
-        tenant_id="t",
+        tenant_id=TenantId("t"),
         request_id="req-1",
         subject=GenericGovernanceSubject(data={"query": "hello"}),
     )

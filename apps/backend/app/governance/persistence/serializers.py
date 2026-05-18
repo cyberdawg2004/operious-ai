@@ -53,7 +53,19 @@ def decision_to_record(decision: GovernanceDecision) -> GovernanceDecisionRecord
     Lossless: every `PolicyEvaluationResult` (including ALLOW rules)
     is serialised to `evaluated_rules`, so `record_to_decision` can
     reconstruct a byte-equal `GovernanceDecision`.
+
+    2.5-C1: ``request_id``, ``tenant_id``, ``subject_kind`` are pulled
+    from ``decision.metadata`` (stamped by ``EnforcementRuntime``) so
+    the persisted record can be queried by these axes at parity with
+    ``GovernanceTraceRecord``. They are removed from the residual
+    ``metadata`` to avoid storing the same scalar twice.
     """
+    md = dict(decision.metadata)
+    correlation_id = md.pop("correlation_id", None)
+    request_id = md.pop("request_id", None)
+    tenant_id = md.pop("tenant_id", None)
+    subject_kind = md.pop("subject_kind", "generic")
+    governance_version = md.pop("governance_version", "unversioned")
     return GovernanceDecisionRecord(
         decision_id=str(decision.decision_id),
         decision=decision.decision.value,
@@ -61,11 +73,11 @@ def decision_to_record(decision: GovernanceDecision) -> GovernanceDecisionRecord
         policy_chain_id=decision.policy_chain_id,
         reason=decision.reason,
         decided_at=decision.decided_at.isoformat(),
-        correlation_id=(
-            str(decision.metadata.get("correlation_id"))
-            if decision.metadata.get("correlation_id")
-            else None
-        ),
+        correlation_id=str(correlation_id) if correlation_id else None,
+        request_id=str(request_id) if request_id else None,
+        tenant_id=str(tenant_id) if tenant_id else None,
+        subject_kind=str(subject_kind) if subject_kind else "generic",
+        governance_version=str(governance_version) if governance_version else "unversioned",
         violations=tuple(_violation_to_record(v) for v in decision.violations),
         restrictions=tuple(
             _restriction_to_record(r) for r in decision.restrictions
@@ -73,9 +85,7 @@ def decision_to_record(decision: GovernanceDecision) -> GovernanceDecisionRecord
         evaluated_rules=tuple(
             _result_to_record(r) for r in decision.evaluated_rules
         ),
-        metadata={
-            k: v for k, v in decision.metadata.items() if k != "correlation_id"
-        },
+        metadata=md,
     )
 
 
@@ -159,6 +169,12 @@ def record_to_decision(record: GovernanceDecisionRecord) -> GovernanceDecision:
     metadata = dict(record.metadata)
     if record.correlation_id is not None:
         metadata["correlation_id"] = record.correlation_id
+    if record.request_id is not None:
+        metadata["request_id"] = record.request_id
+    if record.tenant_id is not None:
+        metadata["tenant_id"] = record.tenant_id
+    if record.subject_kind:
+        metadata["subject_kind"] = record.subject_kind
 
     if record.evaluated_rules:
         results = tuple(
@@ -208,6 +224,7 @@ def _result_to_record(
         reason=r.reason,
         evaluated_at=r.evaluated_at.isoformat(),
         metadata=dict(r.metadata),
+        policy_version=r.policy_version,
     )
 
 
@@ -222,6 +239,7 @@ def _record_to_result(
         reason=record.reason,
         evaluated_at=datetime.fromisoformat(record.evaluated_at),
         metadata=dict(record.metadata),
+        policy_version=record.policy_version,
     )
 
 

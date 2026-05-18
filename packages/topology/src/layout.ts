@@ -25,12 +25,14 @@ export interface PositionedEdge {
   readonly data: TopologyEdgeDto;
 }
 
+// 2.5-J1: kind labels match the wire-format in
+// `apps/backend/app/coordination/topology/enums.py::TopologyNodeKind`.
 const kindRow: Record<TopologyNodeDto['kind'], number> = {
-  agent: 1,
   supervisor: 0,
-  governance_domain: 0,
-  authority_boundary: 2,
-  escalation_target: 0,
+  agent: 1,
+  broadcast: 1,
+  system: 2,
+  external: 2,
 };
 
 /**

@@ -192,76 +192,80 @@ class CoordinationTopologyRuntime:
             build_topology_decision(findings)
         )
 
-        # Sequence + persistence under lock.
+        # 2.5-D: lock-split. Sequence assignment is atomic; result
+        # construction and persistence run outside the lock so I/O
+        # latency does not throttle concurrent evaluators. Persistence
+        # failure burns the assigned sequence (no contiguity invariant
+        # on topology evaluations).
         async with self._lock:
             self._sequence += 1
             sequence = self._sequence
-            ended_at = datetime.now(timezone.utc)
-            latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+        ended_at = datetime.now(timezone.utc)
+        latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
 
-            metadata: dict[str, object] = dict(request.metadata)
-            metadata.update(self._substrate_metadata(request, apex))
-            error_message: str | None = (
-                f"{type(framework_error).__name__}: {framework_error}"
-                if framework_error is not None
-                else None
-            )
+        metadata: dict[str, object] = dict(request.metadata)
+        metadata.update(self._substrate_metadata(request, apex))
+        error_message: str | None = (
+            f"{type(framework_error).__name__}: {framework_error}"
+            if framework_error is not None
+            else None
+        )
 
-            result = CoordinationTopologyEvaluationResult(
-                evaluation_id=evaluation_id,
-                chain_id=self._chain_id,
-                topology_id=self._topology.topology_id,
-                topology_name=self._topology.name,
-                topology_version=self._topology.version,
-                runtime_instance_id=self._instance_id,
-                sequence=sequence,
-                coordination_id=request.coordination_id,
-                coordination_message_id=request.coordination_message_id,
-                sender_id=request.sender_id,
-                recipient_id=request.recipient_id,
-                recipient_kind=request.recipient_kind,
-                aggregate_decision=apex,
-                findings=tuple(findings),
-                evaluator_names=tuple(evaluator_names),
-                chain_depth=request.chain_depth,
-                max_chain_depth=self._topology.max_chain_depth,
-                reason=reason,
-                started_at=started_at,
-                ended_at=ended_at,
-                latency_ms=latency_ms,
-                matched_edge_id=matched_edge_id,
-                matched_path_id=matched_path_id,
-                correlation_id=request.correlation_id,
-                parent_coordination_id=request.parent_coordination_id,
-                parent_message_id=request.parent_message_id,
-                request_id=request_id,
-                tenant_id=resolution.tenant_id,
-                error=error_message,
-                metadata=metadata,
+        result = CoordinationTopologyEvaluationResult(
+            evaluation_id=evaluation_id,
+            chain_id=self._chain_id,
+            topology_id=self._topology.topology_id,
+            topology_name=self._topology.name,
+            topology_version=self._topology.version,
+            runtime_instance_id=self._instance_id,
+            sequence=sequence,
+            coordination_id=request.coordination_id,
+            coordination_message_id=request.coordination_message_id,
+            sender_id=request.sender_id,
+            recipient_id=request.recipient_id,
+            recipient_kind=request.recipient_kind,
+            aggregate_decision=apex,
+            findings=tuple(findings),
+            evaluator_names=tuple(evaluator_names),
+            chain_depth=request.chain_depth,
+            max_chain_depth=self._topology.max_chain_depth,
+            reason=reason,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            matched_edge_id=matched_edge_id,
+            matched_path_id=matched_path_id,
+            correlation_id=request.correlation_id,
+            parent_coordination_id=request.parent_coordination_id,
+            parent_message_id=request.parent_message_id,
+            request_id=request_id,
+            tenant_id=resolution.tenant_id,
+            error=error_message,
+            metadata=metadata,
+        )
+        trace = self._trace_from_result(
+            result,
+            request,
+            tenant_authority_source=resolution.source.value,
+        )
+        record = result_to_record(result=result, trace=trace)
+        try:
+            await self._persistence.record_evaluation(record)
+        except CoordinationTopologyPersistenceError as exc:
+            trace = self._replace_trace_error(
+                trace, f"persistence: {exc}"
             )
-            trace = self._trace_from_result(
-                result,
-                request,
-                tenant_authority_source=resolution.source.value,
+            return CoordinationTopologyEnvelope(
+                trace=trace, error=exc
             )
-            record = result_to_record(result=result, trace=trace)
-            try:
-                await self._persistence.record_evaluation(record)
-            except CoordinationTopologyPersistenceError as exc:
-                trace = self._replace_trace_error(
-                    trace, f"persistence: {exc}"
-                )
-                return CoordinationTopologyEnvelope(
-                    trace=trace, error=exc
-                )
-            except Exception as exc:  # noqa: BLE001 — substrate never re-raises
-                trace = self._replace_trace_error(
-                    trace,
-                    f"persistence failed: {type(exc).__name__}: {exc}",
-                )
-                return CoordinationTopologyEnvelope(
-                    trace=trace, error=exc
-                )
+        except Exception as exc:  # noqa: BLE001 — substrate never re-raises
+            trace = self._replace_trace_error(
+                trace,
+                f"persistence failed: {type(exc).__name__}: {exc}",
+            )
+            return CoordinationTopologyEnvelope(
+                trace=trace, error=exc
+            )
 
         return CoordinationTopologyEnvelope(
             trace=trace,

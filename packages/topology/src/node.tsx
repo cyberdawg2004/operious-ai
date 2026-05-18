@@ -4,20 +4,22 @@ import { Handle, Position } from '@xyflow/react';
 import type { TopologyNodeDto } from '@operious/types';
 import { Badge, type BadgeTone } from '@operious/ui';
 
+// 2.5-J1: kinds match the backend wire-format
+// (`TopologyNodeKind` in `app/coordination/topology/enums.py`).
 const kindTone: Record<TopologyNodeDto['kind'], BadgeTone> = {
   agent: 'info',
   supervisor: 'pending',
-  governance_domain: 'escalate',
-  authority_boundary: 'deny',
-  escalation_target: 'escalate',
+  broadcast: 'info',
+  system: 'pending',
+  external: 'deny',
 };
 
 const kindLabel: Record<TopologyNodeDto['kind'], string> = {
   agent: 'agent',
   supervisor: 'supervisor',
-  governance_domain: 'governance',
-  authority_boundary: 'boundary',
-  escalation_target: 'escalation',
+  broadcast: 'broadcast',
+  system: 'system',
+  external: 'external',
 };
 
 export const TopologyNode = ({ data }: { data: unknown }) => {

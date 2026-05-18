@@ -30,11 +30,19 @@ export const EnforcementStage = {
 export type EnforcementStage =
   (typeof EnforcementStage)[keyof typeof EnforcementStage];
 
+/**
+ * Wire format: numeric values matching the backend `IntEnum` in
+ * `apps/backend/app/governance/enums.py`. The numeric encoding is
+ * the canonical wire representation; the named constants below are
+ * a convenience for frontend consumers and MUST mirror the backend
+ * values byte-for-byte. Pinned in
+ * `tests-frontend/src/wire-format-pinning.test.ts` (2.5-J1).
+ */
 export const ViolationSeverity = {
-  LOW: 'low',
-  MEDIUM: 'medium',
-  HIGH: 'high',
-  CRITICAL: 'critical',
+  LOW: 10,
+  MEDIUM: 20,
+  HIGH: 30,
+  CRITICAL: 40,
 } as const;
 export type ViolationSeverity =
   (typeof ViolationSeverity)[keyof typeof ViolationSeverity];

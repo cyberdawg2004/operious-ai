@@ -39,6 +39,13 @@ class SessionMetadataKey(StrEnum):
     RECORDED_AT = "session.recorded_at"
     CORRELATION_KIND = "session.correlation_kind"
     EXTERNAL_ARTIFACT_ID = "session.external_artifact_id"
+    # 2.5-G4: governance join keys for the timeline payload taxonomy.
+    # When a session event is produced under a governance decision,
+    # callers MAY stamp these keys onto ``payload`` so replay tools
+    # can join the persisted event to a ``GovernanceDecisionRecord``
+    # by id without re-evaluating governance.
+    GOVERNANCE_DECISION_ID = "session.governance_decision_id"
+    GOVERNANCE_CHAIN_ID = "session.governance_chain_id"
 
 
 __all__ = ["SessionMetadataKey"]

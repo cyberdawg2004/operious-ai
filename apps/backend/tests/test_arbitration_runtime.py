@@ -531,3 +531,45 @@ async def test_result_findings_tuple_is_immutable() -> None:
     assert isinstance(result.conflicts, tuple)
     assert isinstance(result.deadlock_witnesses, tuple)
     assert isinstance(result.evaluator_names, tuple)
+
+
+# ─── Chronology Integrity / sequence concurrency (2.5-A) ─────────────
+
+
+@pytest.mark.asyncio
+async def test_concurrent_evaluate_mints_unique_sequences() -> None:
+    """Concurrent ``evaluate()`` invocations must each receive a
+    unique, monotonic ``sequence`` on the produced result/trace.
+
+    Pre-2.5-A the runtime mutated ``self._sequence`` without an
+    ``asyncio.Lock``; concurrent coroutines could observe and write
+    the same value, minting duplicate sequences and corrupting the
+    Chronology Integrity invariant.
+    """
+    rt = _runtime()
+
+    async def _one(seed: str) -> int:
+        case = ArbitrationCase(
+            case_id=derive_case_id(seed=seed),
+            signals=(
+                _sig(
+                    seed,
+                    authority=ArbitrationAuthorityLevel.GOVERNANCE,
+                    verdict=ArbitrationVerdictKind.DENY,
+                ),
+            ),
+        )
+        env = await rt.evaluate(ArbitrationRequest(case=case))
+        return env.unwrap().sequence
+
+    seeds = [f"c-conc-{i}" for i in range(64)]
+    sequences = await asyncio.gather(*(_one(s) for s in seeds))
+
+    assert len(sequences) == len(seeds)
+    assert len(set(sequences)) == len(seeds), (
+        "duplicate sequences across concurrent evaluate(); "
+        "Chronology Integrity violation"
+    )
+    assert sorted(sequences) == list(range(1, len(seeds) + 1)), (
+        "sequence space must be contiguous and 1-indexed"
+    )

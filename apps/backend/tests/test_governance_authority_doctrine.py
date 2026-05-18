@@ -83,6 +83,7 @@ from app.coordination.enums import (
     CoordinationPriority,
 )
 from app.governance.context import GovernanceContext
+from app.identity import TenantId
 from app.governance.enums import (
     Decision,
     EnforcementStage,
@@ -112,7 +113,7 @@ def _retrieval_ctx(
         stage=stage,
         action="rag.assemble_context",
         resource="r",
-        tenant_id=tenant_id,
+        tenant_id=TenantId(tenant_id) if tenant_id is not None else None,
         request_id="b5-test",
         subject=RetrievalGovernanceSubject(
             query=query,

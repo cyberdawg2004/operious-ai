@@ -181,73 +181,74 @@ class CoordinationPolicyRuntime:
             findings
         )
 
-        # Sequence + persistence under lock.
+        # 2.5-D: lock-split. Sequence assignment is atomic; result
+        # construction and persistence run outside the lock so I/O
+        # latency does not throttle concurrent evaluators. Persistence
+        # failure burns the assigned sequence (no contiguity invariant
+        # on policy evaluations).
         async with self._lock:
             self._sequence += 1
             sequence = self._sequence
-            ended_at = datetime.now(timezone.utc)
-            latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+        ended_at = datetime.now(timezone.utc)
+        latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
 
-            metadata: dict[str, object] = dict(request.metadata)
-            metadata.update(self._substrate_metadata(request, apex))
-            error_message: str | None = (
-                f"{type(framework_error).__name__}: {framework_error}"
-                if framework_error is not None
-                else None
-            )
+        metadata: dict[str, object] = dict(request.metadata)
+        metadata.update(self._substrate_metadata(request, apex))
+        error_message: str | None = (
+            f"{type(framework_error).__name__}: {framework_error}"
+            if framework_error is not None
+            else None
+        )
 
-            result = CoordinationPolicyEvaluationResult(
-                evaluation_id=evaluation_id,
-                chain_id=self._chain_id,
-                runtime_instance_id=self._instance_id,
-                sequence=sequence,
-                coordination_id=request.coordination_id,
-                coordination_message_id=request.coordination_message_id,
-                sender_id=request.sender_id,
-                recipient_id=request.recipient_id,
-                recipient_kind=request.recipient_kind,
-                aggregate_decision=apex,
-                findings=tuple(findings),
-                restrictions=restrictions,
-                escalations=escalations,
-                evaluator_names=tuple(evaluator_names),
-                reason=reason,
-                started_at=started_at,
-                ended_at=ended_at,
-                latency_ms=latency_ms,
-                correlation_id=request.correlation_id,
-                parent_coordination_id=request.parent_coordination_id,
-                parent_message_id=request.parent_message_id,
-                request_id=request_id,
-                tenant_id=resolution.tenant_id,
-                error=error_message,
-                metadata=metadata,
+        result = CoordinationPolicyEvaluationResult(
+            evaluation_id=evaluation_id,
+            chain_id=self._chain_id,
+            runtime_instance_id=self._instance_id,
+            sequence=sequence,
+            coordination_id=request.coordination_id,
+            coordination_message_id=request.coordination_message_id,
+            sender_id=request.sender_id,
+            recipient_id=request.recipient_id,
+            recipient_kind=request.recipient_kind,
+            aggregate_decision=apex,
+            findings=tuple(findings),
+            restrictions=restrictions,
+            escalations=escalations,
+            evaluator_names=tuple(evaluator_names),
+            reason=reason,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            correlation_id=request.correlation_id,
+            parent_coordination_id=request.parent_coordination_id,
+            parent_message_id=request.parent_message_id,
+            request_id=request_id,
+            tenant_id=resolution.tenant_id,
+            error=error_message,
+            metadata=metadata,
+        )
+        trace = self._trace_from_result(
+            result,
+            request,
+            tenant_authority_source=resolution.source.value,
+        )
+        record = result_to_record(result)
+        try:
+            await self._persistence.record_evaluation(record)
+        except CoordinationPolicyPersistenceError as exc:
+            error_message = f"persistence: {exc}"
+            trace = self._replace_trace_error(trace, error_message)
+            return CoordinationPolicyEnvelope(
+                trace=trace, error=exc
             )
-            trace = self._trace_from_result(
-                result,
-                request,
-                tenant_authority_source=resolution.source.value,
+        except Exception as exc:  # noqa: BLE001 — substrate never re-raises
+            error_message = (
+                f"persistence failed: {type(exc).__name__}: {exc}"
             )
-            record = result_to_record(result)
-            try:
-                await self._persistence.record_evaluation(record)
-            except CoordinationPolicyPersistenceError as exc:
-                error_message = f"persistence: {exc}"
-                trace = self._replace_trace_error(trace, error_message)
-                # Persistence failed → envelope reports failure but
-                # the in-memory result is still available for the caller
-                # via the trace (lineage continuity).
-                return CoordinationPolicyEnvelope(
-                    trace=trace, error=exc
-                )
-            except Exception as exc:  # noqa: BLE001 — substrate never re-raises
-                error_message = (
-                    f"persistence failed: {type(exc).__name__}: {exc}"
-                )
-                trace = self._replace_trace_error(trace, error_message)
-                return CoordinationPolicyEnvelope(
-                    trace=trace, error=exc
-                )
+            trace = self._replace_trace_error(trace, error_message)
+            return CoordinationPolicyEnvelope(
+                trace=trace, error=exc
+            )
 
         # Successful evaluation (may carry a framework_error from a
         # failing evaluator; surfaced on result.error + trace.error).

@@ -80,6 +80,16 @@ class BoundaryTrace:
     # EGRESS-specific
     egress_id: BoundaryEgressId | None = None
     error: str | None = None
+    # 2.5-G1: governance provenance — joinable id pair mirroring the
+    # ``CoordinationEnvelope`` pattern. ``governance_decision_id`` is
+    # the UUID of the apex ``GovernanceDecision`` whose verdict
+    # caused this boundary call (typically the egress-time gate);
+    # ``governance_chain_id`` is the human-readable chain handle the
+    # decision came from. Both are ID-only — the boundary substrate
+    # never imports governance internals; replay tools join by id
+    # against the governance repository instead of re-evaluating.
+    governance_decision_id: uuid.UUID | None = None
+    governance_chain_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

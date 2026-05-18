@@ -93,13 +93,27 @@ class InMemoryGovernanceRepository:
 def _matches_decision(
     record: GovernanceDecisionRecord, query: DecisionQuery
 ) -> bool:
+    """2.5-C2: parity with ``_matches_trace``.
+
+    Pre-2.5-C2 this matcher silently ignored ``query.request_id``,
+    ``query.tenant_id``, and ``query.subject_kind`` even though
+    ``DecisionQuery`` exposed them — multi-tenant audit queries
+    leaked rows across tenants. The fix in 2.5-C1 added these fields
+    to the record; this matcher now honors them at parity.
+    """
     if query.decision_id is not None and record.decision_id != query.decision_id:
         return False
     if query.correlation_id is not None and record.correlation_id != query.correlation_id:
         return False
+    if query.request_id is not None and record.request_id != query.request_id:
+        return False
+    if query.tenant_id is not None and record.tenant_id != query.tenant_id:
+        return False
     if query.stage is not None and record.stage != query.stage:
         return False
     if query.policy_chain_id is not None and record.policy_chain_id != query.policy_chain_id:
+        return False
+    if query.subject_kind is not None and record.subject_kind != query.subject_kind:
         return False
     if query.final_decision is not None and record.decision != query.final_decision:
         return False

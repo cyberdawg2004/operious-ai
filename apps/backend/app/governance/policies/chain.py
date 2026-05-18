@@ -35,11 +35,22 @@ from app.governance.policies.registry import PolicyRegistry
 
 @dataclass(frozen=True, slots=True)
 class PolicyChain:
-    """Ordered, stage-scoped policy execution descriptor."""
+    """Ordered, stage-scoped policy execution descriptor.
+
+    2.5-E: ``governance_version`` is a free-form, caller-pinned string
+    that identifies the governance build the chain belongs to (e.g.
+    ``"2026.05.19-r1"`` or a git SHA). It is stamped onto every
+    ``GovernanceDecisionRecord`` produced by this chain so audit /
+    replay tools can answer *"which governance version evaluated
+    this?"* without re-reading the chain registry. Defaults to
+    ``"unversioned"`` so existing callers keep working; production
+    composition roots should always pin a real version.
+    """
 
     chain_id: str
     stage: EnforcementStage
     policies: tuple[BaseGovernancePolicy, ...]
+    governance_version: str = "unversioned"
 
     def __post_init__(self) -> None:
         if not self.chain_id:
@@ -62,6 +73,7 @@ class PolicyChain:
         stage: EnforcementStage,
         policy_names: tuple[str, ...],
         registry: PolicyRegistry,
+        governance_version: str = "unversioned",
     ) -> "PolicyChain":
         """Build a chain by resolving policy names against a registry.
 
@@ -72,6 +84,7 @@ class PolicyChain:
             chain_id=chain_id,
             stage=stage,
             policies=tuple(registry.get(name) for name in policy_names),
+            governance_version=governance_version,
         )
 
 

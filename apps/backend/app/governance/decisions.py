@@ -56,6 +56,11 @@ class PolicyEvaluationResult:
     )
     restrictions: tuple[RuntimeRestriction, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # 2.5-E: per-policy version. Free-form, caller-pinned (e.g.
+    # ``"2026.05.19-r1"``). Defaults to ``"unversioned"`` so legacy
+    # producers continue to compile; production policies should
+    # override.
+    policy_version: str = "unversioned"
 
 
 @dataclass(frozen=True, slots=True)

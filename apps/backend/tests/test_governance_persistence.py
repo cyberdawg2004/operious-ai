@@ -434,3 +434,173 @@ async def test_in_memory_repository_query_by_correlation_id() -> None:
     assert all(
         r.correlation_id == str(correlation_id) for r in page.items
     )
+
+
+# ─── 2.5-C3: cross-tenant decision query parity ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_decision_query_filters_by_tenant_id() -> None:
+    """Queries scoped by ``tenant_id`` MUST NOT leak rows from other
+    tenants. Pre-2.5-C the matcher silently ignored ``tenant_id``
+    even though ``DecisionQuery.tenant_id`` was advertised, and
+    ``GovernanceDecisionRecord`` did not carry the field at all —
+    multi-tenant audit queries leaked rows across tenants. This is
+    the regression pin.
+    """
+    repo = InMemoryGovernanceRepository()
+
+    for tenant in ("tenant-a", "tenant-a", "tenant-b"):
+        d = build_decision(
+            stage=EnforcementStage.PRE_RETRIEVAL,
+            policy_chain_id="chain-1",
+            evaluation_results=(
+                PolicyEvaluationResult(
+                    policy_name="p",
+                    rule_id="r",
+                    decision=Decision.ALLOW,
+                    reason="ok",
+                ),
+            ),
+            metadata={"tenant_id": tenant, "subject_kind": "retrieval"},
+        )
+        await repo.record_decision(decision_to_record(d))
+
+    page = await repo.query_decisions(DecisionQuery(tenant_id="tenant-a"))
+    assert page.total == 2
+    assert all(r.tenant_id == "tenant-a" for r in page.items)
+
+    page_b = await repo.query_decisions(DecisionQuery(tenant_id="tenant-b"))
+    assert page_b.total == 1
+    assert page_b.items[0].tenant_id == "tenant-b"
+
+    # Negative tenant — no rows.
+    empty = await repo.query_decisions(DecisionQuery(tenant_id="tenant-z"))
+    assert empty.total == 0
+
+
+@pytest.mark.asyncio
+async def test_decision_query_filters_by_request_id() -> None:
+    repo = InMemoryGovernanceRepository()
+    for rid in ("req-1", "req-1", "req-2"):
+        d = build_decision(
+            stage=EnforcementStage.PRE_RETRIEVAL,
+            policy_chain_id="chain-1",
+            evaluation_results=(
+                PolicyEvaluationResult(
+                    policy_name="p",
+                    rule_id="r",
+                    decision=Decision.ALLOW,
+                    reason="ok",
+                ),
+            ),
+            metadata={"request_id": rid},
+        )
+        await repo.record_decision(decision_to_record(d))
+
+    page = await repo.query_decisions(DecisionQuery(request_id="req-1"))
+    assert page.total == 2
+    assert all(r.request_id == "req-1" for r in page.items)
+
+
+@pytest.mark.asyncio
+async def test_decision_query_filters_by_subject_kind() -> None:
+    repo = InMemoryGovernanceRepository()
+    for kind in ("retrieval", "retrieval", "execution"):
+        d = build_decision(
+            stage=EnforcementStage.PRE_RETRIEVAL,
+            policy_chain_id="chain-1",
+            evaluation_results=(
+                PolicyEvaluationResult(
+                    policy_name="p",
+                    rule_id="r",
+                    decision=Decision.ALLOW,
+                    reason="ok",
+                ),
+            ),
+            metadata={"subject_kind": kind},
+        )
+        await repo.record_decision(decision_to_record(d))
+
+    page = await repo.query_decisions(
+        DecisionQuery(subject_kind="retrieval")
+    )
+    assert page.total == 2
+    assert all(r.subject_kind == "retrieval" for r in page.items)
+
+
+# ─── 2.5-E: governance_version + policy_version provenance ──────────
+
+
+@pytest.mark.asyncio
+async def test_decision_record_carries_governance_version() -> None:
+    """``governance_version`` flows from PolicyChain → metadata →
+    GovernanceDecisionRecord and survives the round-trip."""
+    d = build_decision(
+        stage=EnforcementStage.PRE_RETRIEVAL,
+        policy_chain_id="chain-versioned",
+        evaluation_results=(
+            PolicyEvaluationResult(
+                policy_name="p",
+                rule_id="r",
+                decision=Decision.ALLOW,
+                reason="ok",
+                policy_version="2026.05.19-r1",
+            ),
+        ),
+        metadata={"governance_version": "2026.05.19-r1"},
+    )
+    rec = decision_to_record(d)
+    assert rec.governance_version == "2026.05.19-r1"
+    # Round-trip preserves it.
+    rt = GovernanceDecisionRecord.from_dict(rec.to_dict())
+    assert rt.governance_version == "2026.05.19-r1"
+    # And the per-policy version survives via evaluated_rules.
+    assert rt.evaluated_rules[0].policy_version == "2026.05.19-r1"
+
+
+def test_legacy_decision_record_defaults_governance_version() -> None:
+    """Records persisted before 2.5-E (without ``governance_version``
+    in their dict) MUST deserialize cleanly with the safe default."""
+    legacy_dict = {
+        "decision_id": str(uuid.uuid4()),
+        "decision": "allow",
+        "stage": EnforcementStage.PRE_RETRIEVAL.value,
+        "policy_chain_id": "legacy",
+        "reason": "ok",
+        "decided_at": "2026-05-19T00:00:00+00:00",
+    }
+    rt = GovernanceDecisionRecord.from_dict(legacy_dict)
+    assert rt.governance_version == "unversioned"
+
+
+@pytest.mark.asyncio
+async def test_decision_record_round_trips_new_query_axes() -> None:
+    """The 2.5-C1 fields must round-trip through to_dict/from_dict."""
+    d = build_decision(
+        stage=EnforcementStage.PRE_RETRIEVAL,
+        policy_chain_id="chain-1",
+        evaluation_results=(
+            PolicyEvaluationResult(
+                policy_name="p",
+                rule_id="r",
+                decision=Decision.ALLOW,
+                reason="ok",
+            ),
+        ),
+        metadata={
+            "tenant_id": "t-rt",
+            "request_id": "req-rt",
+            "subject_kind": "retrieval",
+            "correlation_id": "corr-rt",
+        },
+    )
+    rec = decision_to_record(d)
+    assert rec.tenant_id == "t-rt"
+    assert rec.request_id == "req-rt"
+    assert rec.subject_kind == "retrieval"
+    assert rec.correlation_id == "corr-rt"
+    # Serialized round-trip stays byte-identical.
+    serialized = rec.to_dict()
+    rt = GovernanceDecisionRecord.from_dict(serialized)
+    assert rt == rec

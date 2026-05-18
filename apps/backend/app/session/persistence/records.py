@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
@@ -64,6 +65,9 @@ class SessionEventRecord:
     payload: Mapping[str, Any] = field(default_factory=dict)
     correlation_id: SessionCorrelationId | None = None
     annotation: str | None = None
+    # 2.5-G3: governance join axes (mirrors CoordinationRecord).
+    governance_decision_id: uuid.UUID | None = None
+    governance_chain_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

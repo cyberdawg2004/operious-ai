@@ -66,6 +66,13 @@ class SessionTrace:
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     tenant_authority_source: str | None = None
+    # 2.5-G3: governance join axes — same pattern as
+    # ``CoordinationEnvelope`` / ``BoundaryTrace`` /
+    # ``ArbitrationTrace``. ID-only; session substrate never imports
+    # governance internals. Replay tools join by id against the
+    # governance repository instead of re-evaluating.
+    governance_decision_id: uuid.UUID | None = None
+    governance_chain_id: str | None = None
 
 
 __all__ = [

@@ -66,6 +66,11 @@ class ArbitrationTrace:
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     tenant_authority_source: str | None = None
+    # 2.5-G2: governance join axes — same pattern as
+    # ``CoordinationEnvelope`` / ``BoundaryTrace``. ID-only;
+    # arbitration substrate never imports governance internals.
+    governance_decision_id: uuid.UUID | None = None
+    governance_chain_id: str | None = None
 
 
 __all__ = ["ArbitrationTraceContext", "ArbitrationTrace"]

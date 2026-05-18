@@ -66,8 +66,18 @@ export class OperiousClient {
       }
     }
 
+    // 2.5-J3: ``X-Request-ID`` is the canonical request-id header
+    // the backend's ``RequestContextMiddleware`` consumes (see
+    // ``app/middleware/request_context.py::REQUEST_ID_HEADER``).
+    // Pre-2.5-J3 the SDK sent ``x-operious-client-request-id``, a
+    // bespoke name the backend never read — every request was
+    // assigned a fresh server-side id and the client/server logs
+    // could not be joined. ``x-operious-client-request-id`` is
+    // retained as an extension header so an audit can distinguish
+    // *client-minted* from *server-minted* ids when both exist.
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      'X-Request-ID': requestId as unknown as string,
       'x-operious-client-request-id': requestId as unknown as string,
       ...headerForCorrelation(correlationId),
       ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),

@@ -152,6 +152,72 @@ async def test_append_event_rejects_unknown_session() -> None:
     assert env.error is not None
 
 
+@pytest.mark.asyncio
+async def test_append_event_threads_request_correlation_into_event() -> None:
+    """2.5-B: ``request.correlation_id`` must reach the persisted
+    ``SessionTimelineEvent.correlation_id`` (deterministic UUID5
+    projection). Pre-2.5-B the runtime forced ``correlation_id=None``
+    on the timeline event, breaking the forensic-audit join from
+    request to persisted event.
+    """
+    from app.session.identity import derive_correlation_id
+
+    rt = _runtime()
+    parent = await _open(rt)
+    sid = parent.session.identity.session_id
+
+    env = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+            correlation_id="corr-abc-123",
+        )
+    )
+    assert env.is_ok
+    expected = derive_correlation_id(
+        session_id=sid,
+        kind="request_correlation",
+        external_id="corr-abc-123",
+    )
+    assert env.result.event.correlation_id == expected, (
+        "request.correlation_id must be projected onto the persisted "
+        "SessionTimelineEvent.correlation_id"
+    )
+
+    # And it must be replay-deterministic — same request correlation
+    # on the same session yields the byte-identical UUID.
+    env2 = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+            correlation_id="corr-abc-123",
+        )
+    )
+    assert env2.is_ok
+    assert env2.result.event.correlation_id == expected
+
+
+@pytest.mark.asyncio
+async def test_append_event_without_request_correlation_keeps_none() -> None:
+    """No correlation in request → no correlation on persisted event.
+    The previous behaviour is preserved for callers that don't need
+    cross-substrate joining."""
+    rt = _runtime()
+    parent = await _open(rt)
+    sid = parent.session.identity.session_id
+    env = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+        )
+    )
+    assert env.is_ok
+    assert env.result.event.correlation_id is None
+
+
 # ─── record_lifecycle ──────────────────────────────────────────────
 
 

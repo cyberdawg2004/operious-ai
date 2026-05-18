@@ -97,6 +97,9 @@ class ArbitrationRecord:
     ended_at: datetime
     latency_ms: float
     error: str | None
+    # 2.5-G2: governance join axes (mirrors CoordinationRecord).
+    governance_decision_id: uuid.UUID | None = None
+    governance_chain_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

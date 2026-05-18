@@ -17,6 +17,7 @@ from typing import ClassVar, FrozenSet, Sequence
 import pytest
 
 from app.governance.context import GovernanceContext
+from app.identity import TenantId
 from app.governance.decisions import PolicyEvaluationResult
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
 from app.governance.evaluators.engine import PolicyEvaluationEngine
@@ -78,7 +79,7 @@ def _ctx() -> GovernanceContext:
         stage=EnforcementStage.PRE_RETRIEVAL,
         action="rag.assemble_context",
         resource="r",
-        tenant_id="t",
+        tenant_id=TenantId("t"),
         request_id="req-1",
         subject=GenericGovernanceSubject(data={"query": "hello"}),
     )

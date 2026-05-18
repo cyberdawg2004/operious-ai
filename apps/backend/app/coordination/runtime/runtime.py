@@ -156,7 +156,7 @@ from app.governance.enums import Decision
 from app.governance.subjects.communication import (
     CommunicationGovernanceSubject,
 )
-from app.identity import AuthorityResolution, resolve_authority
+from app.identity import AuthorityResolution, TenantId, resolve_authority
 from app.observability.context import get_request_id
 
 
@@ -785,7 +785,16 @@ class CoordinationRuntime:
             action=action,
             resource=resource,
             actor=actor,
-            tenant_id=resolution.tenant_id,
+            # 2.5-F follow-up: ``GovernanceContext.tenant_id`` is typed
+            # as ``TenantId | None``; ``AuthorityResolution.tenant_id``
+            # is still the wider ``str | None`` (legacy ingress axis).
+            # Wrap without mutating bytes — ``TenantId`` is a NewType
+            # alias, so this is purely a static-type projection.
+            tenant_id=(
+                TenantId(resolution.tenant_id)
+                if resolution.tenant_id is not None
+                else None
+            ),
             request_id=request_id,
             subject=subject,
             correlation_id=request.correlation_id,
@@ -845,84 +854,101 @@ class CoordinationRuntime:
         not silently overridden by callers.
         """
         loop = asyncio.get_event_loop()
+        # 2.5-D: lock-split. Pre-2.5-D the runtime held ``self._lock``
+        # across the persistence ``await``, capping throughput at the
+        # disk-I/O latency of the slowest writer. The doctrine is now:
+        #
+        #   1. Assign sequence under the lock (atomic; preserves
+        #      monotonic ordering across concurrent dispatchers).
+        #   2. Build the envelope outside the lock (pure data
+        #      construction, no shared mutable state).
+        #   3. Persist outside the lock so concurrent dispatchers can
+        #      overlap their I/O.
+        #
+        # Failure semantics: on persistence failure the assigned
+        # ``sequence`` is "burnt" — the substrate accepts gaps in the
+        # sequence space rather than holding the lock for compensating
+        # writes. Coordination has no contiguous-sequence invariant
+        # (verified pre-refactor); the envelope on the failed result
+        # is ``None`` so callers know the assigned sequence never
+        # became durable.
         async with self._lock:
             self._sequence += 1
             sequence = self._sequence
-            dispatched_at = datetime.now(timezone.utc)
+        dispatched_at = datetime.now(timezone.utc)
 
-            # Caller metadata is merged in BENEATH substrate-added
-            # keys so substrate lineage (policy evaluation id,
-            # aggregate decision, …) is authoritative.
-            envelope_metadata: dict[str, object] = dict(request.metadata)
-            if extra_metadata:
-                envelope_metadata.update(extra_metadata)
+        # Caller metadata is merged in BENEATH substrate-added
+        # keys so substrate lineage (policy evaluation id,
+        # aggregate decision, …) is authoritative.
+        envelope_metadata: dict[str, object] = dict(request.metadata)
+        if extra_metadata:
+            envelope_metadata.update(extra_metadata)
 
-            # Wedge B7: stamp the singular resolved tenant_id AND
-            # the AuthoritySource that produced it. Audit defect
-            # DR-4 site 5 of 6 closed.
-            envelope = CoordinationEnvelope(
+        # Wedge B7: stamp the singular resolved tenant_id AND
+        # the AuthoritySource that produced it. Audit defect
+        # DR-4 site 5 of 6 closed.
+        envelope = CoordinationEnvelope(
+            coordination_id=coordination_id,
+            message=request.message,
+            direction=request.direction,
+            status=status,
+            sequence=sequence,
+            runtime_instance_id=self._instance_id,
+            correlation_id=request.correlation_id,
+            parent_coordination_id=request.parent_coordination_id,
+            parent_message_id=request.parent_message_id,
+            request_id=request_id,
+            tenant_id=resolution.tenant_id,
+            tenant_authority_source=resolution.source.value,
+            governance_decision_id=governance_decision_id,
+            governance_chain_id=governance_chain_id,
+            created_at=request.message.created_at,
+            dispatched_at=dispatched_at,
+            metadata=envelope_metadata,
+        )
+        record = envelope_to_record(envelope)
+        try:
+            await self._persistence.record_envelope(record)
+        except CoordinationPersistenceError as exc:
+            ended_at = datetime.now(timezone.utc)
+            latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+            trace = self._build_trace(
                 coordination_id=coordination_id,
-                message=request.message,
-                direction=request.direction,
-                status=status,
-                sequence=sequence,
-                runtime_instance_id=self._instance_id,
-                correlation_id=request.correlation_id,
-                parent_coordination_id=request.parent_coordination_id,
-                parent_message_id=request.parent_message_id,
-                request_id=request_id,
-                tenant_id=resolution.tenant_id,
-                tenant_authority_source=resolution.source.value,
-                governance_decision_id=governance_decision_id,
-                governance_chain_id=governance_chain_id,
-                created_at=request.message.created_at,
-                dispatched_at=dispatched_at,
-                metadata=envelope_metadata,
+                envelope=envelope,
+                status=CoordinationStatus.FAILED,
+                started_at=started_at,
+                ended_at=ended_at,
+                latency_ms=latency_ms,
+                error=f"{type(exc).__name__}: {exc}",
             )
-            record = envelope_to_record(envelope)
-            try:
-                await self._persistence.record_envelope(record)
-            except CoordinationPersistenceError as exc:
-                # Build a trace anyway so callers see the lineage.
-                ended_at = datetime.now(timezone.utc)
-                latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
-                trace = self._build_trace(
-                    coordination_id=coordination_id,
-                    envelope=envelope,
-                    status=CoordinationStatus.FAILED,
-                    started_at=started_at,
-                    ended_at=ended_at,
-                    latency_ms=latency_ms,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                return CoordinationDispatchResult(
-                    coordination_id=coordination_id,
-                    outcome=CoordinationDispatchOutcome.PERSISTENCE_ERROR,
-                    trace=trace,
-                    envelope=None,
-                    error=str(exc),
-                    metadata=dict(request.metadata),
-                )
-            except Exception as exc:  # noqa: BLE001 — substrate never re-raises
-                ended_at = datetime.now(timezone.utc)
-                latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
-                trace = self._build_trace(
-                    coordination_id=coordination_id,
-                    envelope=envelope,
-                    status=CoordinationStatus.FAILED,
-                    started_at=started_at,
-                    ended_at=ended_at,
-                    latency_ms=latency_ms,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                return CoordinationDispatchResult(
-                    coordination_id=coordination_id,
-                    outcome=CoordinationDispatchOutcome.PERSISTENCE_ERROR,
-                    trace=trace,
-                    envelope=None,
-                    error=f"persistence failed: {type(exc).__name__}: {exc}",
-                    metadata=dict(request.metadata),
-                )
+            return CoordinationDispatchResult(
+                coordination_id=coordination_id,
+                outcome=CoordinationDispatchOutcome.PERSISTENCE_ERROR,
+                trace=trace,
+                envelope=None,
+                error=str(exc),
+                metadata=dict(request.metadata),
+            )
+        except Exception as exc:  # noqa: BLE001 — substrate never re-raises
+            ended_at = datetime.now(timezone.utc)
+            latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
+            trace = self._build_trace(
+                coordination_id=coordination_id,
+                envelope=envelope,
+                status=CoordinationStatus.FAILED,
+                started_at=started_at,
+                ended_at=ended_at,
+                latency_ms=latency_ms,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return CoordinationDispatchResult(
+                coordination_id=coordination_id,
+                outcome=CoordinationDispatchOutcome.PERSISTENCE_ERROR,
+                trace=trace,
+                envelope=None,
+                error=f"persistence failed: {type(exc).__name__}: {exc}",
+                metadata=dict(request.metadata),
+            )
 
         ended_at = datetime.now(timezone.utc)
         latency_ms = round((loop.time() - loop_start) * 1000.0, 3)

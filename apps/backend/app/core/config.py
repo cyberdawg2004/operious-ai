@@ -132,6 +132,26 @@ class Settings(BaseSettings):
     SURVIVABILITY_REQUEST_BODY_MAX_BYTES: int = 1_000_000  # 1 MiB
     SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS: float = 2.0
 
+    # ─── HTTP transport (2.5-I) ──────────────────────────────────────
+    # Comma-separated CORS allowlist. Empty string disables CORS at
+    # the FastAPI level (production posture defaults to "no CORS";
+    # callers must opt in with a real list of origins). This is
+    # intentionally fail-closed — wildcard ``*`` is rejected at
+    # composition time so we never bless cross-origin from an
+    # unconfigured deployment.
+    #
+    # ``CORS_ALLOW_HEADERS`` lists ONLY the non-authority headers
+    # callers may send. The canonical authority-bearing headers
+    # (defined exclusively in ``app.middleware.authority_context``
+    # as ``AUTHORITY_HEADERS``) are appended at composition time in
+    # ``app.main.create_app`` so this file never references them
+    # by literal — preserving the single-source-of-truth invariant
+    # pinned by ``test_no_other_source_reads_authority_headers``.
+    CORS_ALLOW_ORIGINS: str = ""
+    CORS_ALLOW_CREDENTIALS: bool = False
+    CORS_ALLOW_METHODS: str = "GET,POST,PATCH,DELETE,OPTIONS"
+    CORS_ALLOW_HEADERS: str = "Authorization,Content-Type,X-Request-ID"
+
     # ─── Derived properties ──────────────────────────────────────────
     @property
     def is_production(self) -> bool:

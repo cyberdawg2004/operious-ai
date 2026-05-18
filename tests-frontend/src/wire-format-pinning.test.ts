@@ -37,6 +37,47 @@ const extractStrEnum = (
   return values;
 };
 
+const extractIntEnum = (
+  python: string,
+  className: string,
+): readonly number[] => {
+  const classMatch = python.match(
+    new RegExp(`class\\s+${className}\\(IntEnum\\):([\\s\\S]*?)(?=\\nclass\\s+\\w+\\(|\\n__all__|$)`),
+  );
+  if (!classMatch) {
+    throw new Error(`could not locate IntEnum class ${className}`);
+  }
+  const body = classMatch[1];
+  const lines = body.split('\n');
+  const values: number[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s+[A-Z_][A-Z0-9_]*\s*=\s*(\d+)/);
+    if (m) values.push(parseInt(m[1], 10));
+  }
+  values.sort((a, b) => a - b);
+  return values;
+};
+
+const tsMirrorIntValues = (
+  source: string,
+  constName: string,
+): readonly number[] => {
+  const m = source.match(
+    new RegExp(`export const ${constName}\\s*=\\s*\\{([\\s\\S]*?)\\}\\s*as\\s+const`),
+  );
+  if (!m) {
+    throw new Error(`could not locate TS mirror const ${constName}`);
+  }
+  const body = m[1];
+  const values: number[] = [];
+  for (const line of body.split('\n')) {
+    const v = line.match(/^\s*[A-Z_][A-Z0-9_]*:\s*(\d+)\s*,?/);
+    if (v) values.push(parseInt(v[1], 10));
+  }
+  values.sort((a, b) => a - b);
+  return values;
+};
+
 const tsMirrorValues = (
   source: string,
   constName: string,
@@ -113,6 +154,44 @@ const PINNINGS: readonly Pinning[] = [
     tsFile: 'packages/types/src/governance.ts',
     tsConst: 'RestrictionKind',
   },
+  // 2.5-J1: topology vocabulary alignment.
+  {
+    backendFile: 'apps/backend/app/coordination/topology/enums.py',
+    backendClass: 'CoordinationTopologyDecision',
+    tsFile: 'packages/types/src/topology.ts',
+    tsConst: 'CoordinationTopologyDecision',
+  },
+  {
+    backendFile: 'apps/backend/app/coordination/topology/enums.py',
+    backendClass: 'TopologyNodeKind',
+    tsFile: 'packages/types/src/topology.ts',
+    tsConst: 'TopologyNodeKind',
+  },
+  {
+    backendFile: 'apps/backend/app/coordination/topology/enums.py',
+    backendClass: 'TopologyEdgeKind',
+    tsFile: 'packages/types/src/topology.ts',
+    tsConst: 'TopologyEdgeKind',
+  },
+  {
+    backendFile: 'apps/backend/app/coordination/topology/enums.py',
+    backendClass: 'TopologyBoundaryKind',
+    tsFile: 'packages/types/src/topology.ts',
+    tsConst: 'TopologyBoundaryKind',
+  },
+  {
+    backendFile: 'apps/backend/app/coordination/topology/enums.py',
+    backendClass: 'TopologyBoundaryCrossing',
+    tsFile: 'packages/types/src/topology.ts',
+    tsConst: 'TopologyBoundaryCrossing',
+  },
+  // 2.5-J1: cross-substrate trace-node kind alignment.
+  {
+    backendFile: 'apps/backend/app/observability/trace_node_kind.py',
+    backendClass: 'TraceNodeKind',
+    tsFile: 'packages/types/src/trace.ts',
+    tsConst: 'TraceNodeKind',
+  },
 ];
 
 for (const pinning of PINNINGS) {
@@ -121,6 +200,38 @@ for (const pinning of PINNINGS) {
     const ts = readText(join(ROOT, pinning.tsFile));
     const backend = extractStrEnum(py, pinning.backendClass);
     const frontend = tsMirrorValues(ts, pinning.tsConst);
+    deepStrictEqual(
+      frontend,
+      backend,
+      `wire-format drift: backend ${pinning.backendClass} = ${JSON.stringify(backend)}, frontend ${pinning.tsConst} = ${JSON.stringify(frontend)}`,
+    );
+  });
+}
+
+// ─── 2.5-J1: IntEnum pinning ─────────────────────────────────────────
+
+interface IntPinning {
+  readonly backendFile: string;
+  readonly backendClass: string;
+  readonly tsFile: string;
+  readonly tsConst: string;
+}
+
+const INT_PINNINGS: readonly IntPinning[] = [
+  {
+    backendFile: 'apps/backend/app/governance/enums.py',
+    backendClass: 'ViolationSeverity',
+    tsFile: 'packages/types/src/governance.ts',
+    tsConst: 'ViolationSeverity',
+  },
+];
+
+for (const pinning of INT_PINNINGS) {
+  test(`wire-format pinned: ${pinning.backendClass} ↔ ${pinning.tsConst} (IntEnum)`, () => {
+    const py = readText(join(ROOT, pinning.backendFile));
+    const ts = readText(join(ROOT, pinning.tsFile));
+    const backend = extractIntEnum(py, pinning.backendClass);
+    const frontend = tsMirrorIntValues(ts, pinning.tsConst);
     deepStrictEqual(
       frontend,
       backend,

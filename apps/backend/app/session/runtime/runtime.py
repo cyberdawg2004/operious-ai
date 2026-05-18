@@ -74,6 +74,7 @@ from app.session.identity import (
     SessionEventId,
     SessionId,
     SessionReconstructionId,
+    derive_correlation_id,
     derive_reconstruction_id,
     derive_session_id,
     derive_trace_id,
@@ -333,6 +334,23 @@ class SessionRuntime:
     async def append_event(
         self, request: AppendEventRequest
     ) -> SessionEnvelope:
+        # 2.5-B: thread ``request.correlation_id`` (a free-form string
+        # cross-substrate handle) into the persisted
+        # ``SessionTimelineEvent.correlation_id`` (a typed UUID5
+        # ``SessionCorrelationId``) via ``derive_correlation_id``.
+        # The session substrate is the canonical chronology fabric;
+        # dropping the request correlation here breaks the
+        # forensic-audit join from request to persisted event.
+        # ``kind="request_correlation"`` is namespace-distinct from
+        # every value in ``SessionCorrelationKind`` so this projection
+        # never collides with a record_correlation()-emitted id.
+        derived_correlation: SessionCorrelationId | None = None
+        if request.correlation_id:
+            derived_correlation = derive_correlation_id(
+                session_id=request.session_id,
+                kind="request_correlation",
+                external_id=request.correlation_id,
+            )
         return await self._append_generic(
             session_id=request.session_id,
             kind=request.kind,
@@ -340,7 +358,7 @@ class SessionRuntime:
             continuity_mode=request.continuity_mode,
             payload=request.payload,
             annotation=request.annotation,
-            correlation_id=None,
+            correlation_id=derived_correlation,
             request_correlation_id=request.correlation_id,
             request_request_id=request.request_id,
             extra_metadata=dict(request.metadata),

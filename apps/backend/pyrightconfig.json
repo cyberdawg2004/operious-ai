@@ -30,7 +30,10 @@
     "build",
     "dist",
     "app/_deprecated",
+    "app/_deprecated/**",
+    "**/_deprecated/**",
     "tests/_deprecated",
+    "tests/_deprecated/**",
     "tests/test_*_runtime.py",
     "tests/test_*_persistence.py",
     "tests/test_*_models.py",
@@ -60,7 +63,10 @@
 
   "ignore": [
     "app/_deprecated",
-    "tests/_deprecated"
+    "app/_deprecated/**",
+    "**/_deprecated/**",
+    "tests/_deprecated",
+    "tests/_deprecated/**"
   ],
 
   "venvPath": ".",

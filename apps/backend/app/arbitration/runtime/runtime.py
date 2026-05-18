@@ -20,6 +20,7 @@ arbitration cases explicitly via `evaluate()`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import traceback
@@ -92,6 +93,7 @@ class OperationalArbitrationRuntime:
         "_persistence",
         "_runtime_instance_id",
         "_sequence",
+        "_sequence_lock",
     )
 
     def __init__(
@@ -109,6 +111,18 @@ class OperationalArbitrationRuntime:
         self._persistence = persistence
         self._runtime_instance_id: uuid.UUID = uuid.uuid4()
         self._sequence: int = 0
+        # Chronology Integrity (Core Law 3) — sequence assignment must
+        # be atomic across concurrent ``evaluate()`` invocations. The
+        # lock is held ONLY for the increment; persistence and trace
+        # construction happen outside the lock so we do not throttle
+        # the runtime on disk I/O (matches the lock-split doctrine
+        # adopted by coordination/policy/topology in 2.5-D).
+        self._sequence_lock: asyncio.Lock = asyncio.Lock()
+
+    async def _next_sequence(self) -> int:
+        async with self._sequence_lock:
+            self._sequence += 1
+            return self._sequence
 
     @property
     def runtime_instance_id(self) -> uuid.UUID:
@@ -148,7 +162,7 @@ class OperationalArbitrationRuntime:
         try:
             evaluators = self._resolve_evaluators(request)
         except ArbitrationConfigurationError as exc:
-            return self._failed_envelope(
+            return await self._failed_envelope(
                 request=request,
                 resolution=resolution,
                 evaluation_id=evaluation_id,
@@ -233,8 +247,7 @@ class OperationalArbitrationRuntime:
 
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        self._sequence += 1
-        sequence = self._sequence
+        sequence = await self._next_sequence()
 
         result = ArbitrationResult(
             evaluation_id=evaluation_id,
@@ -480,7 +493,7 @@ class OperationalArbitrationRuntime:
         )
         return meta
 
-    def _failed_envelope(
+    async def _failed_envelope(
         self,
         *,
         request: ArbitrationRequest,
@@ -499,8 +512,7 @@ class OperationalArbitrationRuntime:
         # incrementing produces sequence collisions across failures.
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        self._sequence += 1
-        sequence = self._sequence
+        sequence = await self._next_sequence()
         evaluator_names = tuple(e.name for e in evaluators)
         chain_id = (
             derive_chain_id(evaluator_names=evaluator_names)

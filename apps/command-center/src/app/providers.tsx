@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider, buildPrincipal } from '@operious/auth';
+import { AuthProvider, buildPrincipal, type AuthPrincipal } from '@operious/auth';
 import { OperiousClient, OperiousClientProvider } from '@operious/sdk';
 import { LocaleProvider } from '@/locale/provider';
 import { mockFetch } from '@/mocks/fetch';
@@ -23,6 +23,27 @@ interface ProvidersProps {
  */
 const USE_MOCK_API =
   process.env.NEXT_PUBLIC_OPERIOUS_USE_MOCK_API === 'true';
+
+/**
+ * 2.5-J2: the demo principal / token used to be unconditionally
+ * injected at every render — meaning a production build would
+ * carry ``principal-demo`` / ``demo-token`` to the backend. The
+ * backend's trusted-ingress middleware would (correctly) reject
+ * these, but the frontend should never *produce* them in the first
+ * place. The demo principal is now strictly gated to the same
+ * dev-mock flag as the mock fetch transport. In production the
+ * principal/token are ``null`` until a real auth flow hydrates
+ * them; the SDK will treat the request as anonymous (matching the
+ * doctrine in ``packages/auth/src/context.tsx::useAuthHeader``).
+ */
+const buildDemoPrincipal = (): AuthPrincipal =>
+  buildPrincipal({
+    principalId: 'principal-demo',
+    tenantId: 'tenant-acme',
+    displayName: 'Operations Operator',
+    email: 'ops@operious.local',
+    roles: ['operations.read', 'cognition.review'],
+  });
 
 export const Providers = ({ children }: ProvidersProps) => {
   const [queryClient] = useState(
@@ -55,17 +76,18 @@ export const Providers = ({ children }: ProvidersProps) => {
       }),
   );
 
-  const principal = buildPrincipal({
-    principalId: 'principal-demo',
-    tenantId: 'tenant-acme',
-    displayName: 'Operations Operator',
-    email: 'ops@operious.local',
-    roles: ['operations.read', 'cognition.review'],
-  });
+  // 2.5-J2: principal + token are ONLY injected in dev-mock mode.
+  // Production hydration is the responsibility of a future signed-
+  // session bootstrap; until then the SDK treats the request as
+  // anonymous and the backend rejects non-public endpoints.
+  const principal: AuthPrincipal | null = USE_MOCK_API
+    ? buildDemoPrincipal()
+    : null;
+  const token: string | null = USE_MOCK_API ? 'demo-token' : null;
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider principal={principal} token="demo-token">
+      <AuthProvider principal={principal} token={token}>
         <OperiousClientProvider client={client}>
           <LocaleProvider initialLocale="en">{children}</LocaleProvider>
         </OperiousClientProvider>
