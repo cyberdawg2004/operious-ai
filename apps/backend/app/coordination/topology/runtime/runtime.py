@@ -239,7 +239,11 @@ class CoordinationTopologyRuntime:
                 error=error_message,
                 metadata=metadata,
             )
-            trace = self._trace_from_result(result, request)
+            trace = self._trace_from_result(
+                result,
+                request,
+                tenant_authority_source=resolution.source.value,
+            )
             record = result_to_record(result=result, trace=trace)
             try:
                 await self._persistence.record_evaluation(record)
@@ -316,6 +320,8 @@ class CoordinationTopologyRuntime:
         self,
         result: CoordinationTopologyEvaluationResult,
         request: CoordinationTopologyEvaluationRequest,
+        *,
+        tenant_authority_source: str | None = None,
     ) -> CoordinationTopologyTrace:
         return CoordinationTopologyTrace(
             evaluation_id=result.evaluation_id,
@@ -350,6 +356,7 @@ class CoordinationTopologyRuntime:
             latency_ms=result.latency_ms,
             error=result.error,
             metadata=dict(result.metadata),
+            tenant_authority_source=tenant_authority_source,
         )
 
     def _replace_trace_error(
@@ -390,6 +397,7 @@ class CoordinationTopologyRuntime:
             latency_ms=trace.latency_ms,
             error=error,
             metadata=dict(trace.metadata),
+            tenant_authority_source=trace.tenant_authority_source,
         )
 
     def _fail_fast(
@@ -439,6 +447,7 @@ class CoordinationTopologyRuntime:
             latency_ms=latency_ms,
             error=f"{type(error).__name__}: {error}",
             metadata=dict(request.metadata),
+            tenant_authority_source=resolution.source.value,
         )
         return CoordinationTopologyEnvelope(trace=trace, error=error)
 

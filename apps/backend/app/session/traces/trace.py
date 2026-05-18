@@ -65,6 +65,7 @@ class SessionTrace:
     principal_id: str | None = None
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    tenant_authority_source: str | None = None
 
 
 __all__ = [

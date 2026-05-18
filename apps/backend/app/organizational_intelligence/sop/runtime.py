@@ -180,6 +180,7 @@ class SopRuntime:
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
                 tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -193,6 +194,7 @@ class SopRuntime:
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
                 tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -219,6 +221,7 @@ class SopRuntime:
                 correlation_id=request.correlation_id,
                 request_id=request.request_id,
                 tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
             ),
             result=result,
         )
@@ -347,6 +350,7 @@ class SopRuntime:
         request_id: str | None,
         tenant_id: str | None = None,
         error: str | None = None,
+        tenant_authority_source: str | None = None,
     ) -> IntelligenceTrace:
         return IntelligenceTrace(
             trace_id=generate_trace_id(),
@@ -360,6 +364,7 @@ class SopRuntime:
             request_id=request_id,
             tenant_id=tenant_id,
             error=error,
+            tenant_authority_source=tenant_authority_source,
         )
 
     def _failed(  # noqa: PLR0913
@@ -372,6 +377,7 @@ class SopRuntime:
         correlation_id: str | None,
         request_id: str | None,
         tenant_id: str | None = None,
+        tenant_authority_source: str | None = None,
     ) -> IntelligenceEnvelope:
         # Chronology integrity (Core Law 3): failure envelopes consume
         # a fresh monotonic sequence; reusing `self._sequence` without
@@ -390,6 +396,7 @@ class SopRuntime:
                 request_id=request_id,
                 tenant_id=tenant_id,
                 error=f"{error.__class__.__name__}: {error}",
+                tenant_authority_source=tenant_authority_source,
             ),
             result=None,
             error=error,

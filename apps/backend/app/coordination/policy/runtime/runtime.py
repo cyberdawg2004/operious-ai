@@ -223,7 +223,11 @@ class CoordinationPolicyRuntime:
                 error=error_message,
                 metadata=metadata,
             )
-            trace = self._trace_from_result(result, request)
+            trace = self._trace_from_result(
+                result,
+                request,
+                tenant_authority_source=resolution.source.value,
+            )
             record = result_to_record(result)
             try:
                 await self._persistence.record_evaluation(record)
@@ -297,6 +301,8 @@ class CoordinationPolicyRuntime:
         self,
         result: CoordinationPolicyEvaluationResult,
         request: CoordinationPolicyEvaluationRequest,
+        *,
+        tenant_authority_source: str | None = None,
     ) -> CoordinationPolicyTrace:
         return CoordinationPolicyTrace(
             evaluation_id=result.evaluation_id,
@@ -326,6 +332,7 @@ class CoordinationPolicyRuntime:
             latency_ms=result.latency_ms,
             error=result.error,
             metadata=dict(result.metadata),
+            tenant_authority_source=tenant_authority_source,
         )
 
     def _replace_trace_error(
@@ -359,6 +366,7 @@ class CoordinationPolicyRuntime:
             latency_ms=trace.latency_ms,
             error=error,
             metadata=dict(trace.metadata),
+            tenant_authority_source=trace.tenant_authority_source,
         )
 
     def _fail_fast(
@@ -405,6 +413,7 @@ class CoordinationPolicyRuntime:
             latency_ms=latency_ms,
             error=f"{type(error).__name__}: {error}",
             metadata=dict(request.metadata),
+            tenant_authority_source=resolution.source.value,
         )
         # Silence: `Sequence` is referenced only by `_resolve_evaluators`'
         # signature consumers; nothing to suppress here.

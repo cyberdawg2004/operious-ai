@@ -324,6 +324,7 @@ class SessionRuntime:
             request_request_id=request.request_id,
             tenant_id=session.identity.tenant_id,
             principal_id=session.identity.principal_id,
+            tenant_authority_source=resolution.source.value,
         )
         return SessionEnvelope(trace=trace, result=result)
 
@@ -1015,6 +1016,7 @@ class SessionRuntime:
         event_id: SessionEventId | None = None,
         reconstruction_id: SessionReconstructionId | None = None,
         error: str | None = None,
+        tenant_authority_source: str | None = None,
     ) -> SessionTrace:
         # Replay determinism (Core Law 2): when the request carries a
         # correlation anchor, derive `trace_id` deterministically from
@@ -1048,6 +1050,7 @@ class SessionRuntime:
             tenant_id=tenant_id,
             principal_id=principal_id,
             error=error,
+            tenant_authority_source=tenant_authority_source,
         )
 
     def _failed_envelope(  # type: ignore[no-untyped-def]

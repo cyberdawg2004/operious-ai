@@ -302,6 +302,7 @@ class OperationalArbitrationRuntime:
                 else None
             ),
             metadata=result.metadata,
+            tenant_authority_source=resolution.source.value,
         )
 
         # Persistence (best-effort; failure is folded onto envelope).
@@ -541,6 +542,7 @@ class OperationalArbitrationRuntime:
                     error_outcome.value
                 ),
             },
+            tenant_authority_source=resolution.source.value,
         )
         return ArbitrationEnvelope(
             trace=trace, result=None, error=error

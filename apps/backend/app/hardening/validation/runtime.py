@@ -658,7 +658,10 @@ class HardeningRuntime:
         sequence = self._sequence
         correlation_id = getattr(request, "correlation_id", None)
         request_id = getattr(request, "request_id", None)
-        tenant_id = getattr(request, "tenant_id", None)
+        # P2-C: resolve authority via the contract-agnostic adapter so
+        # every emitted trace carries the same provenance attribution
+        # that the runtime entry computed.
+        resolution = request_authority_resolution(request)
 
         if correlation_id:
             trace_id = derive_trace_id(
@@ -679,10 +682,11 @@ class HardeningRuntime:
             latency_ms=self._latency_ms(monotonic),
             correlation_id=correlation_id,
             request_id=request_id,
-            tenant_id=tenant_id,
+            tenant_id=resolution.tenant_id,
             audit_seed=getattr(result, "audit", None)
             and getattr(result.audit, "seed", None),  # type: ignore[union-attr]
             error=type(error).__name__ if error else None,
+            tenant_authority_source=resolution.source.value,
         )
         return HardeningEnvelope(
             trace=trace,
@@ -702,6 +706,7 @@ class HardeningRuntime:
         sequence = self._next_sequence()
         correlation_id = getattr(request, "correlation_id", None)
         request_id = getattr(request, "request_id", None)
+        resolution = request_authority_resolution(request)
         if correlation_id:
             trace_id = derive_trace_id(
                 seed=(
@@ -721,7 +726,9 @@ class HardeningRuntime:
             latency_ms=self._latency_ms(monotonic),
             correlation_id=correlation_id,
             request_id=request_id,
+            tenant_id=resolution.tenant_id,
             error=type(error).__name__,
+            tenant_authority_source=resolution.source.value,
         )
         return HardeningEnvelope(
             trace=trace, result=None, error=error
