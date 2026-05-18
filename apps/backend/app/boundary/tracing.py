@@ -90,6 +90,14 @@ class BoundaryTrace:
     # against the governance repository instead of re-evaluating.
     governance_decision_id: uuid.UUID | None = None
     governance_chain_id: str | None = None
+    # 2.75-β: authority-resolution provenance. Records which input
+    # axis the effective ``tenant_id`` came from
+    # (``typed_authority`` / ``legacy_tenant`` / ``observed_tenant``
+    # / ``none``). Mirrors the analogous fields on coordination,
+    # supervisor, arbitration, and session traces — auditors join on
+    # tenant_authority_source to reconstruct the attribution chain
+    # across every substrate that processed a request.
+    tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

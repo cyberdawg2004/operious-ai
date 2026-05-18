@@ -19,6 +19,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.boundary.adapters.base import BaseEgressAdapter
 from app.boundary.contracts.requests import (
     BoundaryEgressRequest,
@@ -96,6 +100,16 @@ class BoundaryEgressRuntime:
             if request.egress_id_override is not None
             else generate_egress_id()
         )
+        # Wedge 2.75-β: singular authority resolution at the egress
+        # boundary. ``BoundarySource.tenant_id`` is treated as the
+        # OBSERVED axis; typed ``request.authority`` (B2) wins when
+        # present. Egress-time governance gates and persistence
+        # records consume ``resolution.tenant_id`` instead of
+        # cross-reading ``request.source.tenant_id``.
+        resolution = request_authority_resolution(
+            request,
+            observed_tenant_id=request.source.tenant_id,
+        )
 
         # Resolve the named adapter (only required when
         # `prebuilt_payload` is absent).
@@ -114,6 +128,7 @@ class BoundaryEgressRuntime:
                     t0=t0,
                     error=exc,
                     reason=f"adapter resolution failed: {exc}",
+                    resolution=resolution,
                 )
         else:
             adapter_name = request.adapter_name
@@ -156,7 +171,7 @@ class BoundaryEgressRuntime:
             payload=payload,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.source.tenant_id,
+            tenant_id=resolution.tenant_id,
             error=(
                 f"{framework_error.__class__.__name__}: "
                 f"{framework_error}"
@@ -167,6 +182,7 @@ class BoundaryEgressRuntime:
                 request=request,
                 egress_id=egress_id,
                 adapter_name=adapter_name,
+                resolution=resolution,
             ),
         )
 
@@ -182,9 +198,10 @@ class BoundaryEgressRuntime:
             latency_ms=latency_ms,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.source.tenant_id,
+            tenant_id=resolution.tenant_id,
             egress_id=egress_id,
             error=result.error,
+            tenant_authority_source=resolution.source.value,
         )
 
         if self._persistence is not None:
@@ -233,6 +250,7 @@ class BoundaryEgressRuntime:
         request: BoundaryEgressRequest,
         egress_id: BoundaryEgressId,
         adapter_name: str,
+        resolution: AuthorityResolution,
     ) -> dict[str, object]:
         meta: dict[str, object] = dict(request.metadata)
         meta[BoundaryMetadataKey.DIRECTION.value] = (
@@ -248,9 +266,9 @@ class BoundaryEgressRuntime:
         meta[BoundaryMetadataKey.ADAPTER_NAME.value] = (
             adapter_name
         )
-        if request.source.tenant_id:
+        if resolution.tenant_id:
             meta[BoundaryMetadataKey.TENANT_ID.value] = (
-                request.source.tenant_id
+                resolution.tenant_id
             )
         if request.correlation_id:
             meta[BoundaryMetadataKey.CORRELATION_ID.value] = (
@@ -272,6 +290,7 @@ class BoundaryEgressRuntime:
         t0: float,
         error: BoundaryConfigurationError,
         reason: str,
+        resolution: AuthorityResolution,
     ) -> BoundaryEgressEnvelope:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -287,9 +306,10 @@ class BoundaryEgressRuntime:
             latency_ms=latency_ms,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.source.tenant_id,
+            tenant_id=resolution.tenant_id,
             egress_id=egress_id,
             error=reason,
+            tenant_authority_source=resolution.source.value,
         )
         return BoundaryEgressEnvelope(
             trace=trace, result=None, error=error

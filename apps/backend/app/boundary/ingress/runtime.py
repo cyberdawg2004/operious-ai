@@ -21,6 +21,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.identity import (
+    AuthorityResolution,
+    request_authority_resolution,
+)
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.contracts.requests import (
     BoundaryIngressRequest,
@@ -134,6 +138,22 @@ class BoundaryIngressRuntime:
             if request.ingress_id_override is not None
             else generate_ingress_id()
         )
+        # Wedge 2.75-β: singular authority resolution at the
+        # boundary runtime. Replaces every ``request.source.tenant_id``
+        # read below so the typed-ingress surface (Wedge B2) and the
+        # legacy ``BoundarySource``-derived tenant collapse into one
+        # ``AuthorityResolution`` with explicit attribution recorded
+        # on the trace via ``tenant_authority_source``. The boundary
+        # source's ``tenant_id`` is treated as the OBSERVED axis (it
+        # is what the inbound delivery declared); typed
+        # ``request.authority`` still wins when present, so an
+        # operator that mints an ``AuthorityContext`` at the HTTP
+        # ingress middleware overrides whatever the external source
+        # claimed.
+        resolution = request_authority_resolution(
+            request,
+            observed_tenant_id=request.source.tenant_id,
+        )
 
         # Resolve the named adapter.
         try:
@@ -150,6 +170,7 @@ class BoundaryIngressRuntime:
                     status=BoundaryNormalizationStatus.ADAPTER_ERROR,
                     error=str(exc),
                 ),
+                resolution=resolution,
             )
 
         # 1. Normalise.
@@ -173,7 +194,7 @@ class BoundaryIngressRuntime:
                     external_message_id=(
                         normalization.external_message_id
                     ),
-                    tenant_id=request.source.tenant_id,
+                    tenant_id=resolution.tenant_id,
                 )
             except ValueError:
                 replay_key = None
@@ -196,7 +217,7 @@ class BoundaryIngressRuntime:
                 external_message_id=(
                     normalization.external_message_id
                 ),
-                tenant_id=request.source.tenant_id,
+                tenant_id=resolution.tenant_id,
             )
         else:
             event_id = None
@@ -216,7 +237,7 @@ class BoundaryIngressRuntime:
                     external_message_id=(
                         normalization.external_message_id or ""
                     ),
-                    tenant_id=request.source.tenant_id,
+                    tenant_id=resolution.tenant_id,
                     content_fingerprint=content_fingerprint(
                         normalization.canonical_payload
                     ),
@@ -323,7 +344,7 @@ class BoundaryIngressRuntime:
             event=event,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.source.tenant_id,
+            tenant_id=resolution.tenant_id,
             metadata=self._build_metadata(
                 request=request,
                 ingress_id=ingress_id,
@@ -333,6 +354,7 @@ class BoundaryIngressRuntime:
                 normalization=normalization,
                 adapter_name=adapter.name,
                 original_event_id=original_event_id,
+                resolution=resolution,
             ),
         )
 
@@ -347,6 +369,7 @@ class BoundaryIngressRuntime:
             started_at=started_at,
             ended_at=ended_at,
             latency_ms=latency_ms,
+            resolution=resolution,
         )
 
         framework_error: BaseException | None = None
@@ -396,6 +419,7 @@ class BoundaryIngressRuntime:
         normalization: BoundaryNormalizationResult,
         adapter_name: str,
         original_event_id: BoundaryEventId | None,
+        resolution: AuthorityResolution,
     ) -> dict[str, object]:
         meta: dict[str, object] = dict(request.metadata)
         meta[BoundaryMetadataKey.DIRECTION.value] = (
@@ -440,9 +464,9 @@ class BoundaryIngressRuntime:
             meta[
                 BoundaryMetadataKey.EXTERNAL_CONVERSATION_ID.value
             ] = normalization.external_conversation_id
-        if request.source.tenant_id:
+        if resolution.tenant_id:
             meta[BoundaryMetadataKey.TENANT_ID.value] = (
-                request.source.tenant_id
+                resolution.tenant_id
             )
         if request.correlation_id:
             meta[BoundaryMetadataKey.CORRELATION_ID.value] = (
@@ -467,6 +491,7 @@ class BoundaryIngressRuntime:
         started_at: datetime,
         ended_at: datetime,
         latency_ms: float,
+        resolution: AuthorityResolution,
     ) -> BoundaryTrace:
         return BoundaryTrace(
             direction=BoundaryDirection.INGRESS,
@@ -480,7 +505,7 @@ class BoundaryIngressRuntime:
             latency_ms=latency_ms,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.source.tenant_id,
+            tenant_id=resolution.tenant_id,
             external_message_id=(
                 normalization.external_message_id
             ),
@@ -491,6 +516,7 @@ class BoundaryIngressRuntime:
             event_id=event_id,
             normalization_status=normalization.status,
             replay_disposition=replay_disposition,
+            tenant_authority_source=resolution.source.value,
         )
 
     def _failed_envelope(
@@ -503,6 +529,7 @@ class BoundaryIngressRuntime:
         error: BoundaryConfigurationError,
         reason: str,
         normalization: BoundaryNormalizationResult,
+        resolution: AuthorityResolution,
     ) -> BoundaryIngressEnvelope:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -518,11 +545,12 @@ class BoundaryIngressRuntime:
             latency_ms=latency_ms,
             correlation_id=request.correlation_id,
             request_id=request.request_id,
-            tenant_id=request.source.tenant_id,
+            tenant_id=resolution.tenant_id,
             ingress_id=ingress_id,
             normalization_status=normalization.status,
             replay_disposition=BoundaryReplayDisposition.INVALID_KEY,
             error=reason,
+            tenant_authority_source=resolution.source.value,
         )
         return BoundaryIngressEnvelope(
             trace=trace, result=None, error=error
