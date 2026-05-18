@@ -1,0 +1,193 @@
+"""``JWTProvider`` — RFC 7519 verification.
+
+Verifies a Bearer JWT against a configured key + algorithm
+allowlist and translates registered identity claims into a
+:class:`VerifiedIdentity`. Powered by PyJWT.
+
+Determinism contract
+────────────────────
+Same token + same provider state (key, algorithms, issuer
+allowlist, audience, leeway, claim mapping) → byte-equal
+:class:`VerifiedIdentity` (modulo :attr:`issued_at`, which is
+stamped with the verification clock). For replay-determinism in
+recorded sessions, callers may pin :attr:`issued_at` post-hoc; the
+provider itself does NOT inject randomness.
+
+Failure modes (all → :class:`AuthenticationError`)
+──────────────────────────────────────────────────
+* scheme not Bearer
+* malformed token / signature failure
+* expired token
+* issuer not in allowlist (when configured)
+* audience mismatch (when configured)
+* unsupported algorithm (defence-in-depth on top of PyJWT's
+  ``algorithms=`` allowlist)
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, ClassVar, Final
+
+import jwt
+from jwt import (
+    InvalidAlgorithmError,
+    InvalidAudienceError,
+    InvalidIssuerError,
+    InvalidTokenError,
+)
+
+from app.auth.credentials import Credential
+from app.auth.errors import AuthenticationError
+from app.auth.identity import VerifiedIdentity
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimMapping:
+    """Maps JWT claim names to :class:`VerifiedIdentity` axes.
+
+    Each field names the JWT claim whose value is copied into the
+    corresponding :class:`VerifiedIdentity` axis. ``None`` disables
+    extraction for that axis (the verified identity carries
+    ``None`` on that axis).
+    """
+
+    tenant_id: str | None = "tenant_id"
+    principal_id: str | None = "sub"
+    organization_id: str | None = "org_id"
+    environment_id: str | None = "env"
+
+
+DEFAULT_CLAIM_MAPPING: Final[ClaimMapping] = ClaimMapping()
+
+
+@dataclass(frozen=True, slots=True)
+class _DecodeOptions:
+    issuer: str | tuple[str, ...] | None = None
+    audience: str | tuple[str, ...] | None = None
+    leeway: float = 0.0
+    options: Mapping[str, Any] = field(default_factory=dict)
+
+
+class JWTProvider:
+    """Verify JWT bearer tokens and emit :class:`VerifiedIdentity`."""
+
+    _accepted_schemes: ClassVar[frozenset[str]] = frozenset({"bearer"})
+
+    def __init__(
+        self,
+        *,
+        name: str = "jwt",
+        key: str | bytes,
+        algorithms: tuple[str, ...],
+        issuer: str | tuple[str, ...] | None = None,
+        audience: str | tuple[str, ...] | None = None,
+        leeway: float = 0.0,
+        claim_mapping: ClaimMapping = DEFAULT_CLAIM_MAPPING,
+        require_claims: tuple[str, ...] = (),
+    ) -> None:
+        if not algorithms:
+            raise ValueError(
+                "JWTProvider requires a non-empty algorithms allowlist"
+            )
+        self.name = name
+        self._key = key
+        self._algorithms = tuple(algorithms)
+        self._claim_mapping = claim_mapping
+        self._require_claims = tuple(require_claims)
+        self._decode = _DecodeOptions(
+            issuer=issuer,
+            audience=audience,
+            leeway=leeway,
+        )
+
+    async def verify(self, credential: Credential) -> VerifiedIdentity:
+        if credential.scheme.lower() not in self._accepted_schemes:
+            raise AuthenticationError(
+                f"JWTProvider only accepts Bearer credentials "
+                f"(got scheme={credential.scheme!r})"
+            )
+        try:
+            claims = jwt.decode(
+                credential.value,
+                self._key,
+                algorithms=list(self._algorithms),
+                issuer=self._decode.issuer,
+                audience=self._decode.audience,
+                leeway=self._decode.leeway,
+            )
+        except InvalidAlgorithmError as err:
+            raise AuthenticationError(
+                f"unsupported algorithm: {err}"
+            ) from err
+        except InvalidIssuerError as err:
+            raise AuthenticationError(
+                f"issuer not allowed: {err}"
+            ) from err
+        except InvalidAudienceError as err:
+            raise AuthenticationError(
+                f"audience mismatch: {err}"
+            ) from err
+        except InvalidTokenError as err:
+            raise AuthenticationError(
+                f"invalid token: {err}"
+            ) from err
+
+        if not isinstance(claims, dict):
+            raise AuthenticationError(
+                "JWT payload is not a JSON object"
+            )
+
+        for required in self._require_claims:
+            if required not in claims:
+                raise AuthenticationError(
+                    f"required claim missing: {required!r}"
+                )
+
+        identity_axes: dict[str, Any] = {}
+        for axis, claim_name in (
+            ("tenant_id", self._claim_mapping.tenant_id),
+            ("principal_id", self._claim_mapping.principal_id),
+            ("organization_id", self._claim_mapping.organization_id),
+            ("environment_id", self._claim_mapping.environment_id),
+        ):
+            if claim_name is None:
+                identity_axes[axis] = None
+                continue
+            value = claims.get(claim_name)
+            if value is None:
+                identity_axes[axis] = None
+                continue
+            if not isinstance(value, str):
+                raise AuthenticationError(
+                    f"claim {claim_name!r} must be a string "
+                    f"(got {type(value).__name__})"
+                )
+            identity_axes[axis] = value
+
+        exp = claims.get("exp")
+        expires_at: datetime | None
+        if isinstance(exp, (int, float)):
+            expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+        else:
+            expires_at = None
+
+        return VerifiedIdentity(
+            tenant_id=identity_axes["tenant_id"],
+            principal_id=identity_axes["principal_id"],
+            organization_id=identity_axes["organization_id"],
+            environment_id=identity_axes["environment_id"],
+            issuer=self.name,
+            issued_at=datetime.now(timezone.utc),
+            expires_at=expires_at,
+            claims=dict(claims),
+        )
+
+
+__all__ = [
+    "ClaimMapping",
+    "DEFAULT_CLAIM_MAPPING",
+    "JWTProvider",
+]
