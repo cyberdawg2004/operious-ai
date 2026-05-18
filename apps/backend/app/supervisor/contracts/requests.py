@@ -21,6 +21,7 @@ from app.agents.persistence.records import (
     ToolInvocationRecord,
 )
 from app.governance.persistence.records import GovernanceDecisionRecord
+from app.identity import AuthorityContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,15 @@ class ExecutionInspectionRequest:
         correlation_id / request_id / tenant_id:
                                      Carried through onto the
                                      inspection result + trace.
+        authority:                   Typed authority tuple (Wedge B2).
+                                     When supplied with a non-None
+                                     ``tenant_id`` axis, becomes the
+                                     canonical authority source — see
+                                     ``resolve_authority`` in
+                                     ``app.identity``. When both
+                                     ``authority`` and ``tenant_id``
+                                     are supplied with values, they
+                                     MUST agree.
         evaluator_names:             Optional whitelist; when ``None``
                                      every registered evaluator runs.
                                      When provided, evaluators are
@@ -65,6 +75,7 @@ class ExecutionInspectionRequest:
     correlation_id: uuid.UUID | None = None
     request_id: str | None = None
     tenant_id: str | None = None
+    authority: AuthorityContext | None = None
     live_envelope: AgentExecutionEnvelope | None = None
     recorded_execution: AgentExecutionRecord | None = None
     recorded_tool_invocations: tuple[ToolInvocationRecord, ...] = ()
@@ -73,6 +84,27 @@ class ExecutionInspectionRequest:
     inspection_id_override: uuid.UUID | None = None
     decision_id_override: uuid.UUID | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Wedge B2 coexistence invariant (mirrored from the boundary
+        # request contracts): when both the typed ``authority`` and
+        # the legacy ``tenant_id`` are supplied with values, they
+        # MUST agree. ``None`` on either side is permitted — legacy
+        # callers (tenant_id only) and typed callers (authority only)
+        # are both supported.
+        if (
+            self.authority is not None
+            and self.authority.tenant_id is not None
+            and self.tenant_id is not None
+            and self.authority.tenant_id != self.tenant_id
+        ):
+            raise ValueError(
+                "ExecutionInspectionRequest: authority.tenant_id "
+                "and tenant_id must agree when both are supplied "
+                f"(got authority.tenant_id="
+                f"{self.authority.tenant_id!r}, "
+                f"tenant_id={self.tenant_id!r})"
+            )
 
 
 __all__ = ["ExecutionInspectionRequest"]

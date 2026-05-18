@@ -100,6 +100,9 @@ def inspection_result_to_records(
         ),
         request_id=result.request_id,
         tenant_id=result.tenant_id,
+        # Wedge B6: carry the authority-resolution source through to
+        # persistence so replay can audit the attribution chain.
+        tenant_authority_source=result.tenant_authority_source,
         inspection_mode=result.inspection_mode.value,
         decision=decision_record,
         evaluator_names=tuple(e.evaluator_name for e in result.evaluations),

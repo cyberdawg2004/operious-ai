@@ -58,6 +58,7 @@ wrapping.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from app.identity.primitives import (
     EnvironmentId,
@@ -175,4 +176,119 @@ class AuthorityContext:
         )
 
 
-__all__ = ["AuthorityContext"]
+class AuthoritySource(StrEnum):
+    """Constitutional taxonomy of which input produced an effective tenant_id.
+
+    Wedge B6 introduces this enum so that every site that resolves a
+    tenant authority records the SOURCE of that resolution. Replay
+    reconstruction can then audit the attribution chain without
+    re-running the resolution logic.
+
+    Members:
+      * ``TYPED_AUTHORITY``  — the ``AuthorityContext.tenant_id`` field
+                                supplied at the typed-ingress surface
+                                (Wedge B2). The constitutional source
+                                going forward.
+      * ``LEGACY_TENANT``    — the legacy ``request.tenant_id: str | None``
+                                field. Permitted during the typed-
+                                ingress transition; Wedge B2's
+                                coexistence invariant guarantees it
+                                agrees with ``TYPED_AUTHORITY`` when
+                                both are supplied.
+      * ``OBSERVED_TENANT``  — the tenant observed on the underlying
+                                execution (e.g.,
+                                ``AgentExecutionTrace.tenant_id`` from
+                                Wedge B3). Used as a fallback when
+                                neither typed nor legacy authority
+                                was supplied at the call site.
+      * ``NONE``             — every axis was absent. The operation
+                                is constitutionally tenantless.
+    """
+
+    TYPED_AUTHORITY = "typed_authority"
+    LEGACY_TENANT = "legacy_tenant"
+    OBSERVED_TENANT = "observed_tenant"
+    NONE = "none"
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorityResolution:
+    """Result of resolving an effective tenant_id from multiple input axes.
+
+    Pairs the resolved ``tenant_id`` with the ``AuthoritySource`` that
+    produced it. Frozen, slotted, value-equal — usable as a dictionary
+    key for future authority-keyed caches.
+
+    Constitutional invariant: ``source == AuthoritySource.NONE`` IFF
+    ``tenant_id is None``. The two carry the same information through
+    different lenses (presence vs attribution).
+    """
+
+    tenant_id: str | None
+    source: AuthoritySource
+
+
+def resolve_authority(
+    *,
+    typed: AuthorityContext | None,
+    legacy_tenant_id: str | None,
+    observed_tenant_id: str | None,
+) -> AuthorityResolution:
+    """Singular, deterministic, traceable tenant authority resolution.
+
+    Replaces the two-source ``request.tenant_id or view.tenant_id``
+    coalescing pattern catalogued by audit defect DR-3 (Wedge B1).
+    The resolution rules are pinned here as the constitutional doctrine
+    — anyone who wants a different priority writes a different function,
+    they do NOT alter this one.
+
+    Priority (highest wins):
+
+        1. ``typed.tenant_id`` (when ``typed`` is not None and its
+           ``tenant_id`` axis is not None) — Wedge B2 typed-ingress
+           is the canonical authority surface.
+        2. ``legacy_tenant_id`` — pre-B2 ``str | None`` field.
+           Coexistence invariants at every contract that carries
+           both ``authority`` and ``tenant_id`` guarantee these two
+           cannot disagree, so promoting legacy when typed is absent
+           is constitutionally safe.
+        3. ``observed_tenant_id`` — what the underlying execution
+           observed (e.g., ``AgentExecutionTrace.tenant_id``). The
+           fallback when no caller-stamped authority is available.
+        4. ``None`` — fully tenantless. The operation has no
+           authority chain at any axis.
+
+    The returned ``AuthorityResolution`` records WHICH source won so
+    callers can persist the attribution and replay can audit it
+    without re-running this function.
+
+    This function is PURE — no I/O, no global state, no wall-clock
+    reads. Same inputs produce byte-identical outputs every call.
+    """
+    if typed is not None and typed.tenant_id is not None:
+        return AuthorityResolution(
+            tenant_id=typed.tenant_id,
+            source=AuthoritySource.TYPED_AUTHORITY,
+        )
+    if legacy_tenant_id is not None:
+        return AuthorityResolution(
+            tenant_id=legacy_tenant_id,
+            source=AuthoritySource.LEGACY_TENANT,
+        )
+    if observed_tenant_id is not None:
+        return AuthorityResolution(
+            tenant_id=observed_tenant_id,
+            source=AuthoritySource.OBSERVED_TENANT,
+        )
+    return AuthorityResolution(
+        tenant_id=None,
+        source=AuthoritySource.NONE,
+    )
+
+
+__all__ = [
+    "AuthorityContext",
+    "AuthorityResolution",
+    "AuthoritySource",
+    "resolve_authority",
+]

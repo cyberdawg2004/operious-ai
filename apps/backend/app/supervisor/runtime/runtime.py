@@ -39,6 +39,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
+from app.identity import AuthorityResolution, resolve_authority
 from app.observability.context import get_request_id
 from app.supervisor.contracts.decisions import (
     SupervisorDecision,
@@ -99,9 +100,28 @@ class SupervisorRuntime:
         inspection_id = request.inspection_id_override or uuid.uuid4()
         request_id = request.request_id or get_request_id()
 
+        # Wedge B6: SINGULAR authority resolution.
+        # Audit defect DR-3 was that this runtime coalesced
+        # ``request.tenant_id`` with ``view.tenant_id`` in TWO places
+        # (here + fail_fast) without recording which source won —
+        # replay reconstruction could not audit the attribution chain.
+        # The fix: call ``resolve_authority`` ONCE per inspection,
+        # producing both the effective tenant_id AND the source
+        # (typed_authority / legacy_tenant / observed_tenant / none).
+        # Every downstream stamp (result, trace, view) consumes this
+        # single resolution. The view_builder's internal coalescing
+        # becomes a no-op when this runtime is the caller because we
+        # pre-resolve and pass the resolved value down.
+        observed_tenant_id = self._extract_observed_tenant_id(request)
+        resolution = resolve_authority(
+            typed=request.authority,
+            legacy_tenant_id=request.tenant_id,
+            observed_tenant_id=observed_tenant_id,
+        )
+
         # 1. Validate + build the view.
         try:
-            view, mode = self._build_view(request)
+            view, mode = self._build_view(request, resolution=resolution)
         except InspectionRequestError as exc:
             return self._fail_fast_envelope(
                 inspection_id=inspection_id,
@@ -113,6 +133,7 @@ class SupervisorRuntime:
                 inspection_mode=InspectionMode.LIVE
                 if request.live_envelope is not None
                 else InspectionMode.REPLAY,
+                resolution=resolution,
             )
 
         # 2. Resolve evaluator subset (sorted-name order).
@@ -127,6 +148,7 @@ class SupervisorRuntime:
                 loop_start=loop_start,
                 error=exc,
                 inspection_mode=mode,
+                resolution=resolution,
                 view=view,
             )
 
@@ -148,22 +170,14 @@ class SupervisorRuntime:
         latency_ms = round((loop.time() - loop_start) * 1000.0, 3)
 
         # Lineage discipline: the caller's pipeline owns its own
-        # correlation / tenant. We carry those onto the result + trace
-        # verbatim when supplied, and only fall back to the inspected
-        # execution's own values when the caller did not pre-establish
-        # any. This matches the `ExecutionInspectionRequest` docstring
-        # contract ("carried through onto the inspection result + trace")
-        # and lets supervisor inspections rejoin the orchestrator's
-        # pipeline trace.
+        # correlation. We carry it onto the result + trace verbatim
+        # when supplied, and only fall back to the inspected
+        # execution's own value when the caller did not pre-establish
+        # any. Tenant attribution is handled by ``resolution`` above.
         effective_correlation_id = (
             request.correlation_id
             if request.correlation_id is not None
             else view.correlation_id
-        )
-        effective_tenant_id = (
-            request.tenant_id
-            if request.tenant_id is not None
-            else view.tenant_id
         )
 
         result = ExecutionInspectionResult(
@@ -172,7 +186,8 @@ class SupervisorRuntime:
             runtime_instance_id=self._instance_id,
             correlation_id=effective_correlation_id,
             request_id=request_id,
-            tenant_id=effective_tenant_id,
+            tenant_id=resolution.tenant_id,
+            tenant_authority_source=resolution.source.value,
             inspection_mode=mode,
             evaluations=tuple(evaluations),
             decision=decision,
@@ -188,7 +203,8 @@ class SupervisorRuntime:
             runtime_instance_id=self._instance_id,
             correlation_id=effective_correlation_id,
             request_id=request_id,
-            tenant_id=effective_tenant_id,
+            tenant_id=resolution.tenant_id,
+            tenant_authority_source=resolution.source.value,
             inspection_mode=mode,
             started_at=started_at,
             ended_at=ended_at,
@@ -205,8 +221,31 @@ class SupervisorRuntime:
 
     # ─── Internals ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_observed_tenant_id(
+        request: ExecutionInspectionRequest,
+    ) -> str | None:
+        """Read the underlying execution's observed tenant_id.
+
+        Wedge B6 separates "observed tenant" (what the inspected
+        execution itself carries) from the resolved authority.
+        ``resolve_authority`` consumes the observed value as the
+        lowest-priority fallback. Returns ``None`` when neither
+        inspection source is present — the request will then fail
+        validation in ``_build_view`` and the fail-fast path uses
+        the same ``None`` observation.
+        """
+        if request.live_envelope is not None:
+            return request.live_envelope.trace.tenant_id
+        if request.recorded_execution is not None:
+            return request.recorded_execution.tenant_id
+        return None
+
     def _build_view(
-        self, request: ExecutionInspectionRequest
+        self,
+        request: ExecutionInspectionRequest,
+        *,
+        resolution: AuthorityResolution,
     ) -> tuple[InspectionView, InspectionMode]:
         has_live = request.live_envelope is not None
         has_replay = request.recorded_execution is not None
@@ -222,6 +261,13 @@ class SupervisorRuntime:
                 "envelope or a `recorded_execution`."
             )
 
+        # Wedge B6: pass the resolved tenant_id (NOT request.tenant_id)
+        # down to the view builder. This makes the runtime's authority
+        # resolution singular — the view_builder no longer participates
+        # in coalescing in the runtime path. Its ``tenant_id`` override
+        # parameter still exists for external callers (tests, future
+        # replay tooling) but the runtime never relies on
+        # view_builder's internal fallback.
         if has_live:
             envelope = request.live_envelope
             assert envelope is not None
@@ -231,7 +277,7 @@ class SupervisorRuntime:
                     "request.execution_id"
                 )
             view = build_inspection_view_from_envelope(
-                envelope, tenant_id=request.tenant_id
+                envelope, tenant_id=resolution.tenant_id
             )
             return view, InspectionMode.LIVE
 
@@ -246,7 +292,7 @@ class SupervisorRuntime:
             execution=execution,
             tool_invocations=request.recorded_tool_invocations,
             governance_decisions=request.recorded_governance_decisions,
-            tenant_id=request.tenant_id,
+            tenant_id=resolution.tenant_id,
         )
         return view, InspectionMode.REPLAY
 
@@ -347,6 +393,7 @@ class SupervisorRuntime:
         loop_start: float,
         error: BaseException,
         inspection_mode: InspectionMode,
+        resolution: AuthorityResolution,
         view: InspectionView | None = None,
     ) -> ExecutionInspectionEnvelope:
         loop = asyncio.get_event_loop()
@@ -367,6 +414,11 @@ class SupervisorRuntime:
         )
         _ = synthetic_decision  # not surfaced on the envelope (no result)
 
+        # Wedge B6: the fail-fast path consumes the SAME resolution
+        # produced once at the top of ``inspect()``. The audit-flagged
+        # second coalescing site (``request.tenant_id if view is None
+        # else view.tenant_id``) is closed — fail-fast no longer
+        # diverges from the normal path on authority attribution.
         trace = SupervisorTrace(
             inspection_id=inspection_id,
             execution_id=request.execution_id,
@@ -375,9 +427,8 @@ class SupervisorRuntime:
             if view is None
             else view.correlation_id,
             request_id=request_id,
-            tenant_id=request.tenant_id
-            if view is None
-            else view.tenant_id,
+            tenant_id=resolution.tenant_id,
+            tenant_authority_source=resolution.source.value,
             inspection_mode=inspection_mode,
             started_at=started_at,
             ended_at=ended_at,

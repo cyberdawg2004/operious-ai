@@ -38,11 +38,14 @@ import pytest
 import app.identity as identity_pkg
 from app.identity import (
     AuthorityContext,
+    AuthorityResolution,
+    AuthoritySource,
     EnvironmentId,
     IdentityError,
     OrganizationId,
     PrincipalId,
     TenantId,
+    resolve_authority,
 )
 
 
@@ -291,3 +294,145 @@ def test_authority_context_is_exported_from_identity_substrate() -> (
     assert hasattr(identity_pkg, "AuthorityContext")
     assert "AuthorityContext" in identity_pkg.__all__
     assert identity_pkg.AuthorityContext is AuthorityContext
+
+
+# ─── resolve_authority: priority + attribution ───────────────────────
+
+
+def test_resolve_authority_typed_wins_over_legacy_and_observed() -> (
+    None
+):
+    """Constitutional priority: typed authority is the canonical
+    source. When supplied, it overrides BOTH legacy and observed."""
+    result = resolve_authority(
+        typed=AuthorityContext(tenant_id=TenantId("acme")),
+        legacy_tenant_id="legacy-tenant",
+        observed_tenant_id="observed-tenant",
+    )
+    assert result.tenant_id == "acme"
+    assert result.source is AuthoritySource.TYPED_AUTHORITY
+
+
+def test_resolve_authority_legacy_wins_when_typed_axis_is_none() -> (
+    None
+):
+    """When the typed AuthorityContext is present but its tenant_id
+    axis is None, legacy MUST be used (typed didn't supply tenant
+    authority on that axis)."""
+    result = resolve_authority(
+        typed=AuthorityContext(),  # all axes None
+        legacy_tenant_id="legacy-tenant",
+        observed_tenant_id="observed-tenant",
+    )
+    assert result.tenant_id == "legacy-tenant"
+    assert result.source is AuthoritySource.LEGACY_TENANT
+
+
+def test_resolve_authority_legacy_wins_when_typed_is_none() -> None:
+    """When typed is wholly absent (None), legacy wins over observed."""
+    result = resolve_authority(
+        typed=None,
+        legacy_tenant_id="legacy-tenant",
+        observed_tenant_id="observed-tenant",
+    )
+    assert result.tenant_id == "legacy-tenant"
+    assert result.source is AuthoritySource.LEGACY_TENANT
+
+
+def test_resolve_authority_observed_wins_when_only_observed_supplied() -> (
+    None
+):
+    """When neither typed nor legacy carries authority, observed is
+    the deterministic fallback."""
+    result = resolve_authority(
+        typed=None,
+        legacy_tenant_id=None,
+        observed_tenant_id="observed-tenant",
+    )
+    assert result.tenant_id == "observed-tenant"
+    assert result.source is AuthoritySource.OBSERVED_TENANT
+
+
+def test_resolve_authority_none_when_every_axis_is_none() -> None:
+    """The constitutionally-tenantless resolution. ``source`` is
+    NONE, ``tenant_id`` is None — the two carry the same information
+    through different lenses."""
+    result = resolve_authority(
+        typed=None,
+        legacy_tenant_id=None,
+        observed_tenant_id=None,
+    )
+    assert result.tenant_id is None
+    assert result.source is AuthoritySource.NONE
+
+
+def test_resolve_authority_typed_with_empty_axes_falls_through() -> (
+    None
+):
+    """An AuthorityContext supplied with all-None axes does NOT
+    short-circuit the resolution — it falls through to legacy /
+    observed. The typed branch only fires when ``typed.tenant_id``
+    actually carries a value."""
+    fully_anonymous = AuthorityContext()
+    result = resolve_authority(
+        typed=fully_anonymous,
+        legacy_tenant_id=None,
+        observed_tenant_id="observed",
+    )
+    assert result.tenant_id == "observed"
+    assert result.source is AuthoritySource.OBSERVED_TENANT
+
+
+def test_resolve_authority_is_deterministic() -> None:
+    """Same inputs → byte-identical AuthorityResolution every call."""
+    inputs: dict[str, AuthorityContext | str | None] = {
+        "typed": AuthorityContext(tenant_id=TenantId("acme")),
+        "legacy_tenant_id": "legacy",
+        "observed_tenant_id": "observed",
+    }
+    a = resolve_authority(**inputs)  # type: ignore[arg-type]
+    b = resolve_authority(**inputs)  # type: ignore[arg-type]
+    assert a == b
+
+
+def test_authority_resolution_is_frozen_and_slotted() -> None:
+    """The resolution carries replay-critical attribution — it MUST
+    be immutable."""
+    res = AuthorityResolution(
+        tenant_id="acme", source=AuthoritySource.LEGACY_TENANT
+    )
+    assert not hasattr(res, "__dict__")
+    with pytest.raises(Exception):
+        res.tenant_id = "evil"  # type: ignore[misc]
+
+
+def test_authority_resolution_invariant_none_iff_source_none() -> None:
+    """When ``resolve_authority`` returns ``NONE`` source, the
+    ``tenant_id`` MUST be ``None``, and vice versa. The two carry
+    the same information."""
+    res = resolve_authority(
+        typed=None, legacy_tenant_id=None, observed_tenant_id=None
+    )
+    assert (res.source is AuthoritySource.NONE) is (
+        res.tenant_id is None
+    )
+
+
+def test_authority_source_values_are_stable_strings() -> None:
+    """The enum values are persisted in records — their wire format
+    is part of the contract. Changing one breaks replay across
+    deployments."""
+    assert AuthoritySource.TYPED_AUTHORITY.value == "typed_authority"
+    assert AuthoritySource.LEGACY_TENANT.value == "legacy_tenant"
+    assert AuthoritySource.OBSERVED_TENANT.value == "observed_tenant"
+    assert AuthoritySource.NONE.value == "none"
+
+
+def test_resolve_authority_is_exported_from_identity_substrate() -> (
+    None
+):
+    assert hasattr(identity_pkg, "resolve_authority")
+    assert "resolve_authority" in identity_pkg.__all__
+    assert identity_pkg.resolve_authority is resolve_authority
+    assert "AuthorityResolution" in identity_pkg.__all__
+    assert "AuthoritySource" in identity_pkg.__all__

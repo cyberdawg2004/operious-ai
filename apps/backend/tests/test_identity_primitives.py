@@ -153,6 +153,8 @@ def test_public_api_surface_is_stable() -> None:
     """
     expected = {
         "AuthorityContext",
+        "AuthorityResolution",
+        "AuthoritySource",
         "EnvironmentId",
         "IdentityError",
         "OrganizationId",
@@ -163,5 +165,6 @@ def test_public_api_surface_is_stable() -> None:
         "coerce_principal_id",
         "coerce_tenant_id",
         "project_optional_str",
+        "resolve_authority",
     }
     assert set(identity_pkg.__all__) == expected

@@ -28,6 +28,15 @@ class ExecutionInspectionResult:
         correlation_id /
         request_id /
         tenant_id:             Lineage carried through from the request.
+        tenant_authority_source: Which input produced the effective
+                                 ``tenant_id`` — typed-authority,
+                                 legacy-tenant, observed-tenant, or
+                                 none. Wedge B6 introduces this for
+                                 traceable replay attribution. Stores
+                                 the ``AuthoritySource`` enum's wire
+                                 value; ``None`` only on persistence
+                                 records produced before Wedge B6
+                                 (back-compat fallback).
         inspection_mode:       `LIVE` or `REPLAY`.
         evaluations:           Per-evaluator outputs in sorted-name order.
         decision:              Apex supervisor verdict.
@@ -48,6 +57,7 @@ class ExecutionInspectionResult:
     started_at: datetime
     ended_at: datetime
     latency_ms: float
+    tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

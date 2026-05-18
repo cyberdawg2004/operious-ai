@@ -236,7 +236,15 @@ class SupervisorDecisionRecord:
 
 @dataclass(frozen=True, slots=True)
 class InspectionRecord:
-    """Apex persistable inspection — one per `inspect()` call."""
+    """Apex persistable inspection — one per `inspect()` call.
+
+    Wedge B6 adds the optional ``tenant_authority_source`` field so
+    persisted inspections record WHICH input produced their effective
+    ``tenant_id``. The serializer is backward-compatible: pre-B6
+    records (missing the field) deserialize with
+    ``tenant_authority_source=None``, distinct from a B6-era NONE
+    resolution which serializes the literal ``"none"`` enum value.
+    """
 
     inspection_id: str
     execution_id: str
@@ -251,6 +259,7 @@ class InspectionRecord:
     ended_at: str
     latency_ms: float
     error: str | None = None
+    tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -261,6 +270,7 @@ class InspectionRecord:
             "correlation_id": self.correlation_id,
             "request_id": self.request_id,
             "tenant_id": self.tenant_id,
+            "tenant_authority_source": self.tenant_authority_source,
             "inspection_mode": self.inspection_mode,
             "decision": self.decision.to_dict(),
             "evaluator_names": list(self.evaluator_names),
@@ -290,6 +300,15 @@ class InspectionRecord:
             tenant_id=(
                 str(data["tenant_id"])
                 if data.get("tenant_id") is not None
+                else None
+            ),
+            # Backward-compat: pre-B6 records do not carry this key.
+            # ``data.get`` returns None for both pre-B6 records and
+            # explicit-None post-B6 records; the two are
+            # indistinguishable at the wire layer, as intended.
+            tenant_authority_source=(
+                str(data["tenant_authority_source"])
+                if data.get("tenant_authority_source") is not None
                 else None
             ),
             inspection_mode=str(data["inspection_mode"]),

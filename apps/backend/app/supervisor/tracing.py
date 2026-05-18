@@ -46,6 +46,11 @@ class SupervisorTrace:
     Carries everything a supervisor-runtime persistence backend needs
     to reconstruct the inspection for audit / replay. Pairs 1:1 with
     `ExecutionInspectionResult`.
+
+    Wedge B6 adds ``tenant_authority_source`` so replay can audit
+    WHICH input produced the effective ``tenant_id``. The field is
+    optional (``None`` for pre-B6 records on round-trip) so existing
+    persisted traces continue to deserialize unchanged.
     """
 
     inspection_id: uuid.UUID
@@ -64,6 +69,7 @@ class SupervisorTrace:
     finding_count: int
     escalation_count: int
     error: str | None = None
+    tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
