@@ -101,15 +101,29 @@ def test_precedence_is_total_ordered(
     assert decision.decision is expected
 
 
-def test_empty_results_default_to_allow() -> None:
+def test_empty_results_synthesize_fail_closed_deny() -> None:
+    """Constitutional Core Law 4 (Governance Determinism): empty
+    evaluation results MUST fail closed. The substrate synthesises a
+    DENY result so the operation is refused rather than silently
+    permitted — `no_governance_evaluated` is the canonical
+    attribution."""
     decision = build_decision(
         stage=EnforcementStage.PRE_RETRIEVAL,
         policy_chain_id="chain.test",
         evaluation_results=(),
     )
-    assert decision.decision is Decision.ALLOW
-    assert decision.evaluated_rules == ()
-    assert decision.violations == ()
+    assert decision.decision is Decision.DENY
+    assert len(decision.evaluated_rules) == 1
+    assert (
+        decision.evaluated_rules[0].rule_id
+        == "no_governance_evaluated"
+    )
+    assert (
+        decision.evaluated_rules[0].policy_name
+        == "governance.substrate"
+    )
+    assert len(decision.violations) == 1
+    assert decision.violations[0].rule_id == "no_governance_evaluated"
     assert decision.restrictions == ()
 
 

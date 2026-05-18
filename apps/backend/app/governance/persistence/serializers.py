@@ -35,6 +35,7 @@ from app.governance.persistence.records import (
     EnforcementActionRecord,
     GovernanceDecisionRecord,
     GovernanceTraceRecord,
+    PolicyEvaluationResultRecord,
     PolicyEvaluationTraceRecord,
     PolicyViolationRecord,
     RuntimeRestrictionRecord,
@@ -47,7 +48,12 @@ from app.governance.value_objects import PolicyViolation, RuntimeRestriction
 
 
 def decision_to_record(decision: GovernanceDecision) -> GovernanceDecisionRecord:
-    """Convert a live `GovernanceDecision` into its persistable shape."""
+    """Convert a live `GovernanceDecision` into its persistable shape.
+
+    Lossless: every `PolicyEvaluationResult` (including ALLOW rules)
+    is serialised to `evaluated_rules`, so `record_to_decision` can
+    reconstruct a byte-equal `GovernanceDecision`.
+    """
     return GovernanceDecisionRecord(
         decision_id=str(decision.decision_id),
         decision=decision.decision.value,
@@ -63,6 +69,9 @@ def decision_to_record(decision: GovernanceDecision) -> GovernanceDecisionRecord
         violations=tuple(_violation_to_record(v) for v in decision.violations),
         restrictions=tuple(
             _restriction_to_record(r) for r in decision.restrictions
+        ),
+        evaluated_rules=tuple(
+            _result_to_record(r) for r in decision.evaluated_rules
         ),
         metadata={
             k: v for k, v in decision.metadata.items() if k != "correlation_id"
@@ -134,14 +143,16 @@ def enforcement_action_to_record(
 def record_to_decision(record: GovernanceDecisionRecord) -> GovernanceDecision:
     """Reconstruct a `GovernanceDecision` from its record.
 
-    Used by replay tools and audit-reconciliation utilities. Note:
-    `evaluated_rules` is NOT persisted (the record only stores
-    violations + restrictions for query density); the reconstructed
-    decision's `evaluated_rules` field will be the violations cast back
-    to results. This is sufficient for *verdict* replay but NOT for
-    full per-rule introspection — that requires the corresponding
-    `GovernanceTraceRecord` (which IS round-trippable into per-policy
-    metadata).
+    Used by replay tools and audit-reconciliation utilities.
+
+    Replay determinism (Core Law 2) requires byte-equivalent
+    reconstruction. Records carrying `evaluated_rules` reconstruct the
+    full result chain (including ALLOW rules) losslessly. For legacy
+    records written before `evaluated_rules` persistence landed, the
+    result chain is reconstructed from `violations` only (the
+    non-ALLOW subset); this legacy path is transitional — once all
+    persisted decisions are written through the current serializer,
+    the legacy fall-back becomes unreachable.
     """
     decision_enum = Decision(record.decision)
     stage_enum = EnforcementStage(record.stage)
@@ -149,18 +160,25 @@ def record_to_decision(record: GovernanceDecisionRecord) -> GovernanceDecision:
     if record.correlation_id is not None:
         metadata["correlation_id"] = record.correlation_id
 
-    # Reconstruct results from violations (lossy — see docstring).
-    results = tuple(
-        PolicyEvaluationResult(
-            policy_name=v.policy_name,
-            rule_id=v.rule_id,
-            decision=Decision(v.decision),
-            severity=ViolationSeverity(v.severity),
-            reason=v.detail,
-            metadata=dict(v.metadata),
+    if record.evaluated_rules:
+        results = tuple(
+            _record_to_result(e) for e in record.evaluated_rules
         )
-        for v in record.violations
-    )
+    else:
+        # Legacy reconstruction path — pre-`evaluated_rules` records.
+        # Lossy for ALLOW rules; preserved here for backward compat
+        # with previously-persisted records.
+        results = tuple(
+            PolicyEvaluationResult(
+                policy_name=v.policy_name,
+                rule_id=v.rule_id,
+                decision=Decision(v.decision),
+                severity=ViolationSeverity(v.severity),
+                reason=v.detail,
+                metadata=dict(v.metadata),
+            )
+            for v in record.violations
+        )
 
     return GovernanceDecision(
         decision_id=uuid.UUID(record.decision_id),
@@ -177,6 +195,34 @@ def record_to_decision(record: GovernanceDecisionRecord) -> GovernanceDecision:
 
 
 # ─── Internal helpers ────────────────────────────────────────────────
+
+
+def _result_to_record(
+    r: PolicyEvaluationResult,
+) -> PolicyEvaluationResultRecord:
+    return PolicyEvaluationResultRecord(
+        policy_name=r.policy_name,
+        rule_id=r.rule_id,
+        decision=r.decision.value,
+        severity=int(r.severity),
+        reason=r.reason,
+        evaluated_at=r.evaluated_at.isoformat(),
+        metadata=dict(r.metadata),
+    )
+
+
+def _record_to_result(
+    record: PolicyEvaluationResultRecord,
+) -> PolicyEvaluationResult:
+    return PolicyEvaluationResult(
+        policy_name=record.policy_name,
+        rule_id=record.rule_id,
+        decision=Decision(record.decision),
+        severity=ViolationSeverity(record.severity),
+        reason=record.reason,
+        evaluated_at=datetime.fromisoformat(record.evaluated_at),
+        metadata=dict(record.metadata),
+    )
 
 
 def _violation_to_record(v: PolicyViolation) -> PolicyViolationRecord:

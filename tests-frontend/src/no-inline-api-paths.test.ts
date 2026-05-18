@@ -28,7 +28,17 @@ const SCAN_ROOTS = [
   join(ROOT, 'packages'),
 ];
 
-const PATTERN = /['"`]\/api\/v\d+\//;
+/**
+ * Constitutional path-authority invariant (Core Law 1):
+ *
+ * Any `/api/v<digit>/` substring anywhere in a TypeScript file outside
+ * `ALLOWED_PATHS` is an authority leak — the contract authority is the
+ * single source of operational URL truth. The earlier regex required a
+ * quote/backtick immediately before `/api/v\d+/`, which missed the
+ * template-interpolation pattern `` `${baseUrl}/api/v1/...` ``. The
+ * regex below scans for the substring anywhere in the file body.
+ */
+const PATTERN = /\/api\/v\d+\//;
 
 test('inline /api/v* path strings only live in @operious/contracts', () => {
   const offences: string[] = [];

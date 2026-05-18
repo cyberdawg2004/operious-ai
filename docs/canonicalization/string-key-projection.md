@@ -190,8 +190,13 @@ codification. Their adoption pre-dated the doctrine; this codification
 documents the contract those substrates already implement. No
 post-codification behavior change is implied for those substrates.
 
-`boundary/normalization` does not yet use `_string_key`. F-08 and F-16 will
-address its adoption under separate constitutional ceremonies.
+`boundary/normalization` is also already compliant with the doctrine
+(see `app/boundary/normalization/canonicalize.py`). This is recorded as
+a **non-material amendment** to the original codification text, which
+incorrectly stated that `boundary/normalization` had not yet adopted
+the projection. F-08 and F-16 retain scope only over future
+amendments to the substrate's canonicalisation surface, not over the
+already-active `_string_key` adoption.
 
 ---
 

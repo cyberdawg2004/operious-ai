@@ -1,23 +1,30 @@
 """Retrieval governance subject — canonical input for retrieval-stage policies.
 
-Used at `EnforcementStage.PRE_RETRIEVAL` and (when wired in a future
-sprint) `EnforcementStage.POST_RETRIEVAL`. Carries the request-shape
-information policies need WITHOUT importing Sprint H runtime types —
-the small `CandidateSummary` value object is the only shape that
-crosses into governance.
+Used at `EnforcementStage.PRE_RETRIEVAL` and (when wired) at
+`EnforcementStage.POST_RETRIEVAL`. Carries the request-shape
+information policies need WITHOUT importing any retrieval-runtime
+types — the small `CandidateSummary` value object is the only shape
+that crosses into governance.
 
-Why a summary, not the Sprint H `RetrievalCandidate`:
+Why a summary, not a runtime candidate object:
 
 * The substrate is a leaf in the dependency graph (enforced by the
-  dependency audit). Importing `RetrievalCandidate` here would couple
-  governance to RAG.
+  dependency audit). Importing a retrieval runtime type here would
+  couple governance to that runtime.
 * Governance only needs `chunk_id` + `content` + `score` + `source`
-  for content-based policies; the full Sprint H type carries more
-  than needed and includes UUID objects that are awkward to
+  for content-based policies; full runtime candidate objects carry
+  more than needed and include UUID objects that are awkward to
   serialize.
-* The factory layer (`factories.py`) is the one place RAG types get
-  summarized into governance subjects — concentrating the coupling
-  to one bounded module.
+* Subjects are built by the *composing* runtime — the caller that
+  owns both the retrieval surface and the governance call — so the
+  coupling is concentrated at one composition boundary, never inside
+  the governance substrate.
+
+Phase 2.1 quarantine note: the prior `app/governance/subjects/
+factories.py` translation layer was quarantined under
+`app/_deprecated/governance_bridge/` together with the legacy
+RAG / assembly pipeline. Subjects are now built directly by the
+composition root that invokes governance.
 """
 
 from __future__ import annotations

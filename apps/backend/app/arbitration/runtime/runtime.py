@@ -481,8 +481,14 @@ class OperationalArbitrationRuntime:
         error_outcome: ArbitrationOutcome,
         reason: str,
     ) -> ArbitrationEnvelope:
+        # Chronology integrity (Core Law 3): failure envelopes consume
+        # a fresh monotonic sequence in the runtime instance just like
+        # success envelopes. Reusing `self._sequence` without
+        # incrementing produces sequence collisions across failures.
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
+        self._sequence += 1
+        sequence = self._sequence
         evaluator_names = tuple(e.name for e in evaluators)
         chain_id = (
             derive_chain_id(evaluator_names=evaluator_names)
@@ -496,7 +502,7 @@ class OperationalArbitrationRuntime:
             chain_id=chain_id,
             case_id=request.case.case_id,
             runtime_instance_id=self._runtime_instance_id,
-            sequence=self._sequence,
+            sequence=sequence,
             outcome=error_outcome,
             evaluator_names=evaluator_names,
             finding_count=0,

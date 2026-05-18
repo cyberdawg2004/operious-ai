@@ -36,6 +36,11 @@ def iter_source_lines(
     Module-level helper shared with the dependency auditor — kept
     public (no leading underscore) so cross-module use does not
     trigger `reportPrivateUsage` under strict typing.
+
+    Files that cannot be read are silently skipped here; callers
+    that need to *report* unreadable files must use
+    :func:`iter_unreadable_source_files` so the gap is surfaced as
+    a `CONTAMINATION_SURFACE` finding rather than dropped.
     """
     if not os.path.isdir(substrate_path):
         return
@@ -62,6 +67,38 @@ def iter_source_lines(
                         yield rel_path, line_no, line
             except OSError:
                 continue
+
+
+def iter_unreadable_source_files(
+    substrate_path: str,
+) -> Iterable[tuple[str, str]]:
+    """Yield (rel_path, reason) for `.py` files that cannot be opened.
+
+    Returns deterministic, lexically-sorted order. The hardening
+    substrate is observational — unreadable evidence MUST surface as
+    a finding rather than be dropped silently.
+    """
+    if not os.path.isdir(substrate_path):
+        return
+    unreadable: list[tuple[str, str]] = []
+    for dirpath, dirnames, filenames in os.walk(substrate_path):
+        dirnames.sort()
+        if "__pycache__" in dirnames:
+            dirnames.remove("__pycache__")
+        for filename in sorted(filenames):
+            if not filename.endswith(_PY_EXT):
+                continue
+            file_path = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(file_path, substrate_path)
+            try:
+                with open(file_path, "r", encoding="utf-8") as fp:
+                    fp.read(1)
+            except OSError as exc:
+                unreadable.append(
+                    (rel_path, f"{type(exc).__name__}: {exc}")
+                )
+    for rel_path, reason in sorted(unreadable, key=lambda p: p[0]):
+        yield rel_path, reason
 
 
 def detect_contamination(
@@ -111,6 +148,35 @@ def detect_contamination(
         )
     else:
         iterator = iter_source_lines(substrate_path)
+        # Surface unreadable files as `CONTAMINATION_SURFACE` findings
+        # rather than dropping them silently — fail-open audits are
+        # constitutionally prohibited (Core Law 4: governance
+        # determinism). The test-override path skips this because the
+        # caller already owns the source corpus.
+        for rel_path, reason in iter_unreadable_source_files(
+            substrate_path
+        ):
+            findings.append(
+                HardeningFinding(
+                    finding_id=derive_finding_id(
+                        audit_seed=seed,
+                        kind=HardeningFindingKind.CONTAMINATION_SURFACE.value,
+                        ordinal=ordinal,
+                    ),
+                    ordinal=ordinal,
+                    kind=HardeningFindingKind.CONTAMINATION_SURFACE,
+                    severity=HardeningSeverity.HIGH,
+                    summary=(
+                        f"{substrate.value} source file is unreadable; "
+                        "contamination audit could not inspect it"
+                    ),
+                    detected_at=detected_at,
+                    scope=substrate.value,
+                    offender=rel_path,
+                    evidence=(reason,),
+                )
+            )
+            ordinal += 1
 
     for rel_path, line_no, line in iterator:
         stripped = line.strip()
@@ -183,4 +249,6 @@ class ContaminationDetector:
 __all__ = [
     "ContaminationDetector",
     "detect_contamination",
+    "iter_source_lines",
+    "iter_unreadable_source_files",
 ]

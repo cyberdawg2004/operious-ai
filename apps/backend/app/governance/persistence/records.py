@@ -30,6 +30,52 @@ from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
+class PolicyEvaluationResultRecord:
+    """Persistable shape of one `PolicyEvaluationResult`.
+
+    Carries every rule that fired (including ALLOW), preserving the
+    full chain order on the persisted record. This is the byte-lossless
+    replay anchor for `GovernanceDecision.evaluated_rules` — without
+    it, replay reconstruction can only re-derive the *non-ALLOW*
+    subset from `violations`, which violates Core Law 2 (replay
+    determinism) for any chain that contained ALLOW rules.
+    """
+
+    policy_name: str
+    rule_id: str
+    decision: str
+    severity: int
+    reason: str
+    evaluated_at: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "policy_name": self.policy_name,
+            "rule_id": self.rule_id,
+            "decision": self.decision,
+            "severity": self.severity,
+            "reason": self.reason,
+            "evaluated_at": self.evaluated_at,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(
+        cls, data: Mapping[str, Any]
+    ) -> "PolicyEvaluationResultRecord":
+        return cls(
+            policy_name=str(data["policy_name"]),
+            rule_id=str(data["rule_id"]),
+            decision=str(data["decision"]),
+            severity=int(data["severity"]),
+            reason=str(data.get("reason", "")),
+            evaluated_at=str(data["evaluated_at"]),
+            metadata=dict(data.get("metadata") or {}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PolicyViolationRecord:
     """Persistable shape of one rule-level violation."""
 
@@ -257,6 +303,10 @@ class GovernanceDecisionRecord:
     correlation_id: str | None = None
     violations: tuple[PolicyViolationRecord, ...] = ()
     restrictions: tuple[RuntimeRestrictionRecord, ...] = ()
+    # Lossless replay anchor — every result the chain produced, in
+    # order, including ALLOW rules. Added additively; legacy records
+    # without this field still deserialize cleanly with `()`.
+    evaluated_rules: tuple[PolicyEvaluationResultRecord, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -270,6 +320,9 @@ class GovernanceDecisionRecord:
             "correlation_id": self.correlation_id,
             "violations": [v.to_dict() for v in self.violations],
             "restrictions": [r.to_dict() for r in self.restrictions],
+            "evaluated_rules": [
+                e.to_dict() for e in self.evaluated_rules
+            ],
             "metadata": dict(self.metadata),
         }
 
@@ -290,6 +343,10 @@ class GovernanceDecisionRecord:
             restrictions=tuple(
                 RuntimeRestrictionRecord.from_dict(r)
                 for r in (data.get("restrictions") or ())
+            ),
+            evaluated_rules=tuple(
+                PolicyEvaluationResultRecord.from_dict(e)
+                for e in (data.get("evaluated_rules") or ())
             ),
             metadata=dict(data.get("metadata") or {}),
         )
@@ -332,6 +389,7 @@ class EnforcementActionRecord:
 
 
 __all__ = [
+    "PolicyEvaluationResultRecord",
     "PolicyViolationRecord",
     "RuntimeRestrictionRecord",
     "PolicyEvaluationTraceRecord",

@@ -183,11 +183,26 @@ def build_decision(
     """
     results = tuple(evaluation_results)
     if not results:
-        # An empty result set is an explicit ALLOW — the substrate
-        # treats "no policies fired" as a permissive baseline. The
-        # surrounding orchestration is responsible for ensuring a
-        # *non-empty* chain runs at every enforcement stage.
-        final = Decision.ALLOW
+        # Core Law 4 (Governance Determinism): the substrate MUST NOT
+        # fail open. An empty result set means no policy spoke for or
+        # against the operation — the substrate cannot vouch for it,
+        # so it synthesises a DENY result with the
+        # `no_governance_evaluated` attribution. The composing runtime
+        # sees a normal-shaped decision and a normal-shaped violation
+        # via the usual path; audit / persistence / replay handle it
+        # like any other DENY.
+        synthetic = PolicyEvaluationResult(
+            policy_name="governance.substrate",
+            rule_id="no_governance_evaluated",
+            decision=Decision.DENY,
+            severity=ViolationSeverity.CRITICAL,
+            reason=(
+                "no policy evaluated this operation; substrate refuses "
+                "to vouch (fail-closed by constitutional default)"
+            ),
+        )
+        results = (synthetic,)
+        final = Decision.DENY
     else:
         final = min(
             (r.decision for r in results),

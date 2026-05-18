@@ -72,6 +72,7 @@ from app.session.identity import (
     SessionReconstructionId,
     derive_reconstruction_id,
     derive_session_id,
+    derive_trace_id,
     generate_session_id,
     generate_trace_id,
 )
@@ -249,6 +250,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
         except SessionValidationError as exc:
             return self._failed_envelope(
@@ -257,6 +260,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
         except SessionNotFoundError as exc:
             return self._failed_envelope(
@@ -265,6 +270,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -276,6 +283,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -391,6 +400,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -402,6 +413,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -484,6 +497,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -495,6 +510,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -590,6 +607,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -601,6 +620,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -663,6 +684,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -917,6 +940,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request_correlation_id,
+                request_request_id=request_request_id,
             )
         except Exception as exc:  # noqa: BLE001
             _logger.exception(
@@ -928,6 +953,8 @@ class SessionRuntime:
                 started_at=started_at,
                 t0=t0,
                 error=exc,
+                request_correlation_id=request_correlation_id,
+                request_request_id=request_request_id,
             )
 
         ended_at = datetime.now(tz=timezone.utc)
@@ -977,8 +1004,24 @@ class SessionRuntime:
         reconstruction_id: SessionReconstructionId | None = None,
         error: str | None = None,
     ) -> SessionTrace:
+        # Replay determinism (Core Law 2): when the request carries a
+        # correlation anchor, derive `trace_id` deterministically from
+        # `(kind, correlation_id, request_id, runtime_instance_id,
+        # sequence)` so the same emission is idempotently identified.
+        # Without a correlation anchor we fall back to UUID4 — there
+        # is no replayable lineage to anchor against.
+        if request_correlation_id:
+            trace_id = derive_trace_id(
+                seed=(
+                    f"{kind.value}|{request_correlation_id}|"
+                    f"{request_request_id or ''}|"
+                    f"{self._runtime_instance_id}|{sequence}"
+                )
+            )
+        else:
+            trace_id = generate_trace_id()
         return SessionTrace(
-            trace_id=generate_trace_id(),
+            trace_id=trace_id,
             kind=kind,
             runtime_instance_id=self._runtime_instance_id,
             sequence=sequence,
@@ -1003,18 +1046,25 @@ class SessionRuntime:
         started_at: datetime,
         t0: float,
         error: BaseException,
+        request_correlation_id: str | None = None,
+        request_request_id: str | None = None,
     ) -> SessionEnvelope:
+        # Chronology integrity (Core Law 3): every emitted envelope
+        # MUST consume a fresh monotonic sequence inside the runtime
+        # instance. Failures are emissions too — reusing the prior
+        # success's sequence is a silent chronology fork.
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
+        sequence = self._next_sequence()
         trace = self._build_trace(
             kind=kind,
             session_id=session_id,
             started_at=started_at,
             ended_at=ended_at,
             latency_ms=latency_ms,
-            sequence=self._sequence,
-            request_correlation_id=None,
-            request_request_id=None,
+            sequence=sequence,
+            request_correlation_id=request_correlation_id,
+            request_request_id=request_request_id,
             error=f"{error.__class__.__name__}: {error}",
         )
         return SessionEnvelope(

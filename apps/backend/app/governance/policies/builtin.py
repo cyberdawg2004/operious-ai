@@ -83,7 +83,12 @@ class TenantScopePolicy(BaseGovernancePolicy):
         self,
         context: GovernanceContext,
     ) -> Sequence[PolicyEvaluationResult]:
-        # Empty allowlist = permissive default.
+        # Empty allowlist = operator-explicit permissive default.
+        # The behaviour is retained (operators may deliberately
+        # configure no scoping), but the result is tagged with
+        # `permissive_default` metadata so audits can detect every
+        # ALLOW that came from an unconfigured allowlist — closing
+        # the "is this intentional or misconfigured?" forensic gap.
         if not self.allowed_tenants:
             return (
                 PolicyEvaluationResult(
@@ -92,6 +97,10 @@ class TenantScopePolicy(BaseGovernancePolicy):
                     decision=Decision.ALLOW,
                     severity=ViolationSeverity.LOW,
                     reason="no tenant allowlist configured",
+                    metadata={
+                        "permissive_default": True,
+                        "config_missing": "allowed_tenants",
+                    },
                 ),
             )
 
@@ -161,13 +170,20 @@ class MaxQueryLengthPolicy(BaseGovernancePolicy):
         assert isinstance(subject, RetrievalGovernanceSubject)
         query = subject.query
         if not query:
+            # Symmetry with `TenantScopePolicy.tenant_missing`: a
+            # required field is missing → DENY (fail-closed).
+            # Core Law 4 prohibits asymmetric fail-open on the same
+            # constitutional class.
             return (
                 PolicyEvaluationResult(
                     policy_name=self.name,
                     rule_id="query_missing",
-                    decision=Decision.ALLOW,
-                    severity=ViolationSeverity.LOW,
-                    reason="empty query; nothing to bound",
+                    decision=Decision.DENY,
+                    severity=ViolationSeverity.HIGH,
+                    reason=(
+                        "retrieval subject is missing required `query`; "
+                        "substrate refuses to bound an unspecified query"
+                    ),
                 ),
             )
         if len(query) > self.max_length:
@@ -230,6 +246,9 @@ class ContentDenylistPolicy(BaseGovernancePolicy):
         context: GovernanceContext,
     ) -> Sequence[PolicyEvaluationResult]:
         if not self.denylist:
+            # Empty denylist = operator-explicit permissive default.
+            # Tagged as `permissive_default` so audits can detect
+            # every ALLOW that came from an unconfigured denylist.
             return (
                 PolicyEvaluationResult(
                     policy_name=self.name,
@@ -237,6 +256,10 @@ class ContentDenylistPolicy(BaseGovernancePolicy):
                     decision=Decision.ALLOW,
                     severity=ViolationSeverity.LOW,
                     reason="no denylisted terms configured",
+                    metadata={
+                        "permissive_default": True,
+                        "config_missing": "denylist",
+                    },
                 ),
             )
 

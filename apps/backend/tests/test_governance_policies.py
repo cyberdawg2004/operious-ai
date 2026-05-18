@@ -4,7 +4,8 @@ Properties pinned (now on typed subjects):
 
 * `TenantScopePolicy` with empty allowlist is permissive,
 * `TenantScopePolicy` DENYs missing / non-allowlisted tenants,
-* `MaxQueryLengthPolicy` DENYs over-long queries, ALLOWs empty query,
+* `MaxQueryLengthPolicy` DENYs over-long queries AND DENYs empty query
+  (constitutional symmetry with `TenantScopePolicy.tenant_missing`),
 * `ContentDenylistPolicy` REDACTs per candidate with a restriction,
 * every policy is deterministic across calls,
 * every policy supports only its declared stages.
@@ -121,10 +122,14 @@ async def test_max_query_length_denies_over_long_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_query_length_allows_when_subject_has_empty_query() -> None:
+async def test_max_query_length_denies_when_subject_has_empty_query() -> None:
+    """Constitutional symmetry with `TenantScopePolicy.tenant_missing`:
+    a missing required field on the subject MUST fail closed
+    (Core Law 4) — the substrate refuses to bound an unspecified
+    query rather than silently allowing it through."""
     policy = MaxQueryLengthPolicy(max_length=5)
     results = await policy.evaluate(_ctx(query=""))
-    assert results[0].decision is Decision.ALLOW
+    assert results[0].decision is Decision.DENY
     assert results[0].rule_id == "query_missing"
 
 

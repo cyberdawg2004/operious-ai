@@ -1,12 +1,16 @@
 """`OperationalPatternAnalysisRuntime` — analysis only, never correction.
 
 The runtime accepts a batch of caller-supplied observations and
-returns an immutable `OperationalPatternAnalysis`. It NEVER:
+returns an immutable `OperationalPatternAnalysis` wrapped in an
+`IntelligenceEnvelope`. It is **pure analysis**: it does not
+persist, mutate, route, or schedule. It NEVER:
 
 * contacts sibling substrates,
-* mutates anything beyond persisting its own analysis,
-* generates recommendations (that's `RecommendationRuntime`),
-* schedules retraining or remediation.
+* mutates any state outside its own runtime-instance sequence
+  counter (which is internal to envelope chronology only),
+* generates recommendations (that is `RecommendationRuntime`),
+* schedules retraining or remediation,
+* persists the analysis (callers own persistence).
 """
 
 from __future__ import annotations
@@ -172,14 +176,18 @@ class OperationalPatternAnalysisRuntime:
         correlation_id: str | None,
         request_id: str | None,
     ) -> IntelligenceEnvelope:
+        # Chronology integrity (Core Law 3): failure envelopes consume
+        # a fresh monotonic sequence; reusing `self._sequence` without
+        # incrementing collides on consecutive failures.
         ended_at = datetime.now(tz=timezone.utc)
         latency = (time.perf_counter() - t0) * 1000.0
+        sequence = self._next_sequence()
         return IntelligenceEnvelope(
             trace=IntelligenceTrace(
                 trace_id=generate_trace_id(),
                 kind=IntelligenceTraceKind.PATTERN_ANALYZE,
                 runtime_instance_id=self._runtime_instance_id,
-                sequence=self._sequence,
+                sequence=sequence,
                 started_at=started_at,
                 ended_at=ended_at,
                 latency_ms=latency,

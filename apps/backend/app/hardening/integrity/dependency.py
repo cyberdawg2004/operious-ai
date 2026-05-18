@@ -54,6 +54,37 @@ _SUBSTRATE_PREFIX_MAP = {
     ),
 }
 
+# Conceptual substrates have no Python import prefix because they
+# represent ownership boundaries (e.g. human approval authority), not
+# code substrates. They are listed here so the import-time invariant
+# below can guarantee total enum coverage — adding a new
+# `SubstrateName` enum value forces either a prefix mapping or an
+# explicit conceptual declaration.
+_CONCEPTUAL_SUBSTRATES: frozenset[SubstrateName] = frozenset(
+    {SubstrateName.HUMAN}
+)
+
+
+def _assert_substrate_coverage() -> None:
+    declared = set(_SUBSTRATE_PREFIX_MAP) | _CONCEPTUAL_SUBSTRATES
+    missing = set(SubstrateName) - declared
+    overlap = set(_SUBSTRATE_PREFIX_MAP) & _CONCEPTUAL_SUBSTRATES
+    if missing:
+        raise AssertionError(
+            "Substrate-coverage invariant violated: "
+            f"missing prefix mapping or conceptual declaration for "
+            f"{sorted(s.value for s in missing)!r}"
+        )
+    if overlap:
+        raise AssertionError(
+            "Substrate-coverage invariant violated: "
+            f"{sorted(s.value for s in overlap)!r} appear in both "
+            "_SUBSTRATE_PREFIX_MAP and _CONCEPTUAL_SUBSTRATES"
+        )
+
+
+_assert_substrate_coverage()
+
 
 def _classify_module(module: str) -> SubstrateName | None:
     candidates: list[tuple[int, SubstrateName]] = []

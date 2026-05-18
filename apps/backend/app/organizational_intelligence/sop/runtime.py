@@ -370,15 +370,19 @@ class SopRuntime:
         request_id: str | None,
         tenant_id: str | None = None,
     ) -> IntelligenceEnvelope:
+        # Chronology integrity (Core Law 3): failure envelopes consume
+        # a fresh monotonic sequence; reusing `self._sequence` without
+        # incrementing collides on consecutive failures.
         ended_at = datetime.now(tz=timezone.utc)
         latency = (time.perf_counter() - t0) * 1000.0
+        sequence = self._next_sequence()
         return IntelligenceEnvelope(
             trace=self._trace(
                 kind=kind,
                 started_at=started_at,
                 ended_at=ended_at,
                 latency=latency,
-                sequence=self._sequence,
+                sequence=sequence,
                 correlation_id=correlation_id,
                 request_id=request_id,
                 tenant_id=tenant_id,

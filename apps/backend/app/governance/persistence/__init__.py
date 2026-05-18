@@ -33,6 +33,7 @@ from app.governance.persistence.records import (
     EnforcementActionRecord,
     GovernanceDecisionRecord,
     GovernanceTraceRecord,
+    PolicyEvaluationResultRecord,
     PolicyEvaluationTraceRecord,
     PolicyViolationRecord,
     RuntimeRestrictionRecord,
@@ -49,6 +50,7 @@ __all__ = [
     # Records
     "GovernanceDecisionRecord",
     "GovernanceTraceRecord",
+    "PolicyEvaluationResultRecord",
     "PolicyEvaluationTraceRecord",
     "EnforcementActionRecord",
     "PolicyViolationRecord",

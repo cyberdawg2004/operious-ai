@@ -219,7 +219,12 @@ async def test_skip_decision_is_deterministic_across_runs() -> None:
 
 
 @pytest.mark.asyncio
-async def test_all_skipped_chain_collapses_to_allow_via_decision_builder() -> None:
+async def test_all_skipped_chain_collapses_to_fail_closed_deny() -> None:
+    """Core Law 4 (Governance Determinism): when every policy in the
+    chain is skipped (e.g., none applicable to the subject kind), the
+    aggregation MUST fail closed. The substrate synthesises a DENY
+    with `no_governance_evaluated` attribution rather than silently
+    permitting the operation."""
     engine = PolicyEvaluationEngine()
     chain = _chain(_RetrievalOnlyPolicy())
     ctx = _ctx(GenericGovernanceSubject())
@@ -229,6 +234,9 @@ async def test_all_skipped_chain_collapses_to_allow_via_decision_builder() -> No
         policy_chain_id=chain.chain_id,
         evaluation_results=result.evaluation_results,
     )
-    # No results → empty aggregation → ALLOW (documented permissive
-    # default). Operators ensure non-empty chains run at every stage.
-    assert decision.decision is Decision.ALLOW
+    assert decision.decision is Decision.DENY
+    assert len(decision.evaluated_rules) == 1
+    assert (
+        decision.evaluated_rules[0].rule_id
+        == "no_governance_evaluated"
+    )

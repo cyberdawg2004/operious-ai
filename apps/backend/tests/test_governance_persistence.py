@@ -131,6 +131,96 @@ def test_decision_record_to_runtime_decision_round_trips_verdict() -> None:
     assert reconstructed.violations[0].policy_name == "p"
 
 
+def test_decision_record_preserves_evaluated_rules_losslessly() -> None:
+    """Replay determinism (Core Law 2): reconstruction MUST preserve
+    every rule that fired, including ALLOW rules — the persistence
+    contract is now lossless."""
+    evaluated_at = datetime(
+        2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc
+    )
+    original = build_decision(
+        stage=EnforcementStage.PRE_RETRIEVAL,
+        policy_chain_id="chain-x",
+        evaluation_results=(
+            PolicyEvaluationResult(
+                policy_name="p1",
+                rule_id="r1",
+                decision=Decision.ALLOW,
+                severity=ViolationSeverity.LOW,
+                reason="ok",
+                evaluated_at=evaluated_at,
+            ),
+            PolicyEvaluationResult(
+                policy_name="p2",
+                rule_id="r2",
+                decision=Decision.DEGRADE,
+                severity=ViolationSeverity.MEDIUM,
+                reason="trim",
+                evaluated_at=evaluated_at,
+            ),
+            PolicyEvaluationResult(
+                policy_name="p3",
+                rule_id="r3",
+                decision=Decision.ALLOW,
+                severity=ViolationSeverity.LOW,
+                reason="ok",
+                evaluated_at=evaluated_at,
+            ),
+        ),
+        decision_id=uuid.UUID("22222222-3333-4444-5555-666666666666"),
+        decided_at=evaluated_at,
+    )
+    record = decision_to_record(original)
+    reconstructed = record_to_decision(record)
+    assert len(reconstructed.evaluated_rules) == 3
+    assert tuple(
+        (r.policy_name, r.rule_id, r.decision)
+        for r in reconstructed.evaluated_rules
+    ) == tuple(
+        (r.policy_name, r.rule_id, r.decision)
+        for r in original.evaluated_rules
+    )
+    # Byte-stable JSON round-trip too.
+    assert (
+        GovernanceDecisionRecord.from_dict(record.to_dict()).to_dict()
+        == record.to_dict()
+    )
+
+
+def test_legacy_decision_record_without_evaluated_rules_still_loads() -> None:
+    """Backward compat: records persisted before `evaluated_rules` was
+    added still reconstruct, falling back to violations-based rebuild."""
+    legacy_blob = {
+        "decision_id": "11111111-2222-3333-4444-555555555555",
+        "decision": "deny",
+        "stage": "pre_retrieval",
+        "policy_chain_id": "t",
+        "reason": "deny: p.r",
+        "decided_at": datetime(
+            2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc
+        ).isoformat(),
+        "correlation_id": None,
+        "violations": [
+            {
+                "policy_name": "p",
+                "rule_id": "r",
+                "decision": "deny",
+                "severity": int(ViolationSeverity.HIGH),
+                "detail": "blocked",
+                "metadata": {},
+            }
+        ],
+        "restrictions": [],
+        "metadata": {},
+    }
+    record = GovernanceDecisionRecord.from_dict(legacy_blob)
+    assert record.evaluated_rules == ()
+    reconstructed = record_to_decision(record)
+    # Legacy path reconstructs the DENY result from violations only.
+    assert len(reconstructed.evaluated_rules) == 1
+    assert reconstructed.evaluated_rules[0].decision is Decision.DENY
+
+
 def test_trace_record_round_trips() -> None:
     decision_id = uuid.UUID("11111111-2222-3333-4444-555555555555")
     correlation_id = uuid.uuid4()
