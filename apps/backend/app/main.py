@@ -8,8 +8,8 @@ intentionally boring.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 
@@ -18,13 +18,11 @@ from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.db.session import dispose_engine
-from app.dependencies.memory import close_memory_providers
-from app.dependencies.providers import close_ai_providers
 from app.middleware.request_context import RequestContextMiddleware
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings: Settings = get_settings()
     configure_logging(settings)
     logger = get_logger(__name__)
@@ -39,8 +37,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        await close_memory_providers()
-        await close_ai_providers()
+        # The pre-Phase-2.1 orchestration / AI-provider lifespan hooks were
+        # removed when those substrates were quarantined into
+        # `app/_deprecated/`. The constitutional substrates are pure
+        # value-object layers and have no I/O resources to dispose of. The
+        # only live infra we still own is the SQLAlchemy engine and the
+        # Redis connection (both lazy / no-op when not configured).
         await dispose_engine()
         await close_redis()
         logger.info("application_shutdown", extra={"app": settings.APP_NAME})

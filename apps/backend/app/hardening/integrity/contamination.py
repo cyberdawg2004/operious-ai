@@ -28,10 +28,15 @@ from app.hardening.models.finding import HardeningFinding
 _PY_EXT = ".py"
 
 
-def _iter_source_lines(
+def iter_source_lines(
     substrate_path: str,
 ) -> Iterable[tuple[str, int, str]]:
-    """Walk substrate_path and yield (rel_path, line_no, line)."""
+    """Walk substrate_path and yield (rel_path, line_no, line).
+
+    Module-level helper shared with the dependency auditor — kept
+    public (no leading underscore) so cross-module use does not
+    trigger `reportPrivateUsage` under strict typing.
+    """
     if not os.path.isdir(substrate_path):
         return
     for dirpath, dirnames, filenames in os.walk(
@@ -105,7 +110,7 @@ def detect_contamination(
             key=lambda triple: (triple[0], triple[1]),
         )
     else:
-        iterator = _iter_source_lines(substrate_path)
+        iterator = iter_source_lines(substrate_path)
 
     for rel_path, line_no, line in iterator:
         stripped = line.strip()

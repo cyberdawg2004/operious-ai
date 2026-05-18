@@ -25,6 +25,7 @@ from app.boundary.voice.exceptions import (
     VoiceValidationError,
 )
 from app.boundary.voice.identity import (
+    VoiceCorrelationId,
     derive_correlation_id,
     derive_event_id,
     derive_lineage_id,
@@ -228,7 +229,7 @@ class VoiceEgressRuntime:
         )
 
     async def _next_lineage_sequence(
-        self, correlation_id
+        self, correlation_id: VoiceCorrelationId
     ) -> int:
         existing = await self._persistence.list_lineage_entries(
             correlation_id

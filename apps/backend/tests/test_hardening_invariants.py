@@ -166,7 +166,7 @@ def test_hardening_runtime_does_not_expose_orchestration_methods() -> (
 def test_hardening_runtime_method_surface_is_pinned() -> None:
     method_names = {
         name
-        for name, member in inspect.getmembers(
+        for name, _member in inspect.getmembers(
             HardeningRuntime, predicate=inspect.isfunction
         )
         if not name.startswith("_")

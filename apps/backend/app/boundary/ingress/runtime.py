@@ -39,6 +39,7 @@ from app.boundary.exceptions import (
 )
 from app.boundary.identity import (
     BoundaryEventId,
+    BoundaryIngressId,
     derive_event_id,
     derive_replay_key,
     generate_ingress_id,
@@ -96,16 +97,6 @@ class BoundaryIngressRuntime:
         detector: BoundaryReplayDetector | None = None,
         persistence: BoundaryPersistenceProtocol | None = None,
     ) -> None:
-        if adapters is None:
-            raise BoundaryConfigurationError(
-                "BoundaryIngressRuntime requires an adapters "
-                "registry."
-            )
-        if idempotency is None:
-            raise BoundaryConfigurationError(
-                "BoundaryIngressRuntime requires an idempotency "
-                "registry."
-            )
         self._adapters = adapters
         self._idempotency = idempotency
         self._normalizer = normalizer or BoundaryNormalizer()
@@ -395,16 +386,16 @@ class BoundaryIngressRuntime:
         return adapter
 
     @staticmethod
-    def _build_metadata(  # type: ignore[no-untyped-def]
+    def _build_metadata(
         *,
-        request,
-        ingress_id,
-        event_id,
-        replay_disposition,
-        replay_key,
-        normalization,
-        adapter_name,
-        original_event_id,
+        request: BoundaryIngressRequest,
+        ingress_id: BoundaryIngressId,
+        event_id: BoundaryEventId | None,
+        replay_disposition: BoundaryReplayDisposition,
+        replay_key: uuid.UUID | None,
+        normalization: BoundaryNormalizationResult,
+        adapter_name: str,
+        original_event_id: BoundaryEventId | None,
     ) -> dict[str, object]:
         meta: dict[str, object] = dict(request.metadata)
         meta[BoundaryMetadataKey.DIRECTION.value] = (
@@ -463,19 +454,19 @@ class BoundaryIngressRuntime:
             )
         return meta
 
-    def _build_trace(  # type: ignore[no-untyped-def]
+    def _build_trace(
         self,
         *,
-        request,
-        ingress_id,
-        event_id,
-        adapter_name,
-        sequence,
-        normalization,
-        replay_disposition,
-        started_at,
-        ended_at,
-        latency_ms,
+        request: BoundaryIngressRequest,
+        ingress_id: BoundaryIngressId,
+        event_id: BoundaryEventId | None,
+        adapter_name: str,
+        sequence: int,
+        normalization: BoundaryNormalizationResult,
+        replay_disposition: BoundaryReplayDisposition,
+        started_at: datetime,
+        ended_at: datetime,
+        latency_ms: float,
     ) -> BoundaryTrace:
         return BoundaryTrace(
             direction=BoundaryDirection.INGRESS,
@@ -502,16 +493,16 @@ class BoundaryIngressRuntime:
             replay_disposition=replay_disposition,
         )
 
-    def _failed_envelope(  # type: ignore[no-untyped-def]
+    def _failed_envelope(
         self,
         *,
-        request,
-        ingress_id,
-        started_at,
-        t0,
-        error,
-        reason,
-        normalization,
+        request: BoundaryIngressRequest,
+        ingress_id: BoundaryIngressId,
+        started_at: datetime,
+        t0: float,
+        error: BoundaryConfigurationError,
+        reason: str,
+        normalization: BoundaryNormalizationResult,
     ) -> BoundaryIngressEnvelope:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0

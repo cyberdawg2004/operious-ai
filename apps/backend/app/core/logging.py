@@ -15,14 +15,13 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Optional
 
 from pythonjsonlogger.json import JsonFormatter
 
 from app.core.config import Settings, get_settings
 from app.observability.logging import RequestContextFilter
 
-_CONFIGURED: bool = False
+_configured: bool = False
 
 _JSON_FORMAT = "%(asctime)s %(levelname)s %(name)s %(request_id)s %(message)s"
 _TEXT_FORMAT = (
@@ -36,15 +35,15 @@ _NOISY_LOGGERS = (
 )
 
 
-def configure_logging(settings: Optional[Settings] = None) -> None:
+def configure_logging(settings: Settings | None = None) -> None:
     """Initialise root logging exactly once.
 
     Idempotent: safe to call multiple times (e.g. from `create_app` and
     lifespan handlers). Re-entry after the first call is a no-op.
     """
 
-    global _CONFIGURED
-    if _CONFIGURED:
+    global _configured
+    if _configured:
         return
 
     settings = settings or get_settings()
@@ -80,7 +79,7 @@ def configure_logging(settings: Optional[Settings] = None) -> None:
         },
     )
 
-    _CONFIGURED = True
+    _configured = True
 
 
 def get_logger(name: str) -> logging.Logger:

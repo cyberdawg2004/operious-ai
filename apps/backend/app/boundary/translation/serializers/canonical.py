@@ -20,10 +20,6 @@ def text_fingerprint(text: str, *, language: str) -> str:
 def canonicalize_attributes(
     attributes: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if not isinstance(attributes, Mapping):
-        raise TypeError(
-            "canonicalize_attributes expected a Mapping"
-        )
     return {
         key: _canonicalize(attributes[key])
         for key in sorted(attributes.keys())

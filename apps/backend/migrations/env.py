@@ -28,7 +28,7 @@ from app.db.base import Base
 # Import models so they register on Base.metadata. Every new model
 # module must be imported here (directly or transitively) to be picked
 # up by autogenerate.
-from app.db import models  # noqa: F401
+from app.db import models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

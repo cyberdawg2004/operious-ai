@@ -138,7 +138,7 @@ def test_translation_does_not_use_auto_mutation_tokens(
 def test_ingress_runtime_method_surface_is_pinned() -> None:
     method_names = {
         name
-        for name, member in inspect.getmembers(
+        for name, _member in inspect.getmembers(
             TranslationIngressRuntime,
             predicate=inspect.isfunction,
         )
@@ -150,7 +150,7 @@ def test_ingress_runtime_method_surface_is_pinned() -> None:
 def test_egress_runtime_method_surface_is_pinned() -> None:
     method_names = {
         name
-        for name, member in inspect.getmembers(
+        for name, _member in inspect.getmembers(
             TranslationEgressRuntime,
             predicate=inspect.isfunction,
         )

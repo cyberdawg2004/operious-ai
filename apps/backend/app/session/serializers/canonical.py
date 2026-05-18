@@ -76,7 +76,9 @@ def canonicalize_attributes(
     attributes: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Canonicalise a metadata mapping (typed wrapper)."""
-    if not isinstance(attributes, Mapping):
+    if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
+        attributes, Mapping
+    ):
         raise TypeError(
             f"canonicalize_attributes expected a Mapping, got "
             f"{type(attributes)!r}"

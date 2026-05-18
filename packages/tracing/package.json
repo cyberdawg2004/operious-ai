@@ -1,0 +1,22 @@
+{
+  "name": "@operious/tracing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend correlation continuity primitives. Frontend lineage display only.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@operious/shared": "*",
+    "@operious/types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

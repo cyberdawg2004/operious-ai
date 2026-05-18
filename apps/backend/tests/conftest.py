@@ -9,28 +9,36 @@ is `sqlite`.
 
 Fixtures provided here:
 
-* `sqlite_engine`    — fresh in-memory async SQLite engine, schema created.
-* `session_factory`  — `async_sessionmaker` bound to `sqlite_engine`.
-* `chunker`          — `RecursiveCharacterChunker` with deterministic config.
-* `fake_embedder`    — deterministic in-memory embedding gateway.
-* `vector_provider`  — fresh `InMemoryVectorProvider` per test.
+* `sqlite_engine`     — fresh in-memory async SQLite engine, schema created.
+* `session_factory`   — `async_sessionmaker` bound to `sqlite_engine`.
+* `settings_for_test` — `Settings` instance with safe test defaults.
+
+The pre-Phase-2.1 fixtures (`chunker`, `vector_provider`, `fake_embedder`)
+were removed when the underlying memory / chunking / vector-provider
+modules were quarantined under `app/_deprecated/`. Their only consumers
+live under `tests/_deprecated/` and are excluded from collection by
+`pytest.ini::norecursedirs`.
 """
 
 from __future__ import annotations
 
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.ext.compiler import compiles
+
+if TYPE_CHECKING:
+    from app.core.config import Settings
 
 # ─── SQLite type-compatibility shims ──────────────────────────────────────
 #
@@ -38,13 +46,17 @@ from sqlalchemy.ext.asyncio import (
 # unaffected.
 
 
-@compiles(JSONB, "sqlite")  # type: ignore[no-untyped-call]
-def _compile_jsonb_sqlite(_type, _compiler, **_kw) -> str:  # noqa: ANN001
+@compiles(JSONB, "sqlite")  # type: ignore[no-untyped-call,misc]
+def _compile_jsonb_sqlite(  # pyright: ignore[reportUnusedFunction]
+    _type: object, _compiler: object, **_kw: object
+) -> str:
     return "JSON"
 
 
-@compiles(UUID, "sqlite")  # type: ignore[no-untyped-call]
-def _compile_uuid_sqlite(_type, _compiler, **_kw) -> str:  # noqa: ANN001
+@compiles(UUID, "sqlite")  # type: ignore[no-untyped-call,misc]
+def _compile_uuid_sqlite(  # pyright: ignore[reportUnusedFunction]
+    _type: object, _compiler: object, **_kw: object
+) -> str:
     return "CHAR(36)"
 
 
@@ -57,8 +69,10 @@ async def sqlite_engine() -> AsyncIterator[AsyncEngine]:
 
     # Import inside the fixture so module-import-time side effects (the
     # production engine in `app.db.session`) don't fight the test engine.
+    from app.db import (  # noqa: F401  — ensures every model is registered
+        models,  # pyright: ignore[reportUnusedImport]
+    )
     from app.db.base import Base
-    from app.db import models  # noqa: F401  — ensures every model is registered
 
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -88,32 +102,11 @@ async def session_factory(
     )
 
 
-# ─── Memory-subsystem fixtures ────────────────────────────────────────────
+# ─── Settings fixture ─────────────────────────────────────────────────────
 
 
 @pytest.fixture
-def chunker():
-    """`RecursiveCharacterChunker` with a small, deterministic config."""
-
-    from app.memory.chunking.models import ChunkerConfig
-    from app.memory.chunking.recursive import RecursiveCharacterChunker
-
-    return RecursiveCharacterChunker(
-        ChunkerConfig(target_size=120, overlap=20, min_size=10)
-    )
-
-
-@pytest.fixture
-def vector_provider():
-    """A fresh `InMemoryVectorProvider` per test."""
-
-    from app.providers.in_memory_vector_provider import InMemoryVectorProvider
-
-    return InMemoryVectorProvider()
-
-
-@pytest.fixture
-def settings_for_test():
+def settings_for_test() -> Settings:
     """Build a `Settings` instance with safe test defaults."""
 
     # Force the production-engine import to use a SQLite URL so anything
@@ -121,15 +114,13 @@ def settings_for_test():
     # contact a real Postgres.
     os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
     os.environ.setdefault("OPENAI_API_KEY", "")
-    from app.core.config import Settings  # noqa: E402
+    from app.core.config import Settings as _Settings
 
-    return Settings()
+    return _Settings()
 
 
 __all__ = [
     "sqlite_engine",
     "session_factory",
-    "chunker",
-    "vector_provider",
     "settings_for_test",
 ]

@@ -34,10 +34,18 @@ class ArbitrationEvaluatorRegistry:
                 self.register(evaluator)
 
     def register(self, evaluator: BaseArbitrationEvaluator) -> None:
-        if not isinstance(evaluator, BaseArbitrationEvaluator):
+        # Defense-in-depth: pyright enforces the type at the call site,
+        # but the registry is also reachable from dynamic composition
+        # paths (test fixtures, future plugin shims). Reject any
+        # non-evaluator object at runtime to preserve composition-time
+        # integrity. The isinstance check is intentionally redundant
+        # with the static type — suppress the pyright warning.
+        if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
+            evaluator, BaseArbitrationEvaluator
+        ):
             raise ArbitrationConfigurationError(
-                "Registered object is not a BaseArbitrationEvaluator: "
-                f"{type(evaluator)!r}"
+                f"Arbitration registry rejects non-evaluator object: "
+                f"{type(evaluator).__name__!r}"
             )
         if evaluator.name in self._evaluators:
             raise ArbitrationConfigurationError(

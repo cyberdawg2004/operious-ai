@@ -43,6 +43,7 @@ from app.agents.exceptions import (
     ToolNotFoundError,
 )
 from app.agents.results import ToolInvocationRequest
+from app.agents.tools.base import BaseTool
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
 from app.governance.context import GovernanceContext
@@ -139,9 +140,8 @@ class ToolInvoker:
                     context=context,
                     started_at=started_at,
                     loop_start=loop_start,
-                    error=governance_envelope.error or RuntimeError(
-                        "governance evaluation failed"
-                    ),
+                    error=governance_envelope.error
+                    or RuntimeError("governance evaluation failed"),
                     reason="governance_evaluation_failed",
                     governance_envelope=governance_envelope,
                 )
@@ -238,11 +238,7 @@ class ToolInvoker:
             ended_at=ended_at,
             latency_ms=latency_ms,
             governance_decision_id=governance_decision_id,
-            error=(
-                None
-                if error is None
-                else f"{type(error).__name__}: {error}"
-            ),
+            error=(None if error is None else f"{type(error).__name__}: {error}"),
             metadata=metadata,
         )
         return ToolInvocationEnvelope(
@@ -255,7 +251,7 @@ class ToolInvoker:
 def _build_governance_context(
     request: ToolInvocationRequest,
     context: AgentExecutionContext,
-    tool,  # BaseTool — typed loosely to avoid circular import at runtime
+    tool: BaseTool,
 ) -> GovernanceContext:
     """Construct the typed governance context for one tool invocation.
 
@@ -265,9 +261,7 @@ def _build_governance_context(
     callers can write tool-scoped policies against it.
     """
     capability_str = ",".join(sorted(tool.required_capabilities)) or ""
-    target_resource = str(
-        request.metadata.get("target_resource") or request.tool_name
-    )
+    target_resource = str(request.metadata.get("target_resource") or request.tool_name)
     subject = AgentActionGovernanceSubject(
         agent_id=context.identity.agent_id,
         capability=capability_str,

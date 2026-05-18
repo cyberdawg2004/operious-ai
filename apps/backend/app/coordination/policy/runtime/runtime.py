@@ -45,6 +45,7 @@ from app.coordination.policy.contracts.requests import (
 from app.coordination.policy.contracts.results import (
     CoordinationPolicyEvaluationResult,
 )
+from app.coordination.policy.enums import CoordinationPolicyDecision
 from app.coordination.policy.envelopes import (
     CoordinationPolicyEnvelope,
 )
@@ -273,7 +274,7 @@ class CoordinationPolicyRuntime:
     def _substrate_metadata(
         self,
         request: CoordinationPolicyEvaluationRequest,
-        apex,
+        apex: CoordinationPolicyDecision,
     ) -> Mapping[str, object]:
         return {
             CoordinationPolicyMetadataKey.CHAIN_ID.value: str(

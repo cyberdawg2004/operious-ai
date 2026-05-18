@@ -20,9 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class BaseRepository:
     """Common repository plumbing.
 
-    Subclasses receive their `AsyncSession` via constructor (typically
-    wired by a dependency provider in `app.dependencies.repositories`)
-    and expose intent-named query methods. Repositories MUST NOT call
+    Subclasses receive their `AsyncSession` via constructor (wired by
+    a dependency provider in `app.dependencies.database` /
+    `app.dependencies.services`; the pre-Phase-2.1
+    `app.dependencies.repositories` factory was quarantined into
+    `app/_deprecated/`) and expose intent-named query methods.
+    Repositories MUST NOT call
     `session.commit()` or `session.rollback()` — that is the service
     layer's job.
     """

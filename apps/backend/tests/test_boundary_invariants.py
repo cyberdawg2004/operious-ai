@@ -88,7 +88,7 @@ _FORBIDDEN_RUNTIME_METHODS = {
         BoundaryEgressRuntime,
     ],
 )
-def test_runtime_has_no_orchestration_surfaces(runtime_cls) -> None:
+def test_runtime_has_no_orchestration_surfaces(runtime_cls: type) -> None:
     """No methods that imply orchestration / execution authority."""
     public = {
         name

@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+  }
+  ::selection {
+    background: rgba(138, 166, 255, 0.25);
+  }
+  *:focus-visible {
+    @apply outline-none ring-1 ring-accent ring-offset-0;
+  }
+}
+
+@layer components {
+  .surface-raised {
+    @apply bg-bg-raised border border-line shadow-raised;
+  }
+  .surface-inset {
+    @apply bg-bg-inset border border-line-subtle;
+  }
+  .text-mono {
+    @apply font-mono text-2xs tracking-wider;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}

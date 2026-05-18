@@ -1,0 +1,30 @@
+{
+  "name": "operious-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Operious AI — Governed Organizational Cognition Infrastructure",
+  "workspaces": [
+    "apps/marketing",
+    "apps/command-center",
+    "packages/*",
+    "tests-frontend"
+  ],
+  "scripts": {
+    "dev:marketing": "npm --workspace=@operious/marketing run dev",
+    "dev:command-center": "npm --workspace=@operious/command-center run dev",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:frontend": "npm --workspace=@operious/tests-frontend run test"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0",
+    "prettier": "^3.3.3"
+  }
+}

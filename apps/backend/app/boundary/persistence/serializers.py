@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.boundary.contracts.results import (
     BoundaryEgressResult,
@@ -117,11 +117,7 @@ def egress_result_to_record(
         payload_headers=dict(
             payload.headers if payload is not None else {}
         ),
-        translated_at=(
-            result.translated_at
-            if result.translated_at is not None
-            else datetime.now(tz=timezone.utc)
-        ),
+        translated_at=result.translated_at,
         started_at=result.started_at,
         ended_at=result.ended_at,
         latency_ms=result.latency_ms,

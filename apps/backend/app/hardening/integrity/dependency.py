@@ -19,7 +19,7 @@ from app.hardening.identity import (
     derive_finding_id,
 )
 from app.hardening.integrity.contamination import (
-    _iter_source_lines,
+    iter_source_lines,
 )
 from app.hardening.models.dependency import (
     DependencyAuditFinding,
@@ -133,7 +133,7 @@ def audit_dependencies(
                 key=lambda triple: (triple[0], triple[1]),
             )
         else:
-            blob_iter = _iter_source_lines(path)
+            blob_iter = iter_source_lines(path)
 
         for _rel_path, _line_no, line in blob_iter:
             for module in _import_modules(line):

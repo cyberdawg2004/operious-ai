@@ -29,6 +29,7 @@ from app.boundary.translation.exceptions import (
     TranslationValidationError,
 )
 from app.boundary.translation.identity import (
+    TranslationCorrelationId,
     derive_correlation_id,
     derive_lineage_id,
     derive_replay_id,
@@ -50,6 +51,9 @@ from app.boundary.translation.models.payload import (
 )
 from app.boundary.translation.models.replay import (
     TranslationReplay,
+)
+from app.boundary.translation.models.preservation import (
+    SemanticPreservationCheck,
 )
 from app.boundary.translation.models.validation import (
     TranslationFinding,
@@ -283,7 +287,7 @@ class TranslationEgressRuntime:
         )
 
     async def _next_lineage_sequence(
-        self, correlation_id
+        self, correlation_id: TranslationCorrelationId
     ) -> int:
         existing = (
             await self._persistence.list_lineage_entries(
@@ -383,7 +387,7 @@ class TranslationEgressRuntime:
 
 
 def _build_findings(
-    preservation,
+    preservation: SemanticPreservationCheck,
 ) -> tuple[TranslationFinding, ...]:
     out: list[TranslationFinding] = []
     ordinal = 0

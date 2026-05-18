@@ -84,10 +84,6 @@ class CommunicationRuntime:
         *,
         persistence: IntelligencePersistenceProtocol,
     ) -> None:
-        if persistence is None:
-            raise IntelligenceValidationError(
-                "CommunicationRuntime requires a persistence backend"
-            )
         self._persistence = persistence
         self._runtime_instance_id = uuid.uuid4()
         self._sequence = 0

@@ -40,10 +40,6 @@ def canonicalize_payload(value: Any) -> Any:
 def canonicalize_attributes(
     attributes: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if not isinstance(attributes, Mapping):
-        raise TypeError(
-            "canonicalize_attributes expected a Mapping"
-        )
     return {
         key: canonicalize_payload(attributes[key])
         for key in sorted(attributes.keys(), key=_string_key)

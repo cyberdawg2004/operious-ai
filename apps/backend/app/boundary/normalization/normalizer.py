@@ -97,9 +97,7 @@ class BoundaryNormalizer:
             external_emitted_at=raw.external_emitted_at,
             canonical_payload=canonicalize_payload(
                 raw.canonical_payload
-            )
-            if raw.canonical_payload is not None
-            else {},
+            ),
             error=raw.error,
             metadata=canonicalize_metadata(raw.metadata),
         )

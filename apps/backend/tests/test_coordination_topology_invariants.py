@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
-from dataclasses import fields, is_dataclass
+from dataclasses import is_dataclass
 
 import pytest
 
@@ -96,8 +96,12 @@ def test_public_value_objects_are_frozen_slots() -> None:
         assert is_dataclass(cls), f"{cls.__name__} must be a dataclass"
         params = getattr(cls, "__dataclass_params__")
         assert params.frozen, f"{cls.__name__} must be frozen=True"
-        # `slots` is on Python 3.10+ dataclasses; check by attribute absence.
-        assert "__dict__" not in dir(cls()) if not fields(cls) else True
+        # `slots=True` on Python 3.10+ dataclasses materialises `__slots__`
+        # on the class itself. Verify the class declares __slots__ rather
+        # than instantiating it (constructors require arguments).
+        assert "__slots__" in cls.__dict__, (
+            f"{cls.__name__} must be a slots=True frozen dataclass"
+        )
 
 
 # ─── Namespaced metadata keys ────────────────────────────────────────

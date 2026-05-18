@@ -1,0 +1,28 @@
+{
+  "name": "@operious/observability",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend trace, lineage, and replay visualization helpers.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@operious/shared": "*",
+    "@operious/types": "*",
+    "@operious/ui": "*"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "react": "^18.3.1",
+    "typescript": "^5.6.3"
+  }
+}

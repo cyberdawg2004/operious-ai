@@ -57,6 +57,9 @@ from app.boundary.translation.models.payload import (
 from app.boundary.translation.models.replay import (
     TranslationReplay,
 )
+from app.boundary.translation.models.preservation import (
+    SemanticPreservationCheck,
+)
 from app.boundary.translation.models.validation import (
     TranslationFinding,
     TranslationValidation,
@@ -380,7 +383,7 @@ class TranslationIngressRuntime:
 
 
 def _build_findings(
-    preservation,
+    preservation: SemanticPreservationCheck,
 ) -> tuple[TranslationFinding, ...]:
     out: list[TranslationFinding] = []
     ordinal = 0

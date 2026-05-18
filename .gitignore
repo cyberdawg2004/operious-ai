@@ -1,5 +1,63 @@
+# Python
 venv/
-.env
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Coverage
+coverage/
+htmlcov/
+
+# Python packaging
+*.egg-info/
+.eggs/
+
+# Node
 node_modules/
+.next/
+.turbo/
+dist/
+out/
+*.tsbuildinfo
+
+# Frontend testing
+playwright-report/
+test-results/
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Database
+*.sqlite3
+*.db
+
+# Runtime
+tmp/
+temp/
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Deployment
+.vercel/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Linux/Vim
+*.swp

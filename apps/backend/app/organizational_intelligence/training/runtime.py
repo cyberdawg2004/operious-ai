@@ -85,6 +85,7 @@ from app.organizational_intelligence.lineage.tracker import (
 )
 from app.organizational_intelligence.models.memory import (
     ApprovedPattern,
+    CandidatePattern,
     MemoryEvolutionProposal,
     OrganizationalMemoryArtifact,
 )
@@ -129,10 +130,6 @@ class MemoryEvolutionRuntime:
         persistence: IntelligencePersistenceProtocol,
         extractor: DeterministicCandidateExtractor | None = None,
     ) -> None:
-        if persistence is None:
-            raise IntelligenceValidationError(
-                "MemoryEvolutionRuntime requires a persistence backend"
-            )
         self._persistence = persistence
         self._extractor = (
             extractor or DeterministicCandidateExtractor()
@@ -775,7 +772,7 @@ class MemoryEvolutionRuntime:
         return artifact
 
     async def _load_artifact_for_candidate(
-        self, candidate
+        self, candidate: CandidatePattern
     ) -> OrganizationalMemoryArtifact:
         artifact_id = derive_memory_artifact_id(
             kind=candidate.kind.value,

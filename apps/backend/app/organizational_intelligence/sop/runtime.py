@@ -86,10 +86,6 @@ class SopRuntime:
         persistence: IntelligencePersistenceProtocol,
         analyzer: DeterministicSopAnalyzer | None = None,
     ) -> None:
-        if persistence is None:
-            raise IntelligenceValidationError(
-                "SopRuntime requires a persistence backend"
-            )
         self._persistence = persistence
         self._analyzer = analyzer or DeterministicSopAnalyzer()
         self._runtime_instance_id = uuid.uuid4()

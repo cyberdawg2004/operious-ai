@@ -163,8 +163,9 @@ def _parse_timestamp(value: Any) -> datetime | None:
             parsed = parsedate_to_datetime(value)
         except (TypeError, ValueError):
             return None
-        if parsed is None:
-            return None
+        # `email.utils.parsedate_to_datetime` returns `datetime` per
+        # the typeshed; the runtime branch for a `None` return path
+        # was retired with Python 3.10+. Trust the type contract.
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed

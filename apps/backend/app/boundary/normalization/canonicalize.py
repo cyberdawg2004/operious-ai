@@ -71,11 +71,6 @@ def canonicalize_metadata(
     metadata: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Canonicalise a metadata mapping (typed wrapper)."""
-    if not isinstance(metadata, Mapping):
-        raise TypeError(
-            f"canonicalize_metadata expected a Mapping, got "
-            f"{type(metadata)!r}"
-        )
     return {
         key: canonicalize_payload(metadata[key])
         for key in sorted(metadata.keys(), key=_string_key)

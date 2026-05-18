@@ -5,9 +5,6 @@ from __future__ import annotations
 from app.organizational_intelligence.communication.runtime import (
     CommunicationRuntime,
 )
-from app.organizational_intelligence.exceptions import (
-    IntelligenceConfigurationError,
-)
 from app.organizational_intelligence.operational_patterns.runtime import (
     OperationalPatternAnalysisRuntime,
 )
@@ -51,11 +48,6 @@ class OrganizationalIntelligenceRuntime:
         ) = None,
         recommendations: RecommendationRuntime | None = None,
     ) -> None:
-        if persistence is None:
-            raise IntelligenceConfigurationError(
-                "OrganizationalIntelligenceRuntime requires a "
-                "persistence backend"
-            )
         self.sop = sop or SopRuntime(persistence=persistence)
         self.tonality = tonality or TonalityRuntime(
             persistence=persistence

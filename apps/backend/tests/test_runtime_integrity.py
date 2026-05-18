@@ -351,7 +351,7 @@ def test_governance_view_blocking_authority_in_replay_matches_live() -> None:
     that single-source invariant.
     """
     from app.supervisor.runtime.view_builder import (
-        _record_governance_view,
+        _record_governance_view,  # pyright: ignore[reportPrivateUsage]
     )
 
     for decision in Decision:

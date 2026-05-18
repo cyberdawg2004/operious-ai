@@ -182,7 +182,7 @@ def as_egress_id(value: uuid.UUID | str) -> BoundaryEgressId:
 
 
 def as_external_message_id(value: str) -> ExternalMessageId:
-    if not isinstance(value, str) or not value:
+    if not value:
         raise ValueError(
             "external_message_id must be a non-empty string"
         )
@@ -192,7 +192,7 @@ def as_external_message_id(value: str) -> ExternalMessageId:
 def as_external_conversation_id(
     value: str,
 ) -> ExternalConversationId:
-    if not isinstance(value, str) or not value:
+    if not value:
         raise ValueError(
             "external_conversation_id must be a non-empty string"
         )

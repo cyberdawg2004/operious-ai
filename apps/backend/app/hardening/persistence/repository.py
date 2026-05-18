@@ -18,24 +18,23 @@ from app.hardening.models.failure import (
 class HardeningPersistenceProtocol(Protocol):
     """Storage-agnostic protocol for hardening artifacts."""
 
-    async def write_audit(
-        self, audit: HardeningAudit
-    ) -> None:
+    async def write_audit(self, audit: HardeningAudit) -> None:
         """Append a hardening audit. Audits are write-once."""
+        ...
 
     async def get_audit(
         self, audit_id: HardeningAuditId
     ) -> HardeningAudit | None: ...
 
-    async def list_audits(
-        self,
-    ) -> tuple[HardeningAudit, ...]:
+    async def list_audits(self) -> tuple[HardeningAudit, ...]:
         """Return audits sorted by ``started_at`` (asc)."""
+        ...
 
     async def write_failure_record(
         self, record: FailureContainmentRecord
     ) -> None:
         """Append a failure record. Failure records are write-once."""
+        ...
 
     async def get_failure_record(
         self, record_id: FailureContainmentRecordId
@@ -45,6 +44,7 @@ class HardeningPersistenceProtocol(Protocol):
         self,
     ) -> tuple[FailureContainmentRecord, ...]:
         """Return failure records sorted by ``recorded_at`` (asc)."""
+        ...
 
 
 __all__ = ["HardeningPersistenceProtocol"]

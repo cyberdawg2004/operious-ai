@@ -31,7 +31,10 @@ from app.boundary.enums import BoundaryDirection
 from app.boundary.exceptions import (
     BoundaryConfigurationError,
 )
-from app.boundary.identity import generate_egress_id
+from app.boundary.identity import (
+    BoundaryEgressId,
+    generate_egress_id,
+)
 from app.boundary.persistence.repository import (
     BoundaryPersistenceProtocol,
 )
@@ -63,11 +66,6 @@ class BoundaryEgressRuntime:
         adapters: BoundaryAdapterRegistry,
         persistence: BoundaryPersistenceProtocol | None = None,
     ) -> None:
-        if adapters is None:
-            raise BoundaryConfigurationError(
-                "BoundaryEgressRuntime requires an adapters "
-                "registry."
-            )
         self._adapters = adapters
         self._persistence = persistence
         self._runtime_instance_id: uuid.UUID = uuid.uuid4()
@@ -230,11 +228,11 @@ class BoundaryEgressRuntime:
         return adapter
 
     @staticmethod
-    def _build_metadata(  # type: ignore[no-untyped-def]
+    def _build_metadata(
         *,
-        request,
-        egress_id,
-        adapter_name,
+        request: BoundaryEgressRequest,
+        egress_id: BoundaryEgressId,
+        adapter_name: str,
     ) -> dict[str, object]:
         meta: dict[str, object] = dict(request.metadata)
         meta[BoundaryMetadataKey.DIRECTION.value] = (
@@ -264,16 +262,16 @@ class BoundaryEgressRuntime:
             )
         return meta
 
-    def _failed_envelope(  # type: ignore[no-untyped-def]
+    def _failed_envelope(
         self,
         *,
-        request,
-        egress_id,
-        adapter_name,
-        started_at,
-        t0,
-        error,
-        reason,
+        request: BoundaryEgressRequest,
+        egress_id: BoundaryEgressId,
+        adapter_name: str,
+        started_at: datetime,
+        t0: float,
+        error: BoundaryConfigurationError,
+        reason: str,
     ) -> BoundaryEgressEnvelope:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0

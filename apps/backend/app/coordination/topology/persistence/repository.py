@@ -33,16 +33,19 @@ class CoordinationTopologyPersistenceProtocol(Protocol):
         self, record: CoordinationTopologyRecord
     ) -> None:
         """Persist `record`. Write-once per `evaluation_id`."""
+        ...
 
     async def get_evaluation(
         self, evaluation_id: str
     ) -> CoordinationTopologyRecord | None:
         """Return the record for `evaluation_id`, or None if absent."""
+        ...
 
     async def query_evaluations(
         self, query: CoordinationTopologyQuery
     ) -> RecordPage[CoordinationTopologyRecord]:
         """Return a deterministically-ordered page of records."""
+        ...
 
 
 __all__ = ["CoordinationTopologyPersistenceProtocol"]

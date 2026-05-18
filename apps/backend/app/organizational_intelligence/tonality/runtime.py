@@ -73,10 +73,6 @@ class TonalityRuntime:
             DeterministicTonalityClassifier | None
         ) = None,
     ) -> None:
-        if persistence is None:
-            raise IntelligenceValidationError(
-                "TonalityRuntime requires a persistence backend"
-            )
         self._persistence = persistence
         self._classifier = (
             classifier or DeterministicTonalityClassifier()

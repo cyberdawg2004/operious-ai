@@ -63,9 +63,12 @@ def canonicalize_payload(value: Any) -> Any:
 def canonicalize_attributes(
     attributes: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if not isinstance(attributes, Mapping):
+    if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
+        attributes, Mapping
+    ):
         raise TypeError(
-            "canonicalize_attributes expected a Mapping"
+            f"canonicalize_attributes expected a Mapping, got "
+            f"{type(attributes).__name__!r}"
         )
     return {
         key: canonicalize_payload(attributes[key])

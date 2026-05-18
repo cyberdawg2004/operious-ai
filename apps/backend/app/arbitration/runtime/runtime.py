@@ -96,7 +96,7 @@ class OperationalArbitrationRuntime:
         registry: ArbitrationEvaluatorRegistry,
         persistence: ArbitrationPersistenceProtocol | None = None,
     ) -> None:
-        if registry is None or len(registry) == 0:
+        if len(registry) == 0:
             raise ArbitrationConfigurationError(
                 "OperationalArbitrationRuntime requires a non-empty "
                 "ArbitrationEvaluatorRegistry."
@@ -345,13 +345,14 @@ class OperationalArbitrationRuntime:
         output: ArbitrationEvaluatorOutput | None,
         evaluator_name: str,
     ) -> ArbitrationEvaluatorOutput:
+        # `evaluator_name` is preserved on the signature so the caller's
+        # error reporting can stay symmetric across all coercion sites
+        # — the contract may grow back a runtime check later (e.g. when
+        # evaluators are registered via plugin entry points and their
+        # outputs are dynamically typed).
+        del evaluator_name
         if output is None:
             return ArbitrationEvaluatorOutput(findings=())
-        if not isinstance(output, ArbitrationEvaluatorOutput):
-            raise ArbitrationEvaluationError(
-                f"evaluator {evaluator_name!r} returned an unexpected "
-                f"type: {type(output)!r}"
-            )
         return output
 
     @staticmethod

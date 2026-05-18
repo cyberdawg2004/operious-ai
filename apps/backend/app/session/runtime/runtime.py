@@ -30,8 +30,10 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
+from typing import Any
 
 from app.session.contracts.requests import (
     AppendEventRequest,
@@ -64,7 +66,10 @@ from app.session.exceptions import (
     SessionValidationError,
 )
 from app.session.identity import (
+    SessionCorrelationId,
+    SessionEventId,
     SessionId,
+    SessionReconstructionId,
     derive_reconstruction_id,
     derive_session_id,
     generate_session_id,
@@ -129,10 +134,6 @@ class SessionRuntime:
         registry: SessionRegistry | None = None,
         reconstructor: SessionReconstructor | None = None,
     ) -> None:
-        if persistence is None:
-            raise SessionValidationError(
-                "SessionRuntime requires a persistence backend."
-            )
         self._persistence = persistence
         self._registry = registry or SessionRegistry()
         self._reconstructor = (
@@ -815,7 +816,7 @@ class SessionRuntime:
                 " no further appends accepted"
             )
 
-    def _build_next_event(  # type: ignore[no-untyped-def]
+    def _build_next_event(
         self,
         *,
         session: OperationalSession,
@@ -823,9 +824,9 @@ class SessionRuntime:
         occurred_at: datetime,
         recorded_at: datetime,
         continuity_mode: SessionContinuityMode,
-        payload,
+        payload: Mapping[str, Any] | None,
         annotation: str | None,
-        correlation_id=None,
+        correlation_id: SessionCorrelationId | None = None,
     ) -> SessionTimelineEvent:
         if occurred_at.tzinfo is None:
             raise SessionValidationError(
@@ -972,8 +973,8 @@ class SessionRuntime:
         request_request_id: str | None,
         tenant_id: str | None = None,
         principal_id: str | None = None,
-        event_id=None,
-        reconstruction_id=None,
+        event_id: SessionEventId | None = None,
+        reconstruction_id: SessionReconstructionId | None = None,
         error: str | None = None,
     ) -> SessionTrace:
         return SessionTrace(
