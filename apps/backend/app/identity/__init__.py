@@ -14,6 +14,7 @@ See ``app.identity.primitives`` for the full doctrine, and
 ``tests/test_identity_primitives.py`` for the leaf-invariant guard.
 """
 
+from app.identity.authority import AuthorityContext
 from app.identity.primitives import (
     EnvironmentId,
     IdentityError,
@@ -28,6 +29,7 @@ from app.identity.primitives import (
 from app.identity.projection import project_optional_str
 
 __all__ = [
+    "AuthorityContext",
     "EnvironmentId",
     "IdentityError",
     "OrganizationId",

@@ -24,6 +24,13 @@ TRANSLATION_ROOT = (
 # Allowed: own subtree only.
 _ALLOWED_INTERNAL_PREFIXES = (
     "app.boundary.translation.",
+    # `app.identity` is the substrate-shareable identity leaf
+    # established by Wedge A. It carries the typed identity
+    # primitives and the `AuthorityContext` value object that
+    # Wedge B2 stamps onto every boundary request contract.
+    # It is a LEAF — no sibling-substrate imports — so consuming
+    # it does not couple translation to any other substrate.
+    "app.identity",
 )
 
 # Forbidden: any other Operious substrate (translation MUST NEVER

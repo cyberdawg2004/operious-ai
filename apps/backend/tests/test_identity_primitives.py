@@ -152,6 +152,7 @@ def test_public_api_surface_is_stable() -> None:
     grow it rather than accreting symbols by accident.
     """
     expected = {
+        "AuthorityContext",
         "EnvironmentId",
         "IdentityError",
         "OrganizationId",

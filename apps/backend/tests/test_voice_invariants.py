@@ -21,7 +21,16 @@ VOICE_ROOT = (
 )
 
 
-_ALLOWED_INTERNAL_PREFIXES = ("app.boundary.voice.",)
+_ALLOWED_INTERNAL_PREFIXES = (
+    "app.boundary.voice.",
+    # `app.identity` is the substrate-shareable identity leaf
+    # established by Wedge A. It carries the typed identity
+    # primitives and the `AuthorityContext` value object that
+    # Wedge B2 stamps onto every boundary request contract.
+    # It is a LEAF — no sibling-substrate imports — so consuming
+    # it does not couple voice to any other substrate.
+    "app.identity",
+)
 
 _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.agents",
