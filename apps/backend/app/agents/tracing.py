@@ -85,6 +85,13 @@ class AgentExecutionTrace:
         parent_chain:           Full ancestor chain (oldest first).
                                 Sourced from `CausalityMetadata`.
         request_id:             Platform-wide request id.
+        tenant_id:              Typed tenant authority anchor. The
+                                canonical source of tenant identity for
+                                this execution. Persistence serialisers
+                                and supervisor view builders read this
+                                field directly; metadata MUST NOT be
+                                used as a fallback authority channel
+                                (see Phase 1 / Wedge B3).
         state_transitions:      Ordered, chronological state moves.
         final_state:            Last state reached. Always terminal
                                 for completed traces.
@@ -101,7 +108,9 @@ class AgentExecutionTrace:
         metadata:                Free-form. Initiator + cause are
                                 duplicated here from causality so
                                 trace consumers don't need a second
-                                lookup.
+                                lookup. tenant_id is NOT carried here
+                                — it rides the typed ``tenant_id``
+                                field above.
     """
 
     execution_id: uuid.UUID
@@ -117,6 +126,7 @@ class AgentExecutionTrace:
     ended_at: datetime
     latency_ms: float
     tool_invocation_count: int
+    tenant_id: str | None = None
     tool_invocation_ids: tuple[uuid.UUID, ...] = ()
     governance_decision_ids: tuple[uuid.UUID, ...] = ()
     error: str | None = None

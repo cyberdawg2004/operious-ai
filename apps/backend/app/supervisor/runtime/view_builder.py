@@ -70,11 +70,11 @@ def build_inspection_view_from_envelope(
         if env.is_ok
     )
 
-    effective_tenant = (
-        tenant_id
-        if tenant_id is not None
-        else _safe_str(trace.metadata.get("tenant_id"))
-    )
+    # Authority resolution: the optional ``tenant_id`` parameter
+    # overrides when supplied; otherwise the trace's typed
+    # ``tenant_id`` field is the canonical source. Metadata is NOT
+    # consulted (Phase 1 / Wedge B3 closed the metadata-fishing path).
+    effective_tenant = tenant_id if tenant_id is not None else trace.tenant_id
 
     return InspectionView(
         execution_id=trace.execution_id,
@@ -248,14 +248,6 @@ def _parse_uuid(value: str | None) -> uuid.UUID | None:
 
 def _require_uuid(value: str) -> uuid.UUID:
     return uuid.UUID(value)
-
-
-def _safe_str(value: object) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    return str(value)
 
 
 __all__ = [

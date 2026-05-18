@@ -47,6 +47,14 @@ def execution_trace_to_record(
     *,
     tenant_id: str | None = None,
 ) -> AgentExecutionRecord:
+    """Project an ``AgentExecutionTrace`` into its persistable record.
+
+    Authority resolution: the optional ``tenant_id`` parameter, when
+    supplied, overrides the trace's own ``tenant_id``. Otherwise the
+    trace's typed ``tenant_id`` field is the canonical source.
+    Metadata is NEVER consulted for tenant identity (Phase 1 / Wedge
+    B3 closed the metadata-fishing path).
+    """
     return AgentExecutionRecord(
         execution_id=str(trace.execution_id),
         runtime_instance_id=str(trace.runtime_instance_id),
@@ -63,7 +71,7 @@ def execution_trace_to_record(
         ),
         parent_chain=tuple(str(x) for x in trace.parent_chain),
         request_id=trace.request_id,
-        tenant_id=tenant_id if tenant_id is not None else trace.metadata.get("tenant_id"),
+        tenant_id=tenant_id if tenant_id is not None else trace.tenant_id,
         final_state=trace.final_state.value,
         started_at=trace.started_at.isoformat(),
         ended_at=trace.ended_at.isoformat(),

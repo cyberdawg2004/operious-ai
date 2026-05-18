@@ -369,3 +369,109 @@ async def test_allowed_tools_whitelist_blocks_unlisted_tools() -> None:
     tool_env = env.tool_envelopes[0]
     assert tool_env.is_denied
     assert tool_env.trace.metadata["reason"] == "constraint_blocked"
+
+
+# ─── Wedge B3: tenant_id propagation invariants ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tenant_id_rides_typed_trace_field_not_metadata() -> None:
+    """Wedge B3 constitutional invariant.
+
+    ``tenant_id`` MUST ride the typed ``AgentExecutionTrace.tenant_id``
+    field. It MUST NOT be carried in the metadata dict — that path
+    was the metadata-laundering authority drift the audit flagged.
+    """
+    rt = _runtime()
+    env = await rt.execute("ok", {}, tenant_id="acme")
+    assert env.trace.tenant_id == "acme"
+    assert "tenant_id" not in env.trace.metadata, (
+        "tenant_id leaked into trace.metadata; Wedge B3 closure broken"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tenant_id_none_when_not_supplied() -> None:
+    rt = _runtime()
+    env = await rt.execute("ok", {})
+    assert env.trace.tenant_id is None
+    assert "tenant_id" not in env.trace.metadata
+
+
+@pytest.mark.asyncio
+async def test_fast_fail_envelope_carries_typed_tenant_id() -> None:
+    """Wedge B3 also closed the fast-fail tenant-id drop site.
+
+    Prior to B3, an unknown-agent fast-fail produced a tenant-less
+    trace even when the caller supplied ``tenant_id``. The trace
+    must now carry the supplied tenant_id even on fast-fail.
+    """
+    rt = _runtime()
+    env = await rt.execute("nonexistent_agent", {}, tenant_id="acme")
+    assert env.trace.final_state is ExecutionState.FAILED
+    assert env.trace.tenant_id == "acme"
+    assert "tenant_id" not in env.trace.metadata
+
+
+@pytest.mark.asyncio
+async def test_persistence_serializer_reads_tenant_from_typed_field() -> None:
+    """Round-trip the trace through the persistence serializer.
+
+    After B3, ``execution_trace_to_record`` reads ``trace.tenant_id``
+    directly. Metadata is never consulted.
+    """
+    from app.agents.persistence.serializers import (
+        execution_trace_to_record,
+    )
+
+    rt = _runtime()
+    env = await rt.execute("ok", {}, tenant_id="acme")
+    record = execution_trace_to_record(env.trace)
+    assert record.tenant_id == "acme"
+
+
+@pytest.mark.asyncio
+async def test_persistence_serializer_override_still_wins() -> None:
+    """Explicit ``tenant_id=`` override remains the strongest authority.
+
+    Preserves backward compatibility with callers that pass an
+    explicit override (``execution_envelope_to_records(env, tenant_id=…)``).
+    """
+    from app.agents.persistence.serializers import (
+        execution_trace_to_record,
+    )
+
+    rt = _runtime()
+    env = await rt.execute("ok", {}, tenant_id="acme")
+    record = execution_trace_to_record(env.trace, tenant_id="override")
+    assert record.tenant_id == "override"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_view_reads_tenant_from_typed_field() -> None:
+    """Live-envelope inspection view consumes the typed field.
+
+    After B3, ``build_inspection_view_from_envelope`` reads
+    ``trace.tenant_id`` directly. The metadata-fishing path and its
+    ``_safe_str`` helper were removed.
+    """
+    from app.supervisor.runtime.view_builder import (
+        build_inspection_view_from_envelope,
+    )
+
+    rt = _runtime()
+    env = await rt.execute("ok", {}, tenant_id="acme")
+    view = build_inspection_view_from_envelope(env)
+    assert view.tenant_id == "acme"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_view_override_still_wins() -> None:
+    from app.supervisor.runtime.view_builder import (
+        build_inspection_view_from_envelope,
+    )
+
+    rt = _runtime()
+    env = await rt.execute("ok", {}, tenant_id="acme")
+    view = build_inspection_view_from_envelope(env, tenant_id="override")
+    assert view.tenant_id == "override"
