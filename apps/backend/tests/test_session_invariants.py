@@ -29,14 +29,30 @@ _FORBIDDEN_PARENT_IMPORT_RE = re.compile(
     r"governance|boundary|orchestration)\b",
     re.MULTILINE,
 )
+# 2.75-\u03b1: the singular capability legality gate is the ONLY
+# cross-substrate surface session is permitted to consume.
+_CAPABILITY_GATE_ALLOW_RE = re.compile(
+    r"^(?:from|import)\s+app\.governance\.capability\b",
+    re.MULTILINE,
+)
 
 
 def test_no_parent_substrate_imports() -> None:
-    """The session substrate MUST NOT import from any sibling runtime."""
+    """The session substrate MUST NOT import from any sibling runtime.
+
+    The capability legality gate (``app.governance.capability``) is
+    the singular exemption — Wedge 2.75-\u03b1 adopts it at every
+    P2-A entry. No other governance surface is reachable.
+    """
     offenders: list[str] = []
     for path in _SESSION_ROOT.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        if _FORBIDDEN_PARENT_IMPORT_RE.search(text):
+        # Strip the allowed `app.governance.capability` imports
+        # before scanning for forbidden parents — the regex above
+        # would otherwise match the gate import on the
+        # ``governance`` token.
+        stripped = _CAPABILITY_GATE_ALLOW_RE.sub("", text)
+        if _FORBIDDEN_PARENT_IMPORT_RE.search(stripped):
             offenders.append(str(path))
     assert not offenders, (
         f"forbidden cross-substrate imports found in: {offenders}"

@@ -20,6 +20,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     RegisterCommunicationPatternRequest,
@@ -78,16 +83,20 @@ class CommunicationRuntime:
         "_persistence",
         "_runtime_instance_id",
         "_sequence",
+        "_capability_governance",
     )
 
     def __init__(
         self,
         *,
         persistence: IntelligencePersistenceProtocol,
+        capability_governance: GovernanceRuntime | None = None,
     ) -> None:
         self._persistence = persistence
         self._runtime_instance_id = uuid.uuid4()
         self._sequence = 0
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        self._capability_governance = capability_governance
 
     @property
     def runtime_instance_id(self) -> uuid.UUID:
@@ -102,6 +111,25 @@ class CommunicationRuntime:
         t0 = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.OI_COMMUNICATION_REGISTER,
+            authority=request.authority,
+            resolution=resolution,
+            actor="oi_communication_runtime",
+        )
+        if denial is not None:
+            return self._failed(
+                kind=IntelligenceTraceKind.COMMUNICATION_REGISTER,
+                started_at=started_at,
+                t0=t0,
+                error=denial,
+                correlation_id=request.correlation_id,
+                request_id=request.request_id,
+                tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
+            )
         try:
             if not request.handle:
                 raise IntelligenceValidationError(
@@ -212,6 +240,25 @@ class CommunicationRuntime:
         t0 = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.OI_COMMUNICATION_RETRIEVE,
+            authority=request.authority,
+            resolution=resolution,
+            actor="oi_communication_runtime",
+        )
+        if denial is not None:
+            return self._failed(
+                kind=IntelligenceTraceKind.COMMUNICATION_RETRIEVE,
+                started_at=started_at,
+                t0=t0,
+                error=denial,
+                correlation_id=request.correlation_id,
+                request_id=request.request_id,
+                tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
+            )
         try:
             if request.limit < 1:
                 raise IntelligenceValidationError(

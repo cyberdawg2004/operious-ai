@@ -34,6 +34,11 @@ import uuid
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (
     ApprovePatternRequest,
@@ -123,6 +128,7 @@ class MemoryEvolutionRuntime:
         "_extractor",
         "_runtime_instance_id",
         "_sequence",
+        "_capability_governance",
     )
 
     def __init__(
@@ -130,6 +136,7 @@ class MemoryEvolutionRuntime:
         *,
         persistence: IntelligencePersistenceProtocol,
         extractor: DeterministicCandidateExtractor | None = None,
+        capability_governance: GovernanceRuntime | None = None,
     ) -> None:
         self._persistence = persistence
         self._extractor = (
@@ -137,6 +144,8 @@ class MemoryEvolutionRuntime:
         )
         self._runtime_instance_id = uuid.uuid4()
         self._sequence = 0
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        self._capability_governance = capability_governance
 
     @property
     def runtime_instance_id(self) -> uuid.UUID:
@@ -151,6 +160,25 @@ class MemoryEvolutionRuntime:
         t0 = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.OI_MEMORY_PROPOSE,
+            authority=request.authority,
+            resolution=resolution,
+            actor="oi_training_runtime",
+        )
+        if denial is not None:
+            return self._failed(
+                kind=IntelligenceTraceKind.MEMORY_PROPOSE,
+                started_at=started_at,
+                t0=t0,
+                error=denial,
+                correlation_id=request.correlation_id,
+                request_id=request.request_id,
+                tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
+            )
         try:
             if not request.summary:
                 raise IntelligenceValidationError(
@@ -696,6 +724,25 @@ class MemoryEvolutionRuntime:
         t0 = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.OI_MEMORY_LIST,
+            authority=request.authority,
+            resolution=resolution,
+            actor="oi_training_runtime",
+        )
+        if denial is not None:
+            return self._failed(
+                kind=IntelligenceTraceKind.MEMORY_LIST,
+                started_at=started_at,
+                t0=t0,
+                error=denial,
+                correlation_id=request.correlation_id,
+                request_id=request.request_id,
+                tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
+            )
         try:
             query = MemoryArtifactQuery(
                 tenant_id=resolution.tenant_id,

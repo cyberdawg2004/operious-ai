@@ -11,6 +11,11 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import request_authority_resolution
 from app.hardening.audits.recorder import (
     HardeningAuditRecorder,
@@ -107,6 +112,7 @@ class HardeningRuntime:
         persistence: HardeningPersistenceProtocol,
         recorder: HardeningAuditRecorder | None = None,
         runtime_instance_id: uuid.UUID | None = None,
+        capability_governance: GovernanceRuntime | None = None,
     ) -> None:
         self._persistence = persistence
         self._recorder = recorder or HardeningAuditRecorder()
@@ -114,6 +120,8 @@ class HardeningRuntime:
             runtime_instance_id or uuid.uuid4()
         )
         self._sequence = 0
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        self._capability_governance = capability_governance
 
     @property
     def persistence(self) -> HardeningPersistenceProtocol:
@@ -528,6 +536,18 @@ class HardeningRuntime:
         started_at, monotonic = self._mark_start()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.HARDENING_RECORD_FAILURE,
+            authority=request.authority,
+            resolution=resolution,
+            actor="hardening_runtime",
+        )
+        if denial is not None:
+            return self._fail(
+                kind, started_at, monotonic, request, denial
+            )
         try:
             if not request.seed:
                 raise HardeningContainmentError(

@@ -66,12 +66,30 @@ def _walk_arbitration_modules() -> list[str]:
 
 
 def test_arbitration_does_not_import_sibling_substrates() -> None:
+    # 2.75-\u03b1: the singular capability legality gate is the ONLY
+    # cross-substrate surface arbitration is permitted to consume.
+    # The gate re-exports ``GovernanceRuntime`` so leaf substrates
+    # can take the runtime type as a constructor parameter without
+    # naming ``app.governance.enforcement.*`` directly. The symbol
+    # whitelist below pins the only cross-substrate names allowed
+    # to leak into arbitration's module namespace.
+    _CAPABILITY_GATE_EXEMPTION = "app.governance.capability"
+    _CAPABILITY_GATE_SYMBOLS = {
+        "CapabilityDenied",
+        "GovernanceRuntime",
+        "OperationalAct",
+        "gate_or_deny",
+    }
     for module_name in _walk_arbitration_modules():
         module = importlib.import_module(module_name)
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
             obj_module = getattr(obj, "__module__", None)
             if not isinstance(obj_module, str):
+                continue
+            if obj_module.startswith(_CAPABILITY_GATE_EXEMPTION):
+                continue
+            if attr_name in _CAPABILITY_GATE_SYMBOLS:
                 continue
             for forbidden in _FORBIDDEN_PREFIXES:
                 assert not obj_module.startswith(forbidden), (

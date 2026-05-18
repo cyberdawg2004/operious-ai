@@ -47,6 +47,10 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # substrate (see app/identity/__init__.py); importing from it
     # never introduces a cross-substrate dependency.
     "app.identity",
+    # 2.75-\u03b1: capability legality gate (P2-B). The singular
+    # cross-substrate legality decision surface; the rest of
+    # governance remains opaque to hardening.
+    "app.governance.capability",
 )
 
 _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
@@ -54,7 +58,8 @@ _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.arbitration",
     "app.boundary",
     "app.coordination",
-    "app.governance",
+    # `app.governance` is forbidden EXCEPT for the singular
+    # `app.governance.capability` gate (2.75-\u03b1 adoption).
     "app.memory",
     "app.organizational_intelligence",
     "app.session",
@@ -65,6 +70,7 @@ _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.orchestration",
     "app._deprecated",
 )
+_GOVERNANCE_CAPABILITY_PREFIX = "app.governance.capability"
 
 _FORBIDDEN_NETWORK_LIBS = (
     "openai",
@@ -116,6 +122,21 @@ def test_hardening_does_not_import_other_substrates(
                     stripped.startswith(f"from {forbidden}")
                     or stripped.startswith(f"import {forbidden}")
                 ):
+                    offences.append(
+                        f"{path.relative_to(HARDENING_ROOT)}:"
+                        f"{line_no}: {stripped}"
+                    )
+            # Governance is forbidden EXCEPT for the singular
+            # `app.governance.capability` gate (2.75-\u03b1 adoption).
+            if stripped.startswith(
+                "from app.governance"
+            ) or stripped.startswith("import app.governance"):
+                module = (
+                    stripped[len("from ") :].split()[0]
+                    if stripped.startswith("from ")
+                    else stripped[len("import ") :].split()[0]
+                )
+                if not module.startswith(_GOVERNANCE_CAPABILITY_PREFIX):
                     offences.append(
                         f"{path.relative_to(HARDENING_ROOT)}:"
                         f"{line_no}: {stripped}"

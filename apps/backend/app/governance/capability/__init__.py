@@ -40,6 +40,11 @@ fail-fast envelope without further branching.
 """
 
 from app.governance.capability.acts import OperationalAct
+from app.governance.capability.adoption import (
+    CapabilityDenied,
+    GovernanceRuntime,
+    gate_or_deny,
+)
 from app.governance.capability.gate import (
     CapabilityLegalityRequest,
     build_capability_context,
@@ -47,8 +52,11 @@ from app.governance.capability.gate import (
 )
 
 __all__ = [
+    "CapabilityDenied",
     "CapabilityLegalityRequest",
+    "GovernanceRuntime",
     "OperationalAct",
     "build_capability_context",
     "evaluate_capability_legality",
+    "gate_or_deny",
 ]

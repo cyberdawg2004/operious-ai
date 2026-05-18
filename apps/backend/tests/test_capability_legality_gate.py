@@ -426,14 +426,24 @@ def test_no_bypass_tokens_in_orchestration() -> None:
 
 def test_capability_module_public_surface() -> None:
     """``app.governance.capability.__all__`` MUST be exactly the
-    documented surface. Drift here grows the gate's API silently."""
+    documented surface. Drift here grows the gate's API silently.
+
+    2.75-\u03b1 added three symbols: ``CapabilityDenied`` and
+    ``gate_or_deny`` (the adoption helper consumed by every P2-A
+    runtime entry) plus ``GovernanceRuntime`` re-exported so that
+    leaf substrates can take the runtime type as a parameter
+    without breaking substrate isolation.
+    """
     import app.governance.capability as cap
 
     assert set(cap.__all__) == {
+        "CapabilityDenied",
         "CapabilityLegalityRequest",
+        "GovernanceRuntime",
         "OperationalAct",
         "build_capability_context",
         "evaluate_capability_legality",
+        "gate_or_deny",
     }
 
 

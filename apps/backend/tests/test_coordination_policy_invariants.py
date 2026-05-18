@@ -147,9 +147,14 @@ def test_policy_package_does_not_import_agents_supervisor_or_governance() -> Non
     Composing with governance via the coordination runtime is fine,
     but the policy substrate ITSELF must not depend on governance,
     agents, or supervisor packages.
+
+    Wedge 2.75-\u03b1 exemption: the singular capability legality
+    gate (``app.governance.capability``) is the ONLY cross-substrate
+    surface the policy runtime is permitted to consume.
     """
     pkg_path = Path(app.coordination.policy.__file__).parent
     forbidden = ("app.agents", "app.supervisor", "app.governance")
+    capability_gate_prefix = "app.governance.capability"
     for mod_info in pkgutil.walk_packages(
         [str(pkg_path)], prefix="app.coordination.policy."
     ):
@@ -158,12 +163,20 @@ def test_policy_package_does_not_import_agents_supervisor_or_governance() -> Non
         if source_file is None:
             continue
         text = Path(source_file).read_text()
+        # Strip lines that import the singular capability gate so
+        # the substring scan below does not flag them as governance
+        # leakage.
+        text_for_scan = "\n".join(
+            line
+            for line in text.splitlines()
+            if capability_gate_prefix not in line
+        )
         for prefix in forbidden:
-            assert f"from {prefix}" not in text, (
+            assert f"from {prefix}" not in text_for_scan, (
                 f"{mod_info.name} imports from {prefix} — policy "
                 f"substrate must remain isolated"
             )
-            assert f"import {prefix}" not in text, (
+            assert f"import {prefix}" not in text_for_scan, (
                 f"{mod_info.name} imports {prefix} — policy substrate "
                 f"must remain isolated"
             )

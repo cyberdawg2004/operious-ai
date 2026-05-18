@@ -39,6 +39,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
@@ -97,6 +102,7 @@ class CoordinationPolicyRuntime:
         registry: CoordinationPolicyRegistry,
         persistence: CoordinationPolicyPersistenceProtocol,
         chain_id_override: CoordinationPolicyChainId | None = None,
+        capability_governance: GovernanceRuntime | None = None,
     ) -> None:
         if len(registry) == 0:
             raise CoordinationPolicyConfigurationError(
@@ -115,6 +121,8 @@ class CoordinationPolicyRuntime:
         self._instance_id: uuid.UUID = uuid.uuid4()
         self._sequence: int = 0
         self._lock = asyncio.Lock()
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        self._capability_governance = capability_governance
 
     # ─── Inspection helpers ──────────────────────────────────────────
 
@@ -144,6 +152,25 @@ class CoordinationPolicyRuntime:
             request.evaluation_id_override or generate_evaluation_id()
         )
         request_id = request.request_id or get_request_id()
+
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.COORDINATION_POLICY_EVALUATE,
+            authority=request.authority,
+            resolution=resolution,
+            actor="coordination_policy_runtime",
+        )
+        if denial is not None:
+            return self._fail_fast(
+                evaluation_id=evaluation_id,
+                request=request,
+                resolution=resolution,
+                request_id=request_id,
+                started_at=started_at,
+                loop_start=loop_start,
+                error=denial,
+            )
 
         # Resolve evaluator subset (sorted-name order).
         try:

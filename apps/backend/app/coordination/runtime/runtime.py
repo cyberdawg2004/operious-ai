@@ -149,6 +149,10 @@ from app.coordination.topology.taxonomy import (
     is_blocking_topology_decision,
 )
 from app.coordination.tracing import CoordinationTrace
+from app.governance.capability import (
+    OperationalAct,
+    gate_or_deny,
+)
 from app.governance.context import GovernanceContext
 from app.governance.decisions import is_blocking_decision
 from app.governance.enforcement.runtime import GovernanceRuntime
@@ -171,6 +175,7 @@ class CoordinationRuntime:
         registry: CoordinationRegistry,
         policy_runtime: CoordinationPolicyRuntime | None = None,
         topology_runtime: CoordinationTopologyRuntime | None = None,
+        capability_governance: GovernanceRuntime | None = None,
     ) -> None:
         self._governance = governance_runtime
         self._persistence = persistence
@@ -187,6 +192,15 @@ class CoordinationRuntime:
         # composed by injection. Evaluated AFTER topology and BEFORE
         # governance. Optional for backward-compat.
         self._policy_runtime = policy_runtime
+        # 2.75-\u03b1: capability legality gate. Separate from
+        # ``governance_runtime`` so the policy chain that handles
+        # ``CommunicationGovernanceSubject`` and the one that handles
+        # ``CapabilityGovernanceSubject`` can be composed
+        # independently. ``None`` keeps the gate inert; production
+        # composition root wires a configured runtime so every
+        # dispatch is evaluated against
+        # ``OperationalAct.COORDINATION_DISPATCH``.
+        self._capability_governance = capability_governance
         self._instance_id: uuid.UUID = uuid.uuid4()
         self._sequence: int = 0
         # The sequence assignment + envelope construction happen under
@@ -254,6 +268,30 @@ class CoordinationRuntime:
             legacy_tenant_id=request.tenant_id,
             observed_tenant_id=request.message.recipient.tenant_id,
         )
+
+        # 2.75-\u03b1: capability legality gate. Independent of the
+        # required ``governance_runtime`` so tests can pin only the
+        # communication policy chain; production wires both.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.COORDINATION_DISPATCH,
+            authority=request.authority,
+            resolution=resolution,
+            actor="coordination_runtime",
+        )
+        if denial is not None:
+            return self._fail_fast_result(
+                coordination_id=coordination_id,
+                request=request,
+                request_id=request_id,
+                started_at=started_at,
+                loop_start=loop_start,
+                outcome=CoordinationDispatchOutcome.GOVERNANCE_DENIED,
+                error=denial,
+                status=CoordinationStatus.FAILED,
+                envelope=None,
+                resolution=resolution,
+            )
 
         # 1. Validate.
         try:

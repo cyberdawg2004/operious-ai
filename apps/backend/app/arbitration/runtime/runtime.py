@@ -76,6 +76,11 @@ from app.arbitration.taxonomy import (
     ArbitrationMetadataKey,
 )
 from app.arbitration.tracing import ArbitrationTrace
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -94,6 +99,7 @@ class OperationalArbitrationRuntime:
         "_runtime_instance_id",
         "_sequence",
         "_sequence_lock",
+        "_capability_governance",
     )
 
     def __init__(
@@ -101,6 +107,7 @@ class OperationalArbitrationRuntime:
         *,
         registry: ArbitrationEvaluatorRegistry,
         persistence: ArbitrationPersistenceProtocol | None = None,
+        governance: GovernanceRuntime | None = None,
     ) -> None:
         if len(registry) == 0:
             raise ArbitrationConfigurationError(
@@ -111,6 +118,11 @@ class OperationalArbitrationRuntime:
         self._persistence = persistence
         self._runtime_instance_id: uuid.UUID = uuid.uuid4()
         self._sequence: int = 0
+        # 2.75-\u03b1: capability legality gate. Inert when
+        # ``governance is None``. Production composition root pins
+        # a configured runtime so every ``evaluate`` is gated
+        # against ``OperationalAct.ARBITRATION_EVALUATE``.
+        self._capability_governance = governance
         # Chronology Integrity (Core Law 3) — sequence assignment must
         # be atomic across concurrent ``evaluate()`` invocations. The
         # lock is held ONLY for the increment; persistence and trace
@@ -157,6 +169,28 @@ class OperationalArbitrationRuntime:
             if request.evaluation_id_override is not None
             else generate_evaluation_id()
         )
+
+        # 2.75-\u03b1: capability legality gate. Inert when
+        # ``self._capability_governance`` is unconfigured.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.ARBITRATION_EVALUATE,
+            authority=request.authority,
+            resolution=resolution,
+            actor="arbitration_runtime",
+        )
+        if denial is not None:
+            return await self._failed_envelope(
+                request=request,
+                resolution=resolution,
+                evaluation_id=evaluation_id,
+                evaluators=(),
+                started_at=started_at,
+                t0=t0,
+                error=denial,
+                error_outcome=ArbitrationOutcome.ARBITRATION_ERROR,
+                reason=str(denial),
+            )
 
         # Resolve evaluators (registry sorted by name).
         try:

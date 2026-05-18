@@ -39,6 +39,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import AuthorityResolution, resolve_authority
 from app.observability.context import get_request_id
 from app.supervisor.contracts.decisions import (
@@ -73,10 +78,13 @@ class SupervisorRuntime:
         *,
         evaluator_registry: EvaluatorRegistry,
         scoring_weights: Mapping[str, float] | None = None,
+        governance: GovernanceRuntime | None = None,
     ) -> None:
         self._registry = evaluator_registry
         self._scoring_weights: dict[str, float] = dict(scoring_weights or {})
         self._instance_id = uuid.uuid4()
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        self._capability_governance = governance
 
     # ─── Inspection ───────────────────────────────────────────────────
 
@@ -118,6 +126,28 @@ class SupervisorRuntime:
             legacy_tenant_id=request.tenant_id,
             observed_tenant_id=observed_tenant_id,
         )
+
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.SUPERVISOR_INSPECT,
+            authority=request.authority,
+            resolution=resolution,
+            actor="supervisor_runtime",
+        )
+        if denial is not None:
+            return self._fail_fast_envelope(
+                inspection_id=inspection_id,
+                request=request,
+                request_id=request_id,
+                started_at=started_at,
+                loop_start=loop_start,
+                error=denial,
+                inspection_mode=InspectionMode.LIVE
+                if request.live_envelope is not None
+                else InspectionMode.REPLAY,
+                resolution=resolution,
+            )
 
         # 1. Validate + build the view.
         try:

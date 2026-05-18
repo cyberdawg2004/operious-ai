@@ -35,6 +35,11 @@ from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 from typing import Any
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
@@ -131,6 +136,7 @@ class SessionRuntime:
         "_reconstructor",
         "_runtime_instance_id",
         "_sequence",
+        "_capability_governance",
     )
 
     def __init__(
@@ -139,6 +145,7 @@ class SessionRuntime:
         persistence: SessionPersistenceProtocol,
         registry: SessionRegistry | None = None,
         reconstructor: SessionReconstructor | None = None,
+        governance: GovernanceRuntime | None = None,
     ) -> None:
         self._persistence = persistence
         self._registry = registry or SessionRegistry()
@@ -147,6 +154,11 @@ class SessionRuntime:
         )
         self._runtime_instance_id: uuid.UUID = uuid.uuid4()
         self._sequence: int = 0
+        # 2.75-\u03b1: capability legality gate. ``None`` keeps the
+        # gate inert (test / dev). Production composition root pins
+        # a configured ``GovernanceRuntime`` so every ``open_session``
+        # is evaluated against ``OperationalAct.SESSION_OPEN``.
+        self._capability_governance = governance
 
     # ─── Public read-only properties ────────────────────────────────
 
@@ -172,6 +184,28 @@ class SessionRuntime:
         # P2-A: collapse typed+legacy authority into a single
         # AuthorityResolution at the runtime boundary.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when
+        # ``self._capability_governance`` is unconfigured (tests
+        # / dev). When configured, an empty-capabilities authority
+        # context produces DENY which folds into the existing
+        # fail-fast envelope path.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.SESSION_OPEN,
+            authority=request.authority,
+            resolution=resolution,
+            actor="session_runtime",
+        )
+        if denial is not None:
+            return self._failed_envelope(
+                kind=SessionTraceKind.OPEN_SESSION,
+                session_id=None,
+                started_at=started_at,
+                t0=t0,
+                error=denial,
+                request_correlation_id=request.correlation_id,
+                request_request_id=request.request_id,
+            )
         try:
             session_id = self._resolve_open_session_id(
                 request, resolution=resolution

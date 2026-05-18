@@ -30,6 +30,12 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # It is a LEAF — no sibling-substrate imports — so consuming
     # it does not couple voice to any other substrate.
     "app.identity",
+    # `app.governance.capability` is the institutional legality
+    # gate (P2-B). Wedge 2.75-\u03b1 adopts the gate at every P2-A
+    # entry, including voice ingress/egress. The singular
+    # cross-substrate legality decision surface; the rest of
+    # governance remains opaque to voice.
+    "app.governance.capability",
 )
 
 _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
@@ -37,7 +43,8 @@ _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.arbitration",
     "app.boundary.translation",
     "app.coordination",
-    "app.governance",
+    # `app.governance` is forbidden EXCEPT for the singular
+    # `app.governance.capability` gate (2.75-\u03b1 adoption).
     "app.hardening",
     "app.memory",
     "app.organizational_intelligence",
@@ -49,6 +56,7 @@ _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.orchestration",
     "app._deprecated",
 )
+_GOVERNANCE_CAPABILITY_PREFIX = "app.governance.capability"
 
 _FORBIDDEN_NETWORK_LIBS = (
     "openai",
@@ -98,6 +106,21 @@ def test_voice_does_not_import_other_substrates(
                 ) or stripped.startswith(
                     f"import {forbidden}"
                 ):
+                    offences.append(
+                        f"{path.relative_to(VOICE_ROOT)}:"
+                        f"{line_no}: {stripped}"
+                    )
+            # Governance is forbidden EXCEPT for the singular
+            # `app.governance.capability` gate (2.75-\u03b1 adoption).
+            if stripped.startswith(
+                "from app.governance"
+            ) or stripped.startswith("import app.governance"):
+                module = (
+                    stripped[len("from ") :].split()[0]
+                    if stripped.startswith("from ")
+                    else stripped[len("import ") :].split()[0]
+                )
+                if not module.startswith(_GOVERNANCE_CAPABILITY_PREFIX):
                     offences.append(
                         f"{path.relative_to(VOICE_ROOT)}:"
                         f"{line_no}: {stripped}"

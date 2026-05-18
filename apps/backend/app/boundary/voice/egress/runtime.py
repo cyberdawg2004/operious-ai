@@ -6,6 +6,11 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.governance.capability import (
+    GovernanceRuntime,
+    OperationalAct,
+    gate_or_deny,
+)
 from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
@@ -74,6 +79,7 @@ class VoiceEgressRuntime:
         provider: BaseTextToSpeechProvider,
         persistence: VoicePersistenceProtocol,
         runtime_instance_id: uuid.UUID | None = None,
+        capability_governance: GovernanceRuntime | None = None,
     ) -> None:
         self._provider = provider
         self._persistence = persistence
@@ -81,6 +87,8 @@ class VoiceEgressRuntime:
             runtime_instance_id or uuid.uuid4()
         )
         self._sequence = 0
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        self._capability_governance = capability_governance
 
     @property
     def persistence(self) -> VoicePersistenceProtocol:
@@ -98,6 +106,19 @@ class VoiceEgressRuntime:
         monotonic = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
+        # 2.75-\u03b1: capability legality gate. Inert when None.
+        denial = await gate_or_deny(
+            self._capability_governance,
+            act=OperationalAct.BOUNDARY_VOICE_EGRESS,
+            authority=request.authority,
+            resolution=resolution,
+            actor="voice_egress_runtime",
+        )
+        if denial is not None:
+            return self._fail(
+                kind, started_at, monotonic, request, denial,
+                resolution=resolution,
+            )
         try:
             self._validate_request(request)
 

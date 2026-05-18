@@ -51,6 +51,13 @@ _FORBIDDEN_PARENT_IMPORT_RE = re.compile(
     r"governance|boundary|session|orchestration)\b",
     re.MULTILINE,
 )
+# 2.75-\u03b1: the capability legality gate is the singular
+# cross-substrate exemption (P2-B singular gate, see
+# ``app.governance.capability``).
+_CAPABILITY_GATE_ALLOW_RE = re.compile(
+    r"^(?:from|import)\s+app\.governance\.capability\b",
+    re.MULTILINE,
+)
 
 
 def test_no_parent_substrate_imports() -> None:
@@ -63,7 +70,8 @@ def test_no_parent_substrate_imports() -> None:
     offenders: list[str] = []
     for path in _INTEL_ROOT.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        if _FORBIDDEN_PARENT_IMPORT_RE.search(text):
+        stripped = _CAPABILITY_GATE_ALLOW_RE.sub("", text)
+        if _FORBIDDEN_PARENT_IMPORT_RE.search(stripped):
             offenders.append(str(path))
     assert not offenders, (
         f"forbidden cross-substrate imports found in: {offenders}"

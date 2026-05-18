@@ -31,6 +31,15 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # It is a LEAF — no sibling-substrate imports — so consuming
     # it does not couple translation to any other substrate.
     "app.identity",
+    # `app.governance.capability` is the institutional legality
+    # gate (P2-B). Wedge 2.75-\u03b1 adopts it at every P2-A entry,
+    # including translation ingress/egress. The capability gate is
+    # the SINGULAR cross-substrate legality decision surface — its
+    # adoption does not give translation access to the rest of the
+    # governance substrate; the imported symbols (`OperationalAct`,
+    # `gate_or_deny`) are the only governance surface translation
+    # is permitted to consume.
+    "app.governance.capability",
 )
 
 # Forbidden: any other Operious substrate (translation MUST NEVER
@@ -39,7 +48,10 @@ _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.agents",
     "app.arbitration",
     "app.coordination",
-    "app.governance",
+    # `app.governance` is forbidden EXCEPT for
+    # `app.governance.capability` — the singular capability legality
+    # gate (P2-B). Wedge 2.75-\u03b1 adopts the gate at every P2-A
+    # entry; the rest of governance remains opaque to translation.
     "app.hardening",
     "app.memory",
     "app.organizational_intelligence",
@@ -51,6 +63,11 @@ _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
     "app.orchestration",
     "app._deprecated",
 )
+# The capability gate is the ONLY cross-substrate surface
+# translation may consume. Other governance imports remain
+# forbidden — enforced below by checking that any
+# `from app.governance.*` import targets exactly this sub-package.
+_GOVERNANCE_CAPABILITY_PREFIX = "app.governance.capability"
 
 # Translation MUST NOT import LLM / network clients.
 _FORBIDDEN_NETWORK_LIBS = (
@@ -101,6 +118,24 @@ def test_translation_does_not_import_other_substrates(
                 ) or stripped.startswith(
                     f"import {forbidden}"
                 ):
+                    offences.append(
+                        f"{path.relative_to(TRANSLATION_ROOT)}:"
+                        f"{line_no}: {stripped}"
+                    )
+            # Governance is forbidden EXCEPT for the singular
+            # `app.governance.capability` gate (2.75-\u03b1 adoption).
+            # The gate is the ONLY cross-substrate legality decision
+            # surface; the rest of governance remains opaque to
+            # translation.
+            if stripped.startswith(
+                "from app.governance"
+            ) or stripped.startswith("import app.governance"):
+                module = (
+                    stripped[len("from ") :].split()[0]
+                    if stripped.startswith("from ")
+                    else stripped[len("import ") :].split()[0]
+                )
+                if not module.startswith(_GOVERNANCE_CAPABILITY_PREFIX):
                     offences.append(
                         f"{path.relative_to(TRANSLATION_ROOT)}:"
                         f"{line_no}: {stripped}"

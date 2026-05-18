@@ -58,12 +58,28 @@ def _walk_topology_modules() -> list[str]:
 
 
 def test_topology_does_not_import_sibling_substrates() -> None:
+    # 2.75-\u03b1: the singular capability legality gate is the
+    # exemption. Symbols re-exported through ``app.governance.capability``
+    # (including ``GovernanceRuntime``) carry the original module path
+    # ``app.governance.enforcement.runtime`` — we whitelist that
+    # symbol explicitly rather than weakening the prefix check.
+    _CAPABILITY_GATE_EXEMPTION = "app.governance.capability"
+    _CAPABILITY_GATE_SYMBOLS = {
+        "CapabilityDenied",
+        "GovernanceRuntime",
+        "OperationalAct",
+        "gate_or_deny",
+    }
     for module_name in _walk_topology_modules():
         module = importlib.import_module(module_name)
         for attr_name in dir(module):
             obj = getattr(module, attr_name)
             obj_module = getattr(obj, "__module__", None)
             if not isinstance(obj_module, str):
+                continue
+            if obj_module.startswith(_CAPABILITY_GATE_EXEMPTION):
+                continue
+            if attr_name in _CAPABILITY_GATE_SYMBOLS:
                 continue
             for forbidden in _FORBIDDEN_PREFIXES:
                 assert not obj_module.startswith(forbidden), (
