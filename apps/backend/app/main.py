@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.router import build_api_router
+from app.auth import AuthProvider
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
@@ -49,8 +50,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("application_shutdown", extra={"app": settings.APP_NAME})
 
 
-def create_app() -> FastAPI:
-    """Build and return the FastAPI application."""
+def create_app(
+    *,
+    auth_provider: AuthProvider | None = None,
+) -> FastAPI:
+    """Build and return the FastAPI application.
+
+    ``auth_provider`` is plumbed into
+    :class:`AuthorityContextMiddleware`. When ``None`` (default),
+    Authorization-bearing requests are rejected with
+    ``401 verification_unavailable`` (fail-closed per B5) while
+    the legacy ``X-*-ID`` ingress path and anonymous requests
+    continue to work. Concrete provider implementations are
+    delivered by Wedge C3.
+    """
 
     settings = get_settings()
     configure_logging(settings)
@@ -77,7 +90,10 @@ def create_app() -> FastAPI:
     # ``AuthorityContextMiddleware`` as the SINGLE canonical
     # HTTP-level identity extraction site; see
     # ``app/middleware/authority_context.py`` for the doctrine.
-    app.add_middleware(AuthorityContextMiddleware)
+    app.add_middleware(
+        AuthorityContextMiddleware,
+        auth_provider=auth_provider,
+    )
     app.add_middleware(RequestContextMiddleware)
 
     app.include_router(build_api_router(settings))

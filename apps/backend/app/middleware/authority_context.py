@@ -1,62 +1,54 @@
 """Canonical HTTP authority extraction middleware.
 
-Wedge B8 — the single, deterministic, traceable ingress site where
-HTTP headers converge into a typed
-:class:`app.identity.AuthorityContext`. After this middleware runs,
-the authority for the request lives in exactly TWO mirrored places:
+Wedge B8 established the single, deterministic, traceable ingress
+site where HTTP headers converge into a typed
+:class:`app.identity.AuthorityContext`. Wedge C2 extends that site
+with optional :class:`app.auth.AuthProvider` integration so the
+ingress can VERIFY presented credentials (Authorization header)
+instead of only TRUSTING upstream-stamped identity headers.
 
-1. ``request.state.authority``       — for handlers / dependencies
-   that prefer explicit access.
-2. The :func:`app.identity.get_request_authority` ContextVar — for
-   observability attribution where threading the authority through
-   every layer would be impractical.
+After this middleware runs, the authority for the request lives in:
 
-No other code path in the codebase is permitted to read identity
-HTTP headers (``X-Tenant-ID`` / ``X-Principal-ID`` /
-``X-Organization-ID`` / ``X-Environment-ID``). A static doctrine
-scan in ``tests/test_authority_context_middleware.py`` enforces
-this — the moment a second site starts parsing identity headers,
-the "ingress authority is singular" invariant is broken and the
-audit-tagged ``AuthoritySource`` attribution flowing into
-``resolve_authority`` becomes unreliable.
+1. ``request.state.authority``         — the typed AuthorityContext.
+2. ``request.state.authority_source``  — one of
+   :data:`AUTHORITY_SOURCE_VERIFIED`,
+   :data:`AUTHORITY_SOURCE_HEADER`,
+   :data:`AUTHORITY_SOURCE_ANONYMOUS` for downstream attribution
+   (B6/B7 pattern at the HTTP boundary).
+3. The :func:`app.identity.get_request_authority` ContextVar.
 
-Constitutional positioning
-──────────────────────────
-This middleware is the STRUCTURAL convergence point for HTTP
-authority. It is intentionally NOT:
+Singularity of authority source
+───────────────────────────────
+A request may carry **at most one** authority source:
 
-* an authentication site — header signatures / JWT verification
-  belongs to the future auth-provider ecosystem wedge. This
-  middleware trusts that whatever produced the header (gateway,
-  auth provider, frontend) authorised it upstream.
-* an authorisation site — RBAC / capability evaluation belongs in
-  governance via ``SubjectKind.CAPABILITY`` (out of scope).
-* a tenant policing site — that doctrine lives in
-  ``TenantScopePolicy`` (governance) and ``TenantIsolationEvaluator``
-  (coordination policy), both unified by Wedge B5.
+* an ``Authorization`` header (with a configured AuthProvider) → verified
+* canonical ``X-*-ID`` headers → unverified, upstream-attested
+* neither → anonymous
 
-Malformed-input doctrine
-────────────────────────
-A header that is PRESENT but whitespace-only / empty is a
-structural malformation: it cannot satisfy ``coerce_*_id``'s
-validity contract, and silently coercing it to ``None`` would
-violate the ``IdentityError`` invariant established in Wedge A.
-The middleware refuses such requests with ``400 Bad Request`` and
-a stable JSON body identifying the offending header. Missing
-headers entirely are legitimate (anonymous requests) and produce
-an ``AuthorityContext`` with the corresponding field set to
-``None``.
+A request that presents BOTH an Authorization header AND any
+``X-*-ID`` header is structurally ambiguous (the same constitutional
+class as DR-3/DR-4 silent coalescing closed by B6/B7). The
+middleware rejects such requests with ``400 authority_source_conflict``.
+This preserves the "ingress authority is singular" invariant from
+B8 across the new verified path.
 
-Ordering note
-─────────────
-This middleware is registered AFTER
-:class:`app.middleware.request_context.RequestContextMiddleware` in
-``app.main.create_app`` so that, given Starlette's prepend-based
-``add_middleware`` semantics, it ends up INNER to the request-id
-middleware in the request flow. Request flow is therefore
-``RequestContext → AuthorityContext → Router``: the request id is
-bound BEFORE this middleware logs or returns a 400, so every
-authority-extraction error carries a correlation id.
+Constitutional positioning (unchanged from B8)
+──────────────────────────────────────────────
+* This module owns the SINGLE permitted parse of the canonical
+  identity headers AND the SINGLE permitted parse of the
+  Authorization header into a :class:`Credential`. No other site
+  parses either.
+* Concrete providers (JWT, OIDC, mTLS, ...) live OUTSIDE
+  ``app.auth`` per Wedge C1 doctrine. This middleware consumes the
+  protocol abstractly.
+* RBAC remains parked behind ``SubjectKind.CAPABILITY`` (out of
+  scope).
+
+Ordering note (unchanged)
+─────────────────────────
+Registered AFTER :class:`RequestContextMiddleware` in
+``app.main.create_app`` so request id is bound BEFORE authority
+extraction logs / returns errors.
 """
 
 from __future__ import annotations
@@ -69,6 +61,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
+from app.auth import (
+    AuthenticationError,
+    AuthProvider,
+    Credential,
+    verified_identity_to_authority,
+)
 from app.identity.authority import AuthorityContext
 from app.identity.primitives import IdentityError
 from app.identity.runtime import (
@@ -80,15 +78,12 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Canonical header names ────────────────────────────────────────
-# These are the SINGLE source of truth for HTTP authority header
-# names. Other code paths that need to refer to them must import
-# these constants — string literals duplicated elsewhere break the
-# singularity invariant and are caught by the doctrine test.
 
 TENANT_HEADER: Final[str] = "X-Tenant-ID"
 PRINCIPAL_HEADER: Final[str] = "X-Principal-ID"
 ORGANIZATION_HEADER: Final[str] = "X-Organization-ID"
 ENVIRONMENT_HEADER: Final[str] = "X-Environment-ID"
+AUTHORIZATION_HEADER: Final[str] = "Authorization"
 
 #: Stable ordering — used by the middleware to walk headers and by
 #: tests to enumerate the canonical surface.
@@ -100,15 +95,29 @@ AUTHORITY_HEADERS: Final[tuple[str, ...]] = (
 )
 
 #: Maps each canonical header to its corresponding
-#: ``AuthorityContext.from_raw`` keyword. Kept in module scope so
-#: tests can pin the surface; consumers should not reach into this
-#: mapping for parsing — call the middleware once at ingress.
+#: ``AuthorityContext.from_raw`` keyword.
 HEADER_TO_FIELD: Final[Mapping[str, str]] = {
     TENANT_HEADER: "tenant_id",
     PRINCIPAL_HEADER: "principal_id",
     ORGANIZATION_HEADER: "organization_id",
     ENVIRONMENT_HEADER: "environment_id",
 }
+
+# ─── Authority source attribution constants ────────────────────────
+# Surfaces the provenance of the AuthorityContext bound to a
+# request so downstream code can distinguish verified from
+# upstream-trusted from anonymous. Mirrors the B6/B7
+# ``AuthoritySource`` doctrine at the HTTP boundary.
+
+AUTHORITY_SOURCE_VERIFIED: Final[str] = "verified"
+AUTHORITY_SOURCE_HEADER: Final[str] = "header"
+AUTHORITY_SOURCE_ANONYMOUS: Final[str] = "anonymous"
+
+AUTHORITY_SOURCES: Final[tuple[str, ...]] = (
+    AUTHORITY_SOURCE_VERIFIED,
+    AUTHORITY_SOURCE_HEADER,
+    AUTHORITY_SOURCE_ANONYMOUS,
+)
 
 
 # ─── Middleware ────────────────────────────────────────────────────
@@ -117,40 +126,73 @@ HEADER_TO_FIELD: Final[Mapping[str, str]] = {
 class AuthorityContextMiddleware(BaseHTTPMiddleware):
     """Build and bind one :class:`AuthorityContext` per request.
 
-    Algorithm (deterministic, pure):
+    Algorithm:
 
-    1. Read each canonical header. A missing header → field stays
-       ``None``. A present-but-empty / whitespace-only header is a
-       structural malformation handled in step 3.
-    2. Hand the four raw values to
-       :meth:`AuthorityContext.from_raw`, which runs each non-None
-       value through the corresponding ``coerce_*_id`` helper.
-    3. If ``coerce_*_id`` raises :class:`IdentityError`, the
-       request is rejected with ``400 Bad Request`` and a stable
-       JSON body identifying the offending header. The body is
-       designed to be machine-parseable so client-side test
-       fixtures (and the future auth provider) can pin against it.
-    4. On success, stash the result on ``request.state.authority``
-       and bind the ContextVar (with paired reset in ``finally``).
+    1. Parse the ``Authorization`` header into a
+       :class:`Credential` (None if absent; ``400`` on malformed).
+    2. Read each canonical ``X-*-ID`` header (``400`` on
+       whitespace-only).
+    3. Reject ``400 authority_source_conflict`` if both a
+       credential AND any legacy identity header are present.
+    4. If credential present and ``auth_provider`` configured →
+       verify, translate via
+       :func:`verified_identity_to_authority`, source = ``verified``.
+       Failure modes:
+
+       * provider raises :class:`AuthenticationError` →
+         ``401 verification_failed``.
+       * provider returns malformed claim →
+         :class:`IdentityError` → ``400 malformed_verified_claim``.
+
+    5. If credential present and NO provider configured →
+       ``401 verification_unavailable`` (fail-closed per B5).
+    6. If only legacy headers present → existing B8 path,
+       source = ``header``.
+    7. Otherwise → empty :class:`AuthorityContext`, source =
+       ``anonymous``.
+    8. Stash ``authority`` + ``authority_source`` on
+       ``request.state`` and bind the ContextVar (paired reset in
+       ``finally``).
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        auth_provider: AuthProvider | None = None,
+    ) -> None:
         super().__init__(app)
+        self._auth_provider = auth_provider
 
     async def dispatch(
         self,
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
+        # 1. Authorization header.
         try:
-            authority = self._extract(request)
+            credential = self._parse_authorization(request)
+        except _AuthorizationParseError as err:
+            logger.warning(
+                "authority_authorization_malformed",
+                extra={"reason": err.reason},
+            )
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "malformed_authorization_header",
+                    "header": AUTHORIZATION_HEADER,
+                    "reason": err.reason,
+                },
+            )
+
+        # 2. Legacy X-*-ID headers.
+        try:
+            legacy_raw = self._extract_legacy_headers(request)
         except _AuthorityHeaderError as err:
             logger.warning(
                 "authority_header_malformed",
-                extra={
-                    "header": err.header,
-                    "reason": err.reason,
-                },
+                extra={"header": err.header, "reason": err.reason},
             )
             return JSONResponse(
                 status_code=400,
@@ -161,8 +203,97 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                     "reason": err.reason,
                 },
             )
+        has_legacy = any(v is not None for v in legacy_raw.values())
 
+        # 3. Source singularity.
+        if credential is not None and has_legacy:
+            logger.warning("authority_source_conflict")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "authority_source_conflict",
+                    "reason": (
+                        "request presents both an Authorization "
+                        "header and X-*-ID identity headers; "
+                        "authority source must be singular"
+                    ),
+                },
+            )
+
+        # 4–7. Resolve source-specific AuthorityContext.
+        if credential is not None:
+            if self._auth_provider is None:
+                logger.warning("authority_verification_unavailable")
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "verification_unavailable",
+                        "reason": (
+                            "no auth provider configured; cannot "
+                            "verify presented credential"
+                        ),
+                    },
+                )
+            try:
+                verified = await self._auth_provider.verify(credential)
+            except AuthenticationError as err:
+                logger.warning(
+                    "authority_verification_failed",
+                    extra={"reason": str(err)},
+                )
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "verification_failed",
+                        "reason": str(err),
+                    },
+                )
+            try:
+                authority = verified_identity_to_authority(verified)
+            except IdentityError as err:
+                logger.warning(
+                    "authority_verified_claim_malformed",
+                    extra={"reason": str(err)},
+                )
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "malformed_verified_claim",
+                        "reason": str(err),
+                    },
+                )
+            source = AUTHORITY_SOURCE_VERIFIED
+        elif has_legacy:
+            try:
+                authority = AuthorityContext.from_raw(**legacy_raw)
+            except IdentityError as err:
+                offending_header = _identify_offending_header(
+                    legacy_raw, err
+                )
+                logger.warning(
+                    "authority_header_malformed",
+                    extra={
+                        "header": offending_header,
+                        "reason": str(err),
+                    },
+                )
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "malformed_authority_header",
+                        "header": offending_header,
+                        "field": HEADER_TO_FIELD[offending_header],
+                        "reason": str(err),
+                    },
+                )
+            source = AUTHORITY_SOURCE_HEADER
+        else:
+            authority = AuthorityContext()
+            source = AUTHORITY_SOURCE_ANONYMOUS
+
+        # 8. Bind.
         request.state.authority = authority
+        request.state.authority_source = source
         token = set_request_authority(authority)
         try:
             response: Response = await call_next(request)
@@ -170,14 +301,55 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
             reset_request_authority(token)
         return response
 
-    @staticmethod
-    def _extract(request: Request) -> AuthorityContext:
-        """Pure extraction: headers → ``AuthorityContext``.
+    # ─── Parsers ──────────────────────────────────────────────────
 
-        Raises :class:`_AuthorityHeaderError` (caught by ``dispatch``
-        and translated to a 400 response) when any present header is
-        whitespace-only / empty. Missing headers are tolerated and
-        produce ``None`` axes.
+    @staticmethod
+    def _parse_authorization(
+        request: Request,
+    ) -> Credential | None:
+        """Parse the ``Authorization`` header into a
+        :class:`Credential`.
+
+        Returns ``None`` when no Authorization header is present.
+        Raises :class:`_AuthorizationParseError` on:
+
+        * empty / whitespace-only header value,
+        * missing scheme or value (no whitespace separator,
+          single-token, or empty after split).
+
+        Scheme case is PRESERVED (audit fidelity) — providers are
+        expected to compare case-insensitively per RFC 7235.
+        """
+        raw = request.headers.get(AUTHORIZATION_HEADER)
+        if raw is None:
+            return None
+        stripped = raw.strip()
+        if not stripped:
+            raise _AuthorizationParseError(
+                reason="value is empty or whitespace-only"
+            )
+        parts = stripped.split(None, 1)
+        if len(parts) != 2:
+            raise _AuthorizationParseError(
+                reason="expected '<scheme> <value>', got single token"
+            )
+        scheme, value = parts[0], parts[1].strip()
+        if not scheme or not value:
+            raise _AuthorizationParseError(
+                reason="scheme or value is empty after split"
+            )
+        return Credential(scheme=scheme, value=value)
+
+    @staticmethod
+    def _extract_legacy_headers(
+        request: Request,
+    ) -> dict[str, str | None]:
+        """Extract the four ``X-*-ID`` headers into raw kwargs for
+        :meth:`AuthorityContext.from_raw`.
+
+        Raises :class:`_AuthorityHeaderError` when any present
+        header is whitespace-only (audit needs the exact header
+        name, not just the field name).
         """
         raw: dict[str, str | None] = {}
         for header in AUTHORITY_HEADERS:
@@ -186,48 +358,20 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
             if value is None:
                 raw[field] = None
                 continue
-            try:
-                # We rely on ``coerce_*_id`` (invoked by
-                # ``AuthorityContext.from_raw``) to perform the
-                # canonical strip-and-validate. We pass the value
-                # through so the SAME validation runs in the
-                # middleware as in any other ``from_raw`` caller —
-                # there is no parallel validation path. We still
-                # short-circuit obvious whitespace here so the
-                # error attribution names the exact offending
-                # HEADER (not just the field), which audit needs.
-                if not value.strip():
-                    raise _AuthorityHeaderError(
-                        header=header,
-                        reason="value is empty or whitespace-only",
-                    )
-            except _AuthorityHeaderError:
-                raise
+            if not value.strip():
+                raise _AuthorityHeaderError(
+                    header=header,
+                    reason="value is empty or whitespace-only",
+                )
             raw[field] = value
-
-        try:
-            return AuthorityContext.from_raw(**raw)
-        except IdentityError as err:
-            # Defensive: ``coerce_*_id`` could in principle raise
-            # for a malformation we did not pre-screen. Map back
-            # to the offending header by re-walking the inputs.
-            offending_header = _identify_offending_header(raw, err)
-            raise _AuthorityHeaderError(
-                header=offending_header,
-                reason=str(err),
-            ) from err
+        return raw
 
 
 # ─── Internals ─────────────────────────────────────────────────────
 
 
 class _AuthorityHeaderError(Exception):
-    """Internal carrier for one malformed HTTP authority header.
-
-    Not exported; the middleware catches it and renders a 400 JSON
-    response. The shape matches the response body so tests can pin
-    both the wire format and the internal contract.
-    """
+    """Internal carrier for one malformed ``X-*-ID`` header."""
 
     def __init__(self, *, header: str, reason: str) -> None:
         super().__init__(f"{header}: {reason}")
@@ -235,20 +379,19 @@ class _AuthorityHeaderError(Exception):
         self.reason = reason
 
 
+class _AuthorizationParseError(Exception):
+    """Internal carrier for malformed ``Authorization`` header."""
+
+    def __init__(self, *, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def _identify_offending_header(
     raw: Mapping[str, str | None],
     err: IdentityError,
 ) -> str:
-    """Best-effort attribution of an ``IdentityError`` to a header.
-
-    The ``coerce_*_id`` helpers all raise messages prefixed with the
-    field name (``tenant_id``, ``principal_id``, ...). We invert the
-    ``HEADER_TO_FIELD`` map to recover the header. If the message
-    doesn't match any field (would only happen if the helper API
-    changes), we fall back to the first non-None raw entry so the
-    response always names some header. The static field-name shape
-    is pinned by ``test_identity_primitives.py``.
-    """
+    """Best-effort attribution of ``IdentityError`` to a header."""
     message = str(err)
     for header, field in HEADER_TO_FIELD.items():
         if message.startswith(field):
@@ -261,6 +404,11 @@ def _identify_offending_header(
 
 __all__ = [
     "AUTHORITY_HEADERS",
+    "AUTHORITY_SOURCES",
+    "AUTHORITY_SOURCE_ANONYMOUS",
+    "AUTHORITY_SOURCE_HEADER",
+    "AUTHORITY_SOURCE_VERIFIED",
+    "AUTHORIZATION_HEADER",
     "AuthorityContextMiddleware",
     "ENVIRONMENT_HEADER",
     "HEADER_TO_FIELD",
