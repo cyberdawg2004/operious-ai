@@ -21,6 +21,10 @@ from app.core.redis import close_redis
 from app.db.session import dispose_engine
 from app.middleware.authority_context import AuthorityContextMiddleware
 from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.trusted_ingress import (
+    IPNetwork,
+    TrustedIngressMiddleware,
+)
 
 
 @asynccontextmanager
@@ -53,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app(
     *,
     auth_provider: AuthProvider | None = None,
+    trusted_proxies: tuple[IPNetwork, ...] | None = None,
 ) -> FastAPI:
     """Build and return the FastAPI application.
 
@@ -63,6 +68,15 @@ def create_app(
     the legacy ``X-*-ID`` ingress path and anonymous requests
     continue to work. Concrete provider implementations are
     delivered by Wedge C3.
+
+    ``trusted_proxies`` activates the C4 trusted-ingress chain.
+    When ``None`` (default), no trust enforcement runs and the
+    B8/C2 ingress is byte-for-byte preserved (legacy / test
+    deployments). When passed (including the empty tuple),
+    :class:`TrustedIngressMiddleware` is registered and rejects
+    authority-bearing headers from peers outside the allowlist
+    with ``400 untrusted_ingress``. An empty tuple is the strict
+    fail-closed setting — every peer is untrusted.
     """
 
     settings = get_settings()
@@ -90,10 +104,16 @@ def create_app(
     # ``AuthorityContextMiddleware`` as the SINGLE canonical
     # HTTP-level identity extraction site; see
     # ``app/middleware/authority_context.py`` for the doctrine.
+    # Inner → outer (Starlette prepends; last added is outermost).
     app.add_middleware(
         AuthorityContextMiddleware,
         auth_provider=auth_provider,
     )
+    if trusted_proxies is not None:
+        app.add_middleware(
+            TrustedIngressMiddleware,
+            trusted_proxies=trusted_proxies,
+        )
     app.add_middleware(RequestContextMiddleware)
 
     app.include_router(build_api_router(settings))
