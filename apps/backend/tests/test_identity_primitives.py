@@ -164,7 +164,10 @@ def test_public_api_surface_is_stable() -> None:
         "coerce_organization_id",
         "coerce_principal_id",
         "coerce_tenant_id",
+        "get_request_authority",
         "project_optional_str",
+        "reset_request_authority",
         "resolve_authority",
+        "set_request_authority",
     }
     assert set(identity_pkg.__all__) == expected

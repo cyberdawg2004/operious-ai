@@ -32,6 +32,11 @@ from app.identity.primitives import (
     coerce_tenant_id,
 )
 from app.identity.projection import project_optional_str
+from app.identity.runtime import (
+    get_request_authority,
+    reset_request_authority,
+    set_request_authority,
+)
 
 __all__ = [
     "AuthorityContext",
@@ -46,6 +51,9 @@ __all__ = [
     "coerce_organization_id",
     "coerce_principal_id",
     "coerce_tenant_id",
+    "get_request_authority",
     "project_optional_str",
+    "reset_request_authority",
     "resolve_authority",
+    "set_request_authority",
 ]

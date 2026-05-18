@@ -18,6 +18,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.db.session import dispose_engine
+from app.middleware.authority_context import AuthorityContextMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 
 
@@ -63,7 +64,20 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Request context first so every later layer sees the correlation id.
+    # Middleware registration order matters: Starlette's
+    # ``add_middleware`` prepends to ``user_middleware`` and the
+    # build wraps in REVERSED order, so the LAST registered class
+    # ends up OUTERMOST in the request flow. We want:
+    #
+    #     RequestContext (outer) → AuthorityContext (inner) → Router
+    #
+    # so the request id is bound BEFORE the authority middleware
+    # logs / returns a 400 — every authority-extraction error then
+    # carries the correlation id. Wedge B8 establishes
+    # ``AuthorityContextMiddleware`` as the SINGLE canonical
+    # HTTP-level identity extraction site; see
+    # ``app/middleware/authority_context.py`` for the doctrine.
+    app.add_middleware(AuthorityContextMiddleware)
     app.add_middleware(RequestContextMiddleware)
 
     app.include_router(build_api_router(settings))
