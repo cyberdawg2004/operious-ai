@@ -126,6 +126,7 @@ class CoordinationTrace:
     ended_at: datetime
     latency_ms: float
     error: str | None = None
+    tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

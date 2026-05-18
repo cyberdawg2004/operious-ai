@@ -37,6 +37,7 @@ from app.coordination.identity import (
     CoordinationMessageId,
 )
 from app.governance.enums import EnforcementStage
+from app.identity import AuthorityContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +72,16 @@ class CoordinationDispatchRequest:
                                   callers SHOULD supply the same
                                   value the surrounding governance
                                   pipeline uses.
+        authority:               Typed authority tuple (Wedge B2).
+                                  When supplied with a non-None
+                                  ``tenant_id`` axis, becomes the
+                                  canonical authority source — see
+                                  ``resolve_authority`` in
+                                  ``app.identity``. When both
+                                  ``authority`` and ``tenant_id``
+                                  are supplied with values, they
+                                  MUST agree (Wedge B7 coexistence
+                                  invariant).
         enforcement_stage:       Which governance stage chain to run.
                                   Defaults to `PRE_EXECUTION`.
         coordination_id_override:
@@ -105,11 +116,34 @@ class CoordinationDispatchRequest:
     parent_message_id: CoordinationMessageId | None = None
     request_id: str | None = None
     tenant_id: str | None = None
+    authority: AuthorityContext | None = None
     enforcement_stage: EnforcementStage = EnforcementStage.PRE_EXECUTION
     coordination_id_override: CoordinationId | None = None
     chain_depth: int = 0
     governance_metadata: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Wedge B7 coexistence invariant (mirrored from boundary +
+        # supervisor contracts): when both the typed ``authority``
+        # and the legacy ``tenant_id`` are supplied with values,
+        # they MUST agree. ``None`` on either side is permitted —
+        # legacy callers (tenant_id only) and typed callers
+        # (authority only) are both supported during the typed-
+        # ingress transition.
+        if (
+            self.authority is not None
+            and self.authority.tenant_id is not None
+            and self.tenant_id is not None
+            and self.authority.tenant_id != self.tenant_id
+        ):
+            raise ValueError(
+                "CoordinationDispatchRequest: authority.tenant_id "
+                "and tenant_id must agree when both are supplied "
+                f"(got authority.tenant_id="
+                f"{self.authority.tenant_id!r}, "
+                f"tenant_id={self.tenant_id!r})"
+            )
 
 
 __all__ = ["CoordinationDispatchRequest"]

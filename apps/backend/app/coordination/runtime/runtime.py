@@ -156,6 +156,7 @@ from app.governance.enums import Decision
 from app.governance.subjects.communication import (
     CommunicationGovernanceSubject,
 )
+from app.identity import AuthorityResolution, resolve_authority
 from app.observability.context import get_request_id
 
 
@@ -238,6 +239,22 @@ class CoordinationRuntime:
         )
         request_id = request.request_id or get_request_id()
 
+        # Wedge B7: SINGULAR authority resolution.
+        # Audit defect DR-4 was that six internal sites coalesced
+        # ``request.tenant_id or msg.recipient.tenant_id`` independently
+        # (topology subrequest, policy subrequest, governance subject,
+        # governance context, envelope, fail-fast trace) — with the
+        # falsy-string bug from B4 (``""`` silently falling back to
+        # recipient) and zero attribution. We resolve authority ONCE
+        # here and thread the resolution through every downstream
+        # site. Every envelope, every trace, every persisted record
+        # records WHICH source produced the effective ``tenant_id``.
+        resolution = resolve_authority(
+            typed=request.authority,
+            legacy_tenant_id=request.tenant_id,
+            observed_tenant_id=request.message.recipient.tenant_id,
+        )
+
         # 1. Validate.
         try:
             self._validate(request)
@@ -252,6 +269,7 @@ class CoordinationRuntime:
                 error=exc,
                 status=CoordinationStatus.FAILED,
                 envelope=None,
+                resolution=resolution,
             )
 
         # 2. Invoke coordination-topology (structural authority) when
@@ -264,6 +282,7 @@ class CoordinationRuntime:
                     request=request,
                     request_id=request_id,
                     coordination_id=coordination_id,
+                    resolution=resolution,
                 )
             )
             topology_metadata = self._topology_metadata_for(
@@ -286,6 +305,7 @@ class CoordinationRuntime:
                     started_at=started_at,
                     loop_start=loop_start,
                     extra_metadata=topology_metadata,
+                    resolution=resolution,
                 )
             topology_result = topology_envelope.unwrap()
             topology_apex = topology_result.aggregate_decision
@@ -307,6 +327,7 @@ class CoordinationRuntime:
                     started_at=started_at,
                     loop_start=loop_start,
                     extra_metadata=topology_metadata,
+                    resolution=resolution,
                 )
             # ALLOWED — continue to policy.
 
@@ -321,6 +342,7 @@ class CoordinationRuntime:
                     request=request,
                     request_id=request_id,
                     coordination_id=coordination_id,
+                    resolution=resolution,
                 )
             )
             policy_metadata = self._policy_metadata_for(policy_envelope)
@@ -341,6 +363,7 @@ class CoordinationRuntime:
                     started_at=started_at,
                     loop_start=loop_start,
                     extra_metadata=substrate_metadata,
+                    resolution=resolution,
                 )
             policy_result = policy_envelope.unwrap()
             policy_apex = policy_result.aggregate_decision
@@ -363,11 +386,14 @@ class CoordinationRuntime:
                     started_at=started_at,
                     loop_start=loop_start,
                     extra_metadata=substrate_metadata,
+                    resolution=resolution,
                 )
 
         # 4. Invoke governance.
         gov_context = self._build_governance_context(
-            request=request, request_id=request_id
+            request=request,
+            request_id=request_id,
+            resolution=resolution,
         )
         gov_envelope = await self._governance.evaluate(gov_context)
 
@@ -384,6 +410,7 @@ class CoordinationRuntime:
                 started_at=started_at,
                 loop_start=loop_start,
                 extra_metadata=substrate_metadata,
+                resolution=resolution,
             )
 
         decision = gov_envelope.unwrap()
@@ -404,6 +431,7 @@ class CoordinationRuntime:
                 started_at=started_at,
                 loop_start=loop_start,
                 extra_metadata=substrate_metadata,
+                resolution=resolution,
             )
 
         # 6. Accepted (or DEGRADED) — persist DISPATCHED / DEGRADED envelope.
@@ -419,6 +447,7 @@ class CoordinationRuntime:
             started_at=started_at,
             loop_start=loop_start,
             extra_metadata=substrate_metadata,
+            resolution=resolution,
         )
 
     async def get_message(
@@ -480,6 +509,7 @@ class CoordinationRuntime:
         request: CoordinationDispatchRequest,
         request_id: str | None,
         coordination_id: CoordinationId,
+        resolution: AuthorityResolution,
     ) -> CoordinationTopologyEvaluationRequest:
         """Compose a `CoordinationTopologyEvaluationRequest` from `request`.
 
@@ -487,6 +517,15 @@ class CoordinationRuntime:
         the dispatch request, the message, and the substrate-pinned
         `coordination_id`. The topology substrate never sees the
         dispatch payload; only the structural axes propagate.
+
+        Wedge B7: the ``tenant_id`` field receives the SINGULAR
+        ``resolution.tenant_id`` produced once at the top of
+        ``dispatch``. The earlier ``request.tenant_id or
+        msg.recipient.tenant_id`` coalesce is closed (audit defect
+        DR-4 — site 1 of 6). The two axis-named fields
+        ``sender_tenant_id`` / ``recipient_tenant_id`` keep their
+        explicit semantics — they are NOT authority resolutions but
+        structural axes the topology substrate evaluates against.
         """
         msg = request.message
         return CoordinationTopologyEvaluationRequest(
@@ -498,7 +537,7 @@ class CoordinationRuntime:
             priority=msg.priority,
             coordination_id=coordination_id,
             coordination_message_id=msg.message_id,
-            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            tenant_id=resolution.tenant_id,
             sender_tenant_id=request.tenant_id,
             recipient_tenant_id=msg.recipient.tenant_id,
             correlation_id=request.correlation_id,
@@ -576,6 +615,7 @@ class CoordinationRuntime:
         request: CoordinationDispatchRequest,
         request_id: str | None,
         coordination_id: CoordinationId,
+        resolution: AuthorityResolution,
     ) -> CoordinationPolicyEvaluationRequest:
         """Compose a `CoordinationPolicyEvaluationRequest` from `request`.
 
@@ -583,6 +623,9 @@ class CoordinationRuntime:
         the dispatch request, the message, and the substrate-pinned
         `coordination_id`. The policy substrate never sees the
         dispatch payload; only the topology axes are propagated.
+
+        Wedge B7: receives the SINGULAR ``resolution.tenant_id`` —
+        audit defect DR-4 site 2 of 6 closed.
         """
         msg = request.message
         return CoordinationPolicyEvaluationRequest(
@@ -594,7 +637,7 @@ class CoordinationRuntime:
             priority=msg.priority,
             coordination_id=coordination_id,
             coordination_message_id=msg.message_id,
-            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            tenant_id=resolution.tenant_id,
             sender_tenant_id=request.tenant_id,
             recipient_tenant_id=msg.recipient.tenant_id,
             correlation_id=request.correlation_id,
@@ -678,6 +721,7 @@ class CoordinationRuntime:
         *,
         request: CoordinationDispatchRequest,
         request_id: str | None,
+        resolution: AuthorityResolution,
     ) -> GovernanceContext:
         """Compose a `GovernanceContext` from the dispatch request.
 
@@ -690,6 +734,11 @@ class CoordinationRuntime:
         * subject       ← `CommunicationGovernanceSubject` (typed)
         * correlation_id← request.correlation_id (NewType over UUID)
         * metadata      ← substrate-namespaced fields + caller override
+
+        Wedge B7: BOTH the ``CommunicationGovernanceSubject.tenant_id``
+        and the ``GovernanceContext.tenant_id`` receive the SAME
+        SINGULAR ``resolution.tenant_id``. They cannot drift apart —
+        audit defect DR-4 sites 3 and 4 of 6 closed.
         """
         msg = request.message
         action = _governance_action_for(msg.message_type)
@@ -700,7 +749,7 @@ class CoordinationRuntime:
             channel=f"coordination/{request.direction.value}",
             recipient_scope=msg.recipient.recipient_id,
             content_summary=msg.payload.content_type,
-            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            tenant_id=resolution.tenant_id,
             request_id=request_id,
         )
 
@@ -736,7 +785,7 @@ class CoordinationRuntime:
             action=action,
             resource=resource,
             actor=actor,
-            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            tenant_id=resolution.tenant_id,
             request_id=request_id,
             subject=subject,
             correlation_id=request.correlation_id,
@@ -780,6 +829,7 @@ class CoordinationRuntime:
         error: str | None,
         started_at: datetime,
         loop_start: float,
+        resolution: AuthorityResolution,
         extra_metadata: dict[str, object] | None = None,
     ) -> CoordinationDispatchResult:
         """Assign sequence, build envelope, persist, build trace + result.
@@ -807,6 +857,9 @@ class CoordinationRuntime:
             if extra_metadata:
                 envelope_metadata.update(extra_metadata)
 
+            # Wedge B7: stamp the singular resolved tenant_id AND
+            # the AuthoritySource that produced it. Audit defect
+            # DR-4 site 5 of 6 closed.
             envelope = CoordinationEnvelope(
                 coordination_id=coordination_id,
                 message=request.message,
@@ -818,8 +871,8 @@ class CoordinationRuntime:
                 parent_coordination_id=request.parent_coordination_id,
                 parent_message_id=request.parent_message_id,
                 request_id=request_id,
-                tenant_id=request.tenant_id
-                or request.message.recipient.tenant_id,
+                tenant_id=resolution.tenant_id,
+                tenant_authority_source=resolution.source.value,
                 governance_decision_id=governance_decision_id,
                 governance_chain_id=governance_chain_id,
                 created_at=request.message.created_at,
@@ -902,6 +955,10 @@ class CoordinationRuntime:
         latency_ms: float,
         error: str | None,
     ) -> CoordinationTrace:
+        # The trace mirrors the envelope's authority attribution —
+        # ``tenant_authority_source`` is carried verbatim so the trace
+        # and the envelope cannot disagree on which input produced the
+        # effective tenant. There is no independent resolution here.
         msg = envelope.message
         return CoordinationTrace(
             coordination_id=coordination_id,
@@ -921,6 +978,7 @@ class CoordinationRuntime:
             in_reply_to=msg.in_reply_to,
             request_id=envelope.request_id,
             tenant_id=envelope.tenant_id,
+            tenant_authority_source=envelope.tenant_authority_source,
             governance_decision_id=envelope.governance_decision_id,
             governance_chain_id=envelope.governance_chain_id,
             started_at=started_at,
@@ -942,10 +1000,16 @@ class CoordinationRuntime:
         error: BaseException,
         status: CoordinationStatus,
         envelope: CoordinationEnvelope | None,
+        resolution: AuthorityResolution,
     ) -> CoordinationDispatchResult:
         """Build a trace + result for failures that occur before persistence.
 
         Used for validation failures (no envelope ever constructed).
+
+        Wedge B7: the fail-fast trace consumes the SAME resolution
+        produced once at the top of ``dispatch()`` — audit defect
+        DR-4 site 6 of 6 closed. The trace and the (absent) envelope
+        share the same authority attribution.
         """
         loop = asyncio.get_event_loop()
         ended_at = datetime.now(timezone.utc)
@@ -968,7 +1032,8 @@ class CoordinationRuntime:
             parent_message_id=request.parent_message_id,
             in_reply_to=msg.in_reply_to,
             request_id=request_id,
-            tenant_id=request.tenant_id or msg.recipient.tenant_id,
+            tenant_id=resolution.tenant_id,
+            tenant_authority_source=resolution.source.value,
             governance_decision_id=None,
             governance_chain_id=None,
             started_at=started_at,

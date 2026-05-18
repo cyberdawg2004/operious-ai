@@ -78,6 +78,16 @@ class CoordinationEnvelope:
         parent_message_id:      Causality ancestor (message).
         request_id:             Platform-wide request id.
         tenant_id:              Tenant scope.
+        tenant_authority_source: Which input produced the effective
+                                 ``tenant_id`` — typed-authority,
+                                 legacy-tenant, observed-tenant
+                                 (= recipient tenant), or none.
+                                 Wedge B7 introduces this for
+                                 traceable replay attribution.
+                                 Stores the ``AuthoritySource``
+                                 enum's wire value; ``None`` only
+                                 on persistence records produced
+                                 before Wedge B7 (back-compat).
         governance_decision_id: Apex `GovernanceDecision.decision_id`
                                  the substrate received. ``None`` for
                                  envelopes produced before governance
@@ -110,6 +120,7 @@ class CoordinationEnvelope:
     governance_chain_id: str | None
     created_at: datetime
     dispatched_at: datetime
+    tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property

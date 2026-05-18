@@ -71,6 +71,7 @@ def envelope_to_record(envelope: CoordinationEnvelope) -> CoordinationRecord:
         ),
         request_id=envelope.request_id,
         tenant_id=envelope.tenant_id,
+        tenant_authority_source=envelope.tenant_authority_source,
         governance_decision_id=(
             str(envelope.governance_decision_id)
             if envelope.governance_decision_id is not None
@@ -147,6 +148,7 @@ def record_to_envelope(record: CoordinationRecord) -> CoordinationEnvelope:
         ),
         request_id=record.request_id,
         tenant_id=record.tenant_id,
+        tenant_authority_source=record.tenant_authority_source,
         governance_decision_id=(
             uuid.UUID(record.governance_decision_id)
             if record.governance_decision_id is not None

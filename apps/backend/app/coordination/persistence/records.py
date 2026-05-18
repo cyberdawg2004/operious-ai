@@ -78,6 +78,11 @@ class CoordinationRecord:
     # Timestamps (ISO-8601, UTC)
     created_at: str
     dispatched_at: str
+    # Authority attribution (Wedge B7). Records WHICH input produced
+    # the effective ``tenant_id``. Optional + defaults to None so
+    # pre-B7 records (missing the key) deserialize unchanged. Placed
+    # after all non-default fields to satisfy dataclass ordering.
+    tenant_authority_source: str | None = None
     # Metadata bags
     recipient_metadata: Mapping[str, Any] = field(default_factory=dict)
     payload_metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -103,6 +108,7 @@ class CoordinationRecord:
             "in_reply_to": self.in_reply_to,
             "request_id": self.request_id,
             "tenant_id": self.tenant_id,
+            "tenant_authority_source": self.tenant_authority_source,
             "governance_decision_id": self.governance_decision_id,
             "governance_chain_id": self.governance_chain_id,
             "payload_content_type": self.payload_content_type,
@@ -158,6 +164,15 @@ class CoordinationRecord:
             tenant_id=(
                 str(data["tenant_id"])
                 if data.get("tenant_id") is not None
+                else None
+            ),
+            # Backward-compat: pre-B7 records do not carry this key;
+            # ``data.get`` returns None and we deserialize with the
+            # same default the dataclass would have used at
+            # construction time.
+            tenant_authority_source=(
+                str(data["tenant_authority_source"])
+                if data.get("tenant_authority_source") is not None
                 else None
             ),
             governance_decision_id=(
