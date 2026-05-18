@@ -35,8 +35,11 @@ def test_runtime_module_public_surface() -> None:
     """Pin the public surface so the runtime stays focused."""
     assert set(runtime.__all__) == {
         "get_request_authority",
-        "set_request_authority",
+        "get_request_authority_source",
         "reset_request_authority",
+        "reset_request_authority_source",
+        "set_request_authority",
+        "set_request_authority_source",
     }
 
 

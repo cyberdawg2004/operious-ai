@@ -71,7 +71,9 @@ from app.identity.authority import AuthorityContext
 from app.identity.primitives import IdentityError
 from app.identity.runtime import (
     reset_request_authority,
+    reset_request_authority_source,
     set_request_authority,
+    set_request_authority_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -265,7 +267,12 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
             source = AUTHORITY_SOURCE_VERIFIED
         elif has_legacy:
             try:
-                authority = AuthorityContext.from_raw(**legacy_raw)
+                authority = AuthorityContext.from_raw(
+                    tenant_id=legacy_raw.get("tenant_id"),
+                    principal_id=legacy_raw.get("principal_id"),
+                    organization_id=legacy_raw.get("organization_id"),
+                    environment_id=legacy_raw.get("environment_id"),
+                )
             except IdentityError as err:
                 offending_header = _identify_offending_header(
                     legacy_raw, err
@@ -295,9 +302,11 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
         request.state.authority = authority
         request.state.authority_source = source
         token = set_request_authority(authority)
+        source_token = set_request_authority_source(source)
         try:
             response: Response = await call_next(request)
         finally:
+            reset_request_authority_source(source_token)
             reset_request_authority(token)
         return response
 

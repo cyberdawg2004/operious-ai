@@ -19,13 +19,25 @@ import sys
 from pythonjsonlogger.json import JsonFormatter
 
 from app.core.config import Settings, get_settings
+from app.observability.authority_logging import AuthorityContextFilter
 from app.observability.logging import RequestContextFilter
 
 _configured: bool = False
 
-_JSON_FORMAT = "%(asctime)s %(levelname)s %(name)s %(request_id)s %(message)s"
+#: Branch D — authority attribution. Every record carries the
+#: ingress trust posture + the four identity axes alongside the
+#: request id, so audit pipelines can correlate ``tenant_id`` /
+#: ``principal_id`` provenance with log lines without joining
+#: separate streams.
+_JSON_FORMAT = (
+    "%(asctime)s %(levelname)s %(name)s %(request_id)s "
+    "%(authority_source)s %(tenant_id)s %(principal_id)s "
+    "%(organization_id)s %(environment_id)s %(message)s"
+)
 _TEXT_FORMAT = (
-    "%(asctime)s | %(levelname)-8s | req=%(request_id)s | %(name)s | %(message)s"
+    "%(asctime)s | %(levelname)-8s | req=%(request_id)s "
+    "| auth=%(authority_source)s tenant=%(tenant_id)s "
+    "principal=%(principal_id)s | %(name)s | %(message)s"
 )
 
 _NOISY_LOGGERS = (
@@ -61,6 +73,7 @@ def configure_logging(settings: Settings | None = None) -> None:
 
     handler.setFormatter(formatter)
     handler.addFilter(RequestContextFilter())
+    handler.addFilter(AuthorityContextFilter())
 
     root = logging.getLogger()
     root.handlers.clear()

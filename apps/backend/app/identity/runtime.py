@@ -47,6 +47,16 @@ _REQUEST_AUTHORITY: ContextVar[AuthorityContext | None] = ContextVar(
     default=None,
 )
 
+#: Branch D — observability attribution. Carries the request's
+#: ``authority_source`` literal (``"verified"`` / ``"header"`` /
+#: ``"anonymous"``) alongside the :class:`AuthorityContext` itself
+#: so structured logs and audit hooks can attribute each record to
+#: the ingress trust posture without re-reading ``request.state``.
+_REQUEST_AUTHORITY_SOURCE: ContextVar[str | None] = ContextVar(
+    "operious_request_authority_source",
+    default=None,
+)
+
 
 def get_request_authority() -> AuthorityContext | None:
     """Return the current request's :class:`AuthorityContext`.
@@ -77,8 +87,32 @@ def reset_request_authority(
     _REQUEST_AUTHORITY.reset(token)
 
 
+def get_request_authority_source() -> str | None:
+    """Return the current request's authority source literal.
+
+    Mirrors :func:`get_request_authority`. Returns ``None`` when
+    no authority is bound (background tasks, REPL).
+    """
+    return _REQUEST_AUTHORITY_SOURCE.get()
+
+
+def set_request_authority_source(
+    source: str,
+) -> Token[str | None]:
+    return _REQUEST_AUTHORITY_SOURCE.set(source)
+
+
+def reset_request_authority_source(
+    token: Token[str | None],
+) -> None:
+    _REQUEST_AUTHORITY_SOURCE.reset(token)
+
+
 __all__ = [
     "get_request_authority",
-    "set_request_authority",
+    "get_request_authority_source",
     "reset_request_authority",
+    "reset_request_authority_source",
+    "set_request_authority",
+    "set_request_authority_source",
 ]
