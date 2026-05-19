@@ -29,6 +29,9 @@ Architectural rules:
 
 from app.governance.persistence.memory import InMemoryGovernanceRepository
 from app.governance.persistence.models import DecisionQuery, RecordPage
+from app.governance.persistence.postgres import (
+    PostgresGovernanceRepository,
+)
 from app.governance.persistence.records import (
     EnforcementActionRecord,
     GovernanceDecisionRecord,
@@ -66,4 +69,5 @@ __all__ = [
     # Repositories
     "BaseGovernanceRepository",
     "InMemoryGovernanceRepository",
+    "PostgresGovernanceRepository",
 ]

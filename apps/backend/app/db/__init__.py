@@ -24,7 +24,6 @@ they all register on `Base.metadata`. This single import is what Alembic
 autogenerate and any runtime metadata reflection rely on.
 """
 
-from app.db import models as models  # noqa: F401  — registration side effect
 from app.db.base import (
     TENANT_ID_MAX_LENGTH,
     Base,
@@ -40,6 +39,16 @@ from app.db.partitioning import (
 )
 from app.db.repository import TenantScopedRepository
 from app.db.session import AsyncSessionLocal, dispose_engine, engine
+
+# Model registration is imported LAST. Per-substrate ORM modules
+# (e.g. app.governance.db.models) import from app.db.base; pulling
+# them in before `Base` is exported here triggers a circular import
+# when something outside `app/db/` (a test, a runtime module) is the
+# first thing to touch the governance ORM. Importing the models
+# package last guarantees `Base` and the mixins are fully bound on
+# `app.db` before any per-substrate ORM module's import-time
+# `from app.db.base import Base` runs.
+from app.db import models as models  # noqa: F401  — registration side effect, must be last
 
 __all__ = [
     "AsyncSessionLocal",

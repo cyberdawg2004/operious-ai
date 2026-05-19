@@ -54,18 +54,55 @@ class InMemoryGovernanceRepository:
     # ─── Reads ───────────────────────────────────────────────────────
 
     async def get_decision(
-        self, decision_id: str
+        self,
+        decision_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> GovernanceDecisionRecord | None:
-        return self._decisions.get(decision_id)
+        # PR-B2 (M8 closure): tenant-scoped point read. A record
+        # owned by tenant ``T'`` MUST be invisible to a caller
+        # whose authority resolves to tenant ``T`` ≠ ``T'``;
+        # ``None`` is returned in both the "not found" and the
+        # "different tenant" cases so existence cannot leak.
+        record = self._decisions.get(decision_id)
+        if record is None:
+            return None
+        if expected_tenant_id is not None and record.tenant_id != expected_tenant_id:
+            return None
+        return record
 
     async def get_trace(
-        self, decision_id: str
+        self,
+        decision_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> GovernanceTraceRecord | None:
-        return self._traces.get(decision_id)
+        # Same tenant-scoping contract as get_decision — trace
+        # records carry their own tenant_id column so no parent
+        # join is needed.
+        record = self._traces.get(decision_id)
+        if record is None:
+            return None
+        if expected_tenant_id is not None and record.tenant_id != expected_tenant_id:
+            return None
+        return record
 
     async def get_enforcement_actions(
-        self, decision_id: str
+        self,
+        decision_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> tuple[EnforcementActionRecord, ...]:
+        # Tenant scope inherits from the owning decision (mirrors
+        # the session.get_event / supervisor.get_findings_for_inspection
+        # pattern). If the parent decision is invisible from the
+        # requesting tenant, the actions collection is empty —
+        # callers cannot enumerate cross-tenant actions by guessing
+        # decision_ids.
+        if expected_tenant_id is not None:
+            decision = self._decisions.get(decision_id)
+            if decision is None or decision.tenant_id != expected_tenant_id:
+                return ()
         return tuple(self._actions.get(decision_id, ()))
 
     # ─── Queries ─────────────────────────────────────────────────────

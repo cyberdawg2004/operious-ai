@@ -28,7 +28,16 @@ from app.db.base import Base
 # Import models so they register on Base.metadata. Every new model
 # module must be imported here (directly or transitively) to be picked
 # up by autogenerate.
+#
+# ``app.db.models`` registers the cross-cutting infrastructure ORM
+# (``system_health_checks``). Per-substrate ORM modules are imported
+# explicitly below so they bind to ``Base.metadata`` for
+# autogenerate without going through ``app/db/models/__init__.py``
+# (see the rationale in that file's docstring — touching per-substrate
+# ORM at app.db init time creates a circular-import hazard when a
+# substrate test is the first module pytest collects).
 from app.db import models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.governance.db import models as _governance_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 
