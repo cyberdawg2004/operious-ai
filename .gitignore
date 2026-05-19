@@ -61,3 +61,37 @@ Thumbs.db
 
 # Linux/Vim
 *.swp
+
+# Additional env protection
+.env.*
+
+# Secrets
+secrets/
+*.pem
+*.key
+*.crt
+*.p12
+
+# Docker/runtime
+docker-data/
+postgres-data/
+*.pid
+
+# Runtime artifacts
+*.out
+*.err
+*.coverage
+coverage.xml
+
+# AI tooling
+.claude/
+.cursor-cache/
+.ai/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Optional DB dumps
+*.dump
