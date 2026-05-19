@@ -79,7 +79,7 @@ from app.arbitration.tracing import ArbitrationTrace
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
+    evaluate_capability_gate,
 )
 
 _logger = logging.getLogger(__name__)
@@ -172,14 +172,18 @@ class OperationalArbitrationRuntime:
 
         # 2.75-\u03b1: capability legality gate. Inert when
         # ``self._capability_governance`` is unconfigured.
-        denial = await gate_or_deny(
+        # 2.75-\u03b4: capture governance provenance (decision_id,
+        # chain_id) from the gate outcome so the apex
+        # ``ArbitrationTrace`` records who authorised this evaluate
+        # call. Joinable by id against the governance repository.
+        gate_outcome = await evaluate_capability_gate(
             self._capability_governance,
             act=OperationalAct.ARBITRATION_EVALUATE,
             authority=request.authority,
             resolution=resolution,
             actor="arbitration_runtime",
         )
-        if denial is not None:
+        if gate_outcome.denial is not None:
             return await self._failed_envelope(
                 request=request,
                 resolution=resolution,
@@ -187,9 +191,11 @@ class OperationalArbitrationRuntime:
                 evaluators=(),
                 started_at=started_at,
                 t0=t0,
-                error=denial,
+                error=gate_outcome.denial,
                 error_outcome=ArbitrationOutcome.ARBITRATION_ERROR,
-                reason=str(denial),
+                reason=str(gate_outcome.denial),
+                governance_decision_id=gate_outcome.decision_id,
+                governance_chain_id=gate_outcome.chain_id,
             )
 
         # Resolve evaluators (registry sorted by name).
@@ -350,6 +356,8 @@ class OperationalArbitrationRuntime:
             ),
             metadata=result.metadata,
             tenant_authority_source=resolution.source.value,
+            governance_decision_id=gate_outcome.decision_id,
+            governance_chain_id=gate_outcome.chain_id,
         )
 
         # Persistence (best-effort; failure is folded onto envelope).
@@ -539,6 +547,8 @@ class OperationalArbitrationRuntime:
         error: BaseException,
         error_outcome: ArbitrationOutcome,
         reason: str,
+        governance_decision_id: uuid.UUID | None = None,
+        governance_chain_id: str | None = None,
     ) -> ArbitrationEnvelope:
         # Chronology integrity (Core Law 3): failure envelopes consume
         # a fresh monotonic sequence in the runtime instance just like
@@ -589,6 +599,8 @@ class OperationalArbitrationRuntime:
                 ),
             },
             tenant_authority_source=resolution.source.value,
+            governance_decision_id=governance_decision_id,
+            governance_chain_id=governance_chain_id,
         )
         return ArbitrationEnvelope(
             trace=trace, result=None, error=error

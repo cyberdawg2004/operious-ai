@@ -54,6 +54,7 @@ Adoption pattern
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
 from app.governance.capability.acts import OperationalAct
 from app.governance.capability.gate import (
@@ -95,6 +96,93 @@ class CapabilityDenied(Exception):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class CapabilityGateOutcome:
+    """Result of a capability-legality gate invocation.
+
+    The outcome bundles the binary verdict
+    (:attr:`denial` ``is None`` ⇔ ALLOW or inert) AND the governance
+    provenance handles (Wedge 2.75-δ). Per-runtime adoption sites
+    consume ``denial`` for fail-fast branching; runtimes that emit
+    a :class:`GovernanceTrace`-compatible trace also project
+    ``decision_id`` / ``chain_id`` to populate their existing
+    ``governance_decision_id`` / ``governance_chain_id`` fields.
+
+    Attributes:
+        denial: ``None`` when the gate is inert (no ``GovernanceRuntime``)
+            or the verdict is ALLOW; :class:`CapabilityDenied` otherwise.
+        decision_id: UUID of the apex :class:`GovernanceDecision` that
+            produced the verdict. ``None`` when the gate is inert or
+            evaluation produced no decision.
+        chain_id: Human-readable chain handle the decision came from.
+            ``None`` when the gate is inert or no chain produced a
+            verdict.
+    """
+
+    denial: CapabilityDenied | None
+    decision_id: uuid.UUID | None
+    chain_id: str | None
+
+
+async def evaluate_capability_gate(
+    governance: GovernanceRuntime | None,
+    *,
+    act: OperationalAct,
+    authority: AuthorityContext | None,
+    resolution: AuthorityResolution,
+    actor: str,
+    resource: str = "",
+    correlation_id: uuid.UUID | None = None,
+) -> CapabilityGateOutcome:
+    """Full capability-legality gate with governance provenance.
+
+    Primitive used by :func:`gate_or_deny` and consumed directly by
+    runtimes whose traces project ``governance_decision_id`` /
+    ``governance_chain_id`` (Wedge 2.75-δ). Returns the full
+    :class:`CapabilityGateOutcome` — denial verdict AND provenance.
+
+    Construction rules — identical to :func:`gate_or_deny`. When the
+    gate is inert (``governance is None``) the outcome carries
+    ``decision_id is None`` / ``chain_id is None`` so callers always
+    handle the inert case uniformly.
+    """
+    if governance is None:
+        return CapabilityGateOutcome(
+            denial=None, decision_id=None, chain_id=None
+        )
+    gate_authority = (
+        authority
+        if authority is not None
+        else AuthorityContext(tenant_id=resolution.tenant_id)
+    )
+    envelope = await evaluate_capability_legality(
+        governance,
+        CapabilityLegalityRequest(
+            authority=gate_authority,
+            act=act,
+            actor=actor,
+            resource=resource,
+            correlation_id=correlation_id,
+        ),
+    )
+    decision_id, chain_id = _provenance_from_envelope(envelope)
+    if not envelope.is_ok or envelope.decision is None:
+        return CapabilityGateOutcome(
+            denial=CapabilityDenied(act=act, envelope=envelope),
+            decision_id=decision_id,
+            chain_id=chain_id,
+        )
+    if not envelope.decision.is_allow:
+        return CapabilityGateOutcome(
+            denial=CapabilityDenied(act=act, envelope=envelope),
+            decision_id=decision_id,
+            chain_id=chain_id,
+        )
+    return CapabilityGateOutcome(
+        denial=None, decision_id=decision_id, chain_id=chain_id
+    )
+
+
 async def gate_or_deny(
     governance: GovernanceRuntime | None,
     *,
@@ -107,50 +195,59 @@ async def gate_or_deny(
 ) -> CapabilityDenied | None:
     """Single-line capability-legality entry-point gate.
 
-    Returns
-    -------
-    ``None``
-        Gate is inert (``governance is None``) or the act is
-        allowed (``envelope.is_ok and envelope.decision.is_allow``).
-    :class:`CapabilityDenied`
-        Gate is configured AND either the evaluation itself failed
-        (fail-closed) or the verdict was not ALLOW. The caller MUST
-        fold the returned exception into its fail-fast envelope
-        without further branching.
+    Thin denial-only wrapper around :func:`evaluate_capability_gate`
+    preserved for adoption sites that do not project governance
+    provenance onto their traces. Returns:
 
-    Construction rules
-    ------------------
-    * When the request carries a typed :class:`AuthorityContext`,
-      that authority is consumed verbatim (capabilities ride with
-      it).
-    * Otherwise a synthetic ``AuthorityContext`` is built from
-      ``resolution.tenant_id`` with **empty** capabilities. This is
-      the constitutional fail-closed default for legacy ingress:
-      callers that arrive without a verified authority context
-      carry zero capabilities and therefore cannot legally perform
-      capability-gated acts. The substrate refuses to invent
-      capabilities the caller did not claim.
+    * ``None`` — gate inert OR verdict ALLOW; the caller proceeds.
+    * :class:`CapabilityDenied` — verdict not ALLOW OR evaluation
+      failed (fail-closed). The caller MUST fold the returned
+      exception into its existing fail-fast envelope path without
+      further branching.
+
+    Runtimes that emit traces carrying
+    ``governance_decision_id`` / ``governance_chain_id`` should call
+    :func:`evaluate_capability_gate` directly instead so the
+    provenance handles can be stamped onto the trace.
     """
-    if governance is None:
-        return None
-    gate_authority = authority if authority is not None else AuthorityContext(
-        tenant_id=resolution.tenant_id
-    )
-    envelope = await evaluate_capability_legality(
+    outcome = await evaluate_capability_gate(
         governance,
-        CapabilityLegalityRequest(
-            authority=gate_authority,
-            act=act,
-            actor=actor,
-            resource=resource,
-            correlation_id=correlation_id,
-        ),
+        act=act,
+        authority=authority,
+        resolution=resolution,
+        actor=actor,
+        resource=resource,
+        correlation_id=correlation_id,
     )
-    if not envelope.is_ok or envelope.decision is None:
-        return CapabilityDenied(act=act, envelope=envelope)
-    if not envelope.decision.is_allow:
-        return CapabilityDenied(act=act, envelope=envelope)
-    return None
+    return outcome.denial
 
 
-__all__ = ["CapabilityDenied", "GovernanceRuntime", "gate_or_deny"]
+def _provenance_from_envelope(
+    envelope: GovernanceEnvelope,
+) -> tuple[uuid.UUID | None, str | None]:
+    """Extract (decision_id, chain_id) from a governance envelope.
+
+    The capability gate always produces a single-stage policy chain
+    so the apex decision's ``decision_id`` is the authoritative
+    handle. ``chain_id`` mirrors the chain that produced the apex
+    verdict (joinable against the governance repository).
+    """
+    decision = envelope.decision
+    if decision is not None:
+        return decision.decision_id, decision.policy_chain_id or None
+    trace = envelope.trace
+    if trace is not None:
+        return (
+            trace.decision_id,
+            trace.policy_chain_id or None,
+        )
+    return None, None
+
+
+__all__ = [
+    "CapabilityDenied",
+    "CapabilityGateOutcome",
+    "GovernanceRuntime",
+    "evaluate_capability_gate",
+    "gate_or_deny",
+]

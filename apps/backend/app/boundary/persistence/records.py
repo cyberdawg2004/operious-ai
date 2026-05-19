@@ -50,9 +50,9 @@ class BoundaryIngressRecord:
     request_id: str | None
     canonical_payload: Mapping[str, Any]
     error: str | None
-    # 2.5-G1: governance join axes (mirrors CoordinationRecord).
-    governance_decision_id: uuid.UUID | None = None
-    governance_chain_id: str | None = None
+    # 2.5-G1 ⇒ 2.75-δ: governance provenance removed (no apex
+    # producer). See ``BoundaryTrace`` docstring for the doctrine
+    # rationale.
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -80,9 +80,9 @@ class BoundaryEgressRecord:
     correlation_id: str | None
     request_id: str | None
     error: str | None
-    # 2.5-G1: governance join axes (mirrors CoordinationRecord).
-    governance_decision_id: uuid.UUID | None = None
-    governance_chain_id: str | None = None
+    # 2.5-G1 ⇒ 2.75-δ: governance provenance removed (no apex
+    # producer). See ``BoundaryTrace`` docstring for the doctrine
+    # rationale.
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

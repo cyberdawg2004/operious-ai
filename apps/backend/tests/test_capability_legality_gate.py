@@ -432,16 +432,22 @@ def test_capability_module_public_surface() -> None:
     ``gate_or_deny`` (the adoption helper consumed by every P2-A
     runtime entry) plus ``GovernanceRuntime`` re-exported so that
     leaf substrates can take the runtime type as a parameter
-    without breaking substrate isolation.
+    without breaking substrate isolation. 2.75-\u03b4 added two
+    more symbols — ``CapabilityGateOutcome`` and
+    ``evaluate_capability_gate`` — the provenance-bearing variant
+    consumed by runtimes that project governance_decision_id /
+    governance_chain_id onto their traces.
     """
     import app.governance.capability as cap
 
     assert set(cap.__all__) == {
         "CapabilityDenied",
+        "CapabilityGateOutcome",
         "CapabilityLegalityRequest",
         "GovernanceRuntime",
         "OperationalAct",
         "build_capability_context",
+        "evaluate_capability_gate",
         "evaluate_capability_legality",
         "gate_or_deny",
     }

@@ -38,7 +38,7 @@ from typing import Any
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
+    evaluate_capability_gate,
 )
 from app.identity import (
     AuthorityResolution,
@@ -189,22 +189,29 @@ class SessionRuntime:
         # / dev). When configured, an empty-capabilities authority
         # context produces DENY which folds into the existing
         # fail-fast envelope path.
-        denial = await gate_or_deny(
+        # 2.75-\u03b4: capture (decision_id, chain_id) from the gate
+        # outcome and stamp them on the apex ``SessionTrace`` for
+        # OPEN_SESSION calls. Joinable by id against the governance
+        # repository — auditors reconstruct WHY this session was
+        # allowed without re-evaluating the gate.
+        gate_outcome = await evaluate_capability_gate(
             self._capability_governance,
             act=OperationalAct.SESSION_OPEN,
             authority=request.authority,
             resolution=resolution,
             actor="session_runtime",
         )
-        if denial is not None:
+        if gate_outcome.denial is not None:
             return self._failed_envelope(
                 kind=SessionTraceKind.OPEN_SESSION,
                 session_id=None,
                 started_at=started_at,
                 t0=t0,
-                error=denial,
+                error=gate_outcome.denial,
                 request_correlation_id=request.correlation_id,
                 request_request_id=request.request_id,
+                governance_decision_id=gate_outcome.decision_id,
+                governance_chain_id=gate_outcome.chain_id,
             )
         try:
             session_id = self._resolve_open_session_id(
@@ -360,6 +367,8 @@ class SessionRuntime:
             tenant_id=session.identity.tenant_id,
             principal_id=session.identity.principal_id,
             tenant_authority_source=resolution.source.value,
+            governance_decision_id=gate_outcome.decision_id,
+            governance_chain_id=gate_outcome.chain_id,
         )
         return SessionEnvelope(trace=trace, result=result)
 
@@ -1069,6 +1078,8 @@ class SessionRuntime:
         reconstruction_id: SessionReconstructionId | None = None,
         error: str | None = None,
         tenant_authority_source: str | None = None,
+        governance_decision_id: uuid.UUID | None = None,
+        governance_chain_id: str | None = None,
     ) -> SessionTrace:
         # Replay determinism (Core Law 2): when the request carries a
         # correlation anchor, derive `trace_id` deterministically from
@@ -1103,6 +1114,8 @@ class SessionRuntime:
             principal_id=principal_id,
             error=error,
             tenant_authority_source=tenant_authority_source,
+            governance_decision_id=governance_decision_id,
+            governance_chain_id=governance_chain_id,
         )
 
     def _failed_envelope(  # type: ignore[no-untyped-def]
@@ -1115,6 +1128,8 @@ class SessionRuntime:
         error: BaseException,
         request_correlation_id: str | None = None,
         request_request_id: str | None = None,
+        governance_decision_id: uuid.UUID | None = None,
+        governance_chain_id: str | None = None,
     ) -> SessionEnvelope:
         # Chronology integrity (Core Law 3): every emitted envelope
         # MUST consume a fresh monotonic sequence inside the runtime
@@ -1133,6 +1148,8 @@ class SessionRuntime:
             request_correlation_id=request_correlation_id,
             request_request_id=request_request_id,
             error=f"{error.__class__.__name__}: {error}",
+            governance_decision_id=governance_decision_id,
+            governance_chain_id=governance_chain_id,
         )
         return SessionEnvelope(
             trace=trace, result=None, error=error

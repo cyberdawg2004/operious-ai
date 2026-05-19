@@ -416,11 +416,22 @@ _P2A_ADOPTION_SITES: dict[OperationalAct, Path] = {
 }
 
 
+# The capability gate has two equivalent adoption entry points:
+#   * ``gate_or_deny`` — denial-only convenience wrapper.
+#   * ``evaluate_capability_gate`` — full outcome with governance
+#     provenance (decision_id / chain_id). Used by runtimes whose
+#     traces project ``governance_decision_id`` /
+#     ``governance_chain_id`` (Wedge 2.75-\u03b4).
+_CAPABILITY_GATE_FUNCS = frozenset(
+    {"gate_or_deny", "evaluate_capability_gate"}
+)
+
+
 def _calls_gate_or_deny_with_act(
     source: ast.AST, act: OperationalAct
 ) -> bool:
-    """Walk an AST and return True if any ``gate_or_deny(...)``
-    call references ``OperationalAct.<NAME>`` matching ``act``."""
+    """Walk an AST and return True if any capability-gate call
+    references ``OperationalAct.<NAME>`` matching ``act``."""
     target_attr = act.name
     found = False
 
@@ -430,10 +441,10 @@ def _calls_gate_or_deny_with_act(
             func = node.func
             is_gate_call = (
                 isinstance(func, ast.Name)
-                and func.id == "gate_or_deny"
+                and func.id in _CAPABILITY_GATE_FUNCS
             ) or (
                 isinstance(func, ast.Attribute)
-                and func.attr == "gate_or_deny"
+                and func.attr in _CAPABILITY_GATE_FUNCS
             )
             if is_gate_call:
                 for kw in node.keywords:
@@ -460,7 +471,9 @@ def test_every_p2a_runtime_adopts_the_capability_gate(
     tree = ast.parse(path.read_text())
     assert _calls_gate_or_deny_with_act(tree, act), (
         f"runtime {path.relative_to(_BACKEND_APP)} does not invoke "
-        f"gate_or_deny(act=OperationalAct.{act.name}, ...). Wedge "
+        f"the capability gate "
+        f"(gate_or_deny | evaluate_capability_gate)"
+        f"(act=OperationalAct.{act.name}, ...). Wedge "
         f"2.75-\u03b1 requires every P2-A runtime entry to consult "
         f"the singular capability legality gate."
     )
