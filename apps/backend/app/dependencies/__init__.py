@@ -21,4 +21,33 @@ Phase 2.1 quarantine note:
   arbitration, boundary, organizational_intelligence) will land in
   Phase 2.4 and Phase 2.5, sourced from the request authority
   envelope.
+
+Tenant scope (Wedge 2.75-ε composition root)
+────────────────────────────────────────────
+`dependencies.authority` exposes the canonical
+:func:`~app.dependencies.authority.require_tenant_scope` and
+:func:`~app.dependencies.authority.request_tenant_scope_opt`
+helpers. Every public read handler that returns tenant-scoped
+resources MUST source its persistence ``expected_tenant_id``
+argument through one of these dependencies. This is the
+composition-root wedge that enforces row-level tenant isolation
+at the HTTP boundary.
 """
+
+from app.dependencies.authority import (
+    ERROR_CODE_AUTHORITY_REQUIRED,
+    ERROR_CODE_TENANT_AXIS_MISSING,
+    request_authority_opt,
+    request_tenant_scope_opt,
+    require_authority,
+    require_tenant_scope,
+)
+
+__all__ = [
+    "ERROR_CODE_AUTHORITY_REQUIRED",
+    "ERROR_CODE_TENANT_AXIS_MISSING",
+    "request_authority_opt",
+    "request_tenant_scope_opt",
+    "require_authority",
+    "require_tenant_scope",
+]
