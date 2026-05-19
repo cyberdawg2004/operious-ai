@@ -85,6 +85,33 @@ def test_require_authority_raises_401_when_anonymous() -> None:
     )
 
 
+def test_require_authority_raises_401_when_bound_but_fully_anonymous() -> None:
+    """PR-D1 contract — match the docstring's "rejects anonymous"
+    promise against the middleware's bound-empty state.
+
+    :class:`AuthorityContextMiddleware` binds an empty
+    :class:`AuthorityContext` to every anonymous ingress (no
+    Authorization, no X-*-ID headers). The pre-PR-D1 dependency
+    only rejected the ``state.authority is None`` state, which is
+    a test-only stand-in — production requests always have the
+    middleware-bound empty context. Tightening the check closes
+    the gap so anonymous production requests get the same 401
+    the docstring already promised.
+    """
+    empty = AuthorityContext()
+    assert empty.is_fully_anonymous is True
+    with pytest.raises(HTTPException) as excinfo:
+        require_authority(_request(empty))
+    assert excinfo.value.status_code == 401
+    assert excinfo.value.detail == {
+        "code": ERROR_CODE_AUTHORITY_REQUIRED
+    }
+    assert (
+        excinfo.value.headers is not None
+        and excinfo.value.headers.get("WWW-Authenticate") == "Bearer"
+    )
+
+
 # ─── require_tenant_scope ───────────────────────────────────────────
 
 
@@ -111,8 +138,18 @@ def test_require_tenant_scope_raises_400_when_tenant_axis_missing() -> (
     cannot enumerate tenant-scoped resources. Returning ALL
     tenants' records would breach the multi-tenant boundary;
     returning NONE silently would mask the upstream
-    misconfiguration. The platform refuses with 400."""
-    authority = AuthorityContext()  # no tenant_id, no principal_id
+    misconfiguration. The platform refuses with 400.
+
+    PR-D1 note: the fixture must populate AT LEAST one axis so
+    the authority is not :attr:`is_fully_anonymous` — otherwise
+    :func:`require_authority` (which ``require_tenant_scope``
+    calls first) would short-circuit with 401 before the tenant
+    check runs. Using ``principal_id`` here pins the "verified
+    principal, but token has no tenant claim" state precisely.
+    """
+    from app.identity.primitives import PrincipalId
+
+    authority = AuthorityContext(principal_id=PrincipalId("user-1"))
     with pytest.raises(HTTPException) as excinfo:
         require_tenant_scope(_request(authority))
     assert excinfo.value.status_code == 400
@@ -149,8 +186,16 @@ def test_request_tenant_scope_opt_returns_none_when_tenant_missing() -> (
     None
 ):
     """Tenant-less authority still yields ``None`` — admin
-    handlers using this dependency are unconstrained."""
-    authority = AuthorityContext()
+    handlers using this dependency are unconstrained.
+
+    The fixture populates ``principal_id`` so the test
+    distinguishes "authenticated principal with no tenant axis"
+    from "fully anonymous" (the latter is covered by
+    ``test_request_tenant_scope_opt_returns_none_when_anonymous``
+    above)."""
+    from app.identity.primitives import PrincipalId
+
+    authority = AuthorityContext(principal_id=PrincipalId("user-1"))
     assert request_tenant_scope_opt(_request(authority)) is None
 
 

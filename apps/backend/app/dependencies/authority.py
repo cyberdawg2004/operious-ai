@@ -113,13 +113,34 @@ def request_authority_opt(request: Request) -> AuthorityContext | None:
 def require_authority(request: Request) -> AuthorityContext:
     """FastAPI dependency: return the request :class:`AuthorityContext`.
 
-    Raises :exc:`fastapi.HTTPException` (401) when no authority
-    is bound — the request hit a protected endpoint anonymously.
-    This is the wedge that all tenant-scoped read handlers
-    transitively depend on.
+    Raises :exc:`fastapi.HTTPException` (401
+    ``authority_required``) when the request carries no usable
+    authority. This is the wedge every authenticated handler
+    transitively depends on.
+
+    "No usable authority" covers two operationally distinct
+    states the dependency treats identically:
+
+    * ``request.state.authority`` is unbound — the
+      :class:`AuthorityContextMiddleware` did not run. This is
+      a test-only state in practice; production always runs the
+      middleware.
+    * ``request.state.authority`` is bound to a fully-empty
+      :class:`AuthorityContext` (every axis ``None``,
+      :attr:`is_fully_anonymous` ``True``). This is the
+      middleware's normal output for an anonymous ingress (no
+      ``Authorization``, no ``X-*-ID`` headers).
+
+    Both states represent "no principal has been attested for
+    this request" — the only safe answer to a protected
+    endpoint is refusal. Returning the empty
+    :class:`AuthorityContext` here would let handlers see "an
+    authority" and then mishandle the all-``None`` axes as
+    legitimate identity material — exactly the failure mode the
+    fail-closed doctrine forbids.
     """
     authority = request_authority_opt(request)
-    if authority is None:
+    if authority is None or authority.is_fully_anonymous:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": ERROR_CODE_AUTHORITY_REQUIRED},
