@@ -46,11 +46,12 @@ class PostgresSupervisorRepository(BaseRepository):
     # ─── Writes ──────────────────────────────────────────────────────
 
     async def record_inspection(self, record: InspectionRecord) -> None:
-        self.session.add(_inspection_record_to_row(record))
+        row = _inspection_record_to_row(record)
         try:
-            await self.session.flush()
+            # SAVEPOINT isolation — see governance repo for doctrine.
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SupervisorPersistenceError(
                 f"inspection {record.inspection_id!r} already recorded; "
                 "records are write-once"
@@ -58,24 +59,22 @@ class PostgresSupervisorRepository(BaseRepository):
 
     async def record_finding(self, record: RuntimeFindingRecord) -> None:
         inspection_id = _require_inspection_id(record.metadata)
-        self.session.add(
-            _finding_record_to_row(record, inspection_id=inspection_id)
-        )
+        row = _finding_record_to_row(record, inspection_id=inspection_id)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SupervisorPersistenceError(
                 f"finding {record.finding_id!r} already recorded; "
                 "records are write-once"
             ) from exc
 
     async def record_evaluation(self, record: QAEvaluationRecord) -> None:
-        self.session.add(_evaluation_record_to_row(record))
+        row = _evaluation_record_to_row(record)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SupervisorPersistenceError(
                 f"evaluation for inspection {record.inspection_id!r} / "
                 f"evaluator {record.evaluator_name!r} already recorded"
@@ -84,11 +83,11 @@ class PostgresSupervisorRepository(BaseRepository):
     async def record_escalation(
         self, record: EscalationDecisionRecord
     ) -> None:
-        self.session.add(_escalation_record_to_row(record))
+        row = _escalation_record_to_row(record)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SupervisorPersistenceError(
                 f"escalation {record.escalation_id!r} already recorded"
             ) from exc

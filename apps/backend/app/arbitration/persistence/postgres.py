@@ -52,11 +52,13 @@ class PostgresArbitrationPersistence(BaseRepository):
     # ─── Writes ──────────────────────────────────────────────────────
 
     async def save(self, record: ArbitrationRecord) -> None:
-        self.session.add(_record_to_row(record))
+        row = _record_to_row(record)
         try:
-            await self.session.flush()
+            # SAVEPOINT isolation — see governance / coordination
+            # repos for the doctrine rationale.
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise ArbitrationPersistenceError(
                 f"duplicate arbitration record: evaluation_id="
                 f"{record.evaluation_id}"

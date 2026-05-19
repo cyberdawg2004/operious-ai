@@ -76,27 +76,30 @@ class PostgresSessionPersistence(BaseRepository):
         existing_revision = (
             await self.session.execute(existing_stmt)
         ).scalar_one_or_none()
-        if existing_revision is None:
-            self.session.add(_session_record_to_row(record))
-        else:
-            if record.revision <= existing_revision:
-                raise SessionPersistenceError(
-                    "non-monotonic revision: existing="
-                    f"{existing_revision}, incoming="
-                    f"{record.revision}"
-                )
-            existing_row = (
-                await self.session.execute(
-                    select(SessionRow).where(
-                        SessionRow.session_id == record.session_id
-                    )
-                )
-            ).scalar_one()
-            _update_session_row(existing_row, record)
+        if existing_revision is not None and record.revision <= existing_revision:
+            raise SessionPersistenceError(
+                "non-monotonic revision: existing="
+                f"{existing_revision}, incoming="
+                f"{record.revision}"
+            )
         try:
-            await self.session.flush()
+            # SAVEPOINT isolation — IntegrityError rolls back this
+            # nested transaction only; the outer transaction (the
+            # service layer's commit boundary, or a test fixture's
+            # outer BEGIN) is untouched.
+            async with self.session.begin_nested():
+                if existing_revision is None:
+                    self.session.add(_session_record_to_row(record))
+                else:
+                    existing_row = (
+                        await self.session.execute(
+                            select(SessionRow).where(
+                                SessionRow.session_id == record.session_id
+                            )
+                        )
+                    ).scalar_one()
+                    _update_session_row(existing_row, record)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SessionPersistenceError(
                 f"session {record.session_id} could not be persisted"
             ) from exc
@@ -143,11 +146,12 @@ class PostgresSessionPersistence(BaseRepository):
                     "non-monotonic event sequence: "
                     f"head={max_seq}, incoming={record.sequence}"
                 )
-        self.session.add(_event_record_to_row(record))
+        row = _event_record_to_row(record)
         try:
-            await self.session.flush()
+            # SAVEPOINT isolation — see save_session docstring.
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SessionPersistenceError(
                 f"duplicate event id: {record.event_id}"
             ) from exc
@@ -161,11 +165,11 @@ class PostgresSessionPersistence(BaseRepository):
     async def save_correlation(
         self, record: SessionCorrelationRecord
     ) -> None:
-        self.session.add(_correlation_record_to_row(record))
+        row = _correlation_record_to_row(record)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise SessionPersistenceError(
                 f"duplicate correlation id: {record.correlation_id}"
             ) from exc

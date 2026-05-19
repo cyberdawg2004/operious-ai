@@ -9,12 +9,30 @@ codebase never reads `os.environ` directly.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "development", "staging", "production", "test"]
+
+# Repository-root anchored environment resolution.
+#
+# Prevents:
+# - cwd-dependent .env loading
+# - Alembic/runtime divergence
+# - pytest configuration drift
+# - CI path inconsistencies
+# - deployment environment ambiguity
+#
+# apps/backend/app/core/config.py
+#                ↑
+# parents[4]
+#                ↓
+# operious-ai/
+ROOT_DIR = Path(__file__).resolve().parents[4]
+ENV_FILE = ROOT_DIR / ".env"
 
 
 class Settings(BaseSettings):
@@ -24,8 +42,16 @@ class Settings(BaseSettings):
     keys, feature flags, etc.). Everything must be typed and documented.
     """
 
+    AUTH_ENABLED: bool = False
+    AUTH_PROVIDER: str | None = None
+
+    AUTH0_DOMAIN: str | None = None
+    AUTH0_ISSUER: str | None = None
+    AUTH0_AUDIENCE: str | None = None
+    AUTH0_JWKS_URL: str | None = None
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

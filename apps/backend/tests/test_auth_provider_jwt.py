@@ -21,7 +21,16 @@ from app.auth.providers import (
 )
 
 
-HS_KEY = "test-hs256-secret"
+HS_KEY = "97c01989a35cac67133239a913d2813c" "a7ca2e9bb779a18ad25e63ce518624bb"
+
+HS512_KEY = (
+    "97c01989a35cac67133239a913d2813c"
+    "a7ca2e9bb779a18ad25e63ce518624bb"
+    "2e005665a8e978adc63f833b5c5b0a83"
+    "829b935feeded8878412cc55c9b1da35"
+)
+
+OTHER_HS_KEY = "c1d4e8a2f9b3c7d5e1a6b8f2c4d9e7a1" "f6b3d8c2a9e4f1b7d5c8a2e6f9b4d1c3"
 
 
 def _encode(
@@ -34,9 +43,7 @@ def _encode(
 
 
 def _verify(provider: JWTProvider, token: str) -> Any:
-    return asyncio.run(
-        provider.verify(Credential(scheme="Bearer", value=token))
-    )
+    return asyncio.run(provider.verify(Credential(scheme="Bearer", value=token)))
 
 
 def test_satisfies_authprovider_protocol() -> None:
@@ -77,14 +84,35 @@ def test_valid_token_yields_verified_identity() -> None:
             "env": "prod",
         }
     )
-    provider = JWTProvider(key=HS_KEY, algorithms=("HS256",))
+
+    provider = JWTProvider(
+        key=HS_KEY,
+        algorithms=("HS256",),
+    )
+
     vi = _verify(provider, token)
+
     assert vi.principal_id == "alice"
     assert vi.tenant_id == "acme"
     assert vi.organization_id == "org-7"
     assert vi.environment_id == "prod"
     assert vi.issuer == "jwt"
     assert vi.claims["sub"] == "alice"
+
+
+def test_invalid_signature_raises() -> None:
+    token = _encode(
+        {"sub": "alice"},
+        key=OTHER_HS_KEY,
+    )
+
+    provider = JWTProvider(
+        key=HS_KEY,
+        algorithms=("HS256",),
+    )
+
+    with pytest.raises(AuthenticationError):
+        _verify(provider, token)
 
 
 def test_missing_axis_claim_yields_none() -> None:
@@ -118,31 +146,29 @@ def test_custom_claim_mapping() -> None:
 def test_non_bearer_scheme_raises() -> None:
     provider = JWTProvider(key=HS_KEY, algorithms=("HS256",))
     with pytest.raises(AuthenticationError):
-        asyncio.run(
-            provider.verify(Credential(scheme="ApiKey", value="x"))
-        )
-
-
-def test_invalid_signature_raises() -> None:
-    token = _encode({"sub": "alice"}, key="other-secret")
-    provider = JWTProvider(key=HS_KEY, algorithms=("HS256",))
-    with pytest.raises(AuthenticationError):
-        _verify(provider, token)
+        asyncio.run(provider.verify(Credential(scheme="ApiKey", value="x")))
 
 
 def test_expired_token_raises() -> None:
     past = datetime.now(timezone.utc) - timedelta(minutes=5)
-    token = _encode(
-        {"sub": "alice", "exp": int(past.timestamp())}
-    )
+    token = _encode({"sub": "alice", "exp": int(past.timestamp())})
     provider = JWTProvider(key=HS_KEY, algorithms=("HS256",))
     with pytest.raises(AuthenticationError):
         _verify(provider, token)
 
 
 def test_unverified_algorithm_raises() -> None:
-    token = _encode({"sub": "alice"}, algorithm="HS512")
-    provider = JWTProvider(key=HS_KEY, algorithms=("HS256",))
+    token = _encode(
+        {"sub": "alice"},
+        key=HS512_KEY,
+        algorithm="HS512",
+    )
+
+    provider = JWTProvider(
+        key=HS_KEY,
+        algorithms=("HS256",),
+    )
+
     with pytest.raises(AuthenticationError):
         _verify(provider, token)
 
@@ -224,12 +250,10 @@ def test_non_string_axis_claim_raises() -> None:
 
 def test_exp_claim_propagates_to_expires_at() -> None:
     future = datetime.now(timezone.utc) + timedelta(hours=1)
-    token = _encode(
-        {"sub": "alice", "exp": int(future.timestamp())}
-    )
+    token = _encode({"sub": "alice", "exp": int(future.timestamp())})
     provider = JWTProvider(key=HS_KEY, algorithms=("HS256",))
     vi = _verify(provider, token)
     assert vi.expires_at is not None
-    assert abs(
-        (vi.expires_at - future).total_seconds()
-    ) < 1.0  # 1s tolerance for unix-int truncation
+    assert (
+        abs((vi.expires_at - future).total_seconds()) < 1.0
+    )  # 1s tolerance for unix-int truncation

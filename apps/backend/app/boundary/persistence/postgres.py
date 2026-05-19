@@ -48,21 +48,22 @@ class PostgresBoundaryPersistence(BaseRepository):
     # ─── Writes ──────────────────────────────────────────────────────
 
     async def save_ingress(self, record: BoundaryIngressRecord) -> None:
-        self.session.add(_ingress_record_to_row(record))
+        row = _ingress_record_to_row(record)
         try:
-            await self.session.flush()
+            # SAVEPOINT isolation — see governance repo for doctrine.
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise BoundaryPersistenceError(
                 f"duplicate ingress record: ingress_id={record.ingress_id}"
             ) from exc
 
     async def save_egress(self, record: BoundaryEgressRecord) -> None:
-        self.session.add(_egress_record_to_row(record))
+        row = _egress_record_to_row(record)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise BoundaryPersistenceError(
                 f"duplicate egress record: egress_id={record.egress_id}"
             ) from exc

@@ -101,11 +101,13 @@ class PostgresGovernanceRepository(BaseRepository):
             evaluated_rules=[e.to_dict() for e in record.evaluated_rules],
             metadata_json=dict(record.metadata),
         )
-        self.session.add(row)
         try:
-            await self.session.flush()
+            # SAVEPOINT-isolated insert: IntegrityError rolls back the
+            # savepoint only, NOT the outer transaction the service
+            # layer (or a test fixture) is managing.
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise ValueError(
                 f"decision {record.decision_id!r} already recorded; "
                 "records are write-once"
@@ -140,11 +142,10 @@ class PostgresGovernanceRepository(BaseRepository):
             policy_traces=[t.to_dict() for t in record.policy_traces],
             metadata_json=dict(record.metadata),
         )
-        self.session.add(row)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise ValueError(
                 f"trace for decision {record.decision_id!r} already "
                 "recorded; records are write-once"
@@ -162,11 +163,10 @@ class PostgresGovernanceRepository(BaseRepository):
             detail=record.detail,
             metadata_json=dict(record.metadata),
         )
-        self.session.add(row)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise ValueError(
                 f"enforcement action {record.action_id!r} could not "
                 "be recorded (duplicate id or unknown decision_id)"

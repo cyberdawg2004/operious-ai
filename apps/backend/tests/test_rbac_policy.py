@@ -88,8 +88,10 @@ def test_translator_copies_capabilities() -> None:
 # ─── JWTProvider capabilities claim ────────────────────────────────
 
 
-HS_KEY = "test-hs256-secret"
-
+HS_KEY = (
+    "97c01989a35cac67133239a913d2813c"
+    "a7ca2e9bb779a18ad25e63ce518624bb"
+)
 
 def _verify(provider: JWTProvider, token: str) -> VerifiedIdentity:
     return asyncio.run(

@@ -171,13 +171,17 @@ def settings_for_test() -> Settings:
 
 @pytest_asyncio.fixture
 async def pg_engine() -> AsyncIterator[AsyncEngine]:
-    """Yield an async engine bound to ``TEST_DATABASE_URL``.
+    """Yield a function-scoped async engine bound to ``TEST_DATABASE_URL``.
 
-    Production runtime is untouched — this engine is a fresh
-    instance constructed from the test DSN every time the fixture
-    runs, never the module-level ``app.db.session.engine``. It is
-    disposed when the fixture tears down so the connection pool
-    cannot leak into the next test.
+    Production runtime is untouched: this engine never reuses
+    ``app.db.session.engine``. The substrate REFUSES to fall back to
+    the production DSN — contaminating a real deployment with test
+    rows is forbidden at the fixture layer.
+
+    Pre-requisite: ``alembic upgrade head`` must have been applied
+    to ``TEST_DATABASE_URL`` before pytest collects the Postgres
+    integration tests. CI typically runs this in the workflow
+    before invoking pytest.
     """
     dsn = os.environ.get(TEST_DATABASE_URL_ENV)
     if dsn is None:
@@ -201,19 +205,18 @@ async def pg_session(
     Doctrine: every test sees a clean view of the database without
     paying ``CREATE TABLE`` / ``DROP TABLE`` per test. Each test
     runs inside an outer ``BEGIN`` opened against a fresh
-    connection; when the test returns, the outer transaction is
-    rolled back unconditionally — committed inserts the test made
-    during the test body are durably reverted before the next test
-    starts. This is the standard SQLAlchemy "join-an-external-
-    transaction" pattern and works correctly with nested
-    SAVEPOINT/SUBTRANSACTION usage inside the test.
+    connection from the NullPool engine. When the test returns the
+    outer transaction is rolled back unconditionally — every
+    insert the test made during the body is durably reverted
+    before the next test starts.
 
-    The pattern requires migrations to have been applied to the
-    target test database already (CI typically runs ``alembic
-    upgrade head`` against ``TEST_DATABASE_URL`` before pytest).
-    The PR-B1 foundation only ships fixtures + invariants — per-
-    substrate Postgres repository tests land in PR-B2..B7 and will
-    rely on this fixture.
+    Repositories that need to absorb integrity errors without
+    breaking the outer transaction MUST use
+    ``session.begin_nested()`` (SAVEPOINT) — see the doctrine
+    notes in every per-substrate Postgres repository. Direct
+    ``session.rollback()`` calls inside repository writes are
+    forbidden under this fixture; they would unwind the outer
+    BEGIN and leave the connection in an undefined state.
     """
     connection: AsyncConnection = await pg_engine.connect()
     transaction = await connection.begin()
@@ -224,7 +227,8 @@ async def pg_session(
         finally:
             await session.close()
     finally:
-        await transaction.rollback()
+        if transaction.is_active:
+            await transaction.rollback()
         await connection.close()
 
 

@@ -35,11 +35,14 @@ class PostgresCoordinationPersistence(BaseRepository):
     # ─── Writes ──────────────────────────────────────────────────────
 
     async def record_envelope(self, record: CoordinationRecord) -> None:
-        self.session.add(_record_to_row(record))
+        row = _record_to_row(record)
         try:
-            await self.session.flush()
+            # SAVEPOINT isolation — IntegrityError rolls back the
+            # nested transaction only, leaving the outer transaction
+            # (the service layer's commit boundary) untouched.
+            async with self.session.begin_nested():
+                self.session.add(row)
         except IntegrityError as exc:
-            await self.session.rollback()
             raise CoordinationPersistenceError(
                 f"coordination_id {record.coordination_id!r} already "
                 "recorded; records are write-once"
