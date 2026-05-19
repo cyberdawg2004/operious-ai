@@ -38,6 +38,7 @@ from app.db.base import Base
 # substrate test is the first module pytest collects).
 from app.db import models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.governance.db import models as _governance_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.session.db import models as _session_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

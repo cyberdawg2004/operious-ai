@@ -9,6 +9,9 @@ from app.session.persistence.models import (
     SessionQuery,
     SessionRecordPage,
 )
+from app.session.persistence.postgres import (
+    PostgresSessionPersistence,
+)
 from app.session.persistence.records import (
     SessionCorrelationRecord,
     SessionEventRecord,
@@ -27,6 +30,7 @@ from app.session.persistence.serializers import (
 
 __all__ = [
     "InMemorySessionPersistence",
+    "PostgresSessionPersistence",
     "SessionCorrelationQuery",
     "SessionCorrelationRecord",
     "SessionEventQuery",

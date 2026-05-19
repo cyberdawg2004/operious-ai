@@ -35,23 +35,40 @@ _CAPABILITY_GATE_ALLOW_RE = re.compile(
     r"^(?:from|import)\s+app\.governance\.capability\b",
     re.MULTILINE,
 )
+# PR-B1 / PR-B3: ``app.db.base`` and ``app.db.repository`` are the
+# constitutional persistence FOUNDATION (declarative ``Base``,
+# mixins, ``TenantScopedRepository`` helper). They are substrate-
+# shared infrastructure, not sibling runtimes — importing them
+# carries no orchestration / governance / sibling-runtime semantics.
+# The exemption is intentionally NARROW: ``app.db.session`` (global
+# engine), ``app.db.models`` (cross-cutting ORM registry), and
+# ``app.db.partitioning`` (Alembic-facing DDL emitter, consumed by
+# migrations not by substrate code) remain forbidden.
+_DB_FOUNDATION_ALLOW_RE = re.compile(
+    r"^(?:from|import)\s+app\.db\.(?:base|repository)\b",
+    re.MULTILINE,
+)
 
 
 def test_no_parent_substrate_imports() -> None:
     """The session substrate MUST NOT import from any sibling runtime.
 
     The capability legality gate (``app.governance.capability``) is
-    the singular exemption — Wedge 2.75-\u03b1 adopts it at every
-    P2-A entry. No other governance surface is reachable.
+    the singular cross-substrate exemption — Wedge 2.75-\u03b1
+    adopts it at every P2-A entry. The persistence foundation
+    (``app.db.base`` / ``app.db.repository``) is the singular
+    infrastructure exemption — PR-B3 adopts it from
+    ``app/session/db/models.py``.
     """
     offenders: list[str] = []
     for path in _SESSION_ROOT.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        # Strip the allowed `app.governance.capability` imports
-        # before scanning for forbidden parents — the regex above
-        # would otherwise match the gate import on the
-        # ``governance`` token.
+        # Strip the allowed `app.governance.capability` and
+        # `app.db.{base,repository}` imports before scanning for
+        # forbidden parents — the regex above would otherwise match
+        # them on the ``governance`` / ``db`` tokens.
         stripped = _CAPABILITY_GATE_ALLOW_RE.sub("", text)
+        stripped = _DB_FOUNDATION_ALLOW_RE.sub("", stripped)
         if _FORBIDDEN_PARENT_IMPORT_RE.search(stripped):
             offenders.append(str(path))
     assert not offenders, (

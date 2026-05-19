@@ -171,6 +171,44 @@ The substrate **refuses** to fall back to the production DSN
 with test rows is the class of bug the substrate forbids at the
 fixture layer, not at the test layer.
 
+## Substrate-isolation invariant exemption
+
+Every substrate's `test_<substrate>_invariants.py::test_no_parent_substrate_imports`
+test forbids the substrate from importing `app.db.*` (alongside
+sibling-runtime packages like `app.governance`, `app.coordination`,
+etc.). The doctrinal rule is: substrate code is isolated from
+sibling runtimes AND from storage primitives.
+
+PR-B1 created an apparent contradiction for this rule: per-substrate
+ORM modules (`app/<substrate>/db/models.py`) MUST `from app.db.base
+import Base` so SQLAlchemy's declarative machinery binds them, and
+per-substrate Postgres repositories MUST `from app.db.repository
+import TenantScopedRepository` to inherit the clamp helper.
+
+Resolution: both `app.db.base` and `app.db.repository` are
+**constitutional persistence foundation** — substrate-shared
+infrastructure that carries no orchestration / governance / sibling-
+runtime semantics. Each substrate's invariant test adds a narrow
+exemption that allows ONLY these two modules:
+
+```python
+_DB_FOUNDATION_ALLOW_RE = re.compile(
+    r"^(?:from|import)\s+app\.db\.(?:base|repository)\b",
+    re.MULTILINE,
+)
+```
+
+What stays forbidden:
+- `app.db.session` (global engine — substrate code MUST go through the
+  request-scoped session dependency, never touch the global engine).
+- `app.db.models` (cross-cutting ORM registry — substrate code reaches
+  its OWN ORM through `app.<substrate>.db.models`).
+- `app.db.partitioning` (Alembic-facing DDL emitter — consumed by
+  migration files, never by substrate runtime code).
+
+Every PR-B2..B7 adds the same exemption to its substrate's invariant
+test as part of the PR.
+
 ## What PR-B2..B7 build on this
 
 | PR | Substrate | New ORM | New repo | New migration |
