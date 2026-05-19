@@ -110,19 +110,59 @@ class InMemorySessionPersistence:
     # ─── Reads ──────────────────────────────────────────────────────
 
     async def get_session(
-        self, session_id: SessionId
+        self,
+        session_id: SessionId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionRecord | None:
-        return self._sessions.get(session_id)
+        record = self._sessions.get(session_id)
+        if record is None:
+            return None
+        # 2.75-ε: tenant-scoped read. Row-level isolation —
+        # a record belonging to another tenant is invisible
+        # (returns None, indistinguishable from "not found").
+        if (
+            expected_tenant_id is not None
+            and record.tenant_id != expected_tenant_id
+        ):
+            return None
+        return record
 
     async def get_event(
-        self, event_id: SessionEventId
+        self,
+        event_id: SessionEventId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionEventRecord | None:
-        return self._events.get(event_id)
+        record = self._events.get(event_id)
+        if record is None:
+            return None
+        if expected_tenant_id is not None:
+            session = self._sessions.get(record.session_id)
+            if (
+                session is None
+                or session.tenant_id != expected_tenant_id
+            ):
+                return None
+        return record
 
     async def get_correlation(
-        self, correlation_id: SessionCorrelationId
+        self,
+        correlation_id: SessionCorrelationId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionCorrelationRecord | None:
-        return self._correlations.get(correlation_id)
+        record = self._correlations.get(correlation_id)
+        if record is None:
+            return None
+        if expected_tenant_id is not None:
+            session = self._sessions.get(record.session_id)
+            if (
+                session is None
+                or session.tenant_id != expected_tenant_id
+            ):
+                return None
+        return record
 
     async def list_sessions(
         self, query: SessionQuery

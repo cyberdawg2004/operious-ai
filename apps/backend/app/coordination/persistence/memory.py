@@ -47,9 +47,21 @@ class InMemoryCoordinationPersistence:
     # ─── Reads ───────────────────────────────────────────────────────
 
     async def get_envelope(
-        self, coordination_id: str
+        self,
+        coordination_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> CoordinationRecord | None:
-        return self._records.get(coordination_id)
+        record = self._records.get(coordination_id)
+        if record is None:
+            return None
+        # 2.75-ε: tenant-scoped read.
+        if (
+            expected_tenant_id is not None
+            and record.tenant_id != expected_tenant_id
+        ):
+            return None
+        return record
 
     async def query_envelopes(
         self, query: CoordinationQuery

@@ -60,9 +60,17 @@ class CoordinationPersistenceProtocol(Protocol):
     # ─── Reads ───────────────────────────────────────────────────────
 
     async def get_envelope(
-        self, coordination_id: str
+        self,
+        coordination_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> CoordinationRecord | None:
-        """Return the record for `coordination_id`, or ``None``."""
+        """Return the record for `coordination_id`, or ``None``.
+
+        Wedge 2.75-ε: when ``expected_tenant_id`` is supplied,
+        envelopes belonging to a different tenant return ``None``
+        (row-level isolation indistinguishable from absence).
+        """
         ...
 
     async def query_envelopes(

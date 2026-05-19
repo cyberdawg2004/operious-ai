@@ -58,20 +58,56 @@ class BaseSupervisorRepository(Protocol):
     # ─── Reads ───────────────────────────────────────────────────────
 
     async def get_inspection(
-        self, inspection_id: str
-    ) -> InspectionRecord | None: ...
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> InspectionRecord | None:
+        """Point read by inspection_id.
+
+        Wedge 2.75-ε: when ``expected_tenant_id`` is supplied,
+        inspections belonging to a different tenant return
+        ``None`` (row-level isolation).
+        """
+        ...
 
     async def get_findings_for_inspection(
-        self, inspection_id: str
-    ) -> tuple[RuntimeFindingRecord, ...]: ...
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> tuple[RuntimeFindingRecord, ...]:
+        """Findings belonging to ``inspection_id``.
+
+        Tenant scope resolved via the owning :class:`InspectionRecord`:
+        if the parent inspection is invisible from the requesting
+        tenant, the findings collection is empty.
+        """
+        ...
 
     async def get_evaluations_for_inspection(
-        self, inspection_id: str
-    ) -> tuple[QAEvaluationRecord, ...]: ...
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> tuple[QAEvaluationRecord, ...]:
+        """Evaluations belonging to ``inspection_id``.
+
+        Tenant scope resolved via the owning inspection.
+        """
+        ...
 
     async def get_escalations_for_inspection(
-        self, inspection_id: str
-    ) -> tuple[EscalationDecisionRecord, ...]: ...
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> tuple[EscalationDecisionRecord, ...]:
+        """Escalations belonging to ``inspection_id``.
+
+        Tenant scope resolved via the owning inspection.
+        """
+        ...
 
     # ─── Queries ─────────────────────────────────────────────────────
 

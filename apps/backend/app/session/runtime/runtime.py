@@ -804,12 +804,20 @@ class SessionRuntime:
     # ─── read-only lookups ──────────────────────────────────────────
 
     async def get_session(
-        self, session_id: SessionId
+        self,
+        session_id: SessionId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionEnvelope:
+        """Apex-record lookup. Tenant-scoped when ``expected_tenant_id``
+        is supplied — sessions belonging to a different tenant are
+        invisible to the caller (Wedge 2.75-ε)."""
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
         try:
-            session = await self._load_session(session_id)
+            session = await self._load_session(
+                session_id, expected_tenant_id=expected_tenant_id
+            )
         except SessionNotFoundError as exc:
             return self._failed_envelope(
                 kind=SessionTraceKind.LOOKUP,
@@ -885,12 +893,27 @@ class SessionRuntime:
         return generate_session_id()
 
     async def _load_session(
-        self, session_id: SessionId
+        self,
+        session_id: SessionId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> OperationalSession:
         cached = await self._registry.get(session_id)
         if cached is not None:
+            # 2.75-ε: registry-cached sessions still honour the
+            # tenant-scope check. Without it a tenant could see a
+            # rival's session by virtue of the warm registry.
+            if (
+                expected_tenant_id is not None
+                and cached.identity.tenant_id != expected_tenant_id
+            ):
+                raise SessionNotFoundError(
+                    f"unknown session: {session_id}"
+                )
             return cached
-        record = await self._persistence.get_session(session_id)
+        record = await self._persistence.get_session(
+            session_id, expected_tenant_id=expected_tenant_id
+        )
         if record is None:
             raise SessionNotFoundError(
                 f"unknown session: {session_id}"

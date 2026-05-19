@@ -77,23 +77,66 @@ class InMemorySupervisorRepository:
     # ─── Reads ───────────────────────────────────────────────────────
 
     async def get_inspection(
-        self, inspection_id: str
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> InspectionRecord | None:
-        return self._inspections.get(inspection_id)
+        record = self._inspections.get(inspection_id)
+        if record is None:
+            return None
+        # 2.75-ε: tenant-scoped row-level isolation.
+        if (
+            expected_tenant_id is not None
+            and record.tenant_id != expected_tenant_id
+        ):
+            return None
+        return record
 
     async def get_findings_for_inspection(
-        self, inspection_id: str
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> tuple[RuntimeFindingRecord, ...]:
+        # 2.75-ε: tenant scope inherits from the parent inspection.
+        if expected_tenant_id is not None:
+            parent = self._inspections.get(inspection_id)
+            if (
+                parent is None
+                or parent.tenant_id != expected_tenant_id
+            ):
+                return ()
         return tuple(self._findings.get(inspection_id, ()))
 
     async def get_evaluations_for_inspection(
-        self, inspection_id: str
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> tuple[QAEvaluationRecord, ...]:
+        if expected_tenant_id is not None:
+            parent = self._inspections.get(inspection_id)
+            if (
+                parent is None
+                or parent.tenant_id != expected_tenant_id
+            ):
+                return ()
         return tuple(self._evaluations.get(inspection_id, ()))
 
     async def get_escalations_for_inspection(
-        self, inspection_id: str
+        self,
+        inspection_id: str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> tuple[EscalationDecisionRecord, ...]:
+        if expected_tenant_id is not None:
+            parent = self._inspections.get(inspection_id)
+            if (
+                parent is None
+                or parent.tenant_id != expected_tenant_id
+            ):
+                return ()
         return tuple(self._escalations.get(inspection_id, ()))
 
     # ─── Queries ─────────────────────────────────────────────────────

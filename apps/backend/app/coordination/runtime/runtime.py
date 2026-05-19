@@ -489,10 +489,22 @@ class CoordinationRuntime:
         )
 
     async def get_message(
-        self, coordination_id: CoordinationId | str
+        self,
+        coordination_id: CoordinationId | str,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> CoordinationEnvelope | None:
-        """Return the envelope for `coordination_id`, or ``None``."""
-        record = await self._persistence.get_envelope(str(coordination_id))
+        """Return the envelope for `coordination_id`, or ``None``.
+
+        Wedge 2.75-ε: ``expected_tenant_id`` enforces tenant
+        row-level isolation when supplied — envelopes belonging
+        to a different tenant return ``None`` (indistinguishable
+        from absence).
+        """
+        record = await self._persistence.get_envelope(
+            str(coordination_id),
+            expected_tenant_id=expected_tenant_id,
+        )
         if record is None:
             return None
         return record_to_envelope(record)

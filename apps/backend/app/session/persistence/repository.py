@@ -49,16 +49,50 @@ class SessionPersistenceProtocol(Protocol):
     ) -> None: ...
 
     async def get_session(
-        self, session_id: SessionId
-    ) -> SessionRecord | None: ...
+        self,
+        session_id: SessionId,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionRecord | None:
+        """Point read by session_id.
+
+        Wedge 2.75-ε: when ``expected_tenant_id`` is supplied,
+        records belonging to a DIFFERENT tenant MUST return
+        ``None`` — the persisted row exists but is invisible from
+        the requesting tenant's perspective (row-level isolation).
+        ``None`` is also returned for the regular "not found" case,
+        so callers cannot distinguish "absent" from "another
+        tenant's row" — that distinction would leak existence
+        across tenants.
+        """
+        ...
 
     async def get_event(
-        self, event_id: SessionEventId
-    ) -> SessionEventRecord | None: ...
+        self,
+        event_id: SessionEventId,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionEventRecord | None:
+        """Point read by event_id with optional tenant scoping.
+
+        Tenant scope is resolved through the event's owning
+        ``SessionRecord``: an event is visible from tenant T iff
+        the session it belongs to is owned by T.
+        """
+        ...
 
     async def get_correlation(
-        self, correlation_id: SessionCorrelationId
-    ) -> SessionCorrelationRecord | None: ...
+        self,
+        correlation_id: SessionCorrelationId,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionCorrelationRecord | None:
+        """Point read by correlation_id with optional tenant scoping.
+
+        Tenant scope resolved via the owning session, like
+        :meth:`get_event`.
+        """
+        ...
 
     async def list_sessions(
         self, query: SessionQuery
