@@ -243,12 +243,15 @@ def _provenance_from_envelope(
     if decision is not None:
         return decision.decision_id, decision.policy_chain_id or None
     trace = envelope.trace
-    if trace is not None:
-        return (
-            trace.decision_id,
-            trace.policy_chain_id or None,
-        )
-    return None, None
+    # ``GovernanceEnvelope.trace`` is structurally non-Optional (a
+    # decision-less envelope still carries the trace describing why
+    # the decision was withheld). The fallback below assumes this
+    # invariant; if it ever weakens, validate at the call site
+    # rather than re-introducing a dead branch here.
+    return (
+        trace.decision_id,
+        trace.policy_chain_id or None,
+    )
 
 
 __all__ = [

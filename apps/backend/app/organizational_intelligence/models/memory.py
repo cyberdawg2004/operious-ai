@@ -25,7 +25,6 @@ Every transition is **explicit**. There is no auto-promotion path.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping

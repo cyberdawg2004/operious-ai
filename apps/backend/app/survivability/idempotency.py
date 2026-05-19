@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, NewType
@@ -55,7 +54,10 @@ def coerce_idempotency_key(value: str) -> IdempotencyKey:
     ``[A-Za-z0-9_\\-.:]`` so they survive logging and persistence
     without escaping concerns.
     """
-    if not isinstance(value, str):
+    if not isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+        # Defensive: callers from JSON deserialisation or untyped
+        # call sites can violate the static contract; the runtime
+        # gate keeps the persistence layer's invariant honest.
         raise IdempotencyKeyError(
             f"idempotency key must be str; got {type(value).__name__}"
         )

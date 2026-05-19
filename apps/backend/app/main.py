@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -116,20 +117,31 @@ def _register_exception_handlers(app: FastAPI) -> None:
     so frontend / SDK consumers can render and log uniformly.
     """
 
+    # The exception handlers below are registered with FastAPI via the
+    # ``@app.exception_handler`` decorator. The local binding name is
+    # therefore unused at the Python level (the decorator stores the
+    # callable on the app); the ``pyright: ignore`` silences the
+    # ``reportUnusedFunction`` diagnostic without weakening intent.
+
     @app.exception_handler(StarletteHTTPException)
-    async def _http_exception_handler(
+    async def _http_exception_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: StarletteHTTPException
     ):
+        # Starlette types ``exc.detail`` as ``Any``; defensively coerce
+        # to ``str`` to keep the wire envelope stable when middleware
+        # raises with structured payloads.
+        detail_value: Any = exc.detail
+        title = detail_value if isinstance(detail_value, str) else "http_error"
         problem = _problem_for_status(
             status=exc.status_code,
-            title=exc.detail if isinstance(exc.detail, str) else "http_error",
-            detail=str(exc.detail) if exc.detail else "",
+            title=title,
+            detail=str(detail_value) if detail_value else "",
             request=request,
         )
         return problem_details_response(problem)
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_handler(
+    async def _validation_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: RequestValidationError
     ):
         problem = _problem_for_status(
@@ -150,7 +162,9 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def _unhandled_handler(request: Request, exc: Exception):
+    async def _unhandled_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: Exception
+    ):
         # Log with traceback; do not leak internal details to the wire.
         _unhandled_logger.exception(
             "unhandled_exception",

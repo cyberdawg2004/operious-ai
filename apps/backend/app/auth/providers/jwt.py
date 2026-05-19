@@ -144,7 +144,7 @@ class JWTProvider:
                 f"invalid token: {err}"
             ) from err
 
-        if not isinstance(claims, dict):
+        if not isinstance(claims, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise AuthenticationError(
                 "JWT payload is not a JSON object"
             )

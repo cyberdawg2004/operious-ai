@@ -122,14 +122,16 @@ def test_public_value_objects_are_frozen_dataclasses() -> None:
         arbitration_pkg.ResolutionAuthority,
     ]
     for cls in public_dataclasses:
-        assert is_dataclass(cls), (
-            f"{cls.__name__} must be a dataclass"
-        )
+        # Bind ``__name__`` before ``is_dataclass`` narrows ``cls`` to the
+        # ``DataclassInstance`` protocol (which intentionally does not
+        # expose class-level introspection attributes).
+        cls_name = cls.__name__
+        assert is_dataclass(cls), f"{cls_name} must be a dataclass"
         params = getattr(cls, "__dataclass_params__")
-        assert params.frozen, f"{cls.__name__} must be frozen=True"
+        assert params.frozen, f"{cls_name} must be frozen=True"
         # The slots check: cls.__dict__ should declare __slots__.
         assert "__slots__" in cls.__dict__, (
-            f"{cls.__name__} must declare __slots__"
+            f"{cls_name} must declare __slots__"
         )
         # Sanity: fields are accessible.
         assert fields(cls) is not None

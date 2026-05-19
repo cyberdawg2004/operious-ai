@@ -109,14 +109,18 @@ def test_public_value_objects_are_frozen_slots() -> None:
         topology_pkg.EscalationPath,
     ]
     for cls in public_dataclasses:
-        assert is_dataclass(cls), f"{cls.__name__} must be a dataclass"
+        # Bind ``__name__`` before ``is_dataclass`` narrows ``cls`` to the
+        # ``DataclassInstance`` protocol (which intentionally does not
+        # expose class-level introspection attributes).
+        cls_name = cls.__name__
+        assert is_dataclass(cls), f"{cls_name} must be a dataclass"
         params = getattr(cls, "__dataclass_params__")
-        assert params.frozen, f"{cls.__name__} must be frozen=True"
+        assert params.frozen, f"{cls_name} must be frozen=True"
         # `slots=True` on Python 3.10+ dataclasses materialises `__slots__`
         # on the class itself. Verify the class declares __slots__ rather
         # than instantiating it (constructors require arguments).
         assert "__slots__" in cls.__dict__, (
-            f"{cls.__name__} must be a slots=True frozen dataclass"
+            f"{cls_name} must be a slots=True frozen dataclass"
         )
 
 
