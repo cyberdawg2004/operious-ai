@@ -39,6 +39,7 @@ from app.db.base import Base
 from app.db import models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.governance.db import models as _governance_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.session.db import models as _session_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.coordination.db import models as _coordination_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

@@ -23,6 +23,9 @@ from app.coordination.persistence.models import (
     CoordinationQuery,
     RecordPage,
 )
+from app.coordination.persistence.postgres import (
+    PostgresCoordinationPersistence,
+)
 from app.coordination.persistence.records import (
     CoordinationRecord,
 )
@@ -38,6 +41,7 @@ __all__ = [
     "CoordinationRecord",
     "CoordinationPersistenceProtocol",
     "InMemoryCoordinationPersistence",
+    "PostgresCoordinationPersistence",
     "CoordinationQuery",
     "RecordPage",
     "envelope_to_record",
