@@ -77,6 +77,13 @@ def build_capability_context(
     The function is deterministic and replay-safe: identical inputs
     produce structurally identical outputs. No defaults are derived
     from clocks, environment, or globals.
+
+    Wedge 2.75-γ: the full authority axis (principal / organization
+    / environment / authority reference) is projected onto the
+    context. The capability gate is the legality evaluator; dropping
+    these axes here would mean policies (or auditors reading the
+    resulting :class:`GovernanceTrace`) only ever see tenant
+    attribution, not actor / org / env attribution.
     """
     subject = CapabilityGovernanceSubject(
         required_capability=request.act.value,
@@ -90,6 +97,10 @@ def build_capability_context(
         resource=request.resource,
         actor=request.actor,
         tenant_id=request.authority.tenant_id,
+        principal_id=request.authority.principal_id,
+        organization_id=request.authority.organization_id,
+        environment_id=request.authority.environment_id,
+        authority=request.authority,
         subject=subject,
         correlation_id=request.correlation_id,
     )

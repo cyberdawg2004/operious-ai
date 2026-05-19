@@ -113,6 +113,50 @@ class GovernanceContext:
                     f"{self.tenant_id!r} vs "
                     f"{self.authority.tenant_id!r}"
                 )
+        # 2.75-γ: mirror the tenant-axis coexistence invariant on the
+        # principal axis. Without it the same drift pathology applies
+        # to attribution — a context could carry one principal in the
+        # flat field and a different one inside ``authority``,
+        # producing forensic decisions that contradict their own
+        # authority reference.
+        if (
+            self.authority is not None
+            and self.principal_id is not None
+            and self.authority.principal_id is not None
+            and self.authority.principal_id != self.principal_id
+        ):
+            raise GovernanceConfigurationError(
+                "GovernanceContext.principal_id and "
+                "GovernanceContext.authority.principal_id disagree: "
+                f"{self.principal_id!r} vs "
+                f"{self.authority.principal_id!r}"
+            )
+        # 2.75-γ: mirror on organization axis.
+        if (
+            self.authority is not None
+            and self.organization_id is not None
+            and self.authority.organization_id is not None
+            and self.authority.organization_id != self.organization_id
+        ):
+            raise GovernanceConfigurationError(
+                "GovernanceContext.organization_id and "
+                "GovernanceContext.authority.organization_id "
+                f"disagree: {self.organization_id!r} vs "
+                f"{self.authority.organization_id!r}"
+            )
+        # 2.75-γ: mirror on environment axis.
+        if (
+            self.authority is not None
+            and self.environment_id is not None
+            and self.authority.environment_id is not None
+            and self.authority.environment_id != self.environment_id
+        ):
+            raise GovernanceConfigurationError(
+                "GovernanceContext.environment_id and "
+                "GovernanceContext.authority.environment_id "
+                f"disagree: {self.environment_id!r} vs "
+                f"{self.authority.environment_id!r}"
+            )
 
 
 __all__ = ["GovernanceContext"]

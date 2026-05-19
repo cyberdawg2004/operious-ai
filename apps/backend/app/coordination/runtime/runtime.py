@@ -818,6 +818,14 @@ class CoordinationRuntime:
         merged: dict[str, object] = dict(request.governance_metadata)
         merged.update(substrate_metadata)
 
+        # Wedge 2.75-γ: full authority axis. When ``request.authority``
+        # is supplied (the constitutional Wedge-B2 path) project every
+        # axis onto the governance context. The tenant-coexistence
+        # invariant is enforced by ``GovernanceContext.__post_init__``;
+        # the resolution path above already guarantees the tenant
+        # axis is reconciled, so authority.tenant_id == resolved
+        # tenant on every constitutional caller.
+        authority = request.authority
         return GovernanceContext(
             stage=request.enforcement_stage,
             action=action,
@@ -834,6 +842,22 @@ class CoordinationRuntime:
                 else None
             ),
             request_id=request_id,
+            principal_id=(
+                authority.principal_id
+                if authority is not None
+                else None
+            ),
+            organization_id=(
+                authority.organization_id
+                if authority is not None
+                else None
+            ),
+            environment_id=(
+                authority.environment_id
+                if authority is not None
+                else None
+            ),
+            authority=authority,
             subject=subject,
             correlation_id=request.correlation_id,
             metadata=merged,

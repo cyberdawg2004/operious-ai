@@ -46,6 +46,7 @@ from typing import Any, Mapping
 from app.agents.capabilities import CapabilitySet, ExecutionConstraints
 from app.agents.context import AgentExecutionContext
 from app.agents.envelopes import AgentExecutionEnvelope
+from app.identity import AuthorityContext
 from app.agents.enums import ExecutionState
 from app.agents.exceptions import (
     AgentNotFoundError,
@@ -98,6 +99,7 @@ class AgentRuntime:
         constraints: ExecutionConstraints | None = None,
         causality: CausalityMetadata | None = None,
         tenant_id: str | None = None,
+        authority: AuthorityContext | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> AgentExecutionEnvelope:
         """Run one agent end-to-end. Never raises."""
@@ -149,6 +151,7 @@ class AgentRuntime:
             constraints=ctx_constraints,
             causality=ctx_causality,
             tenant_id=tenant_id,
+            authority=authority,
             metadata=dict(metadata or {}),
         )
 

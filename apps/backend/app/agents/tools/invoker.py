@@ -277,6 +277,12 @@ def _build_governance_context(
         tenant_id=context.tenant_id,
         metadata=dict(request.metadata),
     )
+    # Wedge 2.75-γ: project the full authority axis from the typed
+    # ``AuthorityContext`` when present. Tool invocation is the
+    # finest-grained operational act — dropping principal / org / env
+    # here means agent-tool legality decisions are forensically
+    # decoupled from the requesting principal.
+    authority = context.authority
     return GovernanceContext(
         stage=EnforcementStage.PRE_EXECUTION,
         action="agent.tool_invocation",
@@ -292,6 +298,20 @@ def _build_governance_context(
             else None
         ),
         request_id=context.execution.request_id,
+        principal_id=(
+            authority.principal_id if authority is not None else None
+        ),
+        organization_id=(
+            authority.organization_id
+            if authority is not None
+            else None
+        ),
+        environment_id=(
+            authority.environment_id
+            if authority is not None
+            else None
+        ),
+        authority=authority,
         subject=subject,
         correlation_id=context.execution.correlation_id,
         metadata={

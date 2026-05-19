@@ -19,6 +19,7 @@ from typing import Any, Mapping
 from app.agents.capabilities import CapabilitySet, ExecutionConstraints
 from app.agents.identity import AgentIdentity, ExecutionIdentity
 from app.agents.value_objects import CausalityMetadata
+from app.identity import AuthorityContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,13 @@ class AgentExecutionContext:
                       parent_chain).
         tenant_id:    Optional tenant scope. Forwarded into
                       governance subjects when set.
+        authority:    Optional reference to the typed authority
+                      tuple (Wedge B2). When present, every axis
+                      (principal / organization / environment) is
+                      projected onto the governance context for
+                      tool-invocation legality so policies and the
+                      resulting :class:`GovernanceTrace` carry the
+                      full attribution chain (Wedge 2.75-γ).
         metadata:     Free-form structured execution metadata.
     """
 
@@ -47,6 +55,7 @@ class AgentExecutionContext:
     constraints: ExecutionConstraints
     causality: CausalityMetadata
     tenant_id: str | None = None
+    authority: AuthorityContext | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
