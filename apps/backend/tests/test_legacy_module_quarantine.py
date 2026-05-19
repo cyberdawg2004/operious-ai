@@ -156,10 +156,6 @@ _LEGACY_TO_CONSTITUTIONAL_PINS: frozenset[tuple[str, str]] = frozenset(
     {
         ("app/_deprecated/dependencies/governance.py", "governance"),
         (
-            "app/_deprecated/orchestration/tasks/governed_context_assembly_task.py",
-            "governance",
-        ),
-        (
             "app/_deprecated/governance_bridge/subjects_factories.py",
             "governance",
         ),
@@ -276,8 +272,7 @@ def test_deprecated_modules_import_only_from_themselves_or_infra() -> None:
         for match in _FROM_OR_IMPORT_APP.finditer(text):
             target = match.group(1)
             if any(
-                target == prefix.rstrip(".")
-                or target.startswith(prefix)
+                target == prefix.rstrip(".") or target.startswith(prefix)
                 for prefix in _ALLOWED_RUNTIME_PREFIXES_FOR_DEPRECATED
             ):
                 continue
@@ -288,6 +283,5 @@ def test_deprecated_modules_import_only_from_themselves_or_infra() -> None:
     assert not offences, (
         "deprecated modules may only import from `app._deprecated.*`, "
         "from a narrow infrastructure allow-list, or via pinned "
-        "legacy→constitutional couplings; offending imports: "
-        + "; ".join(offences)
+        "legacy→constitutional couplings; offending imports: " + "; ".join(offences)
     )
