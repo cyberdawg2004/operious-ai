@@ -192,6 +192,162 @@ const PINNINGS: readonly Pinning[] = [
     tsFile: 'packages/types/src/trace.ts',
     tsConst: 'TraceNodeKind',
   },
+  // PR-A2: arbitration vocabulary alignment.
+  // Pre-PR-A2 only the *outcome* enum was mirrored on the FE and the
+  // finding wire used short literals + a `kind` field while the BE
+  // emitted namespaced codes on a `code` field — silent drift on every
+  // arbitration response. The four authority/verdict/conflict/deadlock
+  // enums were missing entirely.
+  {
+    backendFile: 'apps/backend/app/arbitration/enums.py',
+    backendClass: 'ArbitrationOutcome',
+    tsFile: 'packages/types/src/arbitration.ts',
+    tsConst: 'ArbitrationOutcome',
+  },
+  {
+    backendFile: 'apps/backend/app/arbitration/enums.py',
+    backendClass: 'ArbitrationAuthorityLevel',
+    tsFile: 'packages/types/src/arbitration.ts',
+    tsConst: 'ArbitrationAuthorityLevel',
+  },
+  {
+    backendFile: 'apps/backend/app/arbitration/enums.py',
+    backendClass: 'ArbitrationVerdictKind',
+    tsFile: 'packages/types/src/arbitration.ts',
+    tsConst: 'ArbitrationVerdictKind',
+  },
+  {
+    backendFile: 'apps/backend/app/arbitration/enums.py',
+    backendClass: 'ArbitrationConflictKind',
+    tsFile: 'packages/types/src/arbitration.ts',
+    tsConst: 'ArbitrationConflictKind',
+  },
+  {
+    backendFile: 'apps/backend/app/arbitration/enums.py',
+    backendClass: 'ArbitrationDeadlockKind',
+    tsFile: 'packages/types/src/arbitration.ts',
+    tsConst: 'ArbitrationDeadlockKind',
+  },
+  {
+    backendFile: 'apps/backend/app/arbitration/taxonomy.py',
+    backendClass: 'ArbitrationFindingCode',
+    tsFile: 'packages/types/src/arbitration.ts',
+    tsConst: 'ArbitrationFindingCode',
+  },
+  // PR-A2: boundary substrate alignment — five vocabularies, zero
+  // frontend mirrors pre-PR-A2. Adapter classification, message
+  // taxonomy, normalisation outcomes, and replay disposition were
+  // un-pinned wire vocabularies any FE renderer had to guess.
+  {
+    backendFile: 'apps/backend/app/boundary/enums.py',
+    backendClass: 'BoundaryDirection',
+    tsFile: 'packages/types/src/boundary.ts',
+    tsConst: 'BoundaryDirection',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/enums.py',
+    backendClass: 'BoundarySourceType',
+    tsFile: 'packages/types/src/boundary.ts',
+    tsConst: 'BoundarySourceType',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/enums.py',
+    backendClass: 'BoundaryMessageType',
+    tsFile: 'packages/types/src/boundary.ts',
+    tsConst: 'BoundaryMessageType',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/enums.py',
+    backendClass: 'BoundaryNormalizationStatus',
+    tsFile: 'packages/types/src/boundary.ts',
+    tsConst: 'BoundaryNormalizationStatus',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/enums.py',
+    backendClass: 'BoundaryReplayDisposition',
+    tsFile: 'packages/types/src/boundary.ts',
+    tsConst: 'BoundaryReplayDisposition',
+  },
+  // PR-A2: translation substrate alignment — eight vocabularies.
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'TranslationDirection',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'TranslationDirection',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'TranslationStatus',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'TranslationStatus',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'TranslationProviderKind',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'TranslationProviderKind',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'SemanticPreservationStatus',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'SemanticPreservationStatus',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'LocalizationFormality',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'LocalizationFormality',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'TranslationFindingKind',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'TranslationFindingKind',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/translation/enums.py',
+    backendClass: 'TranslationTraceKind',
+    tsFile: 'packages/types/src/translation.ts',
+    tsConst: 'TranslationTraceKind',
+  },
+  // PR-A2: voice substrate alignment — six vocabularies.
+  {
+    backendFile: 'apps/backend/app/boundary/voice/enums.py',
+    backendClass: 'VoiceDirection',
+    tsFile: 'packages/types/src/voice.ts',
+    tsConst: 'VoiceDirection',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/voice/enums.py',
+    backendClass: 'VoiceStatus',
+    tsFile: 'packages/types/src/voice.ts',
+    tsConst: 'VoiceStatus',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/voice/enums.py',
+    backendClass: 'VoiceProviderKind',
+    tsFile: 'packages/types/src/voice.ts',
+    tsConst: 'VoiceProviderKind',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/voice/enums.py',
+    backendClass: 'AudioFormat',
+    tsFile: 'packages/types/src/voice.ts',
+    tsConst: 'AudioFormat',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/voice/enums.py',
+    backendClass: 'VoiceFindingKind',
+    tsFile: 'packages/types/src/voice.ts',
+    tsConst: 'VoiceFindingKind',
+  },
+  {
+    backendFile: 'apps/backend/app/boundary/voice/enums.py',
+    backendClass: 'VoiceTraceKind',
+    tsFile: 'packages/types/src/voice.ts',
+    tsConst: 'VoiceTraceKind',
+  },
 ];
 
 for (const pinning of PINNINGS) {

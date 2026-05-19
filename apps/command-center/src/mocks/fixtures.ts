@@ -208,7 +208,7 @@ const SAMPLE_ARBITRATION: ArbitrationDecisionDto = {
   precedingAuthority: 'governance',
   findings: [
     {
-      kind: 'authority_precedence_applied',
+      code: 'arbitration.authority_precedence_applied',
       summary: 'Governance precedence applied; arbitration deferred to human approval.',
       evidence: { restrictiveDecision: 'require_approval' },
     },
