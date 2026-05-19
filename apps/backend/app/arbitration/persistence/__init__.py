@@ -16,6 +16,9 @@ from app.arbitration.persistence.models import (
     ArbitrationQuery,
     RecordPage,
 )
+from app.arbitration.persistence.postgres import (
+    PostgresArbitrationPersistence,
+)
 from app.arbitration.persistence.records import (
     ArbitrationConflictRecord,
     ArbitrationDeadlockRecord,
@@ -38,6 +41,7 @@ __all__ = [
     "ArbitrationQuery",
     "ArbitrationRecord",
     "InMemoryArbitrationPersistence",
+    "PostgresArbitrationPersistence",
     "RecordPage",
     "envelope_to_record",
     "result_to_record",

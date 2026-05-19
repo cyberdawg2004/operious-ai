@@ -80,6 +80,23 @@ def test_arbitration_does_not_import_sibling_substrates() -> None:
         "OperationalAct",
         "gate_or_deny",
     }
+    # PR-B1 / PR-B5: ``app.db.base`` and ``app.db.repository`` are
+    # constitutional persistence FOUNDATION (declarative ``Base``,
+    # mixins, ``TenantScopedRepository`` helper). They are
+    # substrate-shared infrastructure, not sibling runtimes. The
+    # exemption is narrowly scoped to those two modules; everything
+    # else under ``app.db`` (session, models, partitioning) remains
+    # forbidden.
+    _DB_FOUNDATION_EXEMPTION_PREFIXES = (
+        "app.db.base",
+        "app.db.repository",
+    )
+    _DB_FOUNDATION_SYMBOLS = {
+        "Base",
+        "TenantScopedMixin",
+        "PartitionedByTenantMixin",
+        "TenantScopedRepository",
+    }
     for module_name in _walk_arbitration_modules():
         module = importlib.import_module(module_name)
         for attr_name in dir(module):
@@ -90,6 +107,13 @@ def test_arbitration_does_not_import_sibling_substrates() -> None:
             if obj_module.startswith(_CAPABILITY_GATE_EXEMPTION):
                 continue
             if attr_name in _CAPABILITY_GATE_SYMBOLS:
+                continue
+            if any(
+                obj_module.startswith(p)
+                for p in _DB_FOUNDATION_EXEMPTION_PREFIXES
+            ):
+                continue
+            if attr_name in _DB_FOUNDATION_SYMBOLS:
                 continue
             for forbidden in _FORBIDDEN_PREFIXES:
                 assert not obj_module.startswith(forbidden), (

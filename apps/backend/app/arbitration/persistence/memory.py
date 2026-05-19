@@ -36,14 +36,38 @@ class InMemoryArbitrationPersistence:
             self._records[record.evaluation_id] = record
 
     async def get(
-        self, evaluation_id: ArbitrationEvaluationId
+        self,
+        evaluation_id: ArbitrationEvaluationId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> ArbitrationRecord | None:
-        return self._records.get(evaluation_id)
+        # PR-B5: tenant-scoped point read. Row-level isolation —
+        # records belonging to another tenant return None,
+        # indistinguishable from absence.
+        record = self._records.get(evaluation_id)
+        if record is None:
+            return None
+        if (
+            expected_tenant_id is not None
+            and record.tenant_id != expected_tenant_id
+        ):
+            return None
+        return record
 
     async def list_records(
-        self, query: ArbitrationQuery
+        self,
+        query: ArbitrationQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> RecordPage:
         rows = list(self._records.values())
+        # PR-B5: system tenant scope is the strict outer bound;
+        # applied before the caller-supplied query filter so
+        # cross-tenant rows cannot leak via list APIs.
+        if expected_tenant_id is not None:
+            rows = [
+                r for r in rows if r.tenant_id == expected_tenant_id
+            ]
         if query.case_id is not None:
             rows = [r for r in rows if r.case_id == query.case_id]
         if query.evaluation_id is not None:
