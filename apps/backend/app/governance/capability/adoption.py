@@ -64,6 +64,7 @@ from app.governance.capability.gate import (
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
 from app.identity.authority import AuthorityContext, AuthorityResolution
+from app.identity.primitives import TenantId
 
 
 class CapabilityDenied(Exception):
@@ -153,7 +154,13 @@ async def evaluate_capability_gate(
     gate_authority = (
         authority
         if authority is not None
-        else AuthorityContext(tenant_id=resolution.tenant_id)
+        else AuthorityContext(
+            tenant_id=(
+                TenantId(resolution.tenant_id)
+                if resolution.tenant_id is not None
+                else None
+            )
+        )
     )
     envelope = await evaluate_capability_legality(
         governance,

@@ -59,6 +59,7 @@ def test_governance_context_accepts_authority_reference() -> None:
         authority=authority,
     )
     assert ctx.authority is authority
+    assert ctx.authority is not None
     assert ctx.tenant_id == ctx.authority.tenant_id
 
 

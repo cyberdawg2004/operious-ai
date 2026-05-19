@@ -55,11 +55,11 @@ from app.hardening.exceptions import (
     HardeningError,
 )
 from app.hardening.identity import (
-    derive_audit_id,
+    derive_audit_id as derive_audit_id,
     derive_correlation_id,
     derive_failure_record_id,
     derive_trace_id,
-    generate_correlation_id,
+    generate_correlation_id as generate_correlation_id,
     generate_trace_id,
 )
 from app.hardening.integrity.contamination import (
@@ -753,11 +753,6 @@ class HardeningRuntime:
         return HardeningEnvelope(
             trace=trace, result=None, error=error
         )
-
-
-# Useful re-exports
-derive_audit_id  # noqa: B018
-generate_correlation_id  # noqa: B018
 
 
 __all__ = ["HardeningRuntime"]

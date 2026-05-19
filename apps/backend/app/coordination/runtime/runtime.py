@@ -280,15 +280,23 @@ class CoordinationRuntime:
             actor="coordination_runtime",
         )
         if denial is not None:
+            # 2.75-α: capability-gate denials terminate as the
+            # canonical governance-denied outcome. ``DENIED`` already
+            # represents "governance said no" (existing post-policy-
+            # evaluation denial); capability legality is the same
+            # constitutional verdict at an earlier gate, so we share
+            # the terminal outcome to keep the dispatch ontology
+            # singular. The discriminating cause survives via
+            # ``error=denial``.
             return self._fail_fast_result(
                 coordination_id=coordination_id,
                 request=request,
                 request_id=request_id,
                 started_at=started_at,
                 loop_start=loop_start,
-                outcome=CoordinationDispatchOutcome.GOVERNANCE_DENIED,
+                outcome=CoordinationDispatchOutcome.DENIED,
                 error=denial,
-                status=CoordinationStatus.FAILED,
+                status=CoordinationStatus.DENIED,
                 envelope=None,
                 resolution=resolution,
             )

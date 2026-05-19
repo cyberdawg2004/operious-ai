@@ -13,13 +13,13 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from app.session.enums import (
-    SessionEventKind,
+    SessionEventKind as SessionEventKind,
     SessionReconstructionStatus,
 )
 from app.session.identity import (
-    SessionCorrelationId,
-    SessionEventId,
-    SessionId,
+    SessionCorrelationId as SessionCorrelationId,
+    SessionEventId as SessionEventId,
+    SessionId as SessionId,
     SessionReconstructionId,
 )
 from app.session.models.correlation import SessionCorrelation
@@ -119,13 +119,6 @@ class ReconstructSessionResult(_BaseResult):
     timeline: SessionTimeline | None = None
     lineage: SessionLineage | None = None
     correlations: tuple[SessionCorrelation, ...] = ()
-
-
-# Re-exports for typing consumers
-SessionEventId  # noqa: B018
-SessionId  # noqa: B018
-SessionCorrelationId  # noqa: B018
-SessionEventKind  # noqa: B018
 
 
 __all__ = [

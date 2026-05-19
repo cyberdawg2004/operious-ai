@@ -97,7 +97,7 @@ from app.session.lineage.tracker import (
 from app.session.models.identity import SessionIdentity
 from app.session.models.lifecycle import SessionLifecycle
 from app.session.models.session import OperationalSession
-from app.session.models.timeline import SessionTimeline
+from app.session.models.timeline import SessionTimeline as SessionTimeline
 from app.session.models.timeline_event import (
     SessionTimelineEvent,
 )
@@ -1214,8 +1214,6 @@ class SessionRuntime:
         return meta
 
 
-# Public re-exports
-SessionTimeline  # noqa: B018
 
 
 __all__ = ["SessionRuntime"]

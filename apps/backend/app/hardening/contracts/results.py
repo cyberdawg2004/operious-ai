@@ -10,7 +10,7 @@ from typing import Any, Mapping
 from app.hardening.enums import (
     ContainmentClassification,
     IntegrityStatus,
-    ReplayStatus,
+    ReplayStatus as ReplayStatus,
     SurvivabilityStatus,
 )
 from app.hardening.models.audit import HardeningAudit
@@ -100,10 +100,6 @@ class RecordFailureResult(_BaseResult):
 @dataclass(frozen=True, slots=True)
 class ClassifyContainmentResult(_BaseResult):
     classification: ContainmentClassification | None = None
-
-
-# ReplayStatus referenced for downstream typing
-ReplayStatus  # noqa: B018
 
 
 __all__ = [

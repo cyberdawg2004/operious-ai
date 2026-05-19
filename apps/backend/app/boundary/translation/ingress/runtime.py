@@ -40,7 +40,7 @@ from app.boundary.translation.exceptions import (
     TranslationContainmentError,
     TranslationError,
     TranslationProviderError,
-    TranslationValidationError,
+    TranslationValidationError as TranslationValidationError,
 )
 from app.boundary.translation.identity import (
     derive_correlation_id,
@@ -454,10 +454,6 @@ def _build_findings(
         )
         ordinal += 1
     return tuple(out)
-
-
-# Re-export the validator types so static analysers don't strip them.
-TranslationValidationError  # noqa: B018
 
 
 __all__ = ["TranslationIngressRuntime"]

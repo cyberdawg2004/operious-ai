@@ -26,6 +26,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from typing import cast
+
 import pytest
 
 from app.governance.capability import (
@@ -35,6 +37,7 @@ from app.governance.capability import (
 )
 from app.governance.context import GovernanceContext
 from app.governance.decisions import GovernanceDecision
+from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
 from app.governance.enums import Decision, EnforcementStage
 from app.governance.tracing import GovernanceTrace
@@ -66,7 +69,7 @@ def _stub_trace(final_decision: Decision = Decision.ALLOW) -> GovernanceTrace:
         started_at=now,
         ended_at=now,
         latency_ms=0.0,
-        status="success",
+        status="ok",
         final_decision=final_decision,
         policy_chain_id=_FIXED_CHAIN_ID,
         policy_traces=(),
@@ -141,7 +144,7 @@ async def test_gate_outcome_inert_when_governance_unconfigured() -> None:
 @pytest.mark.asyncio
 async def test_gate_outcome_carries_provenance_on_allow() -> None:
     outcome = await evaluate_capability_gate(
-        _StubAllowRuntime(),
+        cast(GovernanceRuntime, _StubAllowRuntime()),
         act=OperationalAct.SESSION_OPEN,
         authority=AuthorityContext(
             tenant_id=TenantId("acme"),
@@ -158,7 +161,7 @@ async def test_gate_outcome_carries_provenance_on_allow() -> None:
 @pytest.mark.asyncio
 async def test_gate_outcome_carries_provenance_on_deny() -> None:
     outcome = await evaluate_capability_gate(
-        _StubDenyRuntime(),
+        cast(GovernanceRuntime, _StubDenyRuntime()),
         act=OperationalAct.SESSION_OPEN,
         authority=AuthorityContext(tenant_id=TenantId("acme")),
         resolution=_resolution(),
@@ -181,7 +184,7 @@ async def test_session_trace_populated_on_allow() -> None:
 
     runtime = SessionRuntime(
         persistence=InMemorySessionPersistence(),
-        governance=_StubAllowRuntime(),
+        governance=cast(GovernanceRuntime, _StubAllowRuntime()),
     )
     envelope = await runtime.open_session(
         OpenSessionRequest(
@@ -209,7 +212,7 @@ async def test_session_trace_populated_on_deny_failed_envelope() -> None:
 
     runtime = SessionRuntime(
         persistence=InMemorySessionPersistence(),
-        governance=_StubDenyRuntime(),
+        governance=cast(GovernanceRuntime, _StubDenyRuntime()),
     )
     envelope = await runtime.open_session(
         OpenSessionRequest(
@@ -275,8 +278,10 @@ def _arbitration_request(*, capability: bool):
     from app.arbitration.contracts.requests import ArbitrationRequest
     from app.arbitration.models.case import ArbitrationCase
 
+    from app.arbitration.identity import ArbitrationCaseId
+
     case = ArbitrationCase(
-        case_id=uuid.uuid4(),
+        case_id=ArbitrationCaseId(uuid.uuid4()),
         signals=(),
         recommendations=(),
         iteration_count=0,

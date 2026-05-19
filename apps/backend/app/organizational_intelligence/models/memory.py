@@ -37,9 +37,9 @@ from app.organizational_intelligence.enums import (
     RetrievalEligibility,
 )
 from app.organizational_intelligence.identity import (
-    ApprovalId,
-    ApprovedPatternId,
-    CandidatePatternId,
+    ApprovalId as ApprovalId,
+    ApprovedPatternId as ApprovedPatternId,
+    CandidatePatternId as CandidatePatternId,
     MemoryArtifactId,
     MemoryEvolutionProposalId,
     PatternLineageId,
@@ -329,13 +329,6 @@ class OrganizationalMemoryArtifact:
     @property
     def is_retrieval_eligible(self) -> bool:
         return self.eligibility is RetrievalEligibility.ELIGIBLE
-
-
-# Re-exports for typing consumers
-ApprovedPatternId  # noqa: B018
-CandidatePatternId  # noqa: B018
-ApprovalId  # noqa: B018
-uuid  # noqa: B018
 
 
 __all__ = [

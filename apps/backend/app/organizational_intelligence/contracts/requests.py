@@ -18,7 +18,7 @@ from app.organizational_intelligence.enums import (
     TonalityClass,
 )
 from app.organizational_intelligence.identity import (
-    ApprovalId,
+    ApprovalId as ApprovalId,
     CandidatePatternId,
     MemoryArtifactId,
     RecommendationId,
@@ -327,10 +327,6 @@ class ApproveRecommendationRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-# Re-exports
-ApprovalId  # noqa: B018
 
 
 __all__ = [

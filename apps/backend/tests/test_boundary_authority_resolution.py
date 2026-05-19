@@ -44,7 +44,7 @@ from app.boundary.models.payload import (
 )
 from app.boundary.models.source import BoundarySource
 from app.boundary.registry.registry import BoundaryAdapterRegistry
-from app.identity import AuthorityContext, AuthoritySource
+from app.identity import AuthorityContext, AuthoritySource, TenantId
 
 
 def _source(tenant: str | None = "tenant-source") -> BoundarySource:
@@ -98,7 +98,7 @@ async def test_ingress_typed_authority_wins_over_source_tenant() -> None:
             source=_source(tenant="tenant-source"),
             adapter_name="zendesk_webhook_adapter",
             payload=_payload(),
-            authority=AuthorityContext(tenant_id="tenant-verified"),
+            authority=AuthorityContext(tenant_id=TenantId("tenant-verified")),
         )
     )
     assert envelope.is_ok
@@ -161,7 +161,7 @@ async def test_ingress_failed_envelope_stamps_authority_source() -> None:
             source=_source(tenant="tenant-source"),
             adapter_name="does_not_exist",
             payload=_payload(),
-            authority=AuthorityContext(tenant_id="tenant-verified"),
+            authority=AuthorityContext(tenant_id=TenantId("tenant-verified")),
         )
     )
     assert envelope.result is None
@@ -185,7 +185,7 @@ async def test_egress_typed_authority_wins_over_source_tenant() -> None:
             adapter_name="zendesk_webhook_adapter",
             artifact={"body": "ack"},
             prebuilt_payload=EgressPayload(body={"text": "ack"}),
-            authority=AuthorityContext(tenant_id="tenant-verified"),
+            authority=AuthorityContext(tenant_id=TenantId("tenant-verified")),
         )
     )
     assert envelope.is_ok
@@ -227,7 +227,7 @@ async def test_egress_failed_envelope_stamps_authority_source() -> None:
             source=_source(tenant="tenant-source"),
             adapter_name="does_not_exist",
             artifact={"body": "ack"},
-            authority=AuthorityContext(tenant_id="tenant-verified"),
+            authority=AuthorityContext(tenant_id=TenantId("tenant-verified")),
         )
     )
     assert envelope.result is None
