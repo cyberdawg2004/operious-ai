@@ -74,12 +74,25 @@ class CoordinationPersistenceProtocol(Protocol):
         ...
 
     async def query_envelopes(
-        self, query: CoordinationQuery
+        self,
+        query: CoordinationQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> RecordPage[CoordinationRecord]:
         """Paginated lookup.
 
         Results MUST be sorted by ``(runtime_instance_id, sequence)``
         ascending so callers can stream in deterministic order.
+
+        Wedge 2.75-ε (extended): when ``expected_tenant_id`` is
+        supplied, the system clamps results to that tenant before
+        the caller-supplied ``query.tenant_id`` filter is applied.
+        Cross-tenant rows cannot leak through this surface even
+        if the caller omits the filter or supplies a different
+        tenant — this is the closure-of-correlation-lookup
+        guarantee. (Coordination correlations are not standalone
+        records; they live as a column on each envelope, so the
+        envelope query path IS the correlation lookup path.)
         """
         ...
 

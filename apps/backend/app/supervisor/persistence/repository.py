@@ -112,9 +112,18 @@ class BaseSupervisorRepository(Protocol):
     # ─── Queries ─────────────────────────────────────────────────────
 
     async def query_inspections(
-        self, query: InspectionQuery
+        self,
+        query: InspectionQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> RecordPage[InspectionRecord]:
-        """Paginated inspection lookup."""
+        """Paginated inspection lookup.
+
+        Wedge 2.75-ε (extended): when ``expected_tenant_id`` is
+        supplied, results are clamped to that tenant before the
+        caller's ``query.tenant_id`` filter is applied. Cross-
+        tenant rows cannot leak through this surface.
+        """
         ...
 
 

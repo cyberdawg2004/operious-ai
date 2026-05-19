@@ -95,16 +95,47 @@ class SessionPersistenceProtocol(Protocol):
         ...
 
     async def list_sessions(
-        self, query: SessionQuery
-    ) -> SessionRecordPage: ...
+        self,
+        query: SessionQuery,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionRecordPage:
+        """Paginated session lookup.
+
+        Wedge 2.75-ε (extended): when ``expected_tenant_id`` is
+        supplied, the system clamps results to that tenant
+        regardless of the caller-supplied ``query.tenant_id``
+        filter. If both are set and disagree the page is empty
+        (the system scope is the strict outer bound; the user
+        filter is the optional inner bound).
+        """
+        ...
 
     async def list_events(
-        self, query: SessionEventQuery
-    ) -> SessionRecordPage: ...
+        self,
+        query: SessionEventQuery,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionRecordPage:
+        """Paginated event lookup.
+
+        Tenant scope resolves via the owning session record: if
+        the parent session is invisible from the requesting
+        tenant, the event page is empty.
+        """
+        ...
 
     async def list_correlations(
-        self, query: SessionCorrelationQuery
-    ) -> SessionRecordPage: ...
+        self,
+        query: SessionCorrelationQuery,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionRecordPage:
+        """Paginated correlation lookup.
+
+        Tenant scope resolves via the owning session record.
+        """
+        ...
 
 
 __all__ = ["SessionPersistenceProtocol"]

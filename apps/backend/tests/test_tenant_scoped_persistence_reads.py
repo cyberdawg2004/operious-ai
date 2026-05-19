@@ -13,6 +13,20 @@ The check is opt-in (``expected_tenant_id`` defaults to ``None``)
 so substrate-internal reads (reconstructors, persistence-level
 joins) can span tenants when constitutionally legitimate. The
 composition root pins ``expected_tenant_id`` at every public read.
+
+Two surfaces are covered:
+
+1. **Point reads** (``get_session``, ``get_event``,
+   ``get_correlation``, ``get_envelope``, ``get_inspection``,
+   ``get_findings_for_inspection``,
+   ``get_evaluations_for_inspection``,
+   ``get_escalations_for_inspection``) — Wedge 2.75-ε.
+2. **Query / list reads** (``list_sessions``, ``list_events``,
+   ``list_correlations``, ``query_envelopes``,
+   ``query_inspections``) — Wedge 2.75-ε (extended) which
+   closes the coordination-correlation-lookup gap. The
+   ``expected_tenant_id`` parameter is the **outer** bound that
+   precedes the caller's filter; callers cannot widen the scope.
 """
 
 from __future__ import annotations
@@ -442,3 +456,184 @@ async def test_session_runtime_get_session_enforces_scope() -> None:
     cross = await runtime.get_session(sid, expected_tenant_id="tenant-B")
     assert cross.result is None
     assert cross.error is not None
+
+
+# ─── QUERY / LIST SURFACE (Wedge 2.75-ε extended, B2) ───────────────
+
+
+@pytest.mark.asyncio
+async def test_session_list_sessions_clamps_to_tenant() -> None:
+    from app.session.persistence.models import SessionQuery
+
+    persistence = InMemorySessionPersistence()
+    sid_a = SessionId(uuid.uuid4())
+    sid_b = SessionId(uuid.uuid4())
+    await persistence.save_session(
+        _session_record(session_id=sid_a, tenant="tenant-A")
+    )
+    await persistence.save_session(
+        _session_record(session_id=sid_b, tenant="tenant-B")
+    )
+
+    page = await persistence.list_sessions(
+        SessionQuery(), expected_tenant_id="tenant-A"
+    )
+    assert tuple(s.session_id for s in page.sessions) == (sid_a,)
+
+    # Caller-supplied query.tenant_id is intersected with the
+    # system bound; disagreeing values yield an empty page.
+    page_xor = await persistence.list_sessions(
+        SessionQuery(tenant_id="tenant-B"),
+        expected_tenant_id="tenant-A",
+    )
+    assert page_xor.sessions == ()
+
+
+@pytest.mark.asyncio
+async def test_session_list_events_clamps_to_tenant() -> None:
+    from app.session.persistence.models import SessionEventQuery
+
+    persistence = InMemorySessionPersistence()
+    sid = SessionId(uuid.uuid4())
+    await persistence.save_session(
+        _session_record(session_id=sid, tenant="tenant-A")
+    )
+    event = _session_event(session_id=sid)
+    await persistence.save_event(event)
+
+    same = await persistence.list_events(
+        SessionEventQuery(session_id=sid),
+        expected_tenant_id="tenant-A",
+    )
+    assert tuple(e.event_id for e in same.events) == (event.event_id,)
+    cross = await persistence.list_events(
+        SessionEventQuery(session_id=sid),
+        expected_tenant_id="tenant-B",
+    )
+    assert cross.events == ()
+
+
+@pytest.mark.asyncio
+async def test_session_list_correlations_clamps_to_tenant() -> None:
+    from app.session.persistence.models import (
+        SessionCorrelationQuery,
+    )
+
+    persistence = InMemorySessionPersistence()
+    sid = SessionId(uuid.uuid4())
+    await persistence.save_session(
+        _session_record(session_id=sid, tenant="tenant-A")
+    )
+    correlation = _session_correlation(session_id=sid)
+    await persistence.save_correlation(correlation)
+
+    same = await persistence.list_correlations(
+        SessionCorrelationQuery(session_id=sid),
+        expected_tenant_id="tenant-A",
+    )
+    assert tuple(c.correlation_id for c in same.correlations) == (
+        correlation.correlation_id,
+    )
+    cross = await persistence.list_correlations(
+        SessionCorrelationQuery(session_id=sid),
+        expected_tenant_id="tenant-B",
+    )
+    assert cross.correlations == ()
+
+
+@pytest.mark.asyncio
+async def test_coordination_query_envelopes_clamps_to_tenant() -> None:
+    """Closes the coordination-correlation-lookup gap. Coordination
+    correlations live on the envelope record — so the envelope
+    query path IS the correlation lookup path."""
+    from app.coordination.persistence.models import CoordinationQuery
+
+    persistence = InMemoryCoordinationPersistence()
+    record = envelope_to_record(_coord_envelope(tenant="tenant-A"))
+    await persistence.record_envelope(record)
+
+    same = await persistence.query_envelopes(
+        CoordinationQuery(), expected_tenant_id="tenant-A"
+    )
+    assert tuple(r.coordination_id for r in same.items) == (
+        record.coordination_id,
+    )
+    cross = await persistence.query_envelopes(
+        CoordinationQuery(), expected_tenant_id="tenant-B"
+    )
+    assert cross.items == ()
+
+
+def test_coordination_runtime_list_messages_exposes_scope_parameter() -> (
+    None
+):
+    """The runtime-level list API is the public read surface;
+    composition root pins ``expected_tenant_id`` here. We assert
+    the parameter is declared on the public method so callers
+    can rely on it (the persistence-level test already proves
+    enforcement)."""
+    import inspect
+
+    from app.coordination.runtime.runtime import CoordinationRuntime
+
+    sig = inspect.signature(CoordinationRuntime.list_messages)
+    assert "expected_tenant_id" in sig.parameters
+    assert (
+        sig.parameters["expected_tenant_id"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
+    assert sig.parameters["expected_tenant_id"].default is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_query_inspections_clamps_to_tenant() -> None:
+    from app.supervisor.persistence.models import InspectionQuery
+
+    repo = InMemorySupervisorRepository()
+    inspection, _, _, _ = _make_inspection(
+        inspection_id="i:1", tenant="tenant-A"
+    )
+    await repo.record_inspection(inspection)
+
+    same = await repo.query_inspections(
+        InspectionQuery(), expected_tenant_id="tenant-A"
+    )
+    assert tuple(i.inspection_id for i in same.items) == (
+        inspection.inspection_id,
+    )
+    cross = await repo.query_inspections(
+        InspectionQuery(), expected_tenant_id="tenant-B"
+    )
+    assert cross.items == ()
+
+
+@pytest.mark.asyncio
+async def test_query_clamp_is_strict_outer_bound() -> None:
+    """``expected_tenant_id`` is the outer bound; the caller's
+    ``query.tenant_id`` filter is a strict inner subset. Setting
+    the caller filter to a DIFFERENT tenant cannot widen the
+    scope back."""
+    from app.session.persistence.models import SessionQuery
+
+    persistence = InMemorySessionPersistence()
+    await persistence.save_session(
+        _session_record(
+            session_id=SessionId(uuid.uuid4()), tenant="tenant-A"
+        )
+    )
+    await persistence.save_session(
+        _session_record(
+            session_id=SessionId(uuid.uuid4()), tenant="tenant-B"
+        )
+    )
+
+    page = await persistence.list_sessions(
+        SessionQuery(tenant_id="tenant-B"),
+        expected_tenant_id="tenant-A",
+    )
+    assert page.sessions == ()
+    page2 = await persistence.list_sessions(
+        SessionQuery(tenant_id="tenant-A"),
+        expected_tenant_id="tenant-A",
+    )
+    assert len(page2.sessions) == 1

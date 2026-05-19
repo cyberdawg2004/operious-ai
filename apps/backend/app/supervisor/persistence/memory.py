@@ -142,11 +142,21 @@ class InMemorySupervisorRepository:
     # ─── Queries ─────────────────────────────────────────────────────
 
     async def query_inspections(
-        self, query: InspectionQuery
+        self,
+        query: InspectionQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> RecordPage[InspectionRecord]:
-        matches = [
-            r for r in self._inspections.values() if _matches(r, query)
-        ]
+        candidates = self._inspections.values()
+        # 2.75-ε (extended): system tenant scope is the outer
+        # bound applied before the caller's filter.
+        if expected_tenant_id is not None:
+            candidates = [
+                r
+                for r in candidates
+                if r.tenant_id == expected_tenant_id
+            ]
+        matches = [r for r in candidates if _matches(r, query)]
         matches.sort(key=lambda r: r.started_at)
         page = matches[query.offset : query.offset + query.limit]
         return RecordPage(items=tuple(page), total=len(matches), offset=query.offset)

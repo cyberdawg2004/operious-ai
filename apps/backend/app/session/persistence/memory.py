@@ -165,9 +165,17 @@ class InMemorySessionPersistence:
         return record
 
     async def list_sessions(
-        self, query: SessionQuery
+        self,
+        query: SessionQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionRecordPage:
         rows = list(self._sessions.values())
+        # 2.75-ε (extended): system tenant scope is the strict
+        # outer bound — it precedes any caller-supplied query
+        # filter so cross-tenant rows cannot leak via list APIs.
+        if expected_tenant_id is not None:
+            rows = [r for r in rows if r.tenant_id == expected_tenant_id]
         if query.session_id is not None:
             rows = [
                 r for r in rows if r.session_id == query.session_id
@@ -205,8 +213,19 @@ class InMemorySessionPersistence:
         )
 
     async def list_events(
-        self, query: SessionEventQuery
+        self,
+        query: SessionEventQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionRecordPage:
+        # 2.75-ε (extended): owning-session tenant gate.
+        if expected_tenant_id is not None:
+            owning = self._sessions.get(query.session_id)
+            if (
+                owning is None
+                or owning.tenant_id != expected_tenant_id
+            ):
+                return SessionRecordPage(events=(), total=0)
         rows = list(self._events_by_session.get(query.session_id, []))
         if query.event_id is not None:
             rows = [r for r in rows if r.event_id == query.event_id]
@@ -241,9 +260,24 @@ class InMemorySessionPersistence:
         return SessionRecordPage(events=tuple(rows), total=total)
 
     async def list_correlations(
-        self, query: SessionCorrelationQuery
+        self,
+        query: SessionCorrelationQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> SessionRecordPage:
         rows = list(self._correlations.values())
+        # 2.75-ε (extended): each correlation inherits scope
+        # from its owning session.
+        if expected_tenant_id is not None:
+            rows = [
+                r
+                for r in rows
+                if (
+                    (parent := self._sessions.get(r.session_id))
+                    is not None
+                    and parent.tenant_id == expected_tenant_id
+                )
+            ]
         if query.session_id is not None:
             rows = [
                 r for r in rows if r.session_id == query.session_id

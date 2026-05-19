@@ -530,11 +530,21 @@ class CoordinationRuntime:
         status: CoordinationStatus | None = None,
         limit: int = 100,
         offset: int = 0,
+        expected_tenant_id: str | None = None,
     ) -> tuple[CoordinationEnvelope, ...]:
         """List envelopes matching the supplied filters.
 
         Order: ``(runtime_instance_id, sequence)`` ascending. This is
         the canonical replay-safe global order.
+
+        Wedge 2.75-ε (extended): ``expected_tenant_id`` enforces
+        row-level tenant isolation at the system level. The
+        ``tenant_id`` keyword remains a caller-driven filter (use
+        when scoped to a single tenant); ``expected_tenant_id``
+        is the system constraint that callers cannot widen. This
+        closes the coordination-correlation-lookup gap left open
+        by 2.75-ε since coordination correlations live on the
+        envelope record and have no standalone read API.
         """
         query = CoordinationQuery(
             correlation_id=str(correlation_id)
@@ -555,7 +565,9 @@ class CoordinationRuntime:
             offset=offset,
         )
         page: RecordPage[CoordinationRecord] = (
-            await self._persistence.query_envelopes(query)
+            await self._persistence.query_envelopes(
+                query, expected_tenant_id=expected_tenant_id
+            )
         )
         return tuple(record_to_envelope(r) for r in page.items)
 

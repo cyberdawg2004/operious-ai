@@ -64,9 +64,19 @@ class InMemoryCoordinationPersistence:
         return record
 
     async def query_envelopes(
-        self, query: CoordinationQuery
+        self,
+        query: CoordinationQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> RecordPage[CoordinationRecord]:
-        matches = [r for r in self._records.values() if _matches(r, query)]
+        # 2.75-ε (extended): system tenant scope is the outer
+        # bound applied before the caller's filter.
+        candidates = self._records.values()
+        if expected_tenant_id is not None:
+            candidates = [
+                r for r in candidates if r.tenant_id == expected_tenant_id
+            ]
+        matches = [r for r in candidates if _matches(r, query)]
         matches.sort(key=lambda r: (r.runtime_instance_id, r.sequence))
         page = matches[query.offset : query.offset + query.limit]
         return RecordPage(
