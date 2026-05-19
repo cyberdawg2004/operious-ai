@@ -76,7 +76,7 @@ from app.boundary.translation.persistence.records import (
 from app.boundary.translation.persistence.repository import (
     TranslationPersistenceProtocol,
 )
-from app.boundary.translation.providers.base import (
+from app.boundary.translation.adapters.base import (
     BaseTranslationProvider,
     TranslationProviderRequest,
 )

@@ -78,7 +78,7 @@ from app.boundary.translation.persistence import (
     IngressTranslationRecord,
     TranslationPersistenceProtocol,
 )
-from app.boundary.translation.providers import (
+from app.boundary.translation.adapters import (
     BaseTranslationProvider,
     IdentityTranslationProvider,
     TranslationProviderRequest,

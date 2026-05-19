@@ -21,7 +21,7 @@ from app.boundary.voice.enums import (
     VoiceProviderKind,
 )
 from app.boundary.voice.models.audio import VoiceAudioHandle
-from app.boundary.voice.providers.base import (
+from app.boundary.voice.adapters.base import (
     BaseSpeechToTextProvider,
     BaseTextToSpeechProvider,
     SpeechToTextProviderRequest,

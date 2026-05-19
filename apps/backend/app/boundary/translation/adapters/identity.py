@@ -18,7 +18,7 @@ from app.boundary.translation.enums import (
 from app.boundary.translation.models.payload import (
     TranslationPayload,
 )
-from app.boundary.translation.providers.base import (
+from app.boundary.translation.adapters.base import (
     BaseTranslationProvider,
     TranslationProviderRequest,
     TranslationProviderResponse,

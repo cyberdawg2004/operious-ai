@@ -61,7 +61,7 @@ from app.boundary.voice.persistence.records import (
 from app.boundary.voice.persistence.repository import (
     VoicePersistenceProtocol,
 )
-from app.boundary.voice.providers.base import (
+from app.boundary.voice.adapters.base import (
     BaseSpeechToTextProvider,
     SpeechToTextProviderRequest,
 )

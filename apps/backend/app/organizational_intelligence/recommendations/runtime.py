@@ -47,7 +47,7 @@ from app.organizational_intelligence.exceptions import (
     IntelligenceNotFoundError,
     IntelligenceValidationError,
 )
-from app.organizational_intelligence.governance.approval_gate import (
+from app.organizational_intelligence.approval_gates.approval_gate import (
     require_approval_for_review,
 )
 from app.organizational_intelligence.identity import (
