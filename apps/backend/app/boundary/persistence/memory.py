@@ -59,19 +59,51 @@ class InMemoryBoundaryPersistence:
             self._egress[record.egress_id] = record
 
     async def get_ingress(
-        self, ingress_id: BoundaryIngressId
+        self,
+        ingress_id: BoundaryIngressId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> BoundaryIngressRecord | None:
-        return self._ingress.get(ingress_id)
+        # PR-B7: tenant-scoped row-level isolation.
+        record = self._ingress.get(ingress_id)
+        if record is None:
+            return None
+        if (
+            expected_tenant_id is not None
+            and record.tenant_id != expected_tenant_id
+        ):
+            return None
+        return record
 
     async def get_egress(
-        self, egress_id: BoundaryEgressId
+        self,
+        egress_id: BoundaryEgressId,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> BoundaryEgressRecord | None:
-        return self._egress.get(egress_id)
+        record = self._egress.get(egress_id)
+        if record is None:
+            return None
+        if (
+            expected_tenant_id is not None
+            and record.tenant_id != expected_tenant_id
+        ):
+            return None
+        return record
 
     async def list_ingress(
-        self, query: BoundaryIngressQuery
+        self,
+        query: BoundaryIngressQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> BoundaryRecordPage:
         rows = list(self._ingress.values())
+        # PR-B7: system tenant scope is the strict outer bound
+        # applied before the caller-supplied query filter.
+        if expected_tenant_id is not None:
+            rows = [
+                r for r in rows if r.tenant_id == expected_tenant_id
+            ]
         if query.ingress_id is not None:
             rows = [
                 r for r in rows if r.ingress_id == query.ingress_id
@@ -126,9 +158,16 @@ class InMemoryBoundaryPersistence:
         )
 
     async def list_egress(
-        self, query: BoundaryEgressQuery
+        self,
+        query: BoundaryEgressQuery,
+        *,
+        expected_tenant_id: str | None = None,
     ) -> BoundaryRecordPage:
         rows = list(self._egress.values())
+        if expected_tenant_id is not None:
+            rows = [
+                r for r in rows if r.tenant_id == expected_tenant_id
+            ]
         if query.egress_id is not None:
             rows = [r for r in rows if r.egress_id == query.egress_id]
         if query.source_type is not None:

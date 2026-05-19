@@ -8,6 +8,9 @@ from app.boundary.persistence.models import (
     BoundaryIngressQuery,
     BoundaryRecordPage,
 )
+from app.boundary.persistence.postgres import (
+    PostgresBoundaryPersistence,
+)
 from app.boundary.persistence.records import (
     BoundaryEgressRecord,
     BoundaryIngressRecord,
@@ -30,6 +33,7 @@ __all__ = [
     "BoundaryPersistenceProtocol",
     "BoundaryRecordPage",
     "InMemoryBoundaryPersistence",
+    "PostgresBoundaryPersistence",
     "egress_envelope_to_record",
     "egress_result_to_record",
     "ingress_envelope_to_record",

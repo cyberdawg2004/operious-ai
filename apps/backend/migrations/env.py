@@ -42,6 +42,7 @@ from app.session.db import models as _session_models  # noqa: F401  # pyright: i
 from app.coordination.db import models as _coordination_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.arbitration.db import models as _arbitration_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.supervisor.db import models as _supervisor_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.boundary.db import models as _boundary_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

@@ -48,6 +48,14 @@ _FORBIDDEN_PARENT_IMPORT_RE = re.compile(
     r"governance)\b",
     re.MULTILINE,
 )
+# PR-B1 / PR-B7: ``app.db.base`` and ``app.db.repository`` are
+# constitutional persistence FOUNDATION. Narrowly exempted with
+# the same strip pattern as the capability-gate exemption — see
+# ``docs/persistence/postgres-foundation.md``.
+_DB_FOUNDATION_ALLOW_RE = re.compile(
+    r"^(?:from|import)\s+app\.db\.(?:base|repository)\b",
+    re.MULTILINE,
+)
 # 2.75-\u03b1: the capability legality gate is the singular
 # cross-substrate exemption (P2-B singular gate).
 _CAPABILITY_GATE_ALLOW_RE = re.compile(
@@ -62,6 +70,7 @@ def test_no_parent_substrate_imports() -> None:
     for path in _BOUNDARY_ROOT.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         stripped = _CAPABILITY_GATE_ALLOW_RE.sub("", text)
+        stripped = _DB_FOUNDATION_ALLOW_RE.sub("", stripped)
         if _FORBIDDEN_PARENT_IMPORT_RE.search(stripped):
             offenders.append(str(path))
     assert not offenders, (
