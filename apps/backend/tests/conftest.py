@@ -12,6 +12,15 @@ Fixtures provided here:
 * `sqlite_engine`     — fresh in-memory async SQLite engine, schema created.
 * `session_factory`   — `async_sessionmaker` bound to `sqlite_engine`.
 * `settings_for_test` — `Settings` instance with safe test defaults.
+* `pg_engine`         — Postgres async engine bound to ``TEST_DATABASE_URL``
+                        (skipped when the env var is absent — keeps CI
+                        green on developers without a local Postgres).
+* `pg_session`        — request-scoped Postgres session wrapped in an
+                        outer ``BEGIN/ROLLBACK`` so each test sees a
+                        clean view of the database without per-test
+                        ``CREATE/DROP TABLE`` overhead.
+* `requires_postgres` — marker decorator for tests that need a real
+                        Postgres backend.
 
 The pre-Phase-2.1 fixtures (`chunker`, `vector_provider`, `fake_embedder`)
 were removed when the underlying memory / chunking / vector-provider
@@ -30,6 +39,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
@@ -39,6 +49,35 @@ from sqlalchemy.ext.compiler import compiles
 
 if TYPE_CHECKING:
     from app.core.config import Settings
+
+
+# ─── Postgres availability gate ───────────────────────────────────────────
+
+
+TEST_DATABASE_URL_ENV = "TEST_DATABASE_URL"
+"""Env var holding the test Postgres DSN.
+
+Set this in CI / integration environments to a dedicated test
+database (e.g. ``postgresql+asyncpg://test:test@localhost:5433/operious_test``).
+When unset, every fixture / test gated on real Postgres skips with
+a clear reason — local-dev developers without a Postgres can still
+run the in-memory test suite to completion.
+
+The substrate REFUSES to fall back to the production DSN
+(``settings.database_url``) for tests: contaminating a real
+deployment with test rows is a class of bug the substrate forbids
+at the fixture layer.
+"""
+
+requires_postgres = pytest.mark.skipif(
+    os.environ.get(TEST_DATABASE_URL_ENV) is None,
+    reason=(
+        f"requires {TEST_DATABASE_URL_ENV}; set it to a test Postgres "
+        "DSN (e.g. postgresql+asyncpg://test:test@localhost:5433/"
+        "operious_test) to enable the Postgres-backed integration "
+        "tests."
+    ),
+)
 
 # ─── SQLite type-compatibility shims ──────────────────────────────────────
 #
@@ -119,8 +158,82 @@ def settings_for_test() -> Settings:
     return _Settings()
 
 
+# ─── Postgres-backed fixtures ─────────────────────────────────────────────
+#
+# These fixtures spin up against the URL in ``TEST_DATABASE_URL``.
+# The fixtures themselves are NOT gated — they are always defined so
+# pytest can collect them — but every test that uses them MUST also
+# carry the ``requires_postgres`` marker, otherwise the test runs on
+# developers without a Postgres and fails opaquely. The PR-B1
+# foundation tests in ``tests/test_db_foundation.py`` demonstrate the
+# pattern.
+
+
+@pytest_asyncio.fixture
+async def pg_engine() -> AsyncIterator[AsyncEngine]:
+    """Yield an async engine bound to ``TEST_DATABASE_URL``.
+
+    Production runtime is untouched — this engine is a fresh
+    instance constructed from the test DSN every time the fixture
+    runs, never the module-level ``app.db.session.engine``. It is
+    disposed when the fixture tears down so the connection pool
+    cannot leak into the next test.
+    """
+    dsn = os.environ.get(TEST_DATABASE_URL_ENV)
+    if dsn is None:
+        pytest.skip(
+            f"requires {TEST_DATABASE_URL_ENV} to be set "
+            "(pg_engine fixture cannot operate without a test DSN)"
+        )
+    engine = create_async_engine(dsn, future=True, pool_pre_ping=True)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def pg_session(
+    pg_engine: AsyncEngine,
+) -> AsyncIterator[AsyncSession]:
+    """Yield a Postgres ``AsyncSession`` wrapped in an outer rollback.
+
+    Doctrine: every test sees a clean view of the database without
+    paying ``CREATE TABLE`` / ``DROP TABLE`` per test. Each test
+    runs inside an outer ``BEGIN`` opened against a fresh
+    connection; when the test returns, the outer transaction is
+    rolled back unconditionally — committed inserts the test made
+    during the test body are durably reverted before the next test
+    starts. This is the standard SQLAlchemy "join-an-external-
+    transaction" pattern and works correctly with nested
+    SAVEPOINT/SUBTRANSACTION usage inside the test.
+
+    The pattern requires migrations to have been applied to the
+    target test database already (CI typically runs ``alembic
+    upgrade head`` against ``TEST_DATABASE_URL`` before pytest).
+    The PR-B1 foundation only ships fixtures + invariants — per-
+    substrate Postgres repository tests land in PR-B2..B7 and will
+    rely on this fixture.
+    """
+    connection: AsyncConnection = await pg_engine.connect()
+    transaction = await connection.begin()
+    try:
+        session = AsyncSession(bind=connection, expire_on_commit=False)
+        try:
+            yield session
+        finally:
+            await session.close()
+    finally:
+        await transaction.rollback()
+        await connection.close()
+
+
 __all__ = [
-    "sqlite_engine",
+    "TEST_DATABASE_URL_ENV",
+    "pg_engine",
+    "pg_session",
+    "requires_postgres",
     "session_factory",
     "settings_for_test",
+    "sqlite_engine",
 ]

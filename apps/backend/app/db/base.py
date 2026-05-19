@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, MetaData, func
+from sqlalchemy import CheckConstraint, DateTime, MetaData, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -31,6 +31,13 @@ NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+# Tenant-id column width. 255 chars is more than enough for any
+# externally-provided identifier (UUIDs, slugs, hierarchical paths)
+# while leaving room for one more byte of prefix encoding in a
+# future migration without crossing the 256-byte boundary that
+# Postgres uses for short-string b-tree optimisation.
+TENANT_ID_MAX_LENGTH = 255
 
 
 class Base(DeclarativeBase):
@@ -85,9 +92,78 @@ class TimestampMixin:
     )
 
 
+class TenantScopedMixin:
+    """Adds the ``tenant_id`` column every tenant-scoped table carries.
+
+    Constitutional rule (``docs/governance/tenant-scoped-persistence.md``):
+    every Postgres-backed substrate that persists tenant-attributed
+    records carries a ``tenant_id`` column on every row. The column
+    is the row-level isolation key — every read repository clamps to
+    ``WHERE tenant_id = $expected_tenant_id`` so a record persisted
+    under tenant ``T`` is invisible to a caller whose request
+    authority resolves to tenant ``T'`` ≠ ``T``.
+
+    Properties:
+
+    * ``NOT NULL`` — tenant-scoped tables have no "tenantless" rows.
+      Tables that DO need to host tenantless rows (system_health,
+      idempotency keys with system scope) MUST NOT use this mixin.
+    * ``String(TENANT_ID_MAX_LENGTH)`` — generous upper bound; not
+      strictly UUID because external tenants may carry slug-shaped
+      identifiers in early integrations.
+    * ``CHECK (length(tenant_id) > 0)`` — a row with an empty string
+      tenant_id is a substrate bug; the check is the durable backstop
+      so an upstream coercion bug cannot produce un-scopeable rows.
+    * Indexed for the dominant access pattern: ``WHERE tenant_id = $X
+      AND <substrate-specific predicate>``. The index alone suffices
+      until per-tenant partitions roll in (see
+      ``app.db.partitioning``); after partitioning, the index becomes
+      partition-local automatically.
+
+    The companion :class:`PartitionedByTenantMixin` is a doctrine
+    marker only — partitioning is declared at DDL time via the
+    helpers in ``app.db.partitioning`` because SQLAlchemy doesn't
+    model ``PARTITION BY`` natively.
+    """
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__: tuple[object, ...] = (
+        CheckConstraint(
+            "length(tenant_id) > 0",
+            name="tenant_id_nonempty",
+        ),
+    )
+
+
+class PartitionedByTenantMixin(TenantScopedMixin):
+    """Doctrine marker: this table is ``PARTITION BY LIST (tenant_id)``.
+
+    Inheriting this mixin is the substrate's declaration that the
+    table is partitioned by tenant at the storage layer. The actual
+    ``CREATE TABLE … PARTITION BY LIST (tenant_id)`` DDL is emitted
+    by the migration that creates the table — see
+    :func:`app.db.partitioning.tenant_partition_ddl`.
+
+    The mixin exists so static analysers (``rg``, AST audits, and
+    architectural-invariant tests) can find every partitioned-by-
+    tenant table without grepping migrations. New substrates that
+    inherit it MUST also call the partitioning helper from their
+    creating migration; the architectural-invariant test in
+    ``tests/test_db_foundation.py`` pins that pairing.
+    """
+
+
 __all__ = [
     "Base",
     "NAMING_CONVENTION",
+    "PartitionedByTenantMixin",
+    "TENANT_ID_MAX_LENGTH",
+    "TenantScopedMixin",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
 ]

@@ -10,16 +10,16 @@ MUST be imported here. Forgetting that step is the single most common
 cause of "missing table" autogeneration bugs, so we keep the manifest
 explicit rather than relying on filesystem scanning.
 
-Phase 2.1 quarantine note:
+Phase 2.1 quarantine + PR-A1 cleanup:
 
 * `Document`, `DocumentChunk`, `ChunkEmbedding`, `WorkflowExecution`
   and `TaskExecution` were quarantined under
-  `app._deprecated.db.models.*` because they belong to the legacy
-  "AI-native, orchestration-first" architecture forbidden by the
-  constitution. They are intentionally NOT imported here so they no
-  longer register on `Base.metadata`. Their existing tables are kept
-  alive by Alembic migrations `0002_*` and `0003_*` for migration
-  safety; a future Phase 5 migration will drop them.
+  `app._deprecated.db.models.*` (Phase 2.1) and then the underlying
+  tables were dropped in migration ``0004_drop_legacy_workflow_memory_tables``
+  (PR-A1). They are intentionally NOT imported here and no longer
+  register on `Base.metadata`. Their ORM modules were excised from
+  `app/_deprecated/db/models/` in the same PR; only the migration
+  history retains a forensic record of their existence.
 """
 
 from app.db.models.system_health import SystemHealthCheck
