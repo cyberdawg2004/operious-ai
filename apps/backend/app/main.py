@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import build_api_router
 from app.auth import AuthProvider
+from app.auth.providers import JWKSAuthProvider
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
@@ -290,4 +291,65 @@ def create_app(
     return app
 
 
-app: FastAPI = create_app()
+def select_auth_provider(settings: Settings) -> AuthProvider | None:
+    """Compose the application-level :class:`AuthProvider` from settings.
+
+    Fail-closed selector — production deployments MUST set
+    ``AUTH_ENABLED=true`` AND a recognised ``AUTH_PROVIDER``;
+    otherwise the substrate boots with ``None`` and the
+    :class:`AuthorityContextMiddleware` rejects every
+    Authorization-bearing request with ``401 verification_unavailable``
+    (B5 doctrine). Returning ``None`` here is therefore safe — it
+    cannot accidentally elevate an unverified caller.
+
+    Recognised providers:
+
+    * ``"auth0"`` — :class:`JWKSAuthProvider` configured from
+      ``AUTH0_JWKS_URL`` / ``AUTH0_AUDIENCE`` / ``AUTH0_ISSUER``.
+      All three settings must be non-empty or the composition
+      root refuses to boot — missing settings would silently
+      degrade to ``None`` and mask a misconfiguration.
+
+    Unrecognised provider names are rejected. New providers
+    (Cognito, Keycloak, custom JWT) are added by extending this
+    function — never by passing custom adapters through
+    environment variables.
+    """
+    if not settings.AUTH_ENABLED:
+        return None
+    provider_name = (settings.AUTH_PROVIDER or "").lower()
+    if provider_name == "" or provider_name == "none":
+        return None
+    if provider_name == "auth0":
+        missing: list[str] = []
+        if not settings.AUTH0_JWKS_URL:
+            missing.append("AUTH0_JWKS_URL")
+        if not settings.AUTH0_AUDIENCE:
+            missing.append("AUTH0_AUDIENCE")
+        if not settings.AUTH0_ISSUER:
+            missing.append("AUTH0_ISSUER")
+        if missing:
+            raise RuntimeError(
+                "AUTH_PROVIDER='auth0' requires "
+                f"{', '.join(missing)} to be set. Refusing to boot."
+            )
+        assert settings.AUTH0_JWKS_URL is not None
+        assert settings.AUTH0_AUDIENCE is not None
+        assert settings.AUTH0_ISSUER is not None
+        return JWKSAuthProvider(
+            jwks_uri=settings.AUTH0_JWKS_URL,
+            audience=settings.AUTH0_AUDIENCE,
+            issuer=settings.AUTH0_ISSUER,
+            algorithms=("RS256",),
+            name="auth0",
+        )
+    raise RuntimeError(
+        f"unsupported AUTH_PROVIDER={settings.AUTH_PROVIDER!r}. "
+        "Recognised values: 'auth0', 'none', or unset. Extend "
+        "app.main.select_auth_provider to add new providers."
+    )
+
+
+app: FastAPI = create_app(
+    auth_provider=select_auth_provider(get_settings()),
+)
