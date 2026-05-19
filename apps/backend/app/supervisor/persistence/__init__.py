@@ -16,6 +16,9 @@ contracts only.
 
 from app.supervisor.persistence.memory import InMemorySupervisorRepository
 from app.supervisor.persistence.models import InspectionQuery, RecordPage
+from app.supervisor.persistence.postgres import (
+    PostgresSupervisorRepository,
+)
 from app.supervisor.persistence.records import (
     EscalationDecisionRecord,
     EvaluationEvidenceRecord,
@@ -41,6 +44,7 @@ __all__ = [
     "InspectionRecord",
     "BaseSupervisorRepository",
     "InMemorySupervisorRepository",
+    "PostgresSupervisorRepository",
     "inspection_envelope_to_records",
     "inspection_result_to_records",
 ]
