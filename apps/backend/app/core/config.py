@@ -26,12 +26,39 @@ Environment = Literal["local", "development", "staging", "production", "test"]
 # - CI path inconsistencies
 # - deployment environment ambiguity
 #
-# apps/backend/app/core/config.py
-#                ↑
-# parents[4]
-#                ↓
-# operious-ai/
-ROOT_DIR = Path(__file__).resolve().parents[4]
+def _resolve_root_dir() -> Path:
+    """Resolve the runtime root without assuming filesystem depth.
+
+    Local checkouts anchor configuration at the repository root so the
+    root `.env` is loaded exactly as before. The Railway Docker image
+    copies `apps/backend` to `/app`, so the same module lives at
+    `/app/app/core/config.py`; in that layout the backend root is the
+    stable runtime anchor.
+    """
+
+    config_path = Path(__file__).resolve()
+    for parent in config_path.parents:
+        if (
+            (parent / "package.json").is_file()
+            and (parent / "apps" / "backend").is_dir()
+        ):
+            return parent
+    for parent in config_path.parents:
+        if (
+            (parent / "alembic.ini").is_file()
+            and (parent / "app" / "main.py").is_file()
+        ):
+            return parent
+    for parent in config_path.parents:
+        if (parent / ".env").is_file():
+            return parent
+    parents = list(config_path.parents)
+    if len(parents) >= 3:
+        return parents[2]
+    return parents[-1]
+
+
+ROOT_DIR = _resolve_root_dir()
 ENV_FILE = ROOT_DIR / ".env"
 
 

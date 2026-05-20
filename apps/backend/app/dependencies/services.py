@@ -63,6 +63,7 @@ from app.governance.persistence import (
     PostgresGovernanceRepository,
 )
 from app.services.health_service import HealthService
+from app.services.ticket_ingress_service import TicketIngressService
 from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
@@ -126,6 +127,16 @@ def get_boundary_repository(
 ) -> BoundaryPersistenceProtocol:
     """Return the Postgres boundary-persistence backend for this request."""
     return PostgresBoundaryPersistence(session)
+
+
+def get_ticket_ingress_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> TicketIngressService:
+    """Return the ticket-ingress write service for this request."""
+    return TicketIngressService(
+        persistence=PostgresBoundaryPersistence(session),
+        session=session,
+    )
 
 
 def get_supervisor_repository(
