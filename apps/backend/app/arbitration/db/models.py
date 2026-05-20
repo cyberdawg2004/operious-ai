@@ -35,6 +35,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -80,16 +81,16 @@ class ArbitrationEvaluationRow(Base):
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evaluator_names: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     findings: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     conflicts: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     deadlock_witnesses: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     signal_count: Mapped[int] = mapped_column(Integer, nullable=False)
     recommendation_count: Mapped[int] = mapped_column(
@@ -125,7 +126,11 @@ class ArbitrationEvaluationRow(Base):
         String(_HANDLE_WIDTH), nullable=True
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
     __table_args__ = (

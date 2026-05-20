@@ -37,6 +37,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -118,11 +119,15 @@ class BoundaryIngressRow(Base):
         String(_HANDLE_WIDTH), nullable=True, index=True
     )
     canonical_payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
     __table_args__ = (
@@ -176,7 +181,7 @@ class BoundaryEgressRow(Base):
         String(_ENUM_WIDTH), nullable=True
     )
     payload_headers: Mapped[dict[str, str]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     translated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -196,7 +201,11 @@ class BoundaryEgressRow(Base):
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
     __table_args__ = (

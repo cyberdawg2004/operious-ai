@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-operious}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-operious}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -46,15 +46,26 @@ services:
     container_name: operious-api
     restart: unless-stopped
     env_file:
-      - .env
+      - ../../.env
     environment:
       # Override host-oriented defaults so the container talks to the
       # other services over the compose network.
+      # Auth0
+      # These are the credentials for the Auth0 tenant that the API will use to authenticate users.
+      # We store these in the environment variables for the API container.
+      AUTH0_DOMAIN: ${operious-dev.uk.auth0.com} 
+      # PostgreSQL  
+      # These are the credentials for the PostgreSQL database that the API will use to store data.
+      # We store these in the environment variables for the API container.
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+      # Redis
+      # These are the credentials for the Redis database that the API will use to store data.
+      # We store these in the environment variables for the API container.
       REDIS_HOST: redis
+      REDIS_PORT: 6379  
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     volumes:
       - ./app:/app/app
       - ./migrations:/app/migrations

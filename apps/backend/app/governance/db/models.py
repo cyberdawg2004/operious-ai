@@ -52,6 +52,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -120,30 +121,36 @@ class GovernanceDecisionRow(Base):
         String(_DECISION_ENUM_WIDTH),
         nullable=False,
         default="generic",
+        server_default=text("'generic'"),
     )
     governance_version: Mapped[str] = mapped_column(
         String(_GOVERNANCE_VERSION_WIDTH),
         nullable=False,
         default="unversioned",
+        server_default=text("'unversioned'"),
     )
     # JSONB blobs preserve the nested record shape losslessly so the
     # repository can rehydrate the record without a side table per
     # nested struct. The lists carry already-serialised dicts (see
     # PostgresGovernanceRepository.record_decision).
     violations: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     restrictions: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     evaluated_rules: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     # SQLAlchemy reserves ``metadata`` on the declarative class;
     # store under SQL name "metadata" but expose as ``metadata_json``
     # on the Python attribute.
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
     __table_args__ = (
@@ -209,6 +216,7 @@ class GovernanceTraceRow(Base):
         String(_DECISION_ENUM_WIDTH),
         nullable=False,
         default="generic",
+        server_default=text("'generic'"),
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
@@ -240,10 +248,14 @@ class GovernanceTraceRow(Base):
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     policy_traces: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 
@@ -285,9 +297,15 @@ class EnforcementActionRow(Base):
     applied_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
-    detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    detail: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 

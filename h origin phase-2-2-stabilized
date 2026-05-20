@@ -1,0 +1,15 @@
+[33m108558e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mphase-2-2-stabilized[m[33m)[m PR-D8: session read endpoints (Phase 3.2)
+[33m1e7ea90[m PR-D7: supervisor read endpoints (Phase 3.2)
+[33m32247cc[m PR-D6: boundary read endpoints (Phase 3.2)
+[33m0ba2b3f[m PR-D5: arbitration read endpoints (Phase 3.2)
+[33mc6aee60[m PR-D4: coordination read endpoints (Phase 3.2)
+[33m59194c8[m PR-D3: governance read endpoints (Phase 3.2)
+[33m57381bd[m PR-D2: router constitutional invariants + DI scaffolding
+[33m6a5dac0[m PR-D1: GET /v1/auth/me + require_authority tightening (Phase 3.2)
+[33m5da661b[m PR-C1: JWKSAuthProvider for Auth0 (Phase 3.3)
+[33m1af246a[m PR-B8: zero-warning baseline + Auth0 config shell
+[33m71df935[m security: harden gitignore for secrets and infra artifacts
+[33me0a8c2f[m PR-B7: boundary Postgres repository (Phase 3.1)
+[33m3d4466c[m PR-B6: supervisor Postgres repository (Phase 3.1)
+[33mb182e22[m PR-B5: arbitration Postgres repository (Phase 3.1)
+[33m953f09d[m PR-B4: coordination Postgres repository (Phase 3.1)

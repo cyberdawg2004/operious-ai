@@ -31,6 +31,14 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _drop_index_if_exists(name: str) -> None:
+    op.execute(sa.text(f'DROP INDEX IF EXISTS "{name}"'))
+
+
+def _drop_table_if_exists(name: str) -> None:
+    op.execute(sa.text(f'DROP TABLE IF EXISTS "{name}"'))
+
+
 def upgrade() -> None:
     op.create_table(
         "documents",
@@ -183,32 +191,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        op.f("ix_chunk_embeddings_vector_index_name"),
-        table_name="chunk_embeddings",
-    )
-    op.drop_index(
-        op.f("ix_chunk_embeddings_provider"),
-        table_name="chunk_embeddings",
-    )
-    op.drop_index(op.f("ix_chunk_embeddings_model"), table_name="chunk_embeddings")
-    op.drop_index(
-        op.f("ix_chunk_embeddings_chunk_id"),
-        table_name="chunk_embeddings",
-    )
-    op.drop_table("chunk_embeddings")
+    _drop_index_if_exists("ix_chunk_embeddings_vector_index_name")
+    _drop_index_if_exists("ix_chunk_embeddings_provider")
+    _drop_index_if_exists("ix_chunk_embeddings_model")
+    _drop_index_if_exists("ix_chunk_embeddings_chunk_id")
+    _drop_table_if_exists("chunk_embeddings")
 
-    op.drop_index(
-        op.f("ix_document_chunks_document_id"),
-        table_name="document_chunks",
-    )
-    op.drop_index(
-        op.f("ix_document_chunks_content_hash"),
-        table_name="document_chunks",
-    )
-    op.drop_table("document_chunks")
+    _drop_index_if_exists("ix_document_chunks_document_id")
+    _drop_index_if_exists("ix_document_chunks_content_hash")
+    _drop_table_if_exists("document_chunks")
 
-    op.drop_index(op.f("ix_documents_source"), table_name="documents")
-    op.drop_index(op.f("ix_documents_request_id"), table_name="documents")
-    op.drop_index(op.f("ix_documents_content_hash"), table_name="documents")
-    op.drop_table("documents")
+    _drop_index_if_exists("ix_documents_source")
+    _drop_index_if_exists("ix_documents_request_id")
+    _drop_index_if_exists("ix_documents_content_hash")
+    _drop_table_if_exists("documents")

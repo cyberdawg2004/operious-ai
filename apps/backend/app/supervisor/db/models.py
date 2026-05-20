@@ -32,6 +32,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -72,13 +73,13 @@ class SupervisorInspectionRow(Base):
         String(_ENUM_WIDTH), nullable=False, index=True
     )
     decision: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     decision_kind: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
     evaluator_names: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
@@ -89,7 +90,11 @@ class SupervisorInspectionRow(Base):
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 
@@ -123,15 +128,21 @@ class SupervisorFindingRow(Base):
     code: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH), nullable=False, index=True
     )
-    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    message: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     evidence: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 
@@ -158,7 +169,7 @@ class SupervisorEvaluationRow(Base):
     )
     score: Mapped[float] = mapped_column(Float, nullable=False)
     finding_ids: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -169,7 +180,11 @@ class SupervisorEvaluationRow(Base):
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 
@@ -196,15 +211,21 @@ class SupervisorEscalationRow(Base):
     level: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
-    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reason: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     triggering_finding_ids: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
     __table_args__ = (

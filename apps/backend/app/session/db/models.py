@@ -60,6 +60,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -131,7 +132,7 @@ class SessionRow(Base):
     # ancestors are read-mostly and almost always traversed by
     # session_id (the relation would add a join with no payoff).
     ancestor_session_ids: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     lineage_depth: Mapped[int] = mapped_column(Integer, nullable=False)
     sequence_head: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -141,16 +142,20 @@ class SessionRow(Base):
         String(_HANDLE_WIDTH), nullable=True
     )
     context_labels: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
+        JSONB, nullable=False, default=list, server_default=text("'[]'")
     )
     context_attributes: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     context_notes: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 
@@ -195,7 +200,7 @@ class SessionEventRow(Base):
         DateTime(timezone=True), nullable=False
     )
     payload: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     correlation_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
@@ -209,7 +214,11 @@ class SessionEventRow(Base):
         String(_HANDLE_WIDTH), nullable=True
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
     __table_args__ = (
@@ -262,10 +271,14 @@ class SessionCorrelationRow(Base):
     )
     annotation: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
 
 

@@ -42,6 +42,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -124,10 +125,13 @@ class CoordinationEnvelopeRow(Base):
         String(_HANDLE_WIDTH), nullable=False
     )
     payload_schema_version: Mapped[str] = mapped_column(
-        String(_ENUM_WIDTH), nullable=False, default="1"
+        String(_ENUM_WIDTH),
+        nullable=False,
+        default="1",
+        server_default=text("'1'"),
     )
     payload_body: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
@@ -136,18 +140,18 @@ class CoordinationEnvelopeRow(Base):
         DateTime(timezone=True), nullable=False
     )
     recipient_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     payload_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     message_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     # All four metadata bags use distinct attribute names so the
     # SQLAlchemy reserved-``metadata`` collision doesn't apply.
     envelope_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
 
     __table_args__ = (
