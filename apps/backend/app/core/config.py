@@ -11,6 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -251,7 +252,7 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         if self.REDIS_URL:
-            return self.REDIS_URL
+            return _normalize_redis_url(self.REDIS_URL)
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
@@ -265,3 +266,24 @@ def get_settings() -> Settings:
     """
 
     return Settings()
+
+
+def _normalize_redis_url(url: str) -> str:
+    """Return a Redis URL accepted by Redis clients and Celery transports."""
+
+    parsed = urlsplit(url)
+    if parsed.scheme != "rediss":
+        return url
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if "ssl_cert_reqs" in query:
+        return url
+    query["ssl_cert_reqs"] = "CERT_REQUIRED"
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query),
+            parsed.fragment,
+        )
+    )

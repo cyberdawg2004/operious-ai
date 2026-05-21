@@ -28,6 +28,7 @@ from app.coordination.identity import (
 from app.coordination.models.payload import CoordinationPayload
 from app.coordination.models.recipients import CoordinationRecipient
 from app.coordination.runtime import CoordinationRuntime
+from app.execution.publisher import ExecutionPublisher
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
 from app.governance.enums import (
@@ -71,10 +72,12 @@ class DispatchService:
         coordination_runtime: CoordinationRuntime,
         boundary_ingress_repository: BoundaryIngressRepository,
         session_repository: SessionRepository,
+        execution_publisher: ExecutionPublisher,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
         self._session_repository = session_repository
+        self._execution_publisher = execution_publisher
 
     async def dispatch(
         self,
@@ -134,6 +137,12 @@ class DispatchService:
             raise DispatchServiceError(
                 "session runtime returned an empty session"
             )
+
+        await self._execution_publisher.publish_diagnostic_execution(
+            dispatch_id=str(coordination_result.coordination_id),
+            session_id=str(session.identity.session_id),
+            tenant_id=tenant_id,
+        )
 
         return DispatchResult(
             dispatch_id=str(coordination_result.coordination_id),

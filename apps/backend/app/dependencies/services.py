@@ -62,6 +62,8 @@ from app.coordination.runtime import CoordinationRuntime
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
+from app.execution.celery_publisher import CeleryExecutionPublisher
+from app.execution.publisher import ExecutionPublisher
 from app.governance.enforcement.handlers import (
     AllowHandler,
     DegradeHandler,
@@ -156,8 +158,16 @@ def get_ticket_ingress_service(
     )
 
 
+def get_execution_publisher() -> ExecutionPublisher:
+    """Return the execution publisher transport boundary."""
+    return CeleryExecutionPublisher()
+
+
 async def get_dispatch_service(
     session: AsyncSession = Depends(get_db_session),
+    execution_publisher: ExecutionPublisher = Depends(
+        get_execution_publisher
+    ),
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
     service = DispatchService(
@@ -168,6 +178,7 @@ async def get_dispatch_service(
         ),
         boundary_ingress_repository=PostgresBoundaryPersistence(session),
         session_repository=PostgresSessionPersistence(session),
+        execution_publisher=execution_publisher,
     )
     try:
         yield service

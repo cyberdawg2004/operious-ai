@@ -19,7 +19,8 @@ dependency surface produced by Phase 2.2 against drift:
    eventually deleted in a later phase).
 
 3. **Lockfile shape**: every entry must be `name==version` (PEP 440
-   pinned). No floating versions, no VCS URLs, no extras. This is
+   pinned), with one explicit Celery Redis transport extra. No floating
+   versions, no VCS URLs, no other extras. This is
    what reproducibility looks like in practice.
 
 All three checks read `requirements.txt` directly so the test is
@@ -90,7 +91,12 @@ TRANSITIONAL_DISTRIBUTIONS: frozenset[str] = frozenset(
 
 
 _REQUIREMENT_LINE = re.compile(
-    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?P<version>[A-Za-z0-9._+!-]+)\s*$"
+    r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?:\[(?P<extras>[A-Za-z0-9][A-Za-z0-9._-]*)\])?"
+    r"==(?P<version>[A-Za-z0-9._+!-]+)\s*$"
+)
+_ALLOWED_EXTRAS: frozenset[tuple[str, str]] = frozenset(
+    {("celery", "redis")}
 )
 
 
@@ -110,7 +116,15 @@ def _parsed_requirements() -> list[tuple[str, str, int]]:
             f"requirements.txt:{idx} is not a strict `name==version` "
             f"pin: {line!r}"
         )
-        parsed.append((match.group("name").lower(), match.group("version"), idx))
+        name = match.group("name").lower()
+        extras = match.group("extras")
+        if extras is not None:
+            extra = extras.lower()
+            assert (name, extra) in _ALLOWED_EXTRAS, (
+                f"requirements.txt:{idx} uses unsupported extras: "
+                f"{line!r}"
+            )
+        parsed.append((name, match.group("version"), idx))
     return parsed
 
 

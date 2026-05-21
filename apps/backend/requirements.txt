@@ -59,6 +59,7 @@ aiohttp==3.13.5
 aiosignal==1.4.0
 aiosqlite==0.21.0
 alembic==1.14.1
+amqp==5.3.1
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anthropic==0.101.0
@@ -67,13 +68,18 @@ asyncpg==0.30.0
 attrs==26.1.0
 backoff==2.2.1
 bcrypt==5.0.0
+billiard==4.2.4
 black==26.3.1
 build==1.5.0
 cachetools==6.2.6
+celery[redis]==5.3.6
 certifi==2026.4.22
 cffi==2.0.0
 charset-normalizer==3.4.7
 click==8.1.8
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
 cryptography==48.0.0
 deprecation==2.1.0
 distro==1.9.0
@@ -104,6 +110,7 @@ jsonpatch==1.33
 jsonpointer==3.1.1
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
+kombu==5.6.2
 linkify-it-py==2.1.0
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
@@ -127,6 +134,7 @@ pathspec==1.1.1
 platformdirs==4.9.6
 portalocker==2.7.0
 propcache==0.5.2
+prompt_toolkit==3.0.52
 protobuf==5.29.6
 psycopg2-binary==2.9.12
 pyarrow==24.0.0
@@ -169,6 +177,7 @@ tomli==2.0.2
 tomli_w==1.1.0
 tqdm==4.67.3
 typer==0.23.1
+tzdata==2026.2
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 uc-micro-py==2.0.0
@@ -176,8 +185,10 @@ urllib3==2.7.0
 uuid_utils==0.15.0
 uv==0.11.14
 uvicorn==0.46.0
+vine==5.1.0
 uvloop==0.22.1
 watchfiles==1.1.1
+wcwidth==0.7.0
 websockets==15.0.1
 yarl==1.23.0
 zipp==3.23.1
