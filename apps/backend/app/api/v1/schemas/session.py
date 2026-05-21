@@ -11,11 +11,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.timeline import TimelineEvent
 from app.session.persistence import (
     SessionCorrelationRecord,
     SessionEventRecord,
     SessionRecord,
 )
+from app.session.models.timeline import SessionTimeline
 
 
 class SessionResponse(BaseModel):
@@ -173,11 +175,39 @@ class SessionCorrelationsPage(BaseModel):
     total: int
 
 
+class SessionTimelineResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    events: list[TimelineEvent] = Field(default_factory=list)
+    total: int
+
+    @classmethod
+    def from_timeline(
+        cls,
+        timeline: SessionTimeline | None,
+        *,
+        fallback_tenant_id: str | None = None,
+    ) -> "SessionTimelineResponse":
+        events = (
+            []
+            if timeline is None
+            else [
+                TimelineEvent.from_session_event(
+                    event,
+                    fallback_tenant_id=fallback_tenant_id,
+                )
+                for event in timeline.events
+            ]
+        )
+        return cls(events=events, total=len(events))
+
+
 __all__ = [
     "SessionCorrelationResponse",
     "SessionCorrelationsPage",
     "SessionEventResponse",
     "SessionEventsPage",
     "SessionResponse",
+    "SessionTimelineResponse",
     "SessionsPage",
 ]

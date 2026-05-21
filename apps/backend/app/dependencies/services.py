@@ -39,6 +39,7 @@ to widen its surface.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections.abc import AsyncIterator
 
 from fastapi import Depends
@@ -170,19 +171,25 @@ async def get_dispatch_service(
     ),
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
+    deferred_execution_publisher = _DeferredExecutionPublisher(
+        execution_publisher
+    )
     service = DispatchService(
         coordination_runtime=CoordinationRuntime(
-            governance_runtime=_dispatch_governance_runtime(),
+            governance_runtime=_dispatch_governance_runtime(
+                PostgresGovernanceRepository(session)
+            ),
             persistence=PostgresCoordinationPersistence(session),
             registry=_dispatch_coordination_registry(),
         ),
         boundary_ingress_repository=PostgresBoundaryPersistence(session),
         session_repository=PostgresSessionPersistence(session),
-        execution_publisher=execution_publisher,
+        execution_publisher=deferred_execution_publisher,
     )
     try:
         yield service
         await session.commit()
+        await deferred_execution_publisher.flush()
     except Exception:
         await session.rollback()
         raise
@@ -212,7 +219,9 @@ def _dispatch_coordination_registry() -> CoordinationRegistry:
     return registry
 
 
-def _dispatch_governance_runtime() -> GovernanceRuntime:
+def _dispatch_governance_runtime(
+    persistence: BaseGovernanceRepository | None = None,
+) -> GovernanceRuntime:
     return GovernanceRuntime(
         engine=PolicyEvaluationEngine(),
         handler_registry=_governance_handler_registry(),
@@ -223,6 +232,7 @@ def _dispatch_governance_runtime() -> GovernanceRuntime:
                 policies=(DispatchCommunicationPolicy(),),
             )
         },
+        persistence=persistence,
     )
 
 
@@ -238,6 +248,43 @@ def _governance_handler_registry() -> EnforcementHandlerRegistry:
     ):
         registry.register(handler)
     return registry
+
+
+@dataclass(frozen=True, slots=True)
+class _DiagnosticExecutionIntent:
+    dispatch_id: str
+    session_id: str
+    tenant_id: str
+
+
+class _DeferredExecutionPublisher(ExecutionPublisher):
+    """Request-scoped publisher that flushes after DB commit."""
+
+    def __init__(self, delegate: ExecutionPublisher) -> None:
+        self._delegate = delegate
+        self._diagnostic_executions: list[_DiagnosticExecutionIntent] = []
+
+    async def publish_diagnostic_execution(
+        self,
+        dispatch_id: str,
+        session_id: str,
+        tenant_id: str,
+    ) -> None:
+        self._diagnostic_executions.append(
+            _DiagnosticExecutionIntent(
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
+        )
+
+    async def flush(self) -> None:
+        for intent in self._diagnostic_executions:
+            await self._delegate.publish_diagnostic_execution(
+                dispatch_id=intent.dispatch_id,
+                session_id=intent.session_id,
+                tenant_id=intent.tenant_id,
+            )
 
 
 __all__ = [

@@ -290,6 +290,9 @@ class GovernanceDecisionsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     items: list[GovernanceDecisionResponse] = Field(default_factory=list)
+    decisions: list[GovernanceDecisionResponse] = Field(
+        default_factory=list
+    )
     total: int = Field(
         ..., description="Total matching decisions before pagination."
     )

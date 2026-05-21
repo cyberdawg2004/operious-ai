@@ -37,7 +37,8 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 from app.governance.context import GovernanceContext
-from app.governance.decisions import build_decision
+from app.governance.decisions import GovernanceDecision, build_decision
+from app.governance.enforcement.models import EnforcementAction
 from app.governance.enforcement.handlers import EnforcementHandlerRegistry
 from app.governance.envelopes import GovernanceEnvelope
 from app.governance.enums import EnforcementStage
@@ -47,6 +48,12 @@ from app.governance.exceptions import (
     GovernanceConfigurationError,
 )
 from app.governance.identity.decision_ids import generate_decision_id
+from app.governance.persistence import (
+    BaseGovernanceRepository,
+    decision_to_record,
+    enforcement_action_to_record,
+    trace_to_record,
+)
 from app.governance.policies.chain import PolicyChain
 from app.governance.tracing import GovernanceTrace
 from app.observability.audit import AuditEvent, emit_audit_event
@@ -72,10 +79,12 @@ class GovernanceRuntime:
         engine: PolicyEvaluationEngine,
         handler_registry: EnforcementHandlerRegistry,
         chains: Mapping[EnforcementStage, PolicyChain],
+        persistence: BaseGovernanceRepository | None = None,
     ) -> None:
         self._engine = engine
         self._handlers = handler_registry
         self._chains: dict[EnforcementStage, PolicyChain] = dict(chains)
+        self._persistence = persistence
 
         # Fail-fast at composition: the registry MUST cover every
         # Decision value the substrate emits.
@@ -291,6 +300,11 @@ class GovernanceRuntime:
             )
         )
 
+        await self._persist_success(
+            decision=decision,
+            trace=trace,
+            action=action,
+        )
         return GovernanceEnvelope(trace=trace, decision=decision)
 
     # ─── Internals ────────────────────────────────────────────────────
@@ -347,6 +361,23 @@ class GovernanceRuntime:
             status="failed",
         )
         return GovernanceEnvelope(trace=trace, error=error)
+
+    async def _persist_success(
+        self,
+        *,
+        decision: GovernanceDecision,
+        trace: GovernanceTrace,
+        action: EnforcementAction,
+    ) -> None:
+        if self._persistence is None:
+            return
+        await self._persistence.record_decision(
+            decision_to_record(decision)
+        )
+        await self._persistence.record_trace(trace_to_record(trace))
+        await self._persistence.record_enforcement_action(
+            enforcement_action_to_record(action)
+        )
 
 
 __all__ = ["GovernanceRuntime"]

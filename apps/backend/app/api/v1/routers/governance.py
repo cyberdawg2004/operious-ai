@@ -143,10 +143,12 @@ async def list_decisions(
         offset=offset,
     )
     page = await repo.query_decisions(query)
+    decisions = [
+        GovernanceDecisionResponse.from_record(r) for r in page.items
+    ]
     return GovernanceDecisionsPage(
-        items=[
-            GovernanceDecisionResponse.from_record(r) for r in page.items
-        ],
+        items=decisions,
+        decisions=decisions,
         total=page.total,
         offset=page.offset,
     )
