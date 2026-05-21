@@ -13,6 +13,7 @@ from app.api.v1.routers.arbitration import router as arbitration_router
 from app.api.v1.routers.auth import router as auth_router
 from app.api.v1.routers.boundary import router as boundary_router
 from app.api.v1.routers.coordination import router as coordination_router
+from app.api.v1.routers.dispatch import router as dispatch_router
 from app.api.v1.routers.governance import router as governance_router
 from app.api.v1.routers.health import router as health_router
 from app.api.v1.routers.ingress import router as ingress_router
@@ -24,6 +25,7 @@ api_router_v1.include_router(health_router)
 api_router_v1.include_router(auth_router, prefix="/auth")
 api_router_v1.include_router(governance_router, prefix="/governance")
 api_router_v1.include_router(coordination_router, prefix="/coordination")
+api_router_v1.include_router(dispatch_router, prefix="/coordination")
 api_router_v1.include_router(arbitration_router, prefix="/arbitration")
 api_router_v1.include_router(boundary_router, prefix="/boundary")
 api_router_v1.include_router(

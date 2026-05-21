@@ -39,6 +39,8 @@ to widen its surface.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,12 +56,32 @@ from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     PostgresCoordinationPersistence,
 )
+from app.coordination.registry import CoordinationRegistry
+from app.coordination.models.participants import CoordinationParticipant
+from app.coordination.runtime import CoordinationRuntime
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
+from app.governance.enforcement.handlers import (
+    AllowHandler,
+    DegradeHandler,
+    DenyHandler,
+    EnforcementHandlerRegistry,
+    EscalateHandler,
+    RedactHandler,
+    RequireApprovalHandler,
+)
+from app.governance.enforcement.runtime import GovernanceRuntime
+from app.governance.enums import EnforcementStage
+from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.persistence import (
     BaseGovernanceRepository,
     PostgresGovernanceRepository,
+)
+from app.governance.policies.chain import PolicyChain
+from app.services.dispatch_service import (
+    DispatchCommunicationPolicy,
+    DispatchService,
 )
 from app.services.health_service import HealthService
 from app.services.ticket_ingress_service import TicketIngressService
@@ -134,11 +156,77 @@ def get_ticket_ingress_service(
     )
 
 
+async def get_dispatch_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> AsyncIterator[DispatchService]:
+    """Return the PR-W3 dispatch service for this request."""
+    service = DispatchService(
+        coordination_runtime=CoordinationRuntime(
+            governance_runtime=_dispatch_governance_runtime(),
+            persistence=PostgresCoordinationPersistence(session),
+            registry=_dispatch_coordination_registry(),
+        ),
+        boundary_ingress_repository=PostgresBoundaryPersistence(session),
+        session_repository=PostgresSessionPersistence(session),
+    )
+    try:
+        yield service
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+
 def get_supervisor_repository(
     session: AsyncSession = Depends(get_db_session),
 ) -> BaseSupervisorRepository:
     """Return the Postgres supervisor-persistence backend for this request."""
     return PostgresSupervisorRepository(session)
+
+
+def _dispatch_coordination_registry() -> CoordinationRegistry:
+    registry = CoordinationRegistry()
+    registry.register(
+        CoordinationParticipant(
+            participant_id="runtime:boundary-ingress",
+            kind="runtime",
+        )
+    )
+    registry.register(
+        CoordinationParticipant(
+            participant_id="agent:ticket-triage",
+            kind="agent",
+        )
+    )
+    return registry
+
+
+def _dispatch_governance_runtime() -> GovernanceRuntime:
+    return GovernanceRuntime(
+        engine=PolicyEvaluationEngine(),
+        handler_registry=_governance_handler_registry(),
+        chains={
+            EnforcementStage.PRE_EXECUTION: PolicyChain(
+                chain_id="dispatch.communication.pre_execution",
+                stage=EnforcementStage.PRE_EXECUTION,
+                policies=(DispatchCommunicationPolicy(),),
+            )
+        },
+    )
+
+
+def _governance_handler_registry() -> EnforcementHandlerRegistry:
+    registry = EnforcementHandlerRegistry()
+    for handler in (
+        AllowHandler(),
+        DenyHandler(),
+        RedactHandler(),
+        DegradeHandler(),
+        EscalateHandler(),
+        RequireApprovalHandler(),
+    ):
+        registry.register(handler)
+    return registry
 
 
 __all__ = [
