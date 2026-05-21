@@ -12,7 +12,7 @@ Public surface:
 * `tenant_partition_ddl`, `attach_tenant_partition_ddl`,
   `DEFAULT_PARTITION_SUFFIX` — Alembic-facing DDL emitters for
   ``PARTITION BY LIST (tenant_id)`` tables (see `app.db.partitioning`).
-* `engine`, `AsyncSessionLocal`, `dispose_engine` — async runtime
+* `get_engine`, `get_session_factory`, `dispose_engine` — async runtime
   primitives (see `app.db.session`).
 
 The FastAPI request-scoped session provider lives in
@@ -38,7 +38,7 @@ from app.db.partitioning import (
     tenant_partition_ddl,
 )
 from app.db.repository import TenantScopedRepository
-from app.db.session import AsyncSessionLocal, dispose_engine, engine
+from app.db.session import dispose_engine, get_engine, get_session_factory
 
 # Model registration is imported LAST. Per-substrate ORM modules
 # (e.g. app.governance.db.models) import from app.db.base; pulling
@@ -48,10 +48,11 @@ from app.db.session import AsyncSessionLocal, dispose_engine, engine
 # package last guarantees `Base` and the mixins are fully bound on
 # `app.db` before any per-substrate ORM module's import-time
 # `from app.db.base import Base` runs.
-from app.db import models as models  # noqa: F401  — registration side effect, must be last
+from app.db import (
+    models as models,
+)  # noqa: F401  — registration side effect, must be last
 
 __all__ = [
-    "AsyncSessionLocal",
     "Base",
     "DEFAULT_PARTITION_SUFFIX",
     "PartitionedByTenantMixin",
@@ -62,6 +63,7 @@ __all__ = [
     "UUIDPrimaryKeyMixin",
     "attach_tenant_partition_ddl",
     "dispose_engine",
-    "engine",
+    "get_engine",
+    "get_session_factory",
     "tenant_partition_ddl",
 ]

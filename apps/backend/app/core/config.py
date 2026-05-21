@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_JSON: bool | None = None
 
+    # ─── Sentry ──────────────────────────────────────────────────────
+    SENTRY_DSN: str | None = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    SENTRY_PROFILES_SAMPLE_RATE: float = 0.0
+    SENTRY_SEND_DEFAULT_PII: bool = False
+
     # ─── PostgreSQL ──────────────────────────────────────────────────
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -203,7 +209,10 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: str = ""
     CORS_ALLOW_CREDENTIALS: bool = False
     CORS_ALLOW_METHODS: str = "GET,POST,PATCH,DELETE,OPTIONS"
-    CORS_ALLOW_HEADERS: str = "Authorization,Content-Type,X-Request-ID"
+    CORS_ALLOW_HEADERS: str = (
+        "Authorization,Content-Type,X-Request-ID,"
+        "x-operious-client-request-id,x-operious-correlation-id"
+    )
 
     # ─── Derived properties ──────────────────────────────────────────
     @property

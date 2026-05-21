@@ -40,8 +40,7 @@ to widen its surface.
 from __future__ import annotations
 
 from fastapi import Depends
-from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitration.persistence import (
     ArbitrationPersistenceProtocol,
@@ -55,8 +54,8 @@ from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     PostgresCoordinationPersistence,
 )
-from app.core.config import Settings, get_settings
-from app.core.redis import get_redis
+from app.core.config import get_settings
+from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
 from app.governance.persistence import (
     BaseGovernanceRepository,
@@ -74,16 +73,12 @@ from app.supervisor.persistence import (
 )
 
 
-def get_health_service(
-    settings: Settings = Depends(get_settings),
-    redis: Redis = Depends(get_redis),
-    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
-) -> HealthService:
-    """Construct `HealthService` with its concrete collaborators."""
+async def get_health_service() -> HealthService:
+    """Construct `HealthService` with lazy readiness collaborators."""
     return HealthService(
-        settings=settings,
-        session_factory=session_factory,
-        redis=redis,
+        settings=get_settings(),
+        session_factory_provider=get_session_factory,
+        redis_provider=get_redis_client,
     )
 
 

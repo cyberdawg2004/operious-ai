@@ -51,6 +51,11 @@ if TYPE_CHECKING:
     from app.core.config import Settings
 
 
+# Pytest must not emit local failures into staging Sentry just because
+# a developer's root `.env` contains SENTRY_DSN.
+os.environ.setdefault("SENTRY_DSN", "")
+
+
 # ─── Postgres availability gate ───────────────────────────────────────────
 
 

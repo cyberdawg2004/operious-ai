@@ -50,20 +50,18 @@ services:
     environment:
       # Override host-oriented defaults so the container talks to the
       # other services over the compose network.
-      # Auth0
-      # These are the credentials for the Auth0 tenant that the API will use to authenticate users.
-      # We store these in the environment variables for the API container.
-      AUTH0_DOMAIN: ${operious-dev.uk.auth0.com} 
       # PostgreSQL  
       # These are the credentials for the PostgreSQL database that the API will use to store data.
       # We store these in the environment variables for the API container.
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-operious}:${POSTGRES_PASSWORD:-operious}@postgres:5432/${POSTGRES_DB:-operious}
       # Redis
       # These are the credentials for the Redis database that the API will use to store data.
       # We store these in the environment variables for the API container.
       REDIS_HOST: redis
-      REDIS_PORT: 6379  
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

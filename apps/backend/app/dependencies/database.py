@@ -20,7 +20,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.session import AsyncSessionLocal
+from app.db.session import get_session_factory as get_async_session_factory
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -36,7 +36,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     Commit is intentionally NOT performed here.
     """
 
-    session = AsyncSessionLocal()
+    session = get_async_session_factory()()
     try:
         yield session
     except Exception:
@@ -52,7 +52,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     Intended for services (e.g. health checks) that need to spin up
     their own short-lived sessions outside the request-scoped one.
     """
-    return AsyncSessionLocal
+    return get_async_session_factory()
 
 
 __all__ = ["get_db_session", "get_session_factory"]

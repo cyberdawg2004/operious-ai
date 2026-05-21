@@ -10,35 +10,71 @@ there's a concrete second backend to abstract over.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from redis.asyncio import Redis, from_url
 
 from app.core.config import Settings, get_settings
 
+logger = logging.getLogger(__name__)
+_redis_client: Redis | None = None
+
 
 def _build_redis(settings: Settings) -> Redis:
+    socket_timeout = min(5.0, settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS)
     return from_url(
         settings.redis_url,
         encoding="utf-8",
         decode_responses=True,
-        socket_timeout=5,
-        socket_connect_timeout=5,
+        socket_timeout=socket_timeout,
+        socket_connect_timeout=socket_timeout,
         health_check_interval=30,
+        retry_on_timeout=False,
     )
 
 
-_settings = get_settings()
+def get_redis_client() -> Redis:
+    """Return the shared async Redis client, creating it lazily."""
 
-redis_client: Redis = _build_redis(_settings)
+    global _redis_client
+
+    if _redis_client is None:
+        settings = get_settings()
+        logger.info(
+            "redis_client_create_begin",
+            extra={
+                "environment": settings.ENVIRONMENT,
+                "url_scheme": settings.redis_url.split(":", maxsplit=1)[0],
+            },
+        )
+        _redis_client = _build_redis(settings)
+        logger.info("redis_client_create_complete")
+    return _redis_client
 
 
 async def get_redis() -> Redis:
     """FastAPI dependency returning the shared async Redis client."""
-    return redis_client
+    return get_redis_client()
 
 
 async def close_redis() -> None:
     """Close the connection pool cleanly on shutdown."""
-    await redis_client.aclose()
+
+    global _redis_client
+
+    if _redis_client is None:
+        logger.info("redis_client_close_skipped")
+        return
+
+    logger.info("redis_client_close_begin")
+    try:
+        await asyncio.wait_for(_redis_client.aclose(), timeout=2.0)
+    except TimeoutError:
+        logger.warning("redis_client_close_timeout")
+    finally:
+        _redis_client = None
+        logger.info("redis_client_close_complete")
 
 
-__all__ = ["redis_client", "get_redis", "close_redis"]
+__all__ = ["get_redis_client", "get_redis", "close_redis"]

@@ -13,9 +13,11 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from sentry_sdk.integrations.fastapi import FastApiIntegration
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import build_api_router
@@ -82,22 +84,59 @@ def _build_cors_origins(raw: str) -> list[str]:
     return items
 
 
+def _init_sentry(settings: Settings) -> None:
+    """Initialize Sentry once, from the composition root.
+
+    The observability hook is deliberately attached to ``create_app`` so
+    imports, tests, and deploy boot all pass through the same lifecycle
+    boundary. Empty DSN means Sentry is disabled for that process.
+    """
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "sentry_init_begin",
+        extra={
+            "environment": settings.ENVIRONMENT,
+            "dsn_configured": bool(settings.SENTRY_DSN),
+            "already_initialized": sentry_sdk.is_initialized(),
+        },
+    )
+    if not settings.SENTRY_DSN:
+        logger.info("sentry_init_skipped", extra={"reason": "missing_dsn"})
+        return
+    if sentry_sdk.is_initialized():
+        logger.info("sentry_init_skipped", extra={"reason": "already_initialized"})
+        return
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        integrations=[FastApiIntegration()],
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        profiles_sample_rate=settings.SENTRY_PROFILES_SAMPLE_RATE,
+        send_default_pii=settings.SENTRY_SEND_DEFAULT_PII,
+        environment=settings.ENVIRONMENT,
+        release=settings.APP_VERSION,
+    )
+    logger.info("sentry_init_complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings: Settings = get_settings()
     configure_logging(settings)
     logger = get_logger(__name__)
     logger.info(
-        "application_startup",
+        "lifespan_startup_begin",
         extra={
             "app": settings.APP_NAME,
             "version": settings.APP_VERSION,
             "environment": settings.ENVIRONMENT,
         },
     )
+    logger.info("lifespan_yield_begin")
     try:
         yield
     finally:
+        logger.info("lifespan_shutdown_begin")
         # The pre-Phase-2.1 orchestration / AI-provider lifespan hooks were
         # removed when those substrates were quarantined into
         # `app/_deprecated/`. The constitutional substrates are pure
@@ -106,7 +145,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Redis connection (both lazy / no-op when not configured).
         await dispose_engine()
         await close_redis()
-        logger.info("application_shutdown", extra={"app": settings.APP_NAME})
+        logger.info("lifespan_shutdown_complete", extra={"app": settings.APP_NAME})
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -212,12 +251,19 @@ def create_app(
 
     settings = get_settings()
     configure_logging(settings)
+    logger = get_logger(__name__)
+    logger.info(
+        "create_app_begin",
+        extra={
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "environment": settings.ENVIRONMENT,
+        },
+    )
+    _init_sentry(settings)
 
     # 2.5-I production posture — trusted_proxies must be explicit.
-    if (
-        settings.is_production
-        and trusted_proxies is None
-    ):
+    if settings.is_production and trusted_proxies is None:
         raise RuntimeError(
             "Production deployments MUST pin an explicit "
             "`trusted_proxies` tuple (possibly empty for the strict "
@@ -225,6 +271,7 @@ def create_app(
             "`trusted_proxies=None`."
         )
 
+    logger.info("fastapi_instance_create_begin")
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
@@ -233,8 +280,11 @@ def create_app(
         openapi_url=None if settings.is_production else "/openapi.json",
         lifespan=lifespan,
     )
+    logger.info("fastapi_instance_create_complete")
 
+    logger.info("exception_handlers_register_begin")
     _register_exception_handlers(app)
+    logger.info("exception_handlers_register_complete")
 
     # Middleware registration order matters: Starlette's
     # ``add_middleware`` prepends to ``user_middleware`` and the
@@ -251,16 +301,24 @@ def create_app(
     # HTTP-level identity extraction site; see
     # ``app/middleware/authority_context.py`` for the doctrine.
     # Inner → outer (Starlette prepends; last added is outermost).
+    logger.info("middleware_authority_register_begin")
     app.add_middleware(
         AuthorityContextMiddleware,
         auth_provider=auth_provider,
     )
+    logger.info("middleware_authority_register_complete")
     if trusted_proxies is not None:
+        logger.info("middleware_trusted_ingress_register_begin")
         app.add_middleware(
             TrustedIngressMiddleware,
             trusted_proxies=trusted_proxies,
         )
+        logger.info("middleware_trusted_ingress_register_complete")
+    else:
+        logger.info("middleware_trusted_ingress_register_skipped")
+    logger.info("middleware_request_context_register_begin")
     app.add_middleware(RequestContextMiddleware)
+    logger.info("middleware_request_context_register_complete")
 
     cors_origins = _build_cors_origins(settings.CORS_ALLOW_ORIGINS)
     if cors_origins:
@@ -270,23 +328,32 @@ def create_app(
         # repeat their literals. See
         # ``test_no_other_source_reads_authority_headers``.
         cors_headers = [
-            h.strip()
-            for h in settings.CORS_ALLOW_HEADERS.split(",")
-            if h.strip()
+            h.strip() for h in settings.CORS_ALLOW_HEADERS.split(",") if h.strip()
         ] + list(AUTHORITY_HEADERS)
+        logger.info(
+            "middleware_cors_register_begin",
+            extra={
+                "origin_count": len(cors_origins),
+                "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
+            },
+        )
         app.add_middleware(
             CORSMiddleware,
             allow_origins=cors_origins,
             allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
             allow_methods=[
-                m.strip()
-                for m in settings.CORS_ALLOW_METHODS.split(",")
-                if m.strip()
+                m.strip() for m in settings.CORS_ALLOW_METHODS.split(",") if m.strip()
             ],
             allow_headers=cors_headers,
         )
+        logger.info("middleware_cors_register_complete")
+    else:
+        logger.info("middleware_cors_register_skipped")
 
+    logger.info("router_registration_begin")
     app.include_router(build_api_router(settings))
+    logger.info("router_registration_complete")
+    logger.info("create_app_complete")
 
     return app
 

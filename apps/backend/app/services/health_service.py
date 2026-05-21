@@ -20,6 +20,8 @@ mapping happens in the v1 schema layer.
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal, Sequence
@@ -40,7 +42,7 @@ from app.services.base import BaseService
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
 
-_DB_PROBE_TIMEOUT_SECONDS = 2.0
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,13 +96,25 @@ class HealthService(BaseService):
         self,
         *,
         settings: Settings,
-        session_factory: async_sessionmaker[AsyncSession],
-        redis: Redis,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+        redis: Redis | None = None,
+        session_factory_provider: (
+            Callable[[], async_sessionmaker[AsyncSession]] | None
+        ) = None,
+        redis_provider: Callable[[], Redis] | None = None,
     ) -> None:
         super().__init__()
         self._settings = settings
-        self._session_factory = session_factory
-        self._redis = redis
+        self._session_factory_provider = (
+            session_factory_provider
+            if session_factory_provider is not None
+            else lambda: _require_session_factory(session_factory)
+        )
+        self._redis_provider = (
+            redis_provider
+            if redis_provider is not None
+            else lambda: _require_redis(redis)
+        )
 
     # ─── Public API ────────────────────────────────────────────────────
 
@@ -123,10 +137,42 @@ class HealthService(BaseService):
         probe instead of summing them, which materially affects probe
         timeouts in orchestrators under partial-degradation conditions.
         """
-        checks: Sequence[DependencyCheck] = await asyncio.gather(
-            self._probe_database(),
-            check_redis(self._redis),
+        probe_timeout = self._settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS
+        readiness_timeout = probe_timeout + 0.5
+        logger.info(
+            "readiness_probe_begin",
+            extra={
+                "probe_timeout_seconds": probe_timeout,
+                "readiness_timeout_seconds": readiness_timeout,
+            },
         )
+        try:
+            checks: Sequence[DependencyCheck] = await asyncio.wait_for(
+                asyncio.gather(
+                    self._probe_database(timeout=probe_timeout),
+                    self._probe_redis(timeout=probe_timeout),
+                ),
+                timeout=readiness_timeout,
+            )
+        except TimeoutError:
+            self.logger.warning(
+                "readiness_probe_timeout",
+                extra={"readiness_timeout_seconds": readiness_timeout},
+            )
+            checks = (
+                DependencyCheck(
+                    name="postgres",
+                    status="unavailable",
+                    latency_ms=round(readiness_timeout * 1000, 2),
+                    error="TimeoutError",
+                ),
+                DependencyCheck(
+                    name="redis",
+                    status="unavailable",
+                    latency_ms=round(readiness_timeout * 1000, 2),
+                    error="TimeoutError",
+                ),
+            )
         overall = aggregate_status(list(checks))
         dependencies = tuple(DependencyReport.from_check(c) for c in checks)
 
@@ -147,7 +193,7 @@ class HealthService(BaseService):
 
     # ─── Internals ─────────────────────────────────────────────────────
 
-    async def _probe_database(self) -> DependencyCheck:
+    async def _probe_database(self, *, timeout: float) -> DependencyCheck:
         """Run a connectivity probe via the system-health repository.
 
         Owns its own session lifecycle so a degraded pool surfaces as a
@@ -156,15 +202,21 @@ class HealthService(BaseService):
         """
 
         async def _ping() -> None:
-            async with self._session_factory() as session:
+            session_factory = self._session_factory_provider()
+            async with session_factory() as session:
                 repo = SystemHealthRepository(session)
                 await repo.ping()
 
         return await run_with_timeout(
             name="postgres",
             coro_factory=_ping,
-            timeout=_DB_PROBE_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
+
+    async def _probe_redis(self, *, timeout: float) -> DependencyCheck:
+        """Run a bounded Redis readiness probe."""
+
+        return await check_redis(self._redis_provider(), timeout=timeout)
 
     def _build_report(
         self,
@@ -189,3 +241,17 @@ __all__ = [
     "HealthReport",
     "HealthService",
 ]
+
+
+def _require_session_factory(
+    session_factory: async_sessionmaker[AsyncSession] | None,
+) -> async_sessionmaker[AsyncSession]:
+    if session_factory is None:
+        raise RuntimeError("HealthService requires a session factory provider")
+    return session_factory
+
+
+def _require_redis(redis: Redis | None) -> Redis:
+    if redis is None:
+        raise RuntimeError("HealthService requires a Redis provider")
+    return redis

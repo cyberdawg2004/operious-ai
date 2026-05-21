@@ -49,12 +49,36 @@ async def run_with_timeout(
     timeout: float,
 ) -> DependencyCheck:
     """Run a probe coroutine, capturing latency, exceptions, and timeouts."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     started = loop.time()
+    logger.info(
+        "dependency_check_begin",
+        extra={"dependency": name, "timeout_seconds": timeout},
+    )
     try:
         await asyncio.wait_for(coro_factory(), timeout=timeout)
         elapsed_ms = (loop.time() - started) * 1000
+        logger.info(
+            "dependency_check_complete",
+            extra={"dependency": name, "latency_ms": round(elapsed_ms, 2)},
+        )
         return DependencyCheck(name=name, status="ok", latency_ms=round(elapsed_ms, 2))
+    except TimeoutError as exc:
+        elapsed_ms = (loop.time() - started) * 1000
+        logger.warning(
+            "dependency_check_timeout",
+            extra={
+                "dependency": name,
+                "timeout_seconds": timeout,
+                "latency_ms": round(elapsed_ms, 2),
+            },
+        )
+        return DependencyCheck(
+            name=name,
+            status="unavailable",
+            latency_ms=round(elapsed_ms, 2),
+            error=type(exc).__name__,
+        )
     except Exception as exc:  # noqa: BLE001 — health checks must swallow
         elapsed_ms = (loop.time() - started) * 1000
         logger.warning(
@@ -73,9 +97,23 @@ async def check_redis(client: Redis, timeout: float = 2.0) -> DependencyCheck:
     """`PING` against the shared async Redis client."""
 
     async def _ping() -> None:
-        await client.ping()
+        logger.info("redis_connect_check_begin")
+        await client.ping()  # type: ignore
+        logger.info("redis_connect_check_complete")
 
-    return await run_with_timeout(name="redis", coro_factory=_ping, timeout=timeout)
+    check = await run_with_timeout(name="redis", coro_factory=_ping, timeout=timeout)
+    if check.status != "ok":
+        try:
+            disconnect_coro = client.connection_pool.disconnect(inuse_connections=True)
+            if disconnect_coro is not None:
+                await asyncio.wait_for(disconnect_coro, timeout=0.5)
+            logger.info("redis_connection_pool_disconnect_complete")
+        except Exception as exc:  # noqa: BLE001 — cleanup must not mask readiness
+            logger.warning(
+                "redis_connection_pool_disconnect_failed",
+                extra={"error": type(exc).__name__},
+            )
+    return check
 
 
 def aggregate_status(
