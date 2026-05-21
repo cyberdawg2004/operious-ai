@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.url import build_database_engine_config
 
 # Import models so they register on Base.metadata. Every new model
 # module must be imported here (directly or transitively) to be picked
@@ -50,10 +51,14 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
+engine_config = build_database_engine_config(
+    settings.database_url,
+    connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
+)
 
 # Inject the live async DSN into Alembic's config so the engine factory
 # below uses the right driver and credentials.
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", engine_config.async_url)
 
 target_metadata = Base.metadata
 
@@ -61,7 +66,7 @@ target_metadata = Base.metadata
 def run_migrations_offline() -> None:
     """Run migrations without a live DB connection (emits SQL)."""
     context.configure(
-        url=settings.database_url_sync,
+        url=engine_config.sync_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -89,6 +94,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=engine_config.connect_args,
     )
 
     async with connectable.connect() as connection:

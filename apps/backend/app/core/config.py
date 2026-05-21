@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 1800
     DB_ECHO: bool = False
+    DB_CONNECT_TIMEOUT_SECONDS: float = 30.0
 
     # ─── Redis ───────────────────────────────────────────────────────
     REDIS_HOST: str = "localhost"

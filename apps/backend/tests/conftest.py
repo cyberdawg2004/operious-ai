@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.pool import NullPool
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -146,6 +147,26 @@ async def session_factory(
     )
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def app_runtime_resources() -> AsyncIterator[None]:
+    """Dispose app-owned async resources before pytest switches loops.
+
+    Several smoke tests exercise the real FastAPI dependency graph via
+    ``ASGITransport``. That transport does not drive lifespan shutdown,
+    so the app-level SQLAlchemy engine would otherwise retain asyncpg
+    pooled connections bound to the just-finished function-scoped event
+    loop. The next async test receives a fresh loop and can then trip
+    ``Future attached to a different loop`` when the pool pre-pings a
+    stale connection.
+    """
+
+    yield
+
+    from app.db.session import dispose_engine
+
+    await dispose_engine()
+
+
 # ─── Settings fixture ─────────────────────────────────────────────────────
 
 
@@ -194,7 +215,12 @@ async def pg_engine() -> AsyncIterator[AsyncEngine]:
             f"requires {TEST_DATABASE_URL_ENV} to be set "
             "(pg_engine fixture cannot operate without a test DSN)"
         )
-    engine = create_async_engine(dsn, future=True, pool_pre_ping=True)
+    engine = create_async_engine(
+        dsn,
+        future=True,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
     try:
         yield engine
     finally:

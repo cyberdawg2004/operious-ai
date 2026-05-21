@@ -47,6 +47,7 @@ from app.db.partitioning import (
     tenant_partition_ddl,
 )
 from app.db.repository import TenantScopedRepository
+from app.db.url import build_database_engine_config
 
 
 # ─── Naming convention invariant ─────────────────────────────────────────
@@ -307,3 +308,30 @@ def test_db_package_reexports_foundation_surface() -> None:
     assert not missing, (
         f"app.db.__all__ missing PR-B1 foundation symbols: {missing}"
     )
+
+
+def test_database_engine_config_canonicalizes_asyncpg_url_once() -> None:
+    """Runtime and Alembic must consume the same normalized URL inputs."""
+
+    config = build_database_engine_config(
+        "postgresql+asyncpg://u:p@db.example/operious"
+        "?sslmode=require&channel_binding=require&connect_timeout=10",
+        connect_timeout=2.5,
+    )
+
+    assert config.async_url == (
+        "postgresql+asyncpg://u:p@db.example/operious"
+    )
+    assert config.sync_url == (
+        "postgresql+psycopg2://u:p@db.example/operious"
+    )
+    assert config.connect_args == {"timeout": 10.0, "ssl": True}
+
+
+def test_database_engine_config_uses_default_timeout_without_url_override() -> None:
+    config = build_database_engine_config(
+        "postgresql+asyncpg://u:p@db.example/operious",
+        connect_timeout=2.5,
+    )
+
+    assert config.connect_args == {"timeout": 2.5}

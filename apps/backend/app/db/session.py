@@ -11,38 +11,20 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
+    close_all_sessions,
     create_async_engine,
 )
 
 from app.core.config import Settings, get_settings
+from app.db.url import build_database_engine_config
 
 logger = logging.getLogger(__name__)
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
-
-
-def _build_asyncpg_url_and_connect_args(
-    settings: Settings,
-) -> tuple[str, dict[str, object]]:
-    url = make_url(settings.database_url)
-    connect_args: dict[str, object] = {
-        "timeout": settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS,
-    }
-    sslmode = url.query.get("sslmode")
-    if sslmode is not None:
-        if sslmode in {"require", "verify-ca", "verify-full"}:
-            connect_args["ssl"] = True
-        url = url.difference_update_query(["sslmode"])
-    if "channel_binding" in url.query:
-        url = url.difference_update_query(["channel_binding"])
-    if "connect_timeout" in url.query:
-        url = url.difference_update_query(["connect_timeout"])
-    return url.render_as_string(hide_password=False), connect_args
 
 
 def _build_engine(settings: Settings) -> AsyncEngine:
@@ -53,20 +35,20 @@ def _build_engine(settings: Settings) -> AsyncEngine:
     surfacing inside request handlers.
     """
 
-    database_url = settings.database_url
-    connect_args: dict[str, object] = {}
-    if settings.database_url.startswith("postgresql+asyncpg://"):
-        database_url, connect_args = _build_asyncpg_url_and_connect_args(settings)
+    engine_config = build_database_engine_config(
+        settings.database_url,
+        connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
+    )
 
     return create_async_engine(
-        database_url,
+        engine_config.async_url,
         echo=settings.DB_ECHO,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
         pool_timeout=settings.DB_POOL_TIMEOUT,
         pool_recycle=settings.DB_POOL_RECYCLE,
         pool_pre_ping=True,
-        connect_args=connect_args,
+        connect_args=engine_config.connect_args,
         future=True,
     )
 
@@ -86,7 +68,7 @@ def get_engine() -> AsyncEngine:
                 "max_overflow": settings.DB_MAX_OVERFLOW,
                 "pool_timeout": settings.DB_POOL_TIMEOUT,
                 "pool_recycle": settings.DB_POOL_RECYCLE,
-                "connect_timeout": settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS,
+                "connect_timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
             },
         )
         _engine = _build_engine(settings)
@@ -117,14 +99,19 @@ async def dispose_engine() -> None:
 
     global _engine, _session_factory
 
-    if _engine is None:
+    engine = _engine
+    _engine = None
+    _session_factory = None
+
+    if engine is None:
         logger.info("db_engine_dispose_skipped")
         return
 
+    logger.info("db_async_sessions_close_begin")
+    await close_all_sessions()
+    logger.info("db_async_sessions_close_complete")
     logger.info("db_engine_dispose_begin")
-    await _engine.dispose()
-    _engine = None
-    _session_factory = None
+    await engine.dispose()
     logger.info("db_engine_dispose_complete")
 
 
