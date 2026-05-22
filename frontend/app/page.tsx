@@ -5,6 +5,7 @@ import { DomainCards } from "@/components/domain-cards";
 import { TrustProof } from "@/components/trust-proof";
 import { ArticleCards } from "@/components/article-cards";
 import { FaqAccordion } from "@/components/faq-accordion";
+import { Footer } from "@/components/footer";
 
 export default function Home() {
   return (
@@ -16,6 +17,7 @@ export default function Home() {
       <TrustProof />
       <ArticleCards />
       <FaqAccordion />
+      <Footer />
     </main>
   );
 }
