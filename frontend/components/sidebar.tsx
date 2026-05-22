@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { KernelSeal } from "./kernel-seal";
+import { useTheme } from "./theme-provider";
 import {
   Building2,
   ChevronDown,
@@ -17,6 +18,8 @@ import {
   FileSearch,
   Settings,
   LogOut,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 interface NavItem {
@@ -56,12 +59,13 @@ export function Sidebar({
   className,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <aside
       className={cn(
         "w-[240px] h-screen flex flex-col shrink-0",
-        "bg-surface-raised border-r border-border-subtle",
+        "bg-[var(--surface-raised)] border-r border-[var(--border-subtle)]",
         className
       )}
     >
@@ -79,9 +83,9 @@ export function Sidebar({
         <button
           className={cn(
             "mt-6 w-full flex items-center gap-2 px-3 py-2",
-            "border border-border-subtle rounded",
+            "border border-[var(--border-subtle)] rounded",
             "transition-all duration-160",
-            "hover:bg-surface hover:border-border-defined"
+            "hover:bg-[var(--surface)] hover:border-[var(--border-defined)]"
           )}
         >
           <Building2 
@@ -147,7 +151,7 @@ export function Sidebar({
       </nav>
 
       {/* Divider */}
-      <div className="mx-4 h-px bg-border-subtle" />
+      <div className="mx-4 h-px bg-[var(--border-subtle)]" />
 
       {/* Bottom section - User profile */}
       <div className="p-4">
@@ -183,6 +187,26 @@ export function Sidebar({
             className="text-ink-tertiary shrink-0 hover:text-ink-secondary transition-colors"
           />
         </div>
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className={cn(
+            "mt-2 w-full flex items-center justify-between gap-2 px-3 py-2 rounded",
+            "text-[12px] text-ink-tertiary",
+            "transition-all duration-160",
+            "hover:bg-[var(--surface-sunken)] hover:text-ink-secondary"
+          )}
+        >
+          <span className="font-technical uppercase tracking-wider">
+            {theme === "dark" ? "Dark Mode" : "Light Mode"}
+          </span>
+          {theme === "dark" ? (
+            <Moon size={14} strokeWidth={1.5} />
+          ) : (
+            <Sun size={14} strokeWidth={1.5} />
+          )}
+        </button>
       </div>
     </aside>
   );
