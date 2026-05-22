@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Sidebar } from "@/components/sidebar";
+import { OperationsQueue } from "@/components/operations-queue";
 
 export default function Home() {
   const [activeItem, setActiveItem] = useState("operations");
@@ -16,26 +17,21 @@ export default function Home() {
         userRole="Operator"
       />
 
-      {/* Main content area placeholder */}
-      <main className="flex-1 p-8">
-        <div className="max-w-4xl">
-          <h1 className="font-display text-[32px] font-semibold text-ink-primary mb-2">
-            Command Center
-          </h1>
-          <p className="text-ink-body text-[15px] leading-relaxed mb-8">
-            Deterministic multi-agent operating system for enterprise governed
-            execution infrastructure.
-          </p>
-
-          {/* Active section indicator */}
-          <div className="p-6 bg-surface rounded-lg border border-border-subtle">
-            <p className="eyebrow text-ink-tertiary mb-2">Current View</p>
-            <p className="text-[18px] font-medium text-ink-primary capitalize">
-              {activeItem.replace("-", " ")}
+      {/* Main content area - render based on active nav item */}
+      {activeItem === "operations" ? (
+        <OperationsQueue />
+      ) : (
+        <main className="flex-1 p-8 bg-canvas">
+          <div className="max-w-4xl">
+            <h1 className="font-display text-[32px] font-semibold text-ink-primary mb-2">
+              {activeItem.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}
+            </h1>
+            <p className="text-ink-body text-[15px] leading-relaxed mb-8">
+              This view is coming soon.
             </p>
           </div>
-        </div>
-      </main>
+        </main>
+      )}
     </div>
   );
 }

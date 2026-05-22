@@ -27,6 +27,7 @@
   --blue-system-muted: #2563EB;
   --red-alert: #DC2626;
   --green-success: #16A34A;
+  --warning-amber: #B8821C;
 
   /* Semantic tokens */
   --background: var(--canvas);
@@ -56,6 +57,7 @@
   --color-blue-system-muted: var(--blue-system-muted);
   --color-red-alert: var(--red-alert);
   --color-green-success: var(--green-success);
+  --color-warning-amber: var(--warning-amber);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-serif: 'Cormorant SC', serif;
