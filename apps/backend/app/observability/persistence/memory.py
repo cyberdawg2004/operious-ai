@@ -13,7 +13,6 @@ from app.escalation.persistence.records import EscalationRecord
 from app.execution.enums import ExecutionState
 from app.execution.persistence.records import ExecutionRecord
 from app.governance.persistence.records import GovernanceDecisionRecord
-from app.observability.enums import OperationalMetricName
 from app.observability.identity import (
     OperationalSLODefinitionId,
     OperationalTraceSpanId,
