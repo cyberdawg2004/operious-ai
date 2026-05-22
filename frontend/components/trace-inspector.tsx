@@ -17,16 +17,16 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// Substrate color mapping
+// Correct Operious substrate color mapping
 const substrateColors = {
-  INGEST: "#3B82F6", // Blue
-  NLU: "#8B5CF6", // Purple
-  POLICY: "#B8821C", // Amber (warning)
-  RETRIEVAL: "#06B6D4", // Cyan
-  GENERATION: "#EC4899", // Pink
-  REVIEW: "#F97316", // Orange
-  DISPATCH: "#10B981", // Emerald
-  AUDIT: "#6B7280", // Gray
+  BOUNDARY: "#1A4A9A", // Blue
+  GOVERNANCE: "#A8882C", // Gold
+  COORDINATION: "#4A5468", // Slate
+  SESSION: "#2E7D5C", // Green
+  EXECUTION: "#0D2860", // Deep blue
+  SUPERVISOR: "#6B5418", // Brown-gold
+  ARBITRATION: "#A6342D", // Red
+  HARDENING: "#8A93A4", // Gray
 } as const;
 
 type SubstrateType = keyof typeof substrateColors;
@@ -53,8 +53,8 @@ const mockEvents: TimelineEvent[] = [
   {
     id: "evt-001",
     timestamp: "14:32:01.042",
-    substrate: "INGEST",
-    action: "Email received and parsed",
+    substrate: "BOUNDARY",
+    action: "TICKET_INGESTED",
     status: "success",
     duration: "124ms",
     details: {
@@ -65,23 +65,10 @@ const mockEvents: TimelineEvent[] = [
   {
     id: "evt-002",
     timestamp: "14:32:01.166",
-    substrate: "NLU",
-    action: "Intent classification",
+    substrate: "GOVERNANCE",
+    action: "POLICY_EVALUATED",
     status: "success",
     duration: "89ms",
-    details: {
-      model: "intent-classifier-v3",
-      confidence: 0.94,
-      output: "REFUND_REQUEST",
-    },
-  },
-  {
-    id: "evt-003",
-    timestamp: "14:32:01.255",
-    substrate: "POLICY",
-    action: "Policy chain evaluation",
-    status: "warning",
-    duration: "203ms",
     details: {
       policyId: "POL-RFD-V3",
       decision: "ALLOW_WITH_REVIEW",
@@ -89,23 +76,70 @@ const mockEvents: TimelineEvent[] = [
     },
   },
   {
+    id: "evt-003",
+    timestamp: "14:32:01.255",
+    substrate: "SESSION",
+    action: "OPENED",
+    status: "success",
+    duration: "42ms",
+    details: {
+      output: "Session initialized with context",
+    },
+  },
+  {
     id: "evt-004",
-    timestamp: "14:32:01.458",
-    substrate: "RETRIEVAL",
-    action: "Knowledge base query",
+    timestamp: "14:32:01.297",
+    substrate: "COORDINATION",
+    action: "AGENT_ASSIGNED",
     status: "success",
     duration: "156ms",
     details: {
-      input: "refund policy electronics 30 days",
-      output: "3 relevant documents retrieved",
-      tokens: 1247,
+      output: "Assigned to L2 support queue",
     },
   },
   {
     id: "evt-005",
-    timestamp: "14:32:01.614",
-    substrate: "GENERATION",
-    action: "Response draft created",
+    timestamp: "14:32:01.453",
+    substrate: "EXECUTION",
+    action: "DIAGNOSTIC_INVOKED",
+    status: "success",
+    duration: "312ms",
+    details: {
+      model: "diagnostic-v3",
+      tokens: 847,
+      output: "Issue classification complete",
+    },
+  },
+  {
+    id: "evt-006",
+    timestamp: "14:32:01.765",
+    substrate: "EXECUTION",
+    action: "CLASSIFICATION_EMITTED",
+    status: "success",
+    duration: "67ms",
+    details: {
+      confidence: 0.94,
+      output: "REFUND_REQUEST_HIGH_VALUE",
+    },
+  },
+  {
+    id: "evt-007",
+    timestamp: "14:32:01.832",
+    substrate: "GOVERNANCE",
+    action: "ACTION_APPROVED",
+    status: "warning",
+    duration: "203ms",
+    details: {
+      policyId: "POL-RFD-V3",
+      decision: "APPROVED_WITH_ESCALATION",
+      output: "Requires supervisor review",
+    },
+  },
+  {
+    id: "evt-008",
+    timestamp: "14:32:02.035",
+    substrate: "EXECUTION",
+    action: "RESOLUTION_DRAFTED",
     status: "success",
     duration: "892ms",
     details: {
@@ -115,47 +149,25 @@ const mockEvents: TimelineEvent[] = [
     },
   },
   {
-    id: "evt-006",
-    timestamp: "14:32:02.506",
-    substrate: "REVIEW",
-    action: "Human review requested",
-    status: "warning",
-    duration: "45.2s",
-    details: {
-      output: "Escalated to L2 agent",
-    },
-  },
-  {
-    id: "evt-007",
-    timestamp: "14:33:17.721",
-    substrate: "REVIEW",
-    action: "Review completed - approved",
+    id: "evt-009",
+    timestamp: "14:32:02.927",
+    substrate: "SUPERVISOR",
+    action: "QA_EVALUATED",
     status: "success",
-    duration: "—",
+    duration: "45.2s",
     details: {
       output: "Agent approved with minor edits",
     },
   },
   {
-    id: "evt-008",
-    timestamp: "14:33:17.892",
-    substrate: "DISPATCH",
-    action: "Response sent to customer",
+    id: "evt-010",
+    timestamp: "14:33:48.127",
+    substrate: "SESSION",
+    action: "RESOLVED",
     status: "success",
     duration: "67ms",
     details: {
-      output: "Email dispatched via SendGrid",
-    },
-  },
-  {
-    id: "evt-009",
-    timestamp: "14:33:17.959",
-    substrate: "AUDIT",
-    action: "Trace finalized",
-    status: "success",
-    duration: "12ms",
-    details: {
-      output: "Immutable record created",
+      output: "Session closed, response dispatched",
     },
   },
 ];
@@ -395,23 +407,16 @@ export function TraceInspector() {
 
                       {/* Content */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded"
-                            style={{
-                              backgroundColor: `${substrateColors[event.substrate]}20`,
-                              color: substrateColors[event.substrate],
-                            }}
-                          >
+                        <span
+                          className="font-mono text-[12px] uppercase tracking-wide"
+                        >
+                          <span style={{ color: substrateColors[event.substrate] }}>
                             {event.substrate}
                           </span>
-                          <span
-                            className="font-sans text-[13px] truncate"
-                            style={{ color: "var(--ink-primary)" }}
-                          >
-                            {event.action}
+                          <span style={{ color: "var(--ink-primary)" }}>
+                            .{event.action}
                           </span>
-                        </div>
+                        </span>
                       </div>
 
                       {/* Status & Duration */}
@@ -474,22 +479,17 @@ export function TraceInspector() {
                   {/* Event Header */}
                   <div>
                     <div className="flex items-center gap-2 mb-2">
-                      <span
-                        className="font-mono text-[10px] uppercase px-1.5 py-0.5 rounded"
-                        style={{
-                          backgroundColor: `${substrateColors[selectedEvent.substrate]}20`,
-                          color: substrateColors[selectedEvent.substrate],
-                        }}
-                      >
-                        {selectedEvent.substrate}
-                      </span>
                       <StatusIcon status={selectedEvent.status} />
                     </div>
                     <h3
-                      className="font-sans text-[16px] font-medium mb-1"
-                      style={{ color: "var(--ink-primary)" }}
+                      className="font-mono text-[14px] uppercase tracking-wide mb-1"
                     >
-                      {selectedEvent.action}
+                      <span style={{ color: substrateColors[selectedEvent.substrate] }}>
+                        {selectedEvent.substrate}
+                      </span>
+                      <span style={{ color: "var(--ink-primary)" }}>
+                        .{selectedEvent.action}
+                      </span>
                     </h3>
                     <p
                       className="font-mono text-[12px]"

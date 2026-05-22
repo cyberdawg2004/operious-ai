@@ -1,17 +1,35 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+SC:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+SC:wght@600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap');
 @import "tailwindcss";
 
 :root {
-  /* Light surface (marketing default) */
-  --canvas: #F8F5EE;
-  --surface: #FFFFFF;
-  --surface-raised: #FBF9F4;
-  --border-subtle: #EAE6DE;
-  --border-defined: #D4CFC4;
-  --ink-primary: #0A0F1C;
-  --ink-body: #2A3548;
-  --ink-secondary: #4A5468;
-  --ink-tertiary: #8A93A4;
+  /* ═══════════════════════════════════════════
+     FIX 5A — ELEVATED BACKGROUND SURFACES
+     Institutional governance infrastructure
+  ═══════════════════════════════════════════ */
+  --canvas: #F4F1E8;              /* Deeper warm bone */
+  --surface: #FCFAF4;             /* Subtle warmth, NOT pure white */
+  --surface-raised: #FFFFFF;      /* Only densest data surfaces */
+  --surface-sunken: #EBE7DC;      /* Recessed areas */
+  --border-subtle: #DDD8CC;       /* Visible but quiet */
+  --border-defined: #C4BFB2;      /* Clear delineation */
+
+  /* ═══════════════════════════════════════════
+     FIX 5B — INK SYSTEM (DARKER)
+     Command presence typography
+  ═══════════════════════════════════════════ */
+  --ink-primary: #0A0F1C;         /* Near-black for headings */
+  --ink-body: #1A2334;            /* Dense charcoal for body */
+  --ink-secondary: #3A4458;       /* Secondary text */
+  --ink-tertiary: #6A7488;        /* Metadata, timestamps */
+
+  /* ═══════════════════════════════════════════
+     FIX 5C — GOLD SYSTEM (AUTHORITATIVE)
+     Governance hierarchy accent
+  ═══════════════════════════════════════════ */
+  --gold-primary: #A8882C;        /* Core governance gold */
+  --gold-bright: #C9A84C;         /* Highlights, active states */
+  --gold-muted: #8A7024;          /* Hover states, borders */
+  --gold-bg: rgba(168,136,44,0.08); /* Subtle highlight fill */
 
   /* Dark surface (hero, Kernel section, trust section, Command Center) */
   --bg-dark: #05080F;
@@ -40,12 +58,17 @@
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
   --color-border-subtle: var(--border-subtle);
   --color-border-defined: var(--border-defined);
   --color-ink-primary: var(--ink-primary);
   --color-ink-body: var(--ink-body);
   --color-ink-secondary: var(--ink-secondary);
   --color-ink-tertiary: var(--ink-tertiary);
+  --color-gold-primary: var(--gold-primary);
+  --color-gold-bright: var(--gold-bright);
+  --color-gold-muted: var(--gold-muted);
+  --color-gold-bg: var(--gold-bg);
   --color-bg-dark: var(--bg-dark);
   --color-surface-dark: var(--surface-dark);
   --color-border-dark: var(--border-dark);
@@ -64,26 +87,80 @@
   --font-mono-technical: 'IBM Plex Mono', monospace;
 }
 
+html {
+  background: var(--canvas);
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
 }
 
-/* Typography utilities */
+/* ═══════════════════════════════════════════
+   FIX 5D — TYPOGRAPHY SYSTEM
+   Command presence with proper hierarchy
+═══════════════════════════════════════════ */
+
+/* Display typography - Cormorant SC for headings */
 .font-display {
   font-family: 'Cormorant SC', serif;
 }
 
+/* Technical typography - IBM Plex Mono for metadata */
 .font-technical {
   font-family: 'IBM Plex Mono', monospace;
 }
 
-/* Eyebrow label style */
+/* Monospace for code and data */
+.font-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* Eyebrow label style - institutional governance */
 .eyebrow {
   font-family: 'IBM Plex Mono', monospace;
   text-transform: uppercase;
   letter-spacing: 0.18em;
   font-size: 11px;
   font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════
+   FIX 5E — INTERACTION STATES
+   Authoritative gold system
+═══════════════════════════════════════════ */
+
+/* Active navigation item */
+.nav-active {
+  background: var(--gold-bg);
+  border-left: 4px solid var(--gold-primary);
+}
+
+/* Gold focus ring */
+.focus-gold:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--gold-primary);
+}
+
+/* Hover states */
+.hover-elevated:hover {
+  background: var(--surface-sunken);
+}
+
+/* ═══════════════════════════════════════════
+   FIX 5F — SHADOWS AND DEPTH
+   Subtle institutional depth
+═══════════════════════════════════════════ */
+
+.shadow-panel {
+  box-shadow: 0 1px 3px rgba(10, 15, 28, 0.06);
+}
+
+.shadow-card {
+  box-shadow: 0 2px 8px rgba(10, 15, 28, 0.08);
+}
+
+.shadow-elevated {
+  box-shadow: 0 4px 16px rgba(10, 15, 28, 0.12);
 }

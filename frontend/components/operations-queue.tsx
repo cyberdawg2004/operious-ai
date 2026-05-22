@@ -339,7 +339,7 @@ function TableRow({
         "border-b border-border-subtle last:border-b-0",
         "transition-colors duration-160",
         isOdd ? "bg-canvas/50" : "bg-surface",
-        "hover:bg-[rgba(168,136,44,0.04)]"
+        "hover:bg-[var(--surface-sunken)]"
       )}
     >
       {/* Checkbox */}

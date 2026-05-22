@@ -183,7 +183,7 @@ function ActionMenu({ onAction }: { onAction: (action: string) => void }) {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-1 rounded hover:bg-[rgba(168,136,44,0.06)] transition-colors duration-160"
+        className="p-1 rounded hover:bg-[var(--gold-bg)] transition-colors duration-160"
       >
         <MoreHorizontal className="w-4 h-4 text-ink-tertiary" strokeWidth={1.5} />
       </button>
@@ -199,7 +199,7 @@ function ActionMenu({ onAction }: { onAction: (action: string) => void }) {
                 onAction("view");
                 setIsOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-[rgba(168,136,44,0.06)] transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-[var(--gold-bg)] transition-colors"
             >
               <Eye className="w-4 h-4" strokeWidth={1.5} />
               View
@@ -209,7 +209,7 @@ function ActionMenu({ onAction }: { onAction: (action: string) => void }) {
                 onAction("edit");
                 setIsOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-[rgba(168,136,44,0.06)] transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-[var(--gold-bg)] transition-colors"
             >
               <Pencil className="w-4 h-4" strokeWidth={1.5} />
               Edit
@@ -219,7 +219,7 @@ function ActionMenu({ onAction }: { onAction: (action: string) => void }) {
                 onAction("history");
                 setIsOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-[rgba(168,136,44,0.06)] transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-[var(--gold-bg)] transition-colors"
             >
               <History className="w-4 h-4" strokeWidth={1.5} />
               Version History
@@ -325,8 +325,8 @@ export function KnowledgeBase() {
                   className={cn(
                     "w-full h-9 px-3 flex items-center gap-2 rounded transition-colors duration-160",
                     activeCategory === category.id
-                      ? "bg-[rgba(168,136,44,0.06)] border-l-4 border-l-gold-accent -ml-px"
-                      : "hover:bg-[rgba(168,136,44,0.04)]"
+? "bg-[var(--gold-bg)] border-l-4 border-l-[var(--gold-primary)] -ml-px"
+                  : "hover:bg-[var(--surface-sunken)]"
                   )}
                 >
                   <Folder
@@ -400,8 +400,8 @@ export function KnowledgeBase() {
                 key={doc.id}
                 className={cn(
                   "h-12 px-4 flex items-center border-b border-border-subtle transition-colors duration-160",
-                  index % 2 === 1 && "bg-[rgba(168,136,44,0.02)]",
-                  "hover:bg-[rgba(168,136,44,0.04)]"
+index % 2 === 1 && "bg-[var(--surface-sunken)]/30",
+                    "hover:bg-[var(--surface-sunken)]"
                 )}
               >
                 {/* Checkbox */}
@@ -474,7 +474,7 @@ export function KnowledgeBase() {
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="w-8 h-8 flex items-center justify-center rounded border border-border-subtle text-ink-secondary hover:bg-[rgba(168,136,44,0.04)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded border border-border-subtle text-ink-secondary hover:bg-[var(--surface-sunken)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" strokeWidth={1.5} />
               </button>
@@ -488,7 +488,7 @@ export function KnowledgeBase() {
                   setCurrentPage((p) => Math.min(totalPages, p + 1))
                 }
                 disabled={currentPage === totalPages || totalPages === 0}
-                className="w-8 h-8 flex items-center justify-center rounded border border-border-subtle text-ink-secondary hover:bg-[rgba(168,136,44,0.04)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded border border-border-subtle text-ink-secondary hover:bg-[var(--surface-sunken)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
               </button>

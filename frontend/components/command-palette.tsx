@@ -309,7 +309,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
                       onMouseEnter={() => setSelectedIndex(currentIndex)}
                       className={cn(
                         "flex h-[44px] cursor-pointer items-center justify-between px-5",
-                        isSelected && "border-l-[3px] border-l-[var(--gold-primary)] bg-[rgba(168,136,44,0.06)]"
+                        isSelected && "border-l-[3px] border-l-[var(--gold-primary)] bg-[var(--gold-bg)]"
                       )}
                     >
                       {/* Left side */}

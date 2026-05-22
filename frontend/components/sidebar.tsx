@@ -118,9 +118,9 @@ export function Sidebar({
                     "w-full h-9 flex items-center gap-3 rounded",
                     "transition-all duration-160",
                     isActive
-                      ? "bg-[rgba(168,136,44,0.06)] border-l-4 border-l-gold pl-2 pr-3"
+                      ? "bg-[var(--gold-bg)] border-l-4 border-l-[var(--gold-primary)] pl-2 pr-3"
                       : "px-3",
-                    !isActive && isHovered && "bg-[rgba(10,15,28,0.04)]"
+                    !isActive && isHovered && "bg-[var(--surface-sunken)]"
                   )}
                 >
                   <Icon
@@ -128,7 +128,7 @@ export function Sidebar({
                     strokeWidth={1.5}
                     className={cn(
                       "shrink-0 transition-colors duration-160",
-                      isActive ? "text-gold" : "text-ink-secondary"
+                      isActive ? "text-[var(--gold-primary)]" : "text-ink-secondary"
                     )}
                   />
                   <span
@@ -155,7 +155,7 @@ export function Sidebar({
           className={cn(
             "flex items-center gap-3 px-3 py-2 rounded",
             "transition-all duration-160",
-            "hover:bg-[rgba(10,15,28,0.04)] cursor-pointer"
+            "hover:bg-[var(--surface-sunken)] cursor-pointer"
           )}
         >
           {/* Avatar */}
