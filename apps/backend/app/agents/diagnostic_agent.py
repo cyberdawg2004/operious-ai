@@ -1,8 +1,10 @@
-"""Deterministic diagnostic agent runtime."""
+"""Diagnostic agent runtime."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
+
+from app.cognition.diagnostic_runtime import DiagnosticCognitionRuntime
 
 
 class DiagnosticResult(BaseModel):
@@ -11,14 +13,32 @@ class DiagnosticResult(BaseModel):
     summary: str
     category: str
     confidence: float
+    provider: str | None = None
+    model: str | None = None
+    citations: tuple[int, ...] = ()
+    usage_id: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_micro_usd: int = 0
+    governance_decision_id: str | None = None
 
 
 class DiagnosticAgent:
     """Bounded support-ticket diagnostic runtime.
 
-    This agent is intentionally heuristic-only for PR_W4. It performs
-    no model calls, tool calls, planning, or autonomous loops.
+    Phase 5-C routes live worker executions through
+    ``DiagnosticCognitionRuntime`` for RAG-grounded LLM reasoning. The
+    local heuristic fallback exists only for legacy direct construction
+    in tests and offline tooling that has not supplied the runtime yet.
     """
+
+    def __init__(
+        self,
+        *,
+        cognition_runtime: DiagnosticCognitionRuntime | None = None,
+    ) -> None:
+        self._cognition_runtime = cognition_runtime
 
     async def execute(
         self,
@@ -26,7 +46,30 @@ class DiagnosticAgent:
         session_id: str,
         tenant_id: str,
         content: str,
+        execution_id: str | None = None,
     ) -> DiagnosticResult:
+        if self._cognition_runtime is not None and execution_id is not None:
+            result = await self._cognition_runtime.reason_about_ticket(
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                content=content,
+            )
+            return DiagnosticResult(
+                summary=result.summary,
+                category=result.category,
+                confidence=result.confidence,
+                provider=result.provider,
+                model=result.model,
+                citations=result.citations,
+                usage_id=str(result.usage_id),
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                total_tokens=result.total_tokens,
+                estimated_cost_micro_usd=result.estimated_cost_micro_usd,
+                governance_decision_id=result.governance_decision_id,
+            )
         normalized = content.casefold()
         category, confidence = _classify(normalized)
         return DiagnosticResult(

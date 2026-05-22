@@ -21,6 +21,9 @@ Modules every constitutional substrate is allowed to import:
 * `governance_metrics`   — typed metric counters for the governance
                            substrate (`record_enforcement_action`,
                            `record_governance_evaluation`).
+* `runtime`              — tenant-scoped operational metrics, SLO
+                           thresholds, structured spans, and DLQ read
+                           authority.
 
 Phase 2.1 quarantine note:
 
@@ -30,3 +33,35 @@ Phase 2.1 quarantine note:
   `rag_retrieval_*`, `retrieval_*`. They are not imported here and
   must never be imported from constitutional code.
 """
+
+from app.observability.enums import (
+    AlertSeverity,
+    AlertThresholdOperator,
+    OperationalMetricName,
+    OperationalTraceStatus,
+)
+from app.observability.identity import (
+    OperationalAlertId,
+    OperationalSLODefinitionId,
+    OperationalTraceSpanId,
+    as_operational_slo_id,
+    as_operational_trace_span_id,
+    derive_alert_id,
+    derive_slo_definition_id,
+    derive_trace_span_id,
+)
+
+__all__ = [
+    "AlertSeverity",
+    "AlertThresholdOperator",
+    "OperationalAlertId",
+    "OperationalMetricName",
+    "OperationalSLODefinitionId",
+    "OperationalTraceSpanId",
+    "OperationalTraceStatus",
+    "as_operational_slo_id",
+    "as_operational_trace_span_id",
+    "derive_alert_id",
+    "derive_slo_definition_id",
+    "derive_trace_span_id",
+]

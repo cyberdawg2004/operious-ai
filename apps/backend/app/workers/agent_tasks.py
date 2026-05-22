@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 from collections.abc import Coroutine, Mapping
 from threading import Thread
 from typing import Any, TypeVar, cast
@@ -10,13 +12,28 @@ from typing import Any, TypeVar, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.diagnostic_agent import DiagnosticAgent
+from app.cognition import (
+    AnthropicMessagesClient,
+    DeterministicDiagnosticLLMClient,
+    DiagnosticCognitionRuntime,
+    DiagnosticCognitionRuntimeConfig,
+)
+from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     CoordinationRecord,
     PostgresCoordinationPersistence,
 )
+from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
+from app.governance.persistence import PostgresGovernanceRepository
+from app.knowledge import (
+    DeterministicHashEmbeddingProvider,
+    DeterministicKnowledgeChunker,
+    KnowledgeRuntime,
+)
+from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.session.identity import as_session_id
 from app.session.lifecycle.classifier import is_terminal as is_terminal_session
@@ -24,6 +41,7 @@ from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
 )
+from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 
@@ -132,11 +150,14 @@ async def execute_diagnostic_agent_runtime(
                 session_id=session_id,
                 tenant_id=tenant_id,
             )
-            result = await DiagnosticAgent().execute(
+            result = await DiagnosticAgent(
+                cognition_runtime=_diagnostic_cognition_runtime(session)
+            ).execute(
                 dispatch_id=dispatch_id,
                 session_id=session_id,
                 tenant_id=tenant_id,
                 content=content,
+                execution_id=str(execution.execution_id),
             )
             claim_lost = await _claim_lost_payload(
                 execution_runtime=execution_runtime,
@@ -287,7 +308,7 @@ def _extract_content(dispatch: CoordinationRecord) -> str:
     body = dispatch.payload_body
     canonical_payload = body.get("canonical_payload")
     if isinstance(canonical_payload, Mapping):
-        extracted = _extract_text(canonical_payload)
+        extracted = _extract_text(cast(Mapping[str, Any], canonical_payload))
         if extracted:
             return extracted
     return _extract_text(body)
@@ -463,6 +484,54 @@ def _max_execution_attempts(task_self: Any) -> int:
     if isinstance(max_retries, int) and max_retries >= 0:
         return max_retries + 1
     return _MAX_EXECUTION_ATTEMPTS
+
+
+def _diagnostic_cognition_runtime(
+    session: AsyncSession,
+) -> DiagnosticCognitionRuntime:
+    settings = get_settings()
+    tenant_repository = PostgresTenantConfigurationRepository(session)
+    knowledge_runtime = KnowledgeRuntime(
+        repository=PostgresKnowledgeRepository(session),
+        tenant_configuration_repository=tenant_repository,
+        embedding_provider=DeterministicHashEmbeddingProvider(),
+        chunker=DeterministicKnowledgeChunker(
+            target_size=settings.CHUNK_TARGET_SIZE,
+            overlap=settings.CHUNK_OVERLAP,
+            min_size=settings.CHUNK_MIN_SIZE,
+        ),
+        vector_index_name=settings.VECTOR_DEFAULT_INDEX,
+        default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
+    )
+    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+        llm_client = DeterministicDiagnosticLLMClient()
+    else:
+        llm_client = AnthropicMessagesClient(
+            api_key=settings.ANTHROPIC_API_KEY,
+            model=settings.ANTHROPIC_DEFAULT_MODEL,
+            base_url=settings.ANTHROPIC_BASE_URL,
+            anthropic_version=settings.ANTHROPIC_VERSION,
+            timeout_seconds=settings.AI_TIMEOUT_SECONDS,
+        )
+    return DiagnosticCognitionRuntime(
+        knowledge_runtime=knowledge_runtime,
+        llm_client=llm_client,
+        usage_persistence=PostgresCognitionUsagePersistence(session),
+        governance_repository=PostgresGovernanceRepository(session),
+        config=DiagnosticCognitionRuntimeConfig(
+            max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,
+            temperature=settings.ANTHROPIC_TEMPERATURE,
+            context_top_k=settings.COGNITION_LLM_CONTEXT_TOP_K,
+            context_token_budget=settings.COGNITION_LLM_CONTEXT_TOKEN_BUDGET,
+            require_citations=settings.COGNITION_LLM_REQUIRE_CITATIONS,
+            input_token_micro_usd=settings.COGNITION_LLM_INPUT_TOKEN_MICRO_USD,
+            output_token_micro_usd=settings.COGNITION_LLM_OUTPUT_TOKEN_MICRO_USD,
+        ),
+    )
+
+
+def _running_under_pytest() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
 
 def _timeline_idempotency_key(

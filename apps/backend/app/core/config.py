@@ -143,6 +143,17 @@ class Settings(BaseSettings):
     # When None the provider returns the model's native dimensionality.
     OPENAI_EMBEDDING_DIMENSIONS: int | None = None
 
+    # ─── Anthropic provider ──────────────────────────────────────────
+    # Used by Phase 5-C diagnostic cognition. The key is platform-owned
+    # deployment secret material: it is read only at runtime composition
+    # and is never persisted, logged, or returned through APIs.
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    ANTHROPIC_VERSION: str = "2023-06-01"
+    ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_MAX_OUTPUT_TOKENS: int = 512
+    ANTHROPIC_TEMPERATURE: float = 0.0
+
     # ─── Embedding gateway ───────────────────────────────────────────
     EMBEDDING_DEFAULT_PROVIDER: str = "openai"
     EMBEDDING_TIMEOUT_SECONDS: float = 30.0
@@ -171,6 +182,13 @@ class Settings(BaseSettings):
     RAG_DEFAULT_MAX_CHUNKS_PER_DOCUMENT: int | None = None
     RAG_DEFAULT_CONTEXT_TOKEN_BUDGET: int = 4000
     RAG_DEFAULT_TOKEN_ESTIMATOR_RATIO: int = 4  # chars-per-token heuristic.
+
+    # ─── Cognition LLM runtime (Phase 5-C) ───────────────────────────
+    COGNITION_LLM_CONTEXT_TOP_K: int = 6
+    COGNITION_LLM_CONTEXT_TOKEN_BUDGET: int = 2500
+    COGNITION_LLM_REQUIRE_CITATIONS: bool = False
+    COGNITION_LLM_INPUT_TOKEN_MICRO_USD: int = 3
+    COGNITION_LLM_OUTPUT_TOKEN_MICRO_USD: int = 15
 
     # ─── Governance runtime ──────────────────────────────────────────
     # Operational defaults for the governance substrate. Empty

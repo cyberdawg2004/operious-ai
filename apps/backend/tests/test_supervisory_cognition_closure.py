@@ -9,7 +9,7 @@ This file locks Phase 3 into its intended authority shape:
 * SOP intelligence proposes approval records only and never mutates
   tenant knowledge documents;
 * request-path code does not call supervisory cognition worker tasks;
-* pending SOP approval proposals have no application path in Phase 3.
+* pending SOP approval proposals have no SOP Intelligence application path.
 """
 
 from __future__ import annotations
@@ -279,7 +279,7 @@ def test_supervisory_cognition_worker_entrypoints_accept_primitive_lineage() -> 
         assert tuple(signature.parameters) == parameter_names
 
 
-def test_pending_sop_approval_records_have_no_application_path() -> None:
+def test_sop_intelligence_approval_records_have_no_direct_application_path() -> None:
     persistence_methods = {
         name
         for name in dir(SOPApprovalPersistenceProtocol)
@@ -310,6 +310,7 @@ def test_pending_sop_approval_records_have_no_application_path() -> None:
 
     assert persistence_methods == {
         "create_approval_record",
+        "update_approval_record",
         "get_approval_record",
         "list_approval_records",
     }

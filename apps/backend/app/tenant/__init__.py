@@ -12,12 +12,15 @@ from app.tenant.identity import (
     TenantChannelConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantKnowledgeDocumentVersionId,
     as_channel_configuration_id,
     as_governance_policy_id,
     as_knowledge_document_id,
+    as_knowledge_document_version_id,
     derive_channel_configuration_id,
     derive_governance_policy_id,
     derive_knowledge_document_id,
+    derive_knowledge_document_version_id,
 )
 from app.tenant.runtime import TenantConfigurationRuntime
 
@@ -30,12 +33,15 @@ __all__ = [
     "TenantGovernancePolicyId",
     "TenantGovernancePolicyStatus",
     "TenantKnowledgeDocumentId",
+    "TenantKnowledgeDocumentVersionId",
     "TenantKnowledgeDocumentStatus",
     "TenantKnowledgeDocumentType",
     "as_channel_configuration_id",
     "as_governance_policy_id",
     "as_knowledge_document_id",
+    "as_knowledge_document_version_id",
     "derive_channel_configuration_id",
     "derive_governance_policy_id",
     "derive_knowledge_document_id",
+    "derive_knowledge_document_version_id",
 ]

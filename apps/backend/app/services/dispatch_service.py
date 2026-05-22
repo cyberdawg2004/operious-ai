@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import ClassVar, FrozenSet, Sequence
+from typing import TYPE_CHECKING, ClassVar, FrozenSet, Sequence
 
 from app.boundary.identity import as_ingress_id
 from app.boundary.persistence import (
@@ -55,8 +56,17 @@ from app.session.enums import SessionScope
 from app.session.persistence import SessionPersistenceProtocol
 from app.session.runtime import SessionRuntime
 
+if TYPE_CHECKING:
+    from app.coordination.topology.runtime.runtime import (
+        CoordinationTopologyRuntime,
+    )
+
 BoundaryIngressRepository = BoundaryPersistenceProtocol
 SessionRepository = SessionPersistenceProtocol
+TenantTopologyRuntimeProvider = Callable[
+    [str],
+    Awaitable["CoordinationTopologyRuntime | None"],
+]
 
 _DISPATCH_SENDER_ID = "runtime:boundary-ingress"
 _DISPATCH_RECIPIENT_ID = "agent:ticket-triage"
@@ -67,7 +77,7 @@ class DispatchResult:
     dispatch_id: str
     session_id: str | None
     execution_id: str | None
-    governance_decision_id: str
+    governance_decision_id: str | None
     verdict: str
     arbitration_evaluation_id: str | None = None
     arbitration_outcome: str | None = None
@@ -88,6 +98,7 @@ class DispatchService:
         execution_publisher: ExecutionPublisher,
         escalation_publisher: EscalationPublisher | None = None,
         dispatch_arbitration_runtime: DispatchArbitrationRuntime | None = None,
+        tenant_topology_runtime_provider: TenantTopologyRuntimeProvider | None = None,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
@@ -96,6 +107,7 @@ class DispatchService:
         self._execution_publisher = execution_publisher
         self._escalation_publisher = escalation_publisher
         self._dispatch_arbitration = dispatch_arbitration_runtime
+        self._tenant_topology_runtime_provider = tenant_topology_runtime_provider
 
     async def dispatch(
         self,
@@ -108,17 +120,30 @@ class DispatchService:
             tenant_id=tenant_id,
         )
         authority = AuthorityContext.from_raw(tenant_id=tenant_id)
-        coordination_result = await self._coordination.dispatch(
+        coordination_runtime = await self._coordination_runtime_for_tenant(
+            tenant_id=tenant_id,
+        )
+        coordination_result = await coordination_runtime.dispatch(
             _to_coordination_request(
                 ingress=ingress,
                 tenant_id=tenant_id,
                 authority=authority,
             )
         )
-        governance_decision_id = (
-            coordination_result.trace.governance_decision_id
-        )
+        governance_decision_id = coordination_result.trace.governance_decision_id
         if governance_decision_id is None:
+            if coordination_result.is_topology_blocked:
+                return DispatchResult(
+                    dispatch_id=str(coordination_result.coordination_id),
+                    session_id=None,
+                    execution_id=None,
+                    governance_decision_id=None,
+                    verdict=coordination_result.outcome.value,
+                    halted=True,
+                    halt_reason=(
+                        coordination_result.error or coordination_result.outcome.value
+                    ),
+                )
             raise DispatchServiceError(
                 "coordination dispatch did not produce a governance decision"
             )
@@ -130,9 +155,11 @@ class DispatchService:
                 proposals=tuple(proposals or _default_dispatch_proposals()),
                 tenant_id=tenant_id,
                 authority=authority,
-                correlation_id=str(coordination_result.trace.correlation_id)
-                if coordination_result.trace.correlation_id is not None
-                else _correlation_id_text(ingress),
+                correlation_id=(
+                    str(coordination_result.trace.correlation_id)
+                    if coordination_result.trace.correlation_id is not None
+                    else _correlation_id_text(ingress)
+                ),
                 request_id=ingress.request_id,
                 metadata={
                     "boundary.ingress_id": str(ingress.ingress_id),
@@ -149,8 +176,7 @@ class DispatchService:
                     session_id=None,
                     execution_id=None,
                     governance_decision_id=str(governance_decision_id),
-                    verdict=arbitration.outcome
-                    or coordination_result.outcome.value,
+                    verdict=arbitration.outcome or coordination_result.outcome.value,
                     arbitration_evaluation_id=arbitration.evaluation_id,
                     arbitration_outcome=arbitration.outcome,
                     halted=True,
@@ -173,9 +199,7 @@ class DispatchService:
                     ),
                     "governance.decision_id": str(governance_decision_id),
                     "arbitration.evaluation_id": (
-                        arbitration.evaluation_id
-                        if arbitration is not None
-                        else None
+                        arbitration.evaluation_id if arbitration is not None else None
                     ),
                     "arbitration.outcome": (
                         arbitration.outcome if arbitration is not None else None
@@ -185,19 +209,13 @@ class DispatchService:
             )
         )
         if not session_envelope.is_ok or session_envelope.result is None:
-            raise DispatchServiceError(
-                "session runtime did not create a session"
-            )
+            raise DispatchServiceError("session runtime did not create a session")
         session_result = session_envelope.result
         if not isinstance(session_result, OpenSessionResult):
-            raise DispatchServiceError(
-                "session runtime returned an unexpected result"
-            )
+            raise DispatchServiceError("session runtime returned an unexpected result")
         session = session_result.session
         if session is None:
-            raise DispatchServiceError(
-                "session runtime returned an empty session"
-            )
+            raise DispatchServiceError("session runtime returned an empty session")
         if (
             coordination_result.outcome is CoordinationDispatchOutcome.DENIED
             and self._escalation_publisher is not None
@@ -208,25 +226,21 @@ class DispatchService:
                 session_id=str(session.identity.session_id),
             )
 
-        execution_request = (
-            await self._execution_runtime.request_diagnostic_execution(
-                dispatch_id=str(coordination_result.coordination_id),
-                session_id=str(session.identity.session_id),
-                tenant_id=tenant_id,
-                metadata={
-                    "boundary.ingress_id": str(ingress.ingress_id),
-                    "session.id": str(session.identity.session_id),
-                    "governance.decision_id": str(governance_decision_id),
-                    "arbitration.evaluation_id": (
-                        arbitration.evaluation_id
-                        if arbitration is not None
-                        else None
-                    ),
-                    "arbitration.outcome": (
-                        arbitration.outcome if arbitration is not None else None
-                    ),
-                },
-            )
+        execution_request = await self._execution_runtime.request_diagnostic_execution(
+            dispatch_id=str(coordination_result.coordination_id),
+            session_id=str(session.identity.session_id),
+            tenant_id=tenant_id,
+            metadata={
+                "boundary.ingress_id": str(ingress.ingress_id),
+                "session.id": str(session.identity.session_id),
+                "governance.decision_id": str(governance_decision_id),
+                "arbitration.evaluation_id": (
+                    arbitration.evaluation_id if arbitration is not None else None
+                ),
+                "arbitration.outcome": (
+                    arbitration.outcome if arbitration is not None else None
+                ),
+            },
         )
 
         await self._execution_publisher.publish_execution(
@@ -277,6 +291,18 @@ class DispatchService:
         if page.ingress:
             return page.ingress[0]
         raise DispatchIngressNotFoundError(ingress_id)
+
+    async def _coordination_runtime_for_tenant(
+        self,
+        *,
+        tenant_id: str,
+    ) -> CoordinationRuntime:
+        if self._tenant_topology_runtime_provider is None:
+            return self._coordination
+        topology_runtime = await self._tenant_topology_runtime_provider(tenant_id)
+        if topology_runtime is None:
+            return self._coordination
+        return self._coordination.with_topology_runtime(topology_runtime)
 
 
 class DispatchServiceError(RuntimeError):
@@ -373,9 +399,7 @@ def _to_coordination_request(
                 body={
                     "ingress_id": str(ingress.ingress_id),
                     "event_id": (
-                        str(ingress.event_id)
-                        if ingress.event_id is not None
-                        else None
+                        str(ingress.event_id) if ingress.event_id is not None else None
                     ),
                     "replay_key": (
                         str(ingress.replay_key)
@@ -393,30 +417,22 @@ def _to_coordination_request(
             metadata={
                 "boundary.ingress_id": str(ingress.ingress_id),
                 "boundary.replay_key": (
-                    str(ingress.replay_key)
-                    if ingress.replay_key is not None
-                    else None
+                    str(ingress.replay_key) if ingress.replay_key is not None else None
                 ),
             },
         ),
         direction=CoordinationDirection.RUNTIME_TO_AGENT,
-        correlation_id=derive_correlation_id(
-            seed=f"boundary:{ingress.ingress_id}"
-        ),
+        correlation_id=derive_correlation_id(seed=f"boundary:{ingress.ingress_id}"),
         request_id=ingress.request_id,
         tenant_id=tenant_id,
         authority=authority,
         metadata={
             "boundary.ingress_id": str(ingress.ingress_id),
             "boundary.event_id": (
-                str(ingress.event_id)
-                if ingress.event_id is not None
-                else None
+                str(ingress.event_id) if ingress.event_id is not None else None
             ),
             "boundary.replay_key": (
-                str(ingress.replay_key)
-                if ingress.replay_key is not None
-                else None
+                str(ingress.replay_key) if ingress.replay_key is not None else None
             ),
         },
     )
@@ -451,4 +467,5 @@ __all__ = [
     "DispatchService",
     "DispatchServiceError",
     "SessionRepository",
+    "TenantTopologyRuntimeProvider",
 ]

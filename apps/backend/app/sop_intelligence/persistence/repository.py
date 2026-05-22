@@ -13,9 +13,16 @@ from app.sop_intelligence.persistence.records import ApprovalRecord
 
 @runtime_checkable
 class SOPApprovalPersistenceProtocol(Protocol):
-    """Tenant-scoped write-once approval proposal persistence."""
+    """Tenant-scoped approval proposal persistence."""
 
     async def create_approval_record(
+        self,
+        record: ApprovalRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def update_approval_record(
         self,
         record: ApprovalRecord,
         *,

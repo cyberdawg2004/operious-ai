@@ -6,6 +6,7 @@ import type {
   CorrelationId,
   GovernanceTraceDto,
   GovernanceTraceId,
+  MePrincipalDto,
   Page,
   MemoryProposalDto,
   QueueItemDto,
@@ -15,6 +16,14 @@ import type {
   SOPProposalDto,
   SessionId,
   SessionTimelineEventDto,
+  TenantChannelConfigurationPage,
+  TenantChannelStatus,
+  TenantChannelType,
+  TenantGovernancePolicyPage,
+  TenantGovernancePolicyStatus,
+  TenantKnowledgeDocumentPage,
+  TenantKnowledgeDocumentStatus,
+  TenantKnowledgeDocumentType,
   TopologyGraphDto,
   TraceBundleDto,
 } from '@operious/types';
@@ -23,12 +32,16 @@ import type { RequestEnvelope } from './client';
 
 import { useAuthedRequest } from './client';
 import {
+  authMeKey,
   cognitionProposalsKey,
   cognitionRecommendationsKey,
   cognitionSopProposalsKey,
   governanceTraceKey,
   operationsQueueKey,
   sessionTimelineKey,
+  tenantChannelsKey,
+  tenantKnowledgeKey,
+  tenantPoliciesKey,
   topologyGraphKey,
   traceBundleKey,
 } from './query';
@@ -193,6 +206,112 @@ export const useRecommendations = (cursor?: string) => {
       const envelope = await request<Page<RecommendationDto>>(
         ENDPOINT.cognition.recommendations,
         cursor ? { query: { cursor } } : {},
+      );
+      return settle(envelope);
+    },
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Auth — `ENDPOINT.auth.me`
+// ---------------------------------------------------------------------------
+
+export const useMe = (enabled = true) => {
+  const request = useAuthedRequest();
+  return useQuery<MePrincipalDto>({
+    queryKey: authMeKey(),
+    enabled,
+    staleTime: FORENSIC_STALE_MS,
+    retry: false,
+    queryFn: async () => {
+      const envelope = await request<MePrincipalDto>(ENDPOINT.auth.me);
+      return settle(envelope);
+    },
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Tenant configuration reads
+// ---------------------------------------------------------------------------
+
+export const useTenantChannels = (filters: {
+  readonly channelType?: TenantChannelType;
+  readonly status?: TenantChannelStatus;
+  readonly limit?: number;
+  readonly offset?: number;
+} = {}) => {
+  const request = useAuthedRequest();
+  return useQuery<TenantChannelConfigurationPage>({
+    queryKey: tenantChannelsKey(filters),
+    staleTime: FORENSIC_STALE_MS,
+    retry: false,
+    queryFn: async () => {
+      const envelope = await request<TenantChannelConfigurationPage>(
+        ENDPOINT.tenant.channels,
+        {
+          query: {
+            channel_type: filters.channelType,
+            status: filters.status,
+            limit: filters.limit,
+            offset: filters.offset,
+          },
+        },
+      );
+      return settle(envelope);
+    },
+  });
+};
+
+export const useTenantKnowledge = (filters: {
+  readonly documentType?: TenantKnowledgeDocumentType;
+  readonly status?: TenantKnowledgeDocumentStatus;
+  readonly limit?: number;
+  readonly offset?: number;
+} = {}) => {
+  const request = useAuthedRequest();
+  return useQuery<TenantKnowledgeDocumentPage>({
+    queryKey: tenantKnowledgeKey(filters),
+    staleTime: FORENSIC_STALE_MS,
+    retry: false,
+    queryFn: async () => {
+      const envelope = await request<TenantKnowledgeDocumentPage>(
+        ENDPOINT.tenant.knowledge,
+        {
+          query: {
+            document_type: filters.documentType,
+            status: filters.status,
+            limit: filters.limit,
+            offset: filters.offset,
+          },
+        },
+      );
+      return settle(envelope);
+    },
+  });
+};
+
+export const useTenantPolicies = (filters: {
+  readonly policyType?: string;
+  readonly status?: TenantGovernancePolicyStatus;
+  readonly limit?: number;
+  readonly offset?: number;
+} = {}) => {
+  const request = useAuthedRequest();
+  return useQuery<TenantGovernancePolicyPage>({
+    queryKey: tenantPoliciesKey(filters),
+    staleTime: FORENSIC_STALE_MS,
+    retry: false,
+    queryFn: async () => {
+      const envelope = await request<TenantGovernancePolicyPage>(
+        ENDPOINT.tenant.policies,
+        {
+          query: {
+            policy_type: filters.policyType,
+            status: filters.status,
+            limit: filters.limit,
+            offset: filters.offset,
+          },
+        },
       );
       return settle(envelope);
     },

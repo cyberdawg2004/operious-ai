@@ -12,11 +12,14 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantTopologyStatus,
 )
 from app.tenant.identity import (
     TenantChannelConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantKnowledgeDocumentVersionId,
+    TenantTopologyConfigurationId,
 )
 
 
@@ -49,6 +52,22 @@ class TenantKnowledgeDocumentRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class TenantKnowledgeDocumentVersionRecord:
+    version_id: TenantKnowledgeDocumentVersionId
+    tenant_id: str
+    document_id: TenantKnowledgeDocumentId
+    version: int
+    title: str
+    content: str
+    document_type: TenantKnowledgeDocumentType
+    status: TenantKnowledgeDocumentStatus
+    uploaded_by: str
+    source_approval_id: str | None
+    created_at: datetime
+    metadata: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class TenantGovernancePolicyRecord:
     policy_id: TenantGovernancePolicyId
     tenant_id: str
@@ -61,8 +80,23 @@ class TenantGovernancePolicyRecord:
     created_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class TenantTopologyConfigurationRecord:
+    config_id: TenantTopologyConfigurationId
+    tenant_id: str
+    topology_name: str
+    status: TenantTopologyStatus
+    topology: Mapping[str, Any]
+    version: int
+    configured_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
 __all__ = [
     "TenantChannelConfigurationRecord",
     "TenantGovernancePolicyRecord",
     "TenantKnowledgeDocumentRecord",
+    "TenantKnowledgeDocumentVersionRecord",
+    "TenantTopologyConfigurationRecord",
 ]

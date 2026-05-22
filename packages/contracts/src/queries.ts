@@ -13,6 +13,14 @@ import type {
   SOPProposalDto,
   SessionId,
   SessionTimelineEventDto,
+  TenantChannelConfigurationPage,
+  TenantChannelStatus,
+  TenantChannelType,
+  TenantGovernancePolicyPage,
+  TenantGovernancePolicyStatus,
+  TenantKnowledgeDocumentPage,
+  TenantKnowledgeDocumentStatus,
+  TenantKnowledgeDocumentType,
   TopologyGraphDto,
   TraceBundleDto,
 } from '@operious/types';
@@ -79,6 +87,32 @@ export interface TopologyGraphQuery {
   readonly version?: string;
 }
 export type TopologyGraphResult = TopologyGraphDto;
+
+// ---- tenant configuration ----
+
+export interface TenantChannelListQuery {
+  readonly channelType?: TenantChannelType;
+  readonly status?: TenantChannelStatus;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+export type TenantChannelListResult = TenantChannelConfigurationPage;
+
+export interface TenantKnowledgeListQuery {
+  readonly documentType?: TenantKnowledgeDocumentType;
+  readonly status?: TenantKnowledgeDocumentStatus;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+export type TenantKnowledgeListResult = TenantKnowledgeDocumentPage;
+
+export interface TenantPolicyListQuery {
+  readonly policyType?: string;
+  readonly status?: TenantGovernancePolicyStatus;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+export type TenantPolicyListResult = TenantGovernancePolicyPage;
 
 // re-export the input id types to keep contracts self-contained
 export type { ArbitrationCaseId, CorrelationId, GovernanceTraceId, SessionId };

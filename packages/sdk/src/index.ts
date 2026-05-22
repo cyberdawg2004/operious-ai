@@ -13,10 +13,16 @@
  *     lineage itself.
  */
 
-export { OperiousClient, OperiousClientProvider, useOperiousClient } from './client';
+export {
+  OperiousClient,
+  OperiousClientProvider,
+  useOperiousClient,
+  useAuthedRequest,
+} from './client';
 export type { OperiousClientConfig, RequestEnvelope } from './client';
 
 export {
+  authMeKey,
   operationsQueueKey,
   traceBundleKey,
   sessionTimelineKey,
@@ -25,6 +31,9 @@ export {
   cognitionProposalsKey,
   cognitionSopProposalsKey,
   cognitionRecommendationsKey,
+  tenantChannelsKey,
+  tenantKnowledgeKey,
+  tenantPoliciesKey,
 } from './query';
 
 export {
@@ -36,9 +45,20 @@ export {
   useMemoryProposals,
   useSOPProposals,
   useRecommendations,
+  useMe,
+  useTenantChannels,
+  useTenantKnowledge,
+  useTenantPolicies,
 } from './hooks';
 
 export {
   useRequestApproval,
   useClaimQueueItem,
+  useCreateChannel,
+  useUpdateChannel,
+  useVerifyChannel,
+  useCreateKnowledgeDocument,
+  useUpdateKnowledgeDocument,
+  useCreatePolicy,
+  useUpdatePolicy,
 } from './mutations';

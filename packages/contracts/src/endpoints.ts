@@ -10,6 +10,9 @@
  */
 
 export const ENDPOINT = {
+  auth: {
+    me: '/api/v1/auth/me',
+  },
   operations: {
     queue: '/api/v1/operations/queue',
     queueItem: (id: string) => `/api/v1/operations/queue/${encodeURIComponent(id)}`,
@@ -35,6 +38,18 @@ export const ENDPOINT = {
   governance: {
     traces: '/api/v1/governance/traces',
     trace: (id: string) => `/api/v1/governance/traces/${encodeURIComponent(id)}`,
+  },
+  tenant: {
+    channels: '/api/v1/tenant/channels',
+    channel: (id: string) => `/api/v1/tenant/channels/${encodeURIComponent(id)}`,
+    verifyChannel: (id: string) =>
+      `/api/v1/tenant/channels/${encodeURIComponent(id)}/verify`,
+    knowledge: '/api/v1/tenant/knowledge',
+    knowledgeDocument: (id: string) =>
+      `/api/v1/tenant/knowledge/${encodeURIComponent(id)}`,
+    policies: '/api/v1/tenant/policies',
+    policy: (id: string) =>
+      `/api/v1/tenant/policies/${encodeURIComponent(id)}`,
   },
 } as const;
 

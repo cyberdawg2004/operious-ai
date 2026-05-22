@@ -239,6 +239,20 @@ class CoordinationRuntime:
     def known_participants(self) -> tuple[str, ...]:
         return self._registry.names()
 
+    def with_topology_runtime(
+        self,
+        topology_runtime: CoordinationTopologyRuntime | None,
+    ) -> "CoordinationRuntime":
+        """Return an equivalent runtime with tenant topology injected."""
+        return CoordinationRuntime(
+            governance_runtime=self._governance,
+            persistence=self._persistence,
+            registry=self._registry,
+            policy_runtime=self._policy_runtime,
+            topology_runtime=topology_runtime,
+            capability_governance=self._capability_governance,
+        )
+
     # ─── Public API ───────────────────────────────────────────────────
 
     async def dispatch(
@@ -248,9 +262,7 @@ class CoordinationRuntime:
         loop = asyncio.get_event_loop()
         started_at = datetime.now(timezone.utc)
         loop_start = loop.time()
-        coordination_id = (
-            request.coordination_id_override or generate_coordination_id()
-        )
+        coordination_id = request.coordination_id_override or generate_coordination_id()
         request_id = request.request_id or get_request_id()
 
         # Wedge B7: SINGULAR authority resolution.
@@ -331,9 +343,7 @@ class CoordinationRuntime:
                     resolution=resolution,
                 )
             )
-            topology_metadata = self._topology_metadata_for(
-                topology_envelope
-            )
+            topology_metadata = self._topology_metadata_for(topology_envelope)
             if not topology_envelope.is_ok:
                 # Topology substrate itself failed — TOPOLOGY_ERROR.
                 return await self._build_and_persist(
@@ -547,27 +557,21 @@ class CoordinationRuntime:
         envelope record and have no standalone read API.
         """
         query = CoordinationQuery(
-            correlation_id=str(correlation_id)
-            if correlation_id is not None
-            else None,
+            correlation_id=str(correlation_id) if correlation_id is not None else None,
             sender_id=sender_id,
             recipient_id=recipient_id,
             tenant_id=tenant_id,
-            runtime_instance_id=str(runtime_instance_id)
-            if runtime_instance_id is not None
-            else None,
+            runtime_instance_id=(
+                str(runtime_instance_id) if runtime_instance_id is not None else None
+            ),
             direction=direction.value if direction is not None else None,
-            message_type=message_type.value
-            if message_type is not None
-            else None,
+            message_type=message_type.value if message_type is not None else None,
             status=status.value if status is not None else None,
             limit=limit,
             offset=offset,
         )
-        page: RecordPage[CoordinationRecord] = (
-            await self._persistence.query_envelopes(
-                query, expected_tenant_id=expected_tenant_id
-            )
+        page: RecordPage[CoordinationRecord] = await self._persistence.query_envelopes(
+            query, expected_tenant_id=expected_tenant_id
         )
         return tuple(record_to_envelope(r) for r in page.items)
 
@@ -649,13 +653,13 @@ class CoordinationRuntime:
             CoordinationTopologyMetadataKey.MAX_CHAIN_DEPTH.value: envelope.trace.max_chain_depth,
         }
         if envelope.trace.matched_edge_id is not None:
-            meta[
-                CoordinationTopologyMetadataKey.MATCHED_EDGE_ID.value
-            ] = str(envelope.trace.matched_edge_id)
+            meta[CoordinationTopologyMetadataKey.MATCHED_EDGE_ID.value] = str(
+                envelope.trace.matched_edge_id
+            )
         if envelope.trace.matched_path_id is not None:
-            meta[
-                CoordinationTopologyMetadataKey.MATCHED_PATH_ID.value
-            ] = envelope.trace.matched_path_id
+            meta[CoordinationTopologyMetadataKey.MATCHED_PATH_ID.value] = (
+                envelope.trace.matched_path_id
+            )
         if envelope.result is not None and envelope.result.reason:
             meta["coordination.topology.reason"] = envelope.result.reason
         return meta
@@ -728,9 +732,7 @@ class CoordinationRuntime:
         """
         result = envelope.result
         meta: dict[str, object] = {
-            CoordinationPolicyMetadataKey.CHAIN_ID.value: str(
-                envelope.trace.chain_id
-            ),
+            CoordinationPolicyMetadataKey.CHAIN_ID.value: str(envelope.trace.chain_id),
             CoordinationPolicyMetadataKey.EVALUATION_ID.value: str(
                 envelope.trace.evaluation_id
             ),
@@ -766,16 +768,13 @@ class CoordinationRuntime:
                 "CoordinationRecipient.recipient_id must be a non-empty string"
             )
         if not self._registry.has(msg.sender_id):
-            raise CoordinationValidationError(
-                f"unknown sender: {msg.sender_id!r}"
-            )
+            raise CoordinationValidationError(f"unknown sender: {msg.sender_id!r}")
         # Broadcast recipients (kind=broadcast) need NOT be registered —
         # they are scope identifiers, not addressable participants. All
         # other recipient kinds MUST be registered.
         recipient_kind = msg.recipient.kind
-        if (
-            recipient_kind != "broadcast"
-            and not self._registry.has(msg.recipient.recipient_id)
+        if recipient_kind != "broadcast" and not self._registry.has(
+            msg.recipient.recipient_id
         ):
             raise CoordinationValidationError(
                 f"unknown recipient: {msg.recipient.recipient_id!r}"
@@ -832,17 +831,17 @@ class CoordinationRuntime:
             CoordinationMetadataKey.RECIPIENT_KIND.value: msg.recipient.kind,
         }
         if msg.in_reply_to is not None:
-            substrate_metadata[
-                CoordinationMetadataKey.IN_REPLY_TO.value
-            ] = str(msg.in_reply_to)
+            substrate_metadata[CoordinationMetadataKey.IN_REPLY_TO.value] = str(
+                msg.in_reply_to
+            )
         if request.parent_coordination_id is not None:
-            substrate_metadata[
-                CoordinationMetadataKey.PARENT_COORDINATION_ID.value
-            ] = str(request.parent_coordination_id)
+            substrate_metadata[CoordinationMetadataKey.PARENT_COORDINATION_ID.value] = (
+                str(request.parent_coordination_id)
+            )
         if request.parent_message_id is not None:
-            substrate_metadata[
-                CoordinationMetadataKey.PARENT_MESSAGE_ID.value
-            ] = str(request.parent_message_id)
+            substrate_metadata[CoordinationMetadataKey.PARENT_MESSAGE_ID.value] = str(
+                request.parent_message_id
+            )
 
         # Caller-provided metadata is merged in BENEATH substrate keys
         # so substrate keys are authoritative (avoids accidental
@@ -874,20 +873,12 @@ class CoordinationRuntime:
                 else None
             ),
             request_id=request_id,
-            principal_id=(
-                authority.principal_id
-                if authority is not None
-                else None
-            ),
+            principal_id=(authority.principal_id if authority is not None else None),
             organization_id=(
-                authority.organization_id
-                if authority is not None
-                else None
+                authority.organization_id if authority is not None else None
             ),
             environment_id=(
-                authority.environment_id
-                if authority is not None
-                else None
+                authority.environment_id if authority is not None else None
             ),
             authority=authority,
             subject=subject,

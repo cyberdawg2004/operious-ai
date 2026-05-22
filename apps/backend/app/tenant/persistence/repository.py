@@ -8,6 +8,7 @@ from app.tenant.identity import (
     TenantChannelConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantTopologyConfigurationId,
 )
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
@@ -16,11 +17,17 @@ from app.tenant.persistence.models import (
     TenantGovernancePolicyQuery,
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentQuery,
+    TenantKnowledgeDocumentVersionPage,
+    TenantKnowledgeDocumentVersionQuery,
+    TenantTopologyConfigurationPage,
+    TenantTopologyConfigurationQuery,
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
+    TenantKnowledgeDocumentVersionRecord,
+    TenantTopologyConfigurationRecord,
 )
 
 
@@ -82,6 +89,28 @@ class TenantConfigurationRepository(Protocol):
         expected_tenant_id: str,
     ) -> TenantKnowledgeDocumentPage: ...
 
+    async def save_knowledge_document_version(
+        self,
+        record: TenantKnowledgeDocumentVersionRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def get_knowledge_document_version(
+        self,
+        document_id: TenantKnowledgeDocumentId,
+        version: int,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantKnowledgeDocumentVersionRecord | None: ...
+
+    async def list_knowledge_document_versions(
+        self,
+        query: TenantKnowledgeDocumentVersionQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantKnowledgeDocumentVersionPage: ...
+
     async def save_governance_policy(
         self,
         record: TenantGovernancePolicyRecord,
@@ -102,6 +131,33 @@ class TenantConfigurationRepository(Protocol):
         *,
         expected_tenant_id: str,
     ) -> TenantGovernancePolicyPage: ...
+
+    async def save_topology_configuration(
+        self,
+        record: TenantTopologyConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def get_topology_configuration(
+        self,
+        config_id: TenantTopologyConfigurationId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantTopologyConfigurationRecord | None: ...
+
+    async def list_topology_configurations(
+        self,
+        query: TenantTopologyConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantTopologyConfigurationPage: ...
+
+    async def resolve_active_topology_configuration(
+        self,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantTopologyConfigurationRecord | None: ...
 
 
 __all__ = ["TenantConfigurationRepository"]

@@ -13,14 +13,25 @@ import { ROOT, readText, tsFilesUnder } from './util.js';
  * the SDK and risks producing operational truth on the frontend.
  *
  * Direct fetch is only allowed in:
- *   - packages/sdk/src/client.tsx          (the only allowed transport authority)
- *   - apps/command-center/src/mocks/*.ts   (deterministic mock transport)
+ *   - packages/sdk/src/client.tsx                          (the only allowed transport authority)
+ *   - apps/command-center/src/mocks/*.ts                   (deterministic mock transport)
+ *   - apps/marketing/src/app/actions/cognition.ts          (server-only proxy to the
+ *                                                           cognition runtime; never
+ *                                                           reachable from a UI bundle)
+ *   - apps/command-center/src/app/api/proxy/[...path]/route.ts
+ *                                                          (server-only Auth0
+ *                                                           token-attaching proxy
+ *                                                           from the browser to
+ *                                                           the backend; never
+ *                                                           reachable from a UI bundle)
  *
  * Any other reference is a semantic violation.
  */
 const ALLOWED_PATHS = [
   join('packages', 'sdk', 'src', 'client.tsx'),
   join('apps', 'command-center', 'src', 'mocks', 'fetch.ts'),
+  join('apps', 'marketing', 'src', 'app', 'actions', 'cognition.ts'),
+  join('apps', 'command-center', 'src', 'app', 'api', 'proxy', '[...path]', 'route.ts'),
 ];
 
 const SCAN_ROOTS = [

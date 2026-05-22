@@ -12,6 +12,11 @@ import type {
   QueueItemKind,
   QueueItemStatus,
   SessionId,
+  TenantChannelStatus,
+  TenantChannelType,
+  TenantGovernancePolicyStatus,
+  TenantKnowledgeDocumentStatus,
+  TenantKnowledgeDocumentType,
 } from '@operious/types';
 
 export const operationsQueueKey = (filters: {
@@ -46,3 +51,41 @@ export const cognitionSopProposalsKey = (cursor: string | undefined) =>
 
 export const cognitionRecommendationsKey = (cursor: string | undefined) =>
   ['cognition-recommendations', cursor ?? 'first-page'] as const;
+
+export const tenantChannelsKey = (filters: {
+  readonly channelType?: TenantChannelType;
+  readonly status?: TenantChannelStatus;
+  readonly offset?: number;
+}) =>
+  [
+    'tenant-channels',
+    filters.channelType ?? 'any-type',
+    filters.status ?? 'any-status',
+    filters.offset ?? 0,
+  ] as const;
+
+export const tenantKnowledgeKey = (filters: {
+  readonly documentType?: TenantKnowledgeDocumentType;
+  readonly status?: TenantKnowledgeDocumentStatus;
+  readonly offset?: number;
+}) =>
+  [
+    'tenant-knowledge',
+    filters.documentType ?? 'any-type',
+    filters.status ?? 'any-status',
+    filters.offset ?? 0,
+  ] as const;
+
+export const tenantPoliciesKey = (filters: {
+  readonly policyType?: string;
+  readonly status?: TenantGovernancePolicyStatus;
+  readonly offset?: number;
+}) =>
+  [
+    'tenant-policies',
+    filters.policyType ?? 'any-type',
+    filters.status ?? 'any-status',
+    filters.offset ?? 0,
+  ] as const;
+
+export const authMeKey = () => ['auth-me'] as const;

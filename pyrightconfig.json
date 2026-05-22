@@ -1,0 +1,25 @@
+{
+  "extends": "./apps/backend/pyrightconfig.json",
+  "include": [
+    "apps/backend/app"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    ".pytest_cache",
+    "venv",
+    ".venv",
+    "build",
+    "dist",
+    "apps/backend/app/_deprecated",
+    "apps/backend/app/_deprecated/**",
+    "**/_deprecated/**"
+  ],
+  "ignore": [
+    "apps/backend/app/_deprecated",
+    "apps/backend/app/_deprecated/**",
+    "**/_deprecated/**"
+  ],
+  "venvPath": ".",
+  "venv": "venv"
+}

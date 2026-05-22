@@ -15,7 +15,7 @@ from app.sop_intelligence.persistence.records import ApprovalRecord
 
 
 class InMemorySOPApprovalPersistence:
-    """Reference write-once approval proposal store."""
+    """Reference approval proposal store."""
 
     def __init__(self) -> None:
         self._records: dict[str, ApprovalRecord] = {}
@@ -32,6 +32,21 @@ class InMemorySOPApprovalPersistence:
             if record.approval_id in self._records:
                 raise SOPIntelligencePersistenceError(
                     f"approval {record.approval_id!r} already recorded"
+                )
+            self._records[record.approval_id] = record
+
+    async def update_approval_record(
+        self,
+        record: ApprovalRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _enforce_expected_tenant(record.tenant_id, expected_tenant_id)
+        async with self._lock:
+            existing = self._records.get(record.approval_id)
+            if existing is None or existing.tenant_id != expected_tenant_id:
+                raise SOPIntelligencePersistenceError(
+                    f"approval {record.approval_id!r} not found"
                 )
             self._records[record.approval_id] = record
 

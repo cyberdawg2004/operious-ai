@@ -9,7 +9,7 @@ class DispatchResponse(BaseModel):
     dispatch_id: str
     session_id: str | None = None
     execution_id: str | None = None
-    governance_decision_id: str
+    governance_decision_id: str | None = None
     verdict: str
     arbitration_evaluation_id: str | None = None
     arbitration_outcome: str | None = None

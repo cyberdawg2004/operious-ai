@@ -42,6 +42,8 @@ export const BoundarySourceType = {
   TWILIO_SMS: 'twilio_sms',
   EMAIL: 'email',
   SLACK: 'slack',
+  LARK: 'lark',
+  SHULEX: 'shulex',
   REST_API: 'rest_api',
   GENERIC: 'generic',
 } as const;

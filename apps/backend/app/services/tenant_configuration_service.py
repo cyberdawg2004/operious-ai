@@ -14,6 +14,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantTopologyStatus,
 )
 from app.tenant.identity import (
     TenantChannelConfigurationId,
@@ -30,6 +31,9 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentQuery,
     TenantKnowledgeDocumentRecord,
+    TenantTopologyConfigurationPage,
+    TenantTopologyConfigurationQuery,
+    TenantTopologyConfigurationRecord,
 )
 from app.tenant.runtime import TenantConfigurationRuntime
 
@@ -234,6 +238,44 @@ class TenantConfigurationService:
             tenant_id=tenant_id,
             query=TenantGovernancePolicyQuery(
                 policy_type=policy_type,
+                status=status,
+                limit=limit,
+                offset=offset,
+            ),
+        )
+
+    async def configure_topology(
+        self,
+        *,
+        tenant_id: str,
+        topology_name: str,
+        topology: Mapping[str, Any],
+        status: TenantTopologyStatus,
+        configured_by: str,
+    ) -> TenantTopologyConfigurationRecord:
+        record = await self._runtime.configure_topology_from_mapping(
+            tenant_id=tenant_id,
+            topology_name=topology_name,
+            topology=topology,
+            status=status,
+            configured_by=configured_by,
+        )
+        await self._session.commit()
+        return record
+
+    async def list_topology_configurations(
+        self,
+        *,
+        tenant_id: str,
+        topology_name: str | None,
+        status: TenantTopologyStatus | None,
+        limit: int | None,
+        offset: int,
+    ) -> TenantTopologyConfigurationPage:
+        return await self._runtime.list_topology_configurations(
+            tenant_id=tenant_id,
+            query=TenantTopologyConfigurationQuery(
+                topology_name=topology_name,
                 status=status,
                 limit=limit,
                 offset=offset,

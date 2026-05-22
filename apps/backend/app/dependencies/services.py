@@ -60,6 +60,7 @@ from app.coordination.persistence import (
 from app.coordination.registry import CoordinationRegistry
 from app.coordination.models.participants import CoordinationParticipant
 from app.coordination.runtime import CoordinationRuntime
+from app.cognition import CognitionRuntime
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
@@ -87,13 +88,31 @@ from app.governance.persistence import (
     PostgresGovernanceRepository,
 )
 from app.governance.policies.chain import PolicyChain
-from app.runtime import make_postgres_dispatch_arbitration_runtime
+from app.knowledge import (
+    DeterministicHashEmbeddingProvider,
+    DeterministicKnowledgeChunker,
+    KnowledgeRuntime,
+)
+from app.knowledge.persistence import PostgresKnowledgeRepository
+from app.observability.persistence import (
+    PostgresOperationalObservabilityPersistence,
+)
+from app.observability.runtime import OperationalObservabilityRuntime
+from app.runtime import (
+    TenantCoordinationTopologyRuntimeProvider,
+    make_postgres_dispatch_arbitration_runtime,
+)
+from app.services.cognition_service import CognitionService
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
 )
 from app.services.escalation_service import EscalationService
 from app.services.health_service import HealthService
+from app.services.knowledge_service import KnowledgeService
+from app.services.operational_observability_service import (
+    OperationalObservabilityService,
+)
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.ticket_ingress_service import TicketIngressService
 from app.qa.persistence import PostgresQAPersistence
@@ -210,6 +229,11 @@ async def get_dispatch_service(
     deferred_escalation_publisher = _DeferredEscalationPublisher(
         delegate=CeleryEscalationPublisher(),
     )
+    tenant_topology_provider = TenantCoordinationTopologyRuntimeProvider(
+        tenant_configuration_runtime=TenantConfigurationRuntime(
+            repository=PostgresTenantConfigurationRepository(session),
+        )
+    )
     service = DispatchService(
         coordination_runtime=CoordinationRuntime(
             governance_runtime=_dispatch_governance_runtime(
@@ -226,6 +250,7 @@ async def get_dispatch_service(
         dispatch_arbitration_runtime=(
             make_postgres_dispatch_arbitration_runtime(session=session)
         ),
+        tenant_topology_runtime_provider=tenant_topology_provider.for_tenant,
     )
     try:
         yield service
@@ -272,6 +297,43 @@ def get_tenant_configuration_service(
     return TenantConfigurationService(runtime=runtime, session=session)
 
 
+def get_cognition_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> CognitionService:
+    """Return the Cognition Hub lifecycle service for this request."""
+    return CognitionService(
+        runtime=CognitionRuntime(
+            approval_persistence=PostgresSOPApprovalPersistence(session),
+            tenant_configuration_repository=(
+                PostgresTenantConfigurationRepository(session)
+            ),
+        ),
+        session=session,
+    )
+
+
+def get_knowledge_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> KnowledgeService:
+    """Return the tenant knowledge ingestion/retrieval service."""
+    settings = get_settings()
+    runtime = KnowledgeRuntime(
+        repository=PostgresKnowledgeRepository(session),
+        tenant_configuration_repository=PostgresTenantConfigurationRepository(
+            session
+        ),
+        embedding_provider=DeterministicHashEmbeddingProvider(),
+        chunker=DeterministicKnowledgeChunker(
+            target_size=settings.CHUNK_TARGET_SIZE,
+            overlap=settings.CHUNK_OVERLAP,
+            min_size=settings.CHUNK_MIN_SIZE,
+        ),
+        vector_index_name=settings.VECTOR_DEFAULT_INDEX,
+        default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
+    )
+    return KnowledgeService(runtime=runtime, session=session)
+
+
 def get_sop_intelligence_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> SOPIntelligenceService:
@@ -287,6 +349,18 @@ def get_sop_intelligence_service(
                 PostgresTenantConfigurationRepository(session)
             ),
         )
+    )
+
+
+def get_operational_observability_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> OperationalObservabilityService:
+    """Return the tenant operational observability service."""
+    return OperationalObservabilityService(
+        runtime=OperationalObservabilityRuntime(
+            persistence=PostgresOperationalObservabilityPersistence(session),
+        ),
+        session=session,
     )
 
 
@@ -461,10 +535,13 @@ def _bounded_publish_error(exc: BaseException) -> str:
 __all__ = [
     "get_arbitration_repository",
     "get_boundary_repository",
+    "get_cognition_service",
     "get_coordination_repository",
     "get_escalation_service",
     "get_governance_repository",
     "get_health_service",
+    "get_knowledge_service",
+    "get_operational_observability_service",
     "get_session_repository",
     "get_sop_intelligence_service",
     "get_supervisor_repository",

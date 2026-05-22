@@ -8,6 +8,10 @@ from app.tenant.persistence.models import (
     TenantGovernancePolicyQuery,
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentQuery,
+    TenantKnowledgeDocumentVersionPage,
+    TenantKnowledgeDocumentVersionQuery,
+    TenantTopologyConfigurationPage,
+    TenantTopologyConfigurationQuery,
 )
 from app.tenant.persistence.postgres import (
     PostgresTenantConfigurationRepository,
@@ -16,6 +20,8 @@ from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
+    TenantKnowledgeDocumentVersionRecord,
+    TenantTopologyConfigurationRecord,
 )
 from app.tenant.persistence.repository import TenantConfigurationRepository
 
@@ -32,4 +38,10 @@ __all__ = [
     "TenantKnowledgeDocumentPage",
     "TenantKnowledgeDocumentQuery",
     "TenantKnowledgeDocumentRecord",
+    "TenantKnowledgeDocumentVersionPage",
+    "TenantKnowledgeDocumentVersionQuery",
+    "TenantKnowledgeDocumentVersionRecord",
+    "TenantTopologyConfigurationPage",
+    "TenantTopologyConfigurationQuery",
+    "TenantTopologyConfigurationRecord",
 ]

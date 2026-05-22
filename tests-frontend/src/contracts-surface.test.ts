@@ -22,9 +22,11 @@ test('ENDPOINT exposes exactly the pinned substrate groups', () => {
   }
   groups.sort();
   deepStrictEqual(groups, [
+    'auth',
     'cognition',
     'governance',
     'operations',
+    'tenant',
     'topology',
     'traces',
   ]);

@@ -16,10 +16,15 @@ import { ROOT, readText, tsFilesUnder } from './util.js';
  *   - the dev-only mock transport that has to bridge contract paths to fixtures.
  *     This is acceptable because the mock is a transitional artifact and
  *     `mocks/fetch.ts` already routes through the imported `ENDPOINT` map.
+ *   - the server-only Auth0 proxy route. It reconstructs `${apiBaseUrl}${path}`
+ *     where `path` is the already-namespaced subpath captured from
+ *     `/api/proxy/[...path]` — this is the legitimate server-side rejoin
+ *     of the same `/api/v*` string the SDK already produced via ENDPOINT.
  */
 const ALLOWED_PATHS = [
   join('packages', 'contracts', 'src', 'endpoints.ts'),
   join('apps', 'command-center', 'src', 'mocks', 'fetch.ts'),
+  join('apps', 'command-center', 'src', 'app', 'api', 'proxy', '[...path]', 'route.ts'),
 ];
 
 const SCAN_ROOTS = [

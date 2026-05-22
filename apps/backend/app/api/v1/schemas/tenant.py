@@ -13,11 +13,13 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantTopologyStatus,
 )
 from app.tenant.persistence import (
     TenantChannelConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
+    TenantTopologyConfigurationRecord,
 )
 
 
@@ -72,9 +74,7 @@ class TenantChannelConfigurationResponse(BaseModel):
 class TenantChannelConfigurationPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[TenantChannelConfigurationResponse] = Field(
-        default_factory=list
-    )
+    items: list[TenantChannelConfigurationResponse] = []
     total: int
     offset: int
 
@@ -85,9 +85,7 @@ class TenantKnowledgeCreateRequest(BaseModel):
     title: str = Field(min_length=1)
     content: str = Field(min_length=1)
     document_type: TenantKnowledgeDocumentType
-    status: TenantKnowledgeDocumentStatus = (
-        TenantKnowledgeDocumentStatus.PENDING_INDEX
-    )
+    status: TenantKnowledgeDocumentStatus = TenantKnowledgeDocumentStatus.PENDING_INDEX
 
 
 class TenantKnowledgeUpdateRequest(BaseModel):
@@ -135,9 +133,7 @@ class TenantKnowledgeDocumentResponse(BaseModel):
 class TenantKnowledgeDocumentPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[TenantKnowledgeDocumentResponse] = Field(
-        default_factory=list
-    )
+    items: list[TenantKnowledgeDocumentResponse] = []
     total: int
     offset: int
 
@@ -191,9 +187,52 @@ class TenantGovernancePolicyResponse(BaseModel):
 class TenantGovernancePolicyPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[TenantGovernancePolicyResponse] = Field(
-        default_factory=list
-    )
+    items: list[TenantGovernancePolicyResponse] = []
+    total: int
+    offset: int
+
+
+class TenantTopologyConfigurationCreateRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    topology_name: str = Field(min_length=1)
+    topology: dict[str, Any]
+    status: TenantTopologyStatus = TenantTopologyStatus.DRAFT
+
+
+class TenantTopologyConfigurationResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    config_id: str
+    topology_name: str
+    topology: dict[str, Any]
+    status: TenantTopologyStatus
+    version: int
+    configured_by: str
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantTopologyConfigurationRecord,
+    ) -> "TenantTopologyConfigurationResponse":
+        return cls(
+            config_id=str(record.config_id),
+            topology_name=record.topology_name,
+            topology=dict(record.topology),
+            status=record.status,
+            version=record.version,
+            configured_by=record.configured_by,
+            created_at=record.created_at.isoformat(),
+            updated_at=record.updated_at.isoformat(),
+        )
+
+
+class TenantTopologyConfigurationPage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[TenantTopologyConfigurationResponse] = []
     total: int
     offset: int
 
@@ -211,4 +250,7 @@ __all__ = [
     "TenantKnowledgeDocumentPage",
     "TenantKnowledgeDocumentResponse",
     "TenantKnowledgeUpdateRequest",
+    "TenantTopologyConfigurationCreateRequest",
+    "TenantTopologyConfigurationPage",
+    "TenantTopologyConfigurationResponse",
 ]

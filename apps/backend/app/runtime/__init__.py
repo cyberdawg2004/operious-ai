@@ -63,6 +63,10 @@ from app.runtime.dispatch_arbitration import (
     DispatchArbitrationProposal,
     DispatchArbitrationRuntime,
 )
+from app.runtime.tenant_topology import (
+    TenantCoordinationTopologyRuntimeProvider,
+    build_coordination_topology_runtime,
+)
 from app.runtime.timeline_runtime import TimelineRuntime
 
 __all__ = [
@@ -99,7 +103,9 @@ __all__ = [
     "SupervisorEventProjectionError",
     "SupervisorOperationalEventProjection",
     "SupervisorOperationalEventProjector",
+    "TenantCoordinationTopologyRuntimeProvider",
     "TimelineRuntime",
+    "build_coordination_topology_runtime",
     "make_postgres_dispatch_arbitration_runtime",
     "project_arbitration_record",
     "project_boundary_ingress_record",

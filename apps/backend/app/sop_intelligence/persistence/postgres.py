@@ -23,7 +23,7 @@ from app.tenant.db.models import TenantKnowledgeDocumentRow
 
 
 class PostgresSOPApprovalPersistence(BaseRepository):
-    """Postgres-backed write-once approval proposal persistence."""
+    """Postgres-backed approval proposal persistence."""
 
     async def create_approval_record(
         self,
@@ -48,17 +48,46 @@ class PostgresSOPApprovalPersistence(BaseRepository):
                 f"approval {record.approval_id!r} already recorded"
             ) from exc
 
+    async def update_approval_record(
+        self,
+        record: ApprovalRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _enforce_expected_tenant(record.tenant_id, expected_tenant_id)
+        if not await self._document_visible(
+            record.document_id,
+            expected_tenant_id=expected_tenant_id,
+        ):
+            raise SOPIntelligencePersistenceError(
+                "approval document_id is not visible for expected_tenant_id"
+            )
+        row = await self._approval_row(
+            record.approval_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if row is None:
+            raise SOPIntelligencePersistenceError(
+                f"approval {record.approval_id!r} not found"
+            )
+        try:
+            async with self.session.begin_nested():
+                _update_row(row, record)
+        except IntegrityError as exc:
+            raise SOPIntelligencePersistenceError(
+                f"approval {record.approval_id!r} could not be updated"
+            ) from exc
+
     async def get_approval_record(
         self,
         approval_id: str,
         *,
         expected_tenant_id: str,
     ) -> ApprovalRecord | None:
-        stmt = select(ApprovalRecordRow).where(
-            ApprovalRecordRow.approval_id == UUID(approval_id),
-            ApprovalRecordRow.tenant_id == expected_tenant_id,
+        row = await self._approval_row(
+            approval_id,
+            expected_tenant_id=expected_tenant_id,
         )
-        row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else _row_to_record(row)
 
     async def list_approval_records(
@@ -96,6 +125,18 @@ class PostgresSOPApprovalPersistence(BaseRepository):
         )
         return (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
+    async def _approval_row(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> ApprovalRecordRow | None:
+        stmt = select(ApprovalRecordRow).where(
+            ApprovalRecordRow.approval_id == UUID(approval_id),
+            ApprovalRecordRow.tenant_id == expected_tenant_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
 
 def _apply_filters(
     stmt: Select[tuple[ApprovalRecordRow]],
@@ -131,6 +172,18 @@ def _record_to_row(record: ApprovalRecord) -> ApprovalRecordRow:
         created_at=datetime.fromisoformat(record.created_at),
         metadata_json=dict(record.metadata),
     )
+
+
+def _update_row(row: ApprovalRecordRow, record: ApprovalRecord) -> None:
+    row.document_id = UUID(record.document_id)
+    row.proposed_change = record.proposed_change
+    row.evidence_sessions = list(record.evidence_sessions)
+    row.confidence = record.confidence
+    row.status = record.status
+    row.proposed_by = record.proposed_by
+    row.reviewed_by = record.reviewed_by
+    row.created_at = datetime.fromisoformat(record.created_at)
+    row.metadata_json = dict(record.metadata)
 
 
 def _row_to_record(row: ApprovalRecordRow) -> ApprovalRecord:

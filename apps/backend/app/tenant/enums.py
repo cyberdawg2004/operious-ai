@@ -42,10 +42,17 @@ class TenantGovernancePolicyStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class TenantTopologyStatus(StrEnum):
+    ACTIVE = "active"
+    DRAFT = "draft"
+    ARCHIVED = "archived"
+
+
 __all__ = [
     "TenantChannelStatus",
     "TenantChannelType",
     "TenantGovernancePolicyStatus",
     "TenantKnowledgeDocumentStatus",
     "TenantKnowledgeDocumentType",
+    "TenantTopologyStatus",
 ]

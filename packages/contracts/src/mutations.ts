@@ -1,10 +1,21 @@
 import type {
   ApprovalRecordDto,
+  ChannelConfigurationId,
   CorrelationId,
+  GovernancePolicyId,
+  KnowledgeDocumentId,
   MemoryProposalId,
   PrincipalId,
   QueueItemDto,
   SOPProposalId,
+  TenantChannelConfigurationDto,
+  TenantChannelStatus,
+  TenantChannelType,
+  TenantGovernancePolicyDto,
+  TenantGovernancePolicyStatus,
+  TenantKnowledgeDocumentDto,
+  TenantKnowledgeDocumentStatus,
+  TenantKnowledgeDocumentType,
 } from '@operious/types';
 
 /**
@@ -55,3 +66,62 @@ export interface ClaimQueueItemResult {
   readonly observedAt: string;
   readonly reason?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Tenant configuration mutations
+// ---------------------------------------------------------------------------
+
+export interface CreateChannelMutation {
+  readonly channelType: TenantChannelType;
+  readonly routingAddress: string;
+  readonly credentials: Readonly<Record<string, unknown>>;
+  readonly webhookSecret: string;
+  readonly status?: TenantChannelStatus;
+}
+export type CreateChannelResult = TenantChannelConfigurationDto;
+
+export interface UpdateChannelMutation {
+  readonly configId: ChannelConfigurationId;
+  readonly routingAddress?: string;
+  readonly credentials?: Readonly<Record<string, unknown>>;
+  readonly webhookSecret?: string;
+  readonly status?: TenantChannelStatus;
+}
+export type UpdateChannelResult = TenantChannelConfigurationDto;
+
+export interface VerifyChannelMutation {
+  readonly configId: ChannelConfigurationId;
+}
+export type VerifyChannelResult = TenantChannelConfigurationDto;
+
+export interface CreateKnowledgeDocumentMutation {
+  readonly title: string;
+  readonly content: string;
+  readonly documentType: TenantKnowledgeDocumentType;
+  readonly status?: TenantKnowledgeDocumentStatus;
+}
+export type CreateKnowledgeDocumentResult = TenantKnowledgeDocumentDto;
+
+export interface UpdateKnowledgeDocumentMutation {
+  readonly documentId: KnowledgeDocumentId;
+  readonly content?: string;
+  readonly status?: TenantKnowledgeDocumentStatus;
+}
+export type UpdateKnowledgeDocumentResult = TenantKnowledgeDocumentDto;
+
+export interface CreatePolicyMutation {
+  readonly policyType: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
+  readonly status?: TenantGovernancePolicyStatus;
+  /** ISO-8601 timestamp. */
+  readonly effectiveFrom: string;
+}
+export type CreatePolicyResult = TenantGovernancePolicyDto;
+
+export interface UpdatePolicyMutation {
+  readonly policyId: GovernancePolicyId;
+  readonly parameters?: Readonly<Record<string, unknown>>;
+  readonly status?: TenantGovernancePolicyStatus;
+  readonly effectiveFrom?: string;
+}
+export type UpdatePolicyResult = TenantGovernancePolicyDto;

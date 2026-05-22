@@ -1,0 +1,525 @@
+"""LLM-backed diagnostic cognition runtime."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Mapping, cast
+
+from app.cognition.exceptions import (
+    CognitionGovernanceRejectionError,
+    CognitionLLMProviderError,
+    CognitionPersistenceError,
+    CognitionSemanticValidationError,
+)
+from app.cognition.governance import LLMDiagnosticOutputPolicy
+from app.cognition.identity import CognitionLLMUsageId, derive_llm_usage_id
+from app.cognition.llm import DiagnosticLLMClient, DiagnosticLLMMessage
+from app.cognition.models import (
+    CognitionLLMUsageRecord,
+    CognitionLLMUsageStatus,
+    DiagnosticLLMCompletion,
+    DiagnosticReasoningResult,
+)
+from app.cognition.persistence import CognitionUsagePersistenceProtocol
+from app.cognition.semantic import validate_governance_terms
+from app.governance.context import GovernanceContext
+from app.governance.enums import Decision, EnforcementStage
+from app.governance.enforcement.handlers import (
+    AllowHandler,
+    DegradeHandler,
+    DenyHandler,
+    EnforcementHandlerRegistry,
+    EscalateHandler,
+    RedactHandler,
+    RequireApprovalHandler,
+)
+from app.governance.enforcement.runtime import GovernanceRuntime
+from app.governance.evaluators.engine import PolicyEvaluationEngine
+from app.governance.persistence import BaseGovernanceRepository
+from app.governance.policies.chain import PolicyChain
+from app.governance.subjects.execution import ExecutionGovernanceSubject
+from app.identity import coerce_tenant_id
+from app.knowledge.models import KnowledgeRetrievalResult
+from app.knowledge.runtime import KnowledgeRuntime
+
+_SYSTEM_PROMPT = """You are Operious diagnostic cognition.
+Classify the support ticket using only the ticket text and cited tenant SOP
+context. Return compact JSON only with keys: summary, category, confidence.
+Use canonical English. Preserve any governance-significant terms present in
+the input or citations, and do not invent refunds, approvals, denials,
+chargebacks, RMA, legal, fraud, compliance, replacement, credit, or escalation
+terms that are not grounded in the input or citations."""
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticCognitionRuntimeConfig:
+    max_output_tokens: int = 512
+    temperature: float = 0.0
+    context_top_k: int = 6
+    context_token_budget: int = 2500
+    require_citations: bool = False
+    input_token_micro_usd: int = 3
+    output_token_micro_usd: int = 15
+
+
+class DiagnosticCognitionRuntime:
+    """Runtime for RAG-grounded diagnostic model reasoning."""
+
+    def __init__(
+        self,
+        *,
+        knowledge_runtime: KnowledgeRuntime,
+        llm_client: DiagnosticLLMClient,
+        usage_persistence: CognitionUsagePersistenceProtocol,
+        governance_repository: BaseGovernanceRepository | None = None,
+        config: DiagnosticCognitionRuntimeConfig | None = None,
+    ) -> None:
+        self._knowledge_runtime = knowledge_runtime
+        self._llm_client = llm_client
+        self._usage_persistence = usage_persistence
+        self._governance = _governance_runtime(
+            governance_repository=governance_repository,
+            require_citations=(
+                config.require_citations if config is not None else False
+            ),
+        )
+        self._config = config or DiagnosticCognitionRuntimeConfig()
+
+    async def reason_about_ticket(
+        self,
+        *,
+        tenant_id: str,
+        execution_id: str,
+        dispatch_id: str,
+        session_id: str,
+        content: str,
+    ) -> DiagnosticReasoningResult:
+        retrieval = await self._knowledge_runtime.retrieve(
+            tenant_id=tenant_id,
+            query=content,
+            top_k=self._config.context_top_k,
+            max_tokens=self._config.context_token_budget,
+        )
+        prompt = _render_user_prompt(
+            tenant_id=tenant_id,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            content=content,
+            retrieval=retrieval,
+        )
+        usage_id = derive_llm_usage_id(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            model=self._llm_client.model_name,
+        )
+        completion: DiagnosticLLMCompletion | None = None
+        try:
+            completion = await self._llm_client.complete(
+                system_prompt=_SYSTEM_PROMPT,
+                messages=(DiagnosticLLMMessage(role="user", content=prompt),),
+                max_output_tokens=self._config.max_output_tokens,
+                temperature=self._config.temperature,
+            )
+            parsed = _parse_output(completion.text)
+            semantic = validate_governance_terms(
+                canonical_text=f"{content}\n\n{_context_text(retrieval)}",
+                output_text=(
+                    f"{parsed.summary}\n{parsed.category}"
+                ),
+            )
+            governance_decision_id = await self._govern_output(
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                content=content,
+                retrieval=retrieval,
+                completion=completion,
+                parsed=parsed,
+                semantic_terms=semantic.output_terms,
+                semantic_valid=True,
+            )
+            record = _usage_record(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                completion=completion,
+                status=CognitionLLMUsageStatus.ACCEPTED,
+                estimated_cost_micro_usd=_estimate_cost(
+                    completion=completion,
+                    input_micro_usd=self._config.input_token_micro_usd,
+                    output_micro_usd=self._config.output_token_micro_usd,
+                ),
+                metadata={
+                    "governance_decision_id": governance_decision_id,
+                    "citation_count": len(retrieval.citations),
+                    "semantic_terms": list(semantic.output_terms),
+                },
+            )
+            await self._save_usage(record, tenant_id=tenant_id)
+            return DiagnosticReasoningResult(
+                summary=parsed.summary,
+                category=parsed.category,
+                confidence=parsed.confidence,
+                provider=completion.provider,
+                model=completion.model,
+                prompt_tokens=completion.usage.prompt_tokens,
+                completion_tokens=completion.usage.completion_tokens,
+                total_tokens=completion.usage.total_tokens,
+                estimated_cost_micro_usd=record.estimated_cost_micro_usd,
+                usage_id=record.usage_id,
+                governance_decision_id=governance_decision_id,
+                citations=tuple(citation.index for citation in retrieval.citations),
+                semantic_terms=semantic.output_terms,
+                retrieval=retrieval,
+                metadata={"raw": dict(completion.raw_metadata)},
+            )
+        except CognitionSemanticValidationError as exc:
+            await self._save_rejected_usage(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                error=exc,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+                completion=completion,
+            )
+            raise
+        except CognitionGovernanceRejectionError as exc:
+            await self._save_rejected_usage(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                error=exc,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+                completion=completion,
+            )
+            raise
+        except Exception as exc:
+            await self._save_rejected_usage(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                error=exc,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+                completion=completion,
+                failed=True,
+            )
+            if isinstance(exc, CognitionLLMProviderError):
+                raise
+            raise CognitionLLMProviderError(
+                f"diagnostic cognition failed: {exc.__class__.__name__}"
+            ) from exc
+
+    async def _govern_output(
+        self,
+        *,
+        tenant_id: str,
+        execution_id: str,
+        dispatch_id: str,
+        session_id: str,
+        content: str,
+        retrieval: KnowledgeRetrievalResult,
+        completion: DiagnosticLLMCompletion,
+        parsed: "_ParsedDiagnosticOutput",
+        semantic_terms: tuple[str, ...],
+        semantic_valid: bool,
+    ) -> str | None:
+        subject = ExecutionGovernanceSubject(
+            query=content,
+            tenant_id=tenant_id,
+            execution_action="ai.diagnostic_classification",
+            downstream_targets=(f"model:{completion.provider}:{completion.model}",),
+            citation_count=len(retrieval.citations),
+            fragment_count=len(retrieval.items),
+            candidate_count_included=len(retrieval.items),
+            estimated_tokens=retrieval.total_tokens + completion.usage.total_tokens,
+            grounding_strategy="tenant_sop_rag",
+            metadata={
+                "category": parsed.category,
+                "confidence": parsed.confidence,
+                "provider": completion.provider,
+                "model": completion.model,
+                "semantic_valid": semantic_valid,
+                "semantic_terms": list(semantic_terms),
+                "usage_total_tokens": completion.usage.total_tokens,
+            },
+        )
+        envelope = await self._governance.evaluate(
+            GovernanceContext(
+                stage=EnforcementStage.PRE_EXECUTION,
+                action="ai.diagnostic_classification",
+                resource=f"execution:{execution_id}",
+                actor="agent:diagnostic",
+                tenant_id=coerce_tenant_id(tenant_id),
+                subject=subject,
+                metadata={
+                    "dispatch_id": dispatch_id,
+                    "session_id": session_id,
+                },
+            )
+        )
+        decision_id = (
+            str(envelope.decision.decision_id)
+            if envelope.decision is not None
+            else None
+        )
+        if (
+            not envelope.is_ok
+            or envelope.decision is None
+            or envelope.decision.decision is not Decision.ALLOW
+        ):
+            raise CognitionGovernanceRejectionError(
+                "governance rejected diagnostic model output"
+            )
+        return decision_id
+
+    async def _save_usage(
+        self,
+        record: CognitionLLMUsageRecord,
+        *,
+        tenant_id: str,
+    ) -> None:
+        try:
+            await self._usage_persistence.save_llm_usage(
+                record,
+                expected_tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            raise CognitionPersistenceError("LLM usage persistence failed") from exc
+
+    async def _save_rejected_usage(
+        self,
+        *,
+        usage_id: CognitionLLMUsageId,
+        tenant_id: str,
+        execution_id: str,
+        dispatch_id: str,
+        session_id: str,
+        error: BaseException,
+        provider: str,
+        model: str,
+        completion: DiagnosticLLMCompletion | None = None,
+        failed: bool = False,
+    ) -> None:
+        prompt_tokens = completion.usage.prompt_tokens if completion is not None else 0
+        completion_tokens = (
+            completion.usage.completion_tokens if completion is not None else 0
+        )
+        total_tokens = completion.usage.total_tokens if completion is not None else 0
+        cost = (
+            _estimate_cost(
+                completion=completion,
+                input_micro_usd=self._config.input_token_micro_usd,
+                output_micro_usd=self._config.output_token_micro_usd,
+            )
+            if completion is not None
+            else 0
+        )
+        record = CognitionLLMUsageRecord(
+            usage_id=usage_id,
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_micro_usd=cost,
+            status=(
+                CognitionLLMUsageStatus.FAILED
+                if failed
+                else CognitionLLMUsageStatus.REJECTED
+            ),
+            created_at=_utcnow(),
+            metadata={
+                "error_type": error.__class__.__name__,
+                "message": _bounded_message(error),
+            },
+        )
+        await self._save_usage(record, tenant_id=tenant_id)
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedDiagnosticOutput:
+    summary: str
+    category: str
+    confidence: float
+
+
+def _governance_runtime(
+    *,
+    governance_repository: BaseGovernanceRepository | None,
+    require_citations: bool,
+) -> GovernanceRuntime:
+    registry = EnforcementHandlerRegistry()
+    for handler in (
+        AllowHandler(),
+        DenyHandler(),
+        RedactHandler(),
+        DegradeHandler(),
+        EscalateHandler(),
+        RequireApprovalHandler(),
+    ):
+        registry.register(handler)
+    return GovernanceRuntime(
+        engine=PolicyEvaluationEngine(),
+        handler_registry=registry,
+        chains={
+            EnforcementStage.PRE_EXECUTION: PolicyChain(
+                chain_id="cognition.llm_diagnostic.pre_execution",
+                stage=EnforcementStage.PRE_EXECUTION,
+                policies=(
+                    LLMDiagnosticOutputPolicy(require_citations=require_citations),
+                ),
+            )
+        },
+        persistence=governance_repository,
+    )
+
+
+def _parse_output(text: str) -> _ParsedDiagnosticOutput:
+    try:
+        raw = json.loads(_extract_json(text))
+    except json.JSONDecodeError as exc:
+        raise CognitionLLMProviderError("diagnostic model returned invalid JSON") from exc
+    if not isinstance(raw, Mapping):
+        raise CognitionLLMProviderError("diagnostic model returned non-object JSON")
+    data = cast(Mapping[str, Any], raw)
+    summary = data.get("summary")
+    category = data.get("category")
+    confidence = data.get("confidence")
+    if not isinstance(summary, str) or not summary.strip():
+        raise CognitionLLMProviderError("diagnostic model summary is missing")
+    if not isinstance(category, str) or not category.strip():
+        raise CognitionLLMProviderError("diagnostic model category is missing")
+    if not isinstance(confidence, (int, float)):
+        raise CognitionLLMProviderError("diagnostic model confidence is missing")
+    confidence_float = float(confidence)
+    if not 0.0 <= confidence_float <= 1.0:
+        raise CognitionLLMProviderError("diagnostic model confidence must be in [0, 1]")
+    return _ParsedDiagnosticOutput(
+        summary=summary.strip(),
+        category=category.strip(),
+        confidence=confidence_float,
+    )
+
+
+def _extract_json(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return stripped
+    return stripped[start : end + 1]
+
+
+def _render_user_prompt(
+    *,
+    tenant_id: str,
+    dispatch_id: str,
+    session_id: str,
+    content: str,
+    retrieval: KnowledgeRetrievalResult,
+) -> str:
+    return "\n\n".join(
+        (
+            f"tenant_id: {tenant_id}",
+            f"dispatch_id: {dispatch_id}",
+            f"session_id: {session_id}",
+            "ticket:",
+            content,
+            "tenant_sop_citations:",
+            _context_text(retrieval) or "(no indexed SOP citations available)",
+        )
+    )
+
+
+def _context_text(retrieval: KnowledgeRetrievalResult) -> str:
+    return "\n\n".join(
+        (
+            f"[{item.citation_index}] {item.title} "
+            f"v{item.document_version}: {item.content}"
+        )
+        for item in retrieval.items
+    )
+
+
+def _usage_record(
+    *,
+    usage_id: CognitionLLMUsageId,
+    tenant_id: str,
+    execution_id: str,
+    dispatch_id: str,
+    session_id: str,
+    completion: DiagnosticLLMCompletion,
+    status: CognitionLLMUsageStatus,
+    estimated_cost_micro_usd: int,
+    metadata: Mapping[str, Any],
+) -> CognitionLLMUsageRecord:
+    return CognitionLLMUsageRecord(
+        usage_id=usage_id,
+        tenant_id=tenant_id,
+        execution_id=execution_id,
+        dispatch_id=dispatch_id,
+        session_id=session_id,
+        provider=completion.provider,
+        model=completion.model,
+        prompt_tokens=completion.usage.prompt_tokens,
+        completion_tokens=completion.usage.completion_tokens,
+        total_tokens=completion.usage.total_tokens,
+        estimated_cost_micro_usd=estimated_cost_micro_usd,
+        status=status,
+        created_at=_utcnow(),
+        metadata=metadata,
+    )
+
+
+def _estimate_cost(
+    *,
+    completion: DiagnosticLLMCompletion,
+    input_micro_usd: int,
+    output_micro_usd: int,
+) -> int:
+    return (
+        completion.usage.prompt_tokens * input_micro_usd
+        + completion.usage.completion_tokens * output_micro_usd
+    )
+
+
+def _bounded_message(error: BaseException) -> str:
+    message = str(error)
+    if len(message) <= 240:
+        return message
+    return f"{message[:237]}..."
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+__all__ = [
+    "DiagnosticCognitionRuntime",
+    "DiagnosticCognitionRuntimeConfig",
+]

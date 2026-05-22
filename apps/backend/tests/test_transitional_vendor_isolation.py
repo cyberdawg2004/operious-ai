@@ -87,6 +87,7 @@ _GUARDED_PACKAGES: tuple[str, ...] = (
     "api",
     "arbitration",
     "boundary",
+    "cognition",
     "coordination",
     "core",
     "db",

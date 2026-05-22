@@ -1,16 +1,21 @@
 # Operious AI Consolidated Master Plan
 
-Updated baseline after Phase 2.5-C. This document is the canonical
+Updated baseline after Phase 5-C. This document is the canonical
 handoff plan for the next Codex session.
 
 ## Current State Baseline
 
-- Tests: 1,958 passed, 2 skipped, 0 xfailed.
+- Tests: 2,095 passed, 2 skipped, 0 xfailed.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors across the backend surface.
+- Pyright: 0 errors, 680 warnings across the backend surface.
+  Warnings should not grow phase over phase; the Phase 3 remediation
+  marker is 687 warnings.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
-  Phase 2.5-A, Phase 2.5-B, and Phase 2.5-C.
-- Next phase: Phase 2.5-D, Coordination Event Projection.
+  Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
+  Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
+  Phase 3-D, Phase 3-E, Phase 4-A, Phase 4-B, Phase 4-C, and
+  Phase 5-A, Phase 5-B, Phase 5-C.
+- Next phase: Phase 6-A, Operational Observability - PR_W9.
 
 ## Completed Work Ledger
 
@@ -155,6 +160,216 @@ handoff plan for the next Codex session.
 - [x] Verified baseline after closure: 1,958 passed, 2 skipped; smoke
   tests 4/4 green; backend Pyright 0 errors.
 
+## Phase 2.5-D Closure Ledger - Done
+
+- [x] Added `CoordinationOperationalEventProjector` in `app.runtime`.
+- [x] Projected persisted coordination dispatch records into canonical
+  `OperationalEvent` records using `OperationalSubstrate.COORDINATION`.
+- [x] Used `coordination:dispatch` as the canonical operational act,
+  with deterministic event identity derived from the persisted
+  coordination record identity.
+- [x] Added boundary-to-coordination lineage by deriving the projected
+  boundary parent event id from persisted `boundary.event_id` or
+  `boundary.replay_key` dispatch metadata.
+- [x] Preserved coordination source runtime isolation from `app.events`;
+  projection authority remains under `app.runtime`.
+- [x] Enriched dispatch metadata with boundary replay lineage without
+  adding event-fabric imports to services, routers, or source runtimes.
+- [x] Added tests for deterministic identity, boundary parent lineage,
+  idempotent projection, tenant scope, generic-event isolation, and
+  source substrate isolation.
+- [x] Extended event-fabric closure invariants so coordination source
+  code cannot import `app.events` and the coordination projection
+  bridge remains under `app.runtime`.
+- [x] Verified baseline after closure: 1,966 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors.
+
+## Phase 2.5-E Closure Ledger - Done
+
+- [x] Added a full-ticket forensic lifecycle sequence test covering
+  `boundary:ingest -> governance:decide -> coordination:dispatch ->
+  session:open -> execution:request -> execution:claim ->
+  execution:complete`.
+- [x] Used only existing projection bridges under `app.runtime`.
+- [x] Asserted canonical act order, tenant scope, lineage continuity,
+  and replay reconstructability.
+- [x] Proved boundary-to-coordination, governance, session, and
+  execution lineage edges are present in the replay graph.
+- [x] Preserved event fabric as append/read authority only; no live
+  orchestration authority was introduced.
+- [x] Verified baseline after closure: 1,967 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors.
+
+## Phase 2.5-F Closure Ledger - Done
+
+- [x] Added tenant-owned webhook adapters for Email, WhatsApp, Shulex,
+  and Lark under `app/boundary/adapters/`.
+- [x] Added tenant channel route resolution by active
+  `tenant_channel_configurations` routing address.
+- [x] Added HMAC/signature verification for inbound channel webhooks,
+  failing closed before propagation on invalid signatures.
+- [x] Normalized all four channel payloads to one common boundary
+  envelope shape and prevented raw channel-specific payloads from
+  propagating inward.
+- [x] Routed verified channel webhooks through
+  router -> service -> boundary runtime -> persistence layering.
+- [x] Kept adapter code isolated from governance, session, execution,
+  and coordination imports.
+- [x] Preserved legacy smoke ingress so tenant credential encryption is
+  required only for tenant-channel webhook use, not unrelated ingress.
+- [x] Added tests for successful normalization, failed verification,
+  unknown routing, tenant mismatch, deterministic identity, credential
+  non-disclosure, endpoint handoff, and substrate import boundaries.
+- [x] Verified baseline after closure: 1,979 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors.
+
+## Phase 3-A Closure Ledger - Done
+
+- [x] Added `SupervisorRuntime.evaluate_session(session_id)` as a
+  one-argument persisted-evidence supervisor entrypoint.
+- [x] Reconstructed supervisor inputs from persisted session,
+  execution, timeline, and governance records; no live runtime objects
+  are accepted by the evaluation method.
+- [x] Added deterministic UUID5 identities for session inspection and
+  session supervisor decision lineage.
+- [x] Persisted supervisor inspection, finding, evaluation, and
+  escalation records through the existing supervisor repository
+  boundary.
+- [x] Carried compliance score on the persisted inspection surface via
+  the embedded supervisor decision and inspection metadata.
+- [x] Added a Celery transport task that accepts `session_id` only and
+  composes persistence-backed supervisor evaluation inside the worker.
+- [x] Queued supervisor evaluation only after diagnostic execution
+  completion when the owning session is already closed.
+- [x] Proved the resulting inspection projects through the existing
+  Phase 2-H supervisor event projection bridge under `app.runtime`.
+- [x] Added tests for method signature, persisted reconstruction,
+  deterministic identity, tenant scope, idempotency, no session or
+  execution mutation, transport trigger behavior, and projection
+  behavior.
+- [x] Verified baseline after closure: 1,988 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors.
+
+## Phase 3-B Closure Ledger - Done
+
+- [x] Added `QAScoreRecord` contracts, score-dimension vocabulary,
+  deterministic QA score identity, and QA exception surface.
+- [x] Added durable `qa_score_records` table with tenant scope,
+  one-score-per-supervisor-inspection uniqueness, score bounds, and
+  RESTRICT linkage to `supervisor_inspections`.
+- [x] Added in-memory and Postgres QA persistence repositories with
+  expected-tenant enforcement on reads and writes.
+- [x] Added `QAAgentRuntime.score_inspection(inspection_id,
+  expected_tenant_id=...)` that reads persisted supervisor inspection,
+  finding, evaluation, and escalation evidence only.
+- [x] Produced QA dimensions for diagnostic accuracy, policy
+  compliance, timeline integrity, and resolution quality, plus
+  deterministic overall score.
+- [x] Added Celery transport task for QA scoring and queued it after
+  supervisor inspection persistence commits.
+- [x] Added `QAOperationalEventProjector` under `app.runtime` and
+  projected `QAScoreRecord` into the canonical event fabric with
+  `qa:score`.
+- [x] Preserved QA source substrate isolation from `app.events`;
+  projection authority remains under `app.runtime`.
+- [x] Added tests for read-only behavior, tenant scope,
+  deterministic identity, score dimensions, projection idempotency,
+  Postgres persistence, and transport-only Celery behavior.
+- [x] Verified baseline after closure: 2,003 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors.
+
+## Phase 3-C Closure Ledger - Done
+
+- [x] Added `EscalationRecord` contracts, status enum, deterministic
+  UUID5 identity helpers, and escalation exception surface.
+- [x] Added durable `escalation_records` table with tenant scope,
+  RESTRICT links to `operational_sessions` and `governance_decisions`,
+  one escalation per denied governance decision, and status checks.
+- [x] Added in-memory and Postgres escalation persistence repositories
+  with `expected_tenant_id` enforcement on reads and writes.
+- [x] Added `EscalationAgentRuntime.create_for_governance_denial(...)`
+  that creates pending records only from persisted governance DENY
+  lineage and requires tenant-visible session evidence.
+- [x] Added manager approve/reject runtime paths. Approval writes a
+  deterministic governance override provenance record; rejection
+  closes the escalation while preserving denial lineage.
+- [x] Added authenticated, tenant-scoped Command Center endpoints for
+  listing, reading, approving, and rejecting escalation records.
+- [x] Added a Celery transport task for escalation creation and a
+  deferred dispatch-service publisher so governance-denial escalation
+  is queued only after request-path persistence commits.
+- [x] Added `EscalationOperationalEventProjector` under `app.runtime`
+  and projected escalation create/review/approve/reject states into
+  the canonical event fabric.
+- [x] Preserved escalation source substrate isolation from `app.events`;
+  projection authority remains under `app.runtime`.
+- [x] Added tests for record-only agent behavior, tenant scope,
+  deterministic identity, approval/rejection lineage, projection
+  idempotency, endpoint layering, and transport-only Celery behavior.
+- [x] Verified baseline after closure: 2,024 passed, 2 skipped; smoke
+  tests 4/4 green.
+
+## Phase 3-D Closure Ledger - Done
+
+- [x] Added dedicated `sop_intelligence` contracts, status enum,
+  deterministic UUID5 approval identity helper, and proposal exception
+  surface.
+- [x] Added durable `approval_records` table linked to
+  `tenant_knowledge_documents`, with tenant scope, confidence bounds,
+  status checks, evidence-session JSONB, and proposal metadata.
+- [x] Added in-memory and Postgres SOP approval persistence with
+  write-once behavior and `expected_tenant_id` enforcement on reads and
+  writes.
+- [x] Added `SOPIntelligenceRuntime.propose_for_session(...)`, which
+  reconstructs persisted session, supervisor, QA, governance, and
+  tenant knowledge evidence before creating a pending review proposal.
+- [x] Preserved proposal-only authority: the runtime never mutates
+  `tenant_knowledge_documents`, session, supervisor, QA, or governance
+  records.
+- [x] Added tenant-scoped Command Center hydration endpoints for listing
+  and reading SOP approval proposal records.
+- [x] Added low-priority Celery transport task accepting primitive
+  lineage only, queued after high-confidence QA scoring.
+- [x] Left the canonical event fabric unchanged because Phase 3-D did
+  not explicitly adopt `ApprovalRecord` projection.
+- [x] Added tests for proposal-only behavior, tenant scope,
+  deterministic identity, pending-review lifecycle, no knowledge
+  mutation, Postgres persistence, endpoint layering, and transport-only
+  Celery behavior.
+- [x] Verified baseline after closure: 2,038 passed, 2 skipped; smoke
+  tests 4/4 green; Alembic current `0018_approval_records (head)`.
+
+## Phase 3-E Closure Ledger - Done
+
+- [x] Added `test_supervisory_cognition_closure.py` as the Phase 3
+  supervisory cognition closure gate.
+- [x] Pinned supervisor authority so the supervisor substrate cannot
+  import execution runtime authority.
+- [x] Pinned QA authority so the QA substrate writes only QA score
+  records and does not write to session, execution, or governance
+  surfaces.
+- [x] Pinned autonomous escalation behavior to creation-only records
+  while preserving human manager review endpoints.
+- [x] Pinned SOP intelligence to proposal-only behavior with no direct
+  mutation of `tenant_knowledge_documents`.
+- [x] Pinned supervisor, QA, escalation, and SOP intelligence as
+  Celery-triggered observation/approval substrates, not request-path
+  orchestration logic.
+- [x] Pinned pending SOP `ApprovalRecord` proposals so they cannot
+  auto-transition to `applied`.
+- [x] Verified baseline after closure: 2,046 passed, 2 skipped; smoke
+  tests 4/4 green; Alembic current `0018_approval_records (head)`.
+
+## Phase 3-D.1 Follow-Up - Scheduled
+
+- [ ] Project SOP intelligence `ApprovalRecord` proposals into the
+  canonical event fabric through an `app.runtime` projection bridge.
+- [ ] Preserve proposal-only authority: projection must not apply,
+  approve, reject, or mutate `tenant_knowledge_documents`.
+- [ ] Keep this non-blocking for Phase 4, but land it before the demo
+  trace-inspector milestone so proposal lineage appears in forensic
+  reconstruction.
+
 ## Phase 2.5 - Tenant Infrastructure + Boundary/Coordination Closure
 
 Maps to: PR_W5, Item 8.
@@ -271,7 +486,7 @@ authority. No other substrate checks boundary idempotency.
   dedupe semantics.
 - Boundary substrate must not import `app.events`.
 
-### 2.5-D: Coordination Event Projection
+### 2.5-D: Coordination Event Projection - Done
 
 - Add `CoordinationOperationalEventProjector` in `app.runtime`.
 - Project coordination dispatch records into the canonical event fabric.
@@ -279,7 +494,7 @@ authority. No other substrate checks boundary idempotency.
   record identity.
 - Add lineage from boundary ingress to coordination dispatch.
 
-### 2.5-E: Full Ticket Lifecycle Canonical Sequence Test
+### 2.5-E: Full Ticket Lifecycle Canonical Sequence Test - Done
 
 Add a single forensic sequence test proving a processed ticket yields:
 
@@ -296,7 +511,7 @@ boundary:ingest
 This is the audit proof that a ticket can be deterministically
 reconstructed from canonical operational events.
 
-### 2.5-F: Channel Adapters - Item 8
+### 2.5-F: Channel Adapters - Item 8 - Done
 
 Each adapter:
 
@@ -340,7 +555,7 @@ inward.
 
 Maps to: Items 4, 5, 6; PR_W7.
 
-### 3-A: Supervisor Runtime Baseline
+### 3-A: Supervisor Runtime Baseline - Done
 
 - `SupervisorRuntime.evaluate_session()` receives `session_id` only.
 - Derives everything from persisted records.
@@ -350,7 +565,7 @@ Maps to: Items 4, 5, 6; PR_W7.
 - Projects into canonical event fabric through the existing 2-H bridge.
 - Never mutates session state or reopens closed sessions.
 
-### 3-B: QA Agent - Item 6
+### 3-B: QA Agent - Item 6 - Done
 
 - QAAgent Celery task triggers after supervisor evaluation completes.
 - Reads `SupervisorInspectionRecord`.
@@ -360,7 +575,7 @@ Maps to: Items 4, 5, 6; PR_W7.
 - Persists to its own table and projects into canonical event fabric.
 - Read-only: no writes to session, execution, or governance tables.
 
-### 3-C: Escalation Agent + Human Approval Queue - Item 4
+### 3-C: Escalation Agent + Human Approval Queue - Item 4 - Done
 
 Add `EscalationRecord`:
 
@@ -384,7 +599,7 @@ Rules:
 - Rejection closes with denial lineage intact.
 - Escalation projects into canonical event fabric.
 
-### 3-D: SOP Intelligence Agent - Item 5
+### 3-D: SOP Intelligence Agent - Item 5 - Done
 
 - Low-priority Celery task on completed, high-confidence sessions.
 - Analyzes resolution pattern, agent confidence, policy chain, and QA score.
@@ -407,7 +622,7 @@ Rule: the agent proposes; a human approves in Cognition Hub; the system
 applies only after approval. The agent has zero authority to mutate live
 tenant knowledge documents autonomously.
 
-### 3-E: Phase 3 Closure Gate
+### 3-E: Phase 3 Closure Gate - Done
 
 Add `test_supervisory_cognition_closure.py` enforcing:
 
@@ -415,14 +630,15 @@ Add `test_supervisory_cognition_closure.py` enforcing:
 - QA agent does not write to session, execution, or governance tables.
 - Escalation agent creates records only and does not resolve them.
 - SOP intelligence does not mutate `tenant_knowledge_documents` directly.
-- All three agents are Celery tasks only, not request-path logic.
+- Supervisor, QA, escalation, and SOP intelligence are Celery-triggered
+  substrates only, not request-path orchestration logic.
 - `ApprovalRecord` in `pending_review` cannot auto-transition to `applied`.
 
 ## Phase 4 - Arbitration + Multi-Agent Coordination
 
 Maps to: PR_W6, PR_W8.
 
-### 4-A: Arbitration Runtime Wiring - PR_W6
+### 4-A: Arbitration Runtime Wiring - PR_W6 - Done
 
 - Wire existing arbitration substrate into live dispatch path.
 - Detect conflicts when multiple agents produce competing proposals.
@@ -433,7 +649,26 @@ Maps to: PR_W6, PR_W8.
 - Arbitration decisions project into canonical event fabric through
   the existing 2-I bridge.
 
-### 4-B: Multi-Agent Coordination Hardening - PR_W8
+#### Phase 4-A Closure Ledger - Done
+
+- [x] Added dispatch-path arbitration runtime wiring behind
+  service/runtime boundaries.
+- [x] Added conflict detection for competing dispatch proposals and
+  clean `DeadlockWitness` halting semantics.
+- [x] Preserved authority precedence:
+  `GOVERNANCE > TOPOLOGY > POLICY > ARBITRATION`.
+- [x] Projected arbitration decisions through the existing Phase 2-I
+  bridge in `app.runtime`.
+- [x] Hardened deterministic arbitration replay so duplicate
+  `evaluation_id` writes are treated idempotently when the caller
+  supplies an evaluation override.
+- [x] Added tenant-scoped tests for conflict detection, deadlock
+  no-retry behavior, authority precedence, event projection
+  idempotency, and replay duplicate handling.
+- [x] Verified baseline after closure: 2,052 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors.
+
+### 4-B: Multi-Agent Coordination Hardening - PR_W8 - Done
 
 - Enforce DAG: agents never call each other directly.
 - Validate coordination topology at dispatch time against tenant DAG.
@@ -441,18 +676,54 @@ Maps to: PR_W6, PR_W8.
 - Persist tenant topology in `tenant_topology_configurations`.
 - Detect and reject DAG cycles at configuration time.
 
-### 4-C: Phase 4 Closure Gate
+#### Phase 4-B Closure Ledger - Done
+
+- [x] Added tenant-owned topology configuration records with
+  deterministic UUID5 identities.
+- [x] Added durable `tenant_topology_configurations` persistence with
+  tenant-scoped reads/writes and active-topology lookup.
+- [x] Added DAG cycle detection at configuration time before tenant
+  topology records can become active.
+- [x] Added an `app.runtime` tenant-topology composition bridge so
+  dispatch can evaluate active tenant DAGs through the existing
+  coordination topology substrate.
+- [x] Wired dispatch to halt cleanly when tenant topology denies a
+  path before governance, session creation, or execution request.
+- [x] Added tenant topology API/service surfaces without router
+  repository/runtime shortcuts.
+- [x] Added tests for topology persistence, deterministic identities,
+  tenant isolation, DAG cycle rejection, dispatch-time enforcement,
+  authorized paths, and no direct agent-to-agent imports.
+- [x] Verified baseline after closure: 2,057 passed, 2 skipped; smoke
+  tests 4/4 green; bounded backend Pyright 0 errors and 0 warnings.
+
+### 4-C: Phase 4 Closure Gate - Done
 
 - No direct agent-to-agent imports.
 - Arbitration is conflict resolver only, not business logic authority.
 - DAG cycle detection tests exist.
 - `DeadlockWitness` halts execution and never retries indefinitely.
 
+#### Phase 4-C Closure Ledger - Done
+
+- [x] Added `test_phase_4_closure.py` as a single Phase 4 closure
+  gate.
+- [x] Pinned no direct concrete agent-to-agent imports; handoffs must
+  stay mediated by coordination topology.
+- [x] Pinned arbitration as advisory conflict resolution only, with no
+  business/runtime execution imports and only an `evaluate` facade.
+- [x] Pinned dispatch-path deadlock behavior: one arbitration
+  evaluation, no retry loop, and halt before session/execution
+  creation.
+- [x] Pinned tenant topology DAG cycle rejection at configuration time.
+- [x] Verified baseline after closure: 2,064 passed, 2 skipped; smoke
+  tests 4/4 green; bounded backend Pyright 0 errors and 0 warnings.
+
 ## Phase 5 - Memory, Knowledge, and Real AI Cognition
 
 Maps to: PR_W12, PR_W13, Item 9 partial.
 
-### 5-A: Memory + Knowledge Runtime - PR_W12
+### 5-A: Memory + Knowledge Runtime - PR_W12 - Done
 
 - `tenant_knowledge_documents` ingestion pipeline.
 - Chunking, vector embedding, tenant-scoped vector store.
@@ -460,7 +731,24 @@ Maps to: PR_W12, PR_W13, Item 9 partial.
 - Physical tenant knowledge isolation.
 - Tenant-owned documents become the RAG corpus.
 
-### 5-B: Organizational Cognition Engine
+#### Phase 5-A Closure Ledger - Done
+
+- [x] Added the `app.knowledge` runtime substrate with deterministic
+  chunking, UUID5 chunk/vector identities, and a credential-free
+  deterministic embedding adapter boundary.
+- [x] Added tenant-scoped chunk/vector persistence for the RAG corpus,
+  backed by `tenant_knowledge_chunks` and `tenant_knowledge_vectors`.
+- [x] Wired ingestion and retrieval through router -> service -> runtime
+  -> persistence boundaries under `/api/v1/knowledge`.
+- [x] Ingestion reads from `tenant_knowledge_documents`, marks indexed
+  documents active, and preserves idempotent replay with current-index
+  replacement rather than duplicate vector rows.
+- [x] Retrieval is tenant-clamped, deterministic by score/document/order,
+  and emits stable citation indices after token/per-document budgeting.
+- [x] Verified baseline after closure: 2,077 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 681 warnings.
+
+### 5-B: Organizational Cognition Engine - Done
 
 - `ApprovalRecord` lifecycle: `pending_review -> approved -> applied`.
 - Applying approval increments tenant knowledge document version.
@@ -470,7 +758,31 @@ Maps to: PR_W12, PR_W13, Item 9 partial.
   created it.
 - Cognition Hub API endpoints for Command Center.
 
-### 5-C: Real AI Cognition Runtime - PR_W13
+#### Phase 5-B Closure Ledger - Done
+
+- [x] Added deterministic tenant knowledge document version identities
+  derived from tenant, document, and version lineage.
+- [x] Added durable `tenant_knowledge_document_versions` persistence with
+  tenant/document/version uniqueness, archived/current status, and
+  optional `source_approval_id` provenance.
+- [x] Extended tenant knowledge create/update flows to preserve version
+  history while keeping old versions archived instead of deleted.
+- [x] Added `CognitionRuntime` as the reviewed knowledge-evolution
+  authority for approval, apply, rollback, and version-list behavior.
+- [x] Applied approvals increment tenant knowledge document versions,
+  clear stale vector indexing state, and link the active SOP version to
+  the `ApprovalRecord` that created it.
+- [x] Added rollback semantics that restore historical SOP content into a
+  new current version while preserving all archived versions.
+- [x] Wired Cognition Hub API endpoints through router -> service ->
+  runtime -> persistence boundaries under `/api/v1/cognition`.
+- [x] Preserved SOP Intelligence as proposal-only: it can create and read
+  approval proposals but does not apply them or mutate knowledge.
+- [x] Verified baseline after closure: 2,088 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 681 warnings; Alembic
+  current `0021_tenant_knowledge_versions (head)`.
+
+### 5-C: Real AI Cognition Runtime - PR_W13 - Done
 
 - Replace deterministic DiagnosticAgent classification with LLM reasoning
   grounded in SOP corpus.
@@ -484,6 +796,31 @@ Maps to: PR_W12, PR_W13, Item 9 partial.
 Constitutional constraint: LLM proposes actions to ToolInvoker.
 ToolInvoker enforces what governance allows. LLM cannot override policy
 by phrasing output differently.
+
+#### Phase 5-C Closure Ledger - Done
+
+- [x] Added typed Anthropic provider configuration in `Settings`,
+  including `ANTHROPIC_API_KEY`, base URL, API version, model, output
+  limits, temperature, and cognition cost-attribution defaults.
+- [x] Added an Anthropic Messages API adapter using `httpx` instead of
+  importing the quarantined `anthropic` SDK in constitutional code.
+- [x] Added `DiagnosticCognitionRuntime` for RAG-grounded diagnostic
+  reasoning over the Phase 5-A tenant knowledge corpus.
+- [x] Wired diagnostic worker execution to the cognition runtime while
+  preserving Celery as transport only and using deterministic offline
+  transport under pytest.
+- [x] Added semantic preservation validation for governance-significant
+  terms so model output cannot silently drop or invent policy-bearing
+  language.
+- [x] Added a governance pre-execution gate for diagnostic model output
+  before the result is accepted into execution completion.
+- [x] Added durable tenant-scoped `cognition_llm_usage_records` with
+  deterministic UUID5 usage identity and estimated micro-USD cost
+  attribution per model call.
+- [x] Extended vendor SDK isolation invariants to cover `app.cognition`.
+- [x] Verified baseline after closure: 2,095 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 680 warnings; Alembic
+  current `0022_cognition_llm_usage (head)`.
 
 ## Phase 6 - Enterprise Operational Platform
 
@@ -556,8 +893,9 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: [fill in before each session]
-Current test baseline: [fill in before each session]
+Current phase: Phase 6-A - Operational Observability - PR_W9.
+Current test baseline: 2,095 passed, 2 skipped; smoke tests 4/4 green.
+Current Pyright baseline: 0 errors, 680 warnings; warnings must not grow.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -581,7 +919,7 @@ pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coor
 pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
-Continue Phase 2.5 with wedge 2.5-D.
+Continue with Phase 6-A. Do not implement Phase 6-B before Phase 6-A is closed.
 ```
 
 ## New Chat Hyperprompt
@@ -591,38 +929,68 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Phase 2.5-D - Coordination Event Projection.
+Current phase: Phase 6-A - Operational Observability - PR_W9.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
 - Treat docs/stabilization/phase-2.5.md as superseded.
-- Do not start Phase 3.
 - Phase 2.5-A is closed.
 - Phase 2.5-B is closed.
 - Phase 2.5-C is closed.
-- Do not implement 2.5-E before 2.5-D is closed.
+- Phase 2.5-D is closed.
+- Phase 2.5-E is closed.
+- Phase 2.5-F is closed.
+- Phase 3-A is closed.
+- Phase 3-B is closed.
+- Phase 3-C is closed.
+- Phase 3-D is closed.
+- Phase 3-E is closed.
+- Phase 4-A is closed.
+- Phase 4-B is closed.
+- Phase 4-C is closed.
+- Phase 5-A is closed.
+- Phase 5-B is closed.
+- Phase 5-C is closed.
+- Do not implement Phase 6-B before Phase 6-A is closed.
 
 Current verified baseline:
-- Tests: 1,958 passed, 2 skipped, 0 xfailed.
+- Tests: 2,095 passed, 2 skipped, 0 xfailed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
+- Pyright warnings: 680; warnings must not grow phase over phase.
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
   Tenant-Owned Credentials Model.
 - Phase 2.5-B complete: Boundary Ingress Durable Idempotency.
 - Phase 2.5-C complete: Boundary Event Projection.
+- Phase 2.5-D complete: Coordination Event Projection.
+- Phase 2.5-E complete: Full Ticket Lifecycle Canonical Sequence Test.
+- Phase 2.5-F complete: Channel Adapters - Item 8.
+- Phase 3-A complete: Supervisor Runtime Baseline.
+- Phase 3-B complete: QA Agent - Item 6.
+- Phase 3-C complete: Escalation Agent + Human Approval Queue - Item 4.
+- Phase 3-D complete: SOP Intelligence Agent - Item 5.
+- Phase 3-E complete: Phase 3 Closure Gate.
+- Phase 4-A complete: Arbitration Runtime Wiring - PR_W6.
+- Phase 4-B complete: Multi-Agent Coordination Hardening - PR_W8.
+- Phase 4-C complete: Phase 4 Closure Gate.
+- Phase 5-A complete: Memory + Knowledge Runtime - PR_W12.
+- Phase 5-B complete: Organizational Cognition Engine.
+- Phase 5-C complete: Real AI Cognition Runtime - PR_W13.
+- Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
+  canonical event fabric before the demo trace-inspector milestone.
 
 Goal for this chat:
-Implement Phase 2.5-D only.
+Implement Phase 6-A only.
 
-Phase 2.5-D scope:
-- Add `CoordinationOperationalEventProjector` in `app.runtime`.
-- Project coordination dispatch records into the canonical event fabric.
-- Use `coordination:dispatch` operational act anchored to coordination
-  record identity.
-- Add lineage from boundary ingress to coordination dispatch.
-- Keep coordination source runtime isolated from `app.events`.
+Phase 6-A scope:
+- Per-tenant metrics: ticket throughput, governance deny rate,
+  execution latency, QA score distribution, escalation rate.
+- Structured tracing beyond Sentry.
+- SLO definitions and alert thresholds.
+- DLQ operating surface for dead-lettered executions.
+- Do not implement Phase 6-B before Phase 6-A is closed.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.
@@ -639,29 +1007,30 @@ Constitutional rules:
   never returned by API.
 - Do not import governance, session, execution, or coordination from
   boundary adapter code.
+- Supervisor, QA, SOP Intelligence are observation substrates. They
+  never mutate execution, session, or governance records.
 - Celery remains transport only.
 - Frontend remains hydration/observability only.
 
 Before editing:
-- Inspect existing tenant, boundary, governance, hardening, config,
-  router, service, and persistence patterns.
+- Inspect existing observability, metrics, Sentry/logging, execution
+  recovery, dead-letter, governance, escalation, QA, dispatch, service,
+  router, dependency, worker, and persistence patterns.
 - Preserve existing naming, migration, repository, runtime, and test
   conventions.
-- Identify existing tenant identity primitives and reuse them.
+- Identify existing metric counters, trace context, execution
+  dead-letter records, and tenant-scoped read surfaces before editing.
 
-Implementation deliverables for 2.5-D:
-- Runtime bridge under `app.runtime` that projects coordination records
-  to operational events.
-- Deterministic operational event identity anchored to coordination
-  record identity.
-- Lineage from projected boundary ingress to projected coordination
-  dispatch.
-- Tests proving projection idempotency, lineage preservation, tenant
-  scope, and source substrate isolation.
-- Invariant tests proving coordination source runtime does not import
-  `app.events`.
+Implementation deliverables for 6-A:
+- Tenant-scoped operational metrics read model/API surfaces.
+- Structured tracing primitives beyond Sentry without making Sentry a
+  source of truth.
+- SLO definition and alert-threshold records or configuration surface.
+- DLQ/dead-letter operating read surface for failed executions.
+- Tests for tenant isolation, metric determinism, alert thresholds,
+  DLQ read behavior, router/service layering, and transport isolation.
 
-After 2.5-D:
+After 6-A:
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
@@ -675,5 +1044,5 @@ Final answer must include:
 - Runtime/service/router changes.
 - Replay, governance, frontend, and transport implications.
 - Tests run and results.
-- Whether Phase 2.5-D is closed or still open.
+- Whether Phase 6-A is closed or still open.
 ```

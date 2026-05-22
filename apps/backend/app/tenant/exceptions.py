@@ -15,6 +15,10 @@ class TenantConfigurationPersistenceError(TenantConfigurationError):
     """Raised when a tenant configuration write cannot be persisted."""
 
 
+class TenantTopologyCycleError(TenantConfigurationError):
+    """Raised when a tenant topology declaration contains a cycle."""
+
+
 class TenantCredentialEncryptionError(TenantConfigurationError):
     """Raised when tenant credential encryption cannot proceed safely."""
 
@@ -24,4 +28,5 @@ __all__ = [
     "TenantConfigurationNotFoundError",
     "TenantConfigurationPersistenceError",
     "TenantCredentialEncryptionError",
+    "TenantTopologyCycleError",
 ]

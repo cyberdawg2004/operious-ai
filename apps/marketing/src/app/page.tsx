@@ -1,23 +1,29 @@
-import { HeroSection } from '@/components/sections/hero';
-import { ArchitectureVisionSection } from '@/components/sections/architecture-vision';
-import { CognitionNarrativeSection } from '@/components/sections/cognition-narrative';
-import { DeterministicInfrastructureSection } from '@/components/sections/deterministic-infrastructure';
-import { GovernanceSection } from '@/components/sections/governance';
-import { MultilingualSection } from '@/components/sections/multilingual';
-import { CommandCenterPreviewSection } from '@/components/sections/command-center-preview';
-import { PilotCtaSection } from '@/components/sections/pilot-cta';
+import { HeroSection } from '@/components/sections/hero-section';
+import { ProblemSection } from '@/components/sections/problem-section';
+import { KernelSection } from '@/components/sections/kernel-section';
+import { SolutionsSection } from '@/components/sections/solutions-section';
+import { ProductsSection } from '@/components/sections/products-section';
+import { TrustSection } from '@/components/sections/trust-section';
+import { SubstrateChatSection } from '@/components/sections/substrate-chat-section';
+import { EditorialSection } from '@/components/sections/editorial-section';
+import { NewsletterSection } from '@/components/sections/newsletter-section';
+import { FaqSection } from '@/components/sections/faq-section';
+import { ContactSection } from '@/components/sections/contact-section';
 
 export default function MarketingHome() {
   return (
     <>
       <HeroSection />
-      <ArchitectureVisionSection />
-      <CognitionNarrativeSection />
-      <DeterministicInfrastructureSection />
-      <GovernanceSection />
-      <MultilingualSection />
-      <CommandCenterPreviewSection />
-      <PilotCtaSection />
+      <ProblemSection />
+      <KernelSection />
+      <SolutionsSection />
+      <ProductsSection />
+      <TrustSection />
+      <SubstrateChatSection />
+      <EditorialSection />
+      <NewsletterSection />
+      <FaqSection />
+      <ContactSection />
     </>
   );
 }

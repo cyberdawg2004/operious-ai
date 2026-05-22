@@ -26,3 +26,5 @@ export * from './topology';
 export * from './intelligence';
 export * from './operations';
 export * from './trace';
+export * from './tenant';
+export * from './auth';

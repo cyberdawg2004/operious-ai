@@ -17,6 +17,9 @@ from app.api.v1.schemas.tenant import (
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentResponse,
     TenantKnowledgeUpdateRequest,
+    TenantTopologyConfigurationCreateRequest,
+    TenantTopologyConfigurationPage,
+    TenantTopologyConfigurationResponse,
 )
 from app.dependencies.authority import require_authority, require_tenant_scope
 from app.dependencies.services import get_tenant_configuration_service
@@ -30,10 +33,12 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantTopologyStatus,
 )
 from app.tenant.exceptions import (
     TenantConfigurationError,
     TenantConfigurationNotFoundError,
+    TenantTopologyCycleError,
 )
 from app.tenant.identity import (
     as_channel_configuration_id,
@@ -55,9 +60,7 @@ _DEFAULT_LIMIT = 50
 async def configure_channel(
     request: TenantChannelCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
         record = await service.configure_channel(
@@ -84,9 +87,7 @@ async def update_channel(
     config_id: str,
     request: TenantChannelUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
         record = await service.update_channel(
@@ -117,9 +118,7 @@ async def update_channel(
 async def verify_channel(
     config_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
         record = await service.verify_channel(
@@ -144,9 +143,7 @@ async def list_channels(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationPage:
     page = await service.list_channels(
         tenant_id=expected_tenant_id,
@@ -173,9 +170,7 @@ async def create_knowledge_document(
     request: TenantKnowledgeCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
     authority: AuthorityContext = Depends(require_authority),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     record = await service.create_knowledge_document(
         tenant_id=expected_tenant_id,
@@ -197,9 +192,7 @@ async def update_knowledge_document(
     request: TenantKnowledgeUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
     authority: AuthorityContext = Depends(require_authority),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     try:
         record = await service.update_knowledge_document(
@@ -223,15 +216,11 @@ async def update_knowledge_document(
 )
 async def list_knowledge_documents(
     document_type: TenantKnowledgeDocumentType | None = Query(None),
-    status_filter: TenantKnowledgeDocumentStatus | None = Query(
-        None, alias="status"
-    ),
+    status_filter: TenantKnowledgeDocumentStatus | None = Query(None, alias="status"),
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentPage:
     page = await service.list_knowledge_documents(
         tenant_id=expected_tenant_id,
@@ -242,8 +231,7 @@ async def list_knowledge_documents(
     )
     return TenantKnowledgeDocumentPage(
         items=[
-            TenantKnowledgeDocumentResponse.from_record(record)
-            for record in page.items
+            TenantKnowledgeDocumentResponse.from_record(record) for record in page.items
         ],
         total=page.total,
         offset=page.offset,
@@ -258,9 +246,7 @@ async def create_governance_policy(
     request: TenantGovernancePolicyCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
     authority: AuthorityContext = Depends(require_authority),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     record = await service.create_governance_policy(
         tenant_id=expected_tenant_id,
@@ -282,9 +268,7 @@ async def update_governance_policy(
     request: TenantGovernancePolicyUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
     authority: AuthorityContext = Depends(require_authority),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     try:
         record = await service.update_governance_policy(
@@ -309,15 +293,11 @@ async def update_governance_policy(
 )
 async def list_governance_policies(
     policy_type: str | None = Query(None),
-    status_filter: TenantGovernancePolicyStatus | None = Query(
-        None, alias="status"
-    ),
+    status_filter: TenantGovernancePolicyStatus | None = Query(None, alias="status"),
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
-    service: TenantConfigurationService = Depends(
-        get_tenant_configuration_service
-    ),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyPage:
     page = await service.list_governance_policies(
         tenant_id=expected_tenant_id,
@@ -328,7 +308,66 @@ async def list_governance_policies(
     )
     return TenantGovernancePolicyPage(
         items=[
-            TenantGovernancePolicyResponse.from_record(record)
+            TenantGovernancePolicyResponse.from_record(record) for record in page.items
+        ],
+        total=page.total,
+        offset=page.offset,
+    )
+
+
+@router.post(
+    "/topologies",
+    response_model=TenantTopologyConfigurationResponse,
+)
+async def configure_topology(
+    request: TenantTopologyConfigurationCreateRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_authority),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantTopologyConfigurationResponse:
+    try:
+        record = await service.configure_topology(
+            tenant_id=expected_tenant_id,
+            topology_name=request.topology_name,
+            topology=request.topology,
+            status=request.status,
+            configured_by=_principal_or_400(authority),
+        )
+    except TenantTopologyCycleError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "tenant_topology_cycle_detected"},
+        ) from exc
+    except TenantConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "tenant_topology_configuration_invalid"},
+        ) from exc
+    return TenantTopologyConfigurationResponse.from_record(record)
+
+
+@router.get(
+    "/topologies",
+    response_model=TenantTopologyConfigurationPage,
+)
+async def list_topology_configurations(
+    topology_name: str | None = Query(None),
+    status_filter: TenantTopologyStatus | None = Query(None, alias="status"),
+    limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantTopologyConfigurationPage:
+    page = await service.list_topology_configurations(
+        tenant_id=expected_tenant_id,
+        topology_name=topology_name,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return TenantTopologyConfigurationPage(
+        items=[
+            TenantTopologyConfigurationResponse.from_record(record)
             for record in page.items
         ],
         total=page.total,
