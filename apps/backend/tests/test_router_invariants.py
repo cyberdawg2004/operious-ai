@@ -87,6 +87,7 @@ _SUBSTRATE_PACKAGES: Final[frozenset[str]] = frozenset({
     "organizational_intelligence",
     "session",
     "supervisor",
+    "tenant",
 })
 
 #: ``app.*`` packages that routers may import freely. These are
@@ -126,6 +127,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
     "get_health_service",
     "get_session_repository",
     "get_supervisor_repository",
+    "get_tenant_configuration_service",
 })
 
 

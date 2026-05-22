@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 from app.boundary.exceptions import (
     BoundaryPersistenceError,
@@ -25,11 +26,23 @@ from app.boundary.persistence.records import (
 class InMemoryBoundaryPersistence:
     """Write-once, deterministically ordered in-memory implementation."""
 
-    __slots__ = ("_ingress", "_egress", "_lock")
+    __slots__ = (
+        "_ingress",
+        "_ingress_by_event_id",
+        "_ingress_by_replay_key",
+        "_egress",
+        "_lock",
+    )
 
     def __init__(self) -> None:
         self._ingress: dict[
             BoundaryIngressId, BoundaryIngressRecord
+        ] = {}
+        self._ingress_by_replay_key: dict[
+            uuid.UUID, BoundaryIngressId
+        ] = {}
+        self._ingress_by_event_id: dict[
+            uuid.UUID, BoundaryIngressId
         ] = {}
         self._egress: dict[
             BoundaryEgressId, BoundaryEgressRecord
@@ -38,14 +51,21 @@ class InMemoryBoundaryPersistence:
 
     async def save_ingress(
         self, record: BoundaryIngressRecord
-    ) -> None:
+    ) -> BoundaryIngressRecord:
         async with self._lock:
-            if record.ingress_id in self._ingress:
-                raise BoundaryPersistenceError(
-                    "duplicate ingress record: "
-                    f"ingress_id={record.ingress_id}"
-                )
+            existing = self._resolve_duplicate_ingress(record)
+            if existing is not None:
+                return existing
             self._ingress[record.ingress_id] = record
+            if record.replay_key is not None:
+                self._ingress_by_replay_key[record.replay_key] = (
+                    record.ingress_id
+                )
+            if record.event_id is not None:
+                self._ingress_by_event_id[record.event_id] = (
+                    record.ingress_id
+                )
+            return record
 
     async def save_egress(
         self, record: BoundaryEgressRecord
@@ -199,6 +219,26 @@ class InMemoryBoundaryPersistence:
         return BoundaryRecordPage(
             egress=tuple(rows), total=total
         )
+
+    def _resolve_duplicate_ingress(
+        self, record: BoundaryIngressRecord
+    ) -> BoundaryIngressRecord | None:
+        existing = self._ingress.get(record.ingress_id)
+        if existing is not None:
+            return existing
+        if record.replay_key is not None:
+            existing_id = self._ingress_by_replay_key.get(
+                record.replay_key
+            )
+            if existing_id is not None:
+                return self._ingress[existing_id]
+        if record.event_id is not None:
+            existing_id = self._ingress_by_event_id.get(
+                record.event_id
+            )
+            if existing_id is not None:
+                return self._ingress[existing_id]
+        return None
 
 
 __all__ = ["InMemoryBoundaryPersistence"]

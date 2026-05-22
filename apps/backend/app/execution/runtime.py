@@ -1,0 +1,763 @@
+"""ExecutionRuntime: durable execution authority boundary."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Mapping
+
+from app.execution.enums import (
+    ExecutionAttemptState,
+    ExecutionKind,
+    ExecutionOutboxState,
+    ExecutionState,
+)
+from app.execution.exceptions import ExecutionNotClaimableError
+from app.execution.identity import (
+    ExecutionAttemptId,
+    ExecutionId,
+    ExecutionOutboxId,
+    as_attempt_id,
+    as_execution_id,
+    as_outbox_id,
+    derive_execution_id,
+    derive_outbox_id,
+)
+from app.execution.persistence import (
+    ExecutionAttemptPage,
+    ExecutionAttemptQuery,
+    ExecutionAttemptRecord,
+    ExecutionPage,
+    ExecutionOutboxRecord,
+    ExecutionPersistenceProtocol,
+    ExecutionQuery,
+    ExecutionRecord,
+    OutboxPage,
+    OutboxQuery,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRequestResult:
+    """Result of admitting an execution intent."""
+
+    execution: ExecutionRecord
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionClaimResult:
+    """Result of a worker claim attempt."""
+
+    claimed: bool
+    execution: ExecutionRecord | None
+    attempt: ExecutionAttemptRecord | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionOutboxClaimResult:
+    """Result of claiming a durable transport intent."""
+
+    claimed: bool
+    outbox: ExecutionOutboxRecord | None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRecoveryResult:
+    """Result of reopening a stale worker claim."""
+
+    recovered: bool
+    execution: ExecutionRecord | None
+    attempt: ExecutionAttemptRecord | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRecoverySweepResult:
+    """Inspectable result of one stale-claim recovery sweep."""
+
+    scanned: int
+    recovered: tuple[ExecutionRecoveryResult, ...]
+    refused: tuple[ExecutionRecoveryResult, ...] = ()
+
+    @property
+    def recovered_count(self) -> int:
+        return len(self.recovered)
+
+    @property
+    def refused_count(self) -> int:
+        return len(self.refused)
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionWorkerLegitimacyResult:
+    """Read-only verdict for a worker attempting side effects."""
+
+    legitimate: bool
+    execution: ExecutionRecord | None
+    attempt: ExecutionAttemptRecord | None = None
+    reason: str | None = None
+
+
+class ExecutionRuntime:
+    """Apex execution authority.
+
+    This runtime does not execute agents and does not publish transport
+    messages. It owns the durable right to execute and the state
+    transitions around that right.
+    """
+
+    def __init__(
+        self,
+        *,
+        persistence: ExecutionPersistenceProtocol,
+    ) -> None:
+        self._persistence = persistence
+
+    @property
+    def persistence(self) -> ExecutionPersistenceProtocol:
+        return self._persistence
+
+    async def get_execution(
+        self,
+        execution_id: ExecutionId | str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionRecord | None:
+        """Read an execution through the runtime authority boundary."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        return await self._persistence.get_execution(
+            eid,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def get_execution_by_dispatch(
+        self,
+        *,
+        dispatch_id: str,
+        kind: ExecutionKind,
+        expected_tenant_id: str,
+    ) -> ExecutionRecord | None:
+        """Read an execution intent by dispatch identity and tenant."""
+
+        if not dispatch_id:
+            raise ValueError("dispatch_id must be non-empty")
+        if not expected_tenant_id:
+            raise ValueError("expected_tenant_id must be non-empty")
+        return await self._persistence.get_execution_by_dispatch(
+            dispatch_id=dispatch_id,
+            kind=kind,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def get_attempt(
+        self,
+        attempt_id: ExecutionAttemptId | str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionAttemptRecord | None:
+        """Read an execution attempt, optionally scoped by parent tenant."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        aid = (
+            attempt_id
+            if not isinstance(attempt_id, str)
+            else as_attempt_id(attempt_id)
+        )
+        attempt = await self._persistence.get_attempt(aid)
+        if attempt is None or expected_tenant_id is None:
+            return attempt
+        parent = await self._persistence.get_execution(
+            attempt.execution_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if parent is None:
+            return None
+        return attempt
+
+    async def get_outbox(
+        self,
+        outbox_id: ExecutionOutboxId | str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionOutboxRecord | None:
+        """Read an outbox transport intent, optionally tenant scoped."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        oid = (
+            outbox_id
+            if not isinstance(outbox_id, str)
+            else as_outbox_id(outbox_id)
+        )
+        outbox = await self._persistence.get_outbox(oid)
+        if outbox is None or expected_tenant_id is None:
+            return outbox
+        parent = await self._persistence.get_execution(
+            outbox.execution_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if parent is None:
+            return None
+        return outbox
+
+    async def get_outbox_by_execution(
+        self,
+        execution_id: ExecutionId | str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionOutboxRecord | None:
+        """Read the durable transport intent for one execution."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        if expected_tenant_id is not None:
+            parent = await self._persistence.get_execution(
+                eid,
+                expected_tenant_id=expected_tenant_id,
+            )
+            if parent is None:
+                return None
+        return await self._persistence.get_outbox_by_execution(eid)
+
+    async def list_executions(
+        self,
+        query: ExecutionQuery,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionPage:
+        """List executions through the runtime authority boundary."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        return await self._persistence.list_executions(
+            query,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def list_attempts(
+        self,
+        query: ExecutionAttemptQuery,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionAttemptPage:
+        """List execution attempts without creating timeline authority."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        if expected_tenant_id is None:
+            return await self._persistence.list_attempts(query)
+        if query.execution_id is None:
+            raise ValueError(
+                "tenant-scoped attempt reads require execution_id"
+            )
+        parent = await self._persistence.get_execution(
+            query.execution_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if parent is None:
+            return ExecutionAttemptPage(
+                attempts=(),
+                total=0,
+                offset=query.offset,
+            )
+        return await self._persistence.list_attempts(query)
+
+    async def list_outbox(
+        self,
+        query: OutboxQuery,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> OutboxPage:
+        """List outbox transport intents through execution authority."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        if expected_tenant_id is None:
+            return await self._persistence.list_outbox(query)
+        if query.execution_id is None:
+            raise ValueError("tenant-scoped outbox reads require execution_id")
+        parent = await self._persistence.get_execution(
+            query.execution_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if parent is None:
+            return OutboxPage(records=(), total=0, offset=query.offset)
+        return await self._persistence.list_outbox(query)
+
+    async def request_diagnostic_execution(
+        self,
+        *,
+        dispatch_id: str,
+        session_id: str,
+        tenant_id: str,
+        requested_at: datetime | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> ExecutionRequestResult:
+        """Create or retrieve the durable diagnostic execution intent."""
+
+        if not tenant_id:
+            raise ValueError("execution request requires tenant_id")
+        ts = requested_at or datetime.now(tz=timezone.utc)
+        execution_id = derive_execution_id(
+            kind=ExecutionKind.DIAGNOSTIC_AGENT.value,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        execution = ExecutionRecord(
+            execution_id=execution_id,
+            kind=ExecutionKind.DIAGNOSTIC_AGENT,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=ExecutionState.REQUESTED,
+            attempt_count=0,
+            requested_at=ts,
+            metadata=dict(metadata or {}),
+        )
+        outbox = ExecutionOutboxRecord(
+            outbox_id=derive_outbox_id(execution_id=execution_id),
+            execution_id=execution_id,
+            state=ExecutionOutboxState.PENDING,
+            created_at=ts,
+            metadata={
+                "execution.kind": ExecutionKind.DIAGNOSTIC_AGENT.value,
+                **dict(metadata or {}),
+            },
+        )
+        persisted = await self._persistence.request_execution(
+            execution=execution,
+            outbox=outbox,
+        )
+        return ExecutionRequestResult(execution=persisted)
+
+    async def claim_execution(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        worker_id: str,
+        claimed_at: datetime | None = None,
+    ) -> ExecutionClaimResult:
+        """Atomically claim an execution before worker logic runs."""
+
+        if not worker_id:
+            raise ValueError("worker_id must be non-empty")
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        claimed = await self._persistence.claim_execution(
+            execution_id=eid,
+            worker_id=worker_id,
+            claimed_at=claimed_at or datetime.now(tz=timezone.utc),
+        )
+        if claimed is not None:
+            return ExecutionClaimResult(
+                claimed=True,
+                execution=claimed.execution,
+                attempt=claimed.attempt,
+            )
+        current = await self._persistence.get_execution(eid)
+        if current is None:
+            return ExecutionClaimResult(
+                claimed=False, execution=None, reason="execution_not_found"
+            )
+        return ExecutionClaimResult(
+            claimed=False,
+            execution=current,
+            reason=f"execution_not_claimable:{current.state.value}",
+        )
+
+    async def complete_execution(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        attempt_id: ExecutionAttemptId | str | None = None,
+        worker_id: str | None = None,
+        result: Mapping[str, Any],
+        completed_at: datetime | None = None,
+    ) -> ExecutionRecord:
+        _validate_optional_worker_id(worker_id)
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        aid = (
+            None
+            if attempt_id is None
+            else (
+                attempt_id
+                if not isinstance(attempt_id, str)
+                else as_attempt_id(attempt_id)
+            )
+        )
+        return await self._persistence.complete_execution(
+            execution_id=eid,
+            attempt_id=aid,
+            result=result,
+            completed_at=completed_at or datetime.now(tz=timezone.utc),
+            worker_id=worker_id,
+        )
+
+    async def fail_execution(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        attempt_id: ExecutionAttemptId | str | None = None,
+        worker_id: str | None = None,
+        error: str,
+        failed_at: datetime | None = None,
+        retry_requested: bool = False,
+    ) -> ExecutionRecord:
+        _validate_optional_worker_id(worker_id)
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        aid = (
+            None
+            if attempt_id is None
+            else (
+                attempt_id
+                if not isinstance(attempt_id, str)
+                else as_attempt_id(attempt_id)
+            )
+        )
+        return await self._persistence.fail_execution(
+            execution_id=eid,
+            attempt_id=aid,
+            error=error,
+            failed_at=failed_at or datetime.now(tz=timezone.utc),
+            retry_requested=retry_requested,
+            worker_id=worker_id,
+        )
+
+    async def dead_letter_execution(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        attempt_id: ExecutionAttemptId | str | None = None,
+        worker_id: str | None = None,
+        error: str,
+        dead_lettered_at: datetime | None = None,
+    ) -> ExecutionRecord:
+        _validate_optional_worker_id(worker_id)
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        aid = (
+            None
+            if attempt_id is None
+            else (
+                attempt_id
+                if not isinstance(attempt_id, str)
+                else as_attempt_id(attempt_id)
+            )
+        )
+        return await self._persistence.dead_letter_execution(
+            execution_id=eid,
+            attempt_id=aid,
+            error=error,
+            dead_lettered_at=dead_lettered_at or datetime.now(tz=timezone.utc),
+            worker_id=worker_id,
+        )
+
+    async def recover_stale_execution(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        stale_before: datetime,
+        recovered_at: datetime | None = None,
+        reason: str = "execution claim expired",
+    ) -> ExecutionRecoveryResult:
+        """Reopen an expired claimed execution without creating an attempt.
+
+        Recovery marks the current running attempt as failed with
+        ``retry_requested=True`` and returns the execution to
+        ``REQUESTED``. The next legitimate worker claim creates the
+        next deterministic attempt id.
+        """
+
+        if stale_before.tzinfo is None:
+            raise ValueError("stale_before must be timezone-aware")
+        if recovered_at is not None and recovered_at.tzinfo is None:
+            raise ValueError("recovered_at must be timezone-aware")
+        if not reason:
+            raise ValueError("recovery reason must be non-empty")
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        recovered = await self._persistence.recover_stale_execution(
+            execution_id=eid,
+            stale_before=stale_before,
+            recovered_at=recovered_at or datetime.now(tz=timezone.utc),
+            reason=reason,
+        )
+        if recovered is not None:
+            return ExecutionRecoveryResult(
+                recovered=True,
+                execution=recovered.execution,
+                attempt=recovered.attempt,
+            )
+        current = await self._persistence.get_execution(eid)
+        if current is None:
+            return ExecutionRecoveryResult(
+                recovered=False,
+                execution=None,
+                reason="execution_not_found",
+            )
+        if current.state is not ExecutionState.CLAIMED:
+            return ExecutionRecoveryResult(
+                recovered=False,
+                execution=current,
+                reason=f"execution_not_claimed:{current.state.value}",
+            )
+        return ExecutionRecoveryResult(
+            recovered=False,
+            execution=current,
+            reason="execution_not_stale",
+        )
+
+    async def recover_stale_executions(
+        self,
+        *,
+        stale_before: datetime,
+        recovered_at: datetime | None = None,
+        reason: str = "execution claim expired",
+        limit: int = 100,
+        tenant_id: str | None = None,
+    ) -> ExecutionRecoverySweepResult:
+        """Recover a bounded page of stale claimed executions.
+
+        This is the execution-owned reaper primitive. It selects only
+        claimed executions older than ``stale_before`` and delegates
+        each transition to ``recover_stale_execution`` so the same
+        state machine and attempt lineage rules apply everywhere.
+        """
+
+        if stale_before.tzinfo is None:
+            raise ValueError("stale_before must be timezone-aware")
+        if recovered_at is not None and recovered_at.tzinfo is None:
+            raise ValueError("recovered_at must be timezone-aware")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if not reason:
+            raise ValueError("recovery reason must be non-empty")
+        page = await self._persistence.list_executions(
+            ExecutionQuery(
+                tenant_id=tenant_id,
+                state=ExecutionState.CLAIMED,
+                claimed_before_or_at=stale_before,
+                limit=limit,
+            ),
+            expected_tenant_id=tenant_id,
+        )
+        ts = recovered_at or datetime.now(tz=timezone.utc)
+        recovered_results: list[ExecutionRecoveryResult] = []
+        refused_results: list[ExecutionRecoveryResult] = []
+        for execution in page.executions:
+            result = await self.recover_stale_execution(
+                execution_id=execution.execution_id,
+                stale_before=stale_before,
+                recovered_at=ts,
+                reason=reason,
+            )
+            if result.recovered:
+                recovered_results.append(result)
+            else:
+                refused_results.append(result)
+        return ExecutionRecoverySweepResult(
+            scanned=len(page.executions),
+            recovered=tuple(recovered_results),
+            refused=tuple(refused_results),
+        )
+
+    async def validate_worker_legitimacy(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        attempt_id: ExecutionAttemptId | str,
+        worker_id: str,
+    ) -> ExecutionWorkerLegitimacyResult:
+        """Read-only worker ownership check before side effects."""
+
+        if not worker_id:
+            raise ValueError("worker_id must be non-empty")
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        aid = (
+            attempt_id
+            if not isinstance(attempt_id, str)
+            else as_attempt_id(attempt_id)
+        )
+        execution = await self._persistence.get_execution(eid)
+        if execution is None:
+            return ExecutionWorkerLegitimacyResult(
+                legitimate=False,
+                execution=None,
+                reason="execution_not_found",
+            )
+        attempt = await self._persistence.get_attempt(aid)
+        if attempt is None:
+            return ExecutionWorkerLegitimacyResult(
+                legitimate=False,
+                execution=execution,
+                reason="attempt_not_found",
+            )
+        reason = _worker_legitimacy_violation(
+            execution=execution,
+            attempt=attempt,
+            worker_id=worker_id,
+        )
+        return ExecutionWorkerLegitimacyResult(
+            legitimate=reason is None,
+            execution=execution,
+            attempt=attempt,
+            reason=reason,
+        )
+
+    async def claim_outbox_for_execution(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        publisher_id: str,
+        claimed_at: datetime | None = None,
+    ) -> ExecutionOutboxClaimResult:
+        """Atomically claim the pending transport intent for an execution."""
+
+        if not publisher_id:
+            raise ValueError("publisher_id must be non-empty")
+        eid = (
+            execution_id
+            if not isinstance(execution_id, str)
+            else as_execution_id(execution_id)
+        )
+        claimed = await self._persistence.claim_outbox_for_execution(
+            execution_id=eid,
+            publisher_id=publisher_id,
+            claimed_at=claimed_at or datetime.now(tz=timezone.utc),
+        )
+        if claimed is not None:
+            return ExecutionOutboxClaimResult(
+                claimed=True,
+                outbox=claimed,
+            )
+        current = await self._persistence.get_outbox_by_execution(eid)
+        if current is None:
+            return ExecutionOutboxClaimResult(
+                claimed=False,
+                outbox=None,
+                reason="outbox_not_found",
+            )
+        return ExecutionOutboxClaimResult(
+            claimed=False,
+            outbox=current,
+            reason=f"outbox_not_publishable:{current.state.value}",
+        )
+
+    async def mark_outbox_published(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId | str,
+        published_at: datetime | None = None,
+    ) -> ExecutionOutboxRecord:
+        oid = (
+            outbox_id
+            if not isinstance(outbox_id, str)
+            else as_outbox_id(outbox_id)
+        )
+        return await self._persistence.mark_outbox_published(
+            outbox_id=oid,
+            published_at=published_at or datetime.now(tz=timezone.utc),
+        )
+
+    async def mark_outbox_failed(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId | str,
+        error: str,
+        failed_at: datetime | None = None,
+    ) -> ExecutionOutboxRecord:
+        oid = (
+            outbox_id
+            if not isinstance(outbox_id, str)
+            else as_outbox_id(outbox_id)
+        )
+        return await self._persistence.mark_outbox_failed(
+            outbox_id=oid,
+            error=error,
+            failed_at=failed_at or datetime.now(tz=timezone.utc),
+        )
+
+    async def require_claim(
+        self,
+        *,
+        execution_id: ExecutionId | str,
+        worker_id: str,
+    ) -> ExecutionRecord:
+        claim = await self.claim_execution(
+            execution_id=execution_id, worker_id=worker_id
+        )
+        if claim.claimed and claim.execution is not None:
+            return claim.execution
+        raise ExecutionNotClaimableError(claim.reason or "claim refused")
+
+
+__all__ = [
+    "ExecutionClaimResult",
+    "ExecutionOutboxClaimResult",
+    "ExecutionRecoveryResult",
+    "ExecutionRecoverySweepResult",
+    "ExecutionRequestResult",
+    "ExecutionRuntime",
+    "ExecutionWorkerLegitimacyResult",
+]
+
+
+def _validate_optional_worker_id(worker_id: str | None) -> None:
+    if worker_id is not None and not worker_id:
+        raise ValueError("worker_id must be non-empty when supplied")
+
+
+def _validate_optional_tenant_id(tenant_id: str | None) -> None:
+    if tenant_id is not None and not tenant_id:
+        raise ValueError("expected_tenant_id must be non-empty when supplied")
+
+
+def _worker_legitimacy_violation(
+    *,
+    execution: ExecutionRecord,
+    attempt: ExecutionAttemptRecord,
+    worker_id: str,
+) -> str | None:
+    if execution.state is not ExecutionState.CLAIMED:
+        return f"execution_not_claimed:{execution.state.value}"
+    if execution.worker_id != worker_id:
+        return "worker_mismatch:execution"
+    if attempt.execution_id != execution.execution_id:
+        return "attempt_execution_mismatch"
+    if attempt.worker_id != worker_id:
+        return "worker_mismatch:attempt"
+    if attempt.state is not ExecutionAttemptState.RUNNING:
+        return f"attempt_not_running:{attempt.state.value}"
+    if attempt.attempt_number != execution.attempt_count:
+        return "attempt_not_current"
+    return None

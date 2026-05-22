@@ -44,7 +44,7 @@ _BOUNDARY_ROOT = Path("app/boundary")
 
 _FORBIDDEN_PARENT_IMPORT_RE = re.compile(
     r"^(?:from|import)\s+app\.(?:agents|supervisor|coordination|"
-    r"memory|arbitration|embeddings|replay|tracing|providers|db|"
+    r"memory|arbitration|embeddings|events|replay|tracing|providers|db|"
     r"governance)\b",
     re.MULTILINE,
 )
@@ -263,3 +263,15 @@ def test_runtime_composition_is_valid() -> None:
     )
     eg = BoundaryEgressRuntime(adapters=reg)
     assert ing.runtime_instance_id != eg.runtime_instance_id
+
+
+def test_ticket_ingress_does_not_create_request_local_idempotency() -> None:
+    """Ticket ingress must rely on boundary persistence for replay authority."""
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "app/services/ticket_ingress_service.py"
+    )
+    text = path.read_text(
+        encoding="utf-8"
+    )
+    assert "BoundaryIdempotencyRegistry" not in text

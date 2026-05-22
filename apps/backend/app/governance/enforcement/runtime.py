@@ -50,6 +50,8 @@ from app.governance.exceptions import (
 from app.governance.identity.decision_ids import generate_decision_id
 from app.governance.persistence import (
     BaseGovernanceRepository,
+)
+from app.governance.persistence.serializers import (
     decision_to_record,
     enforcement_action_to_record,
     trace_to_record,

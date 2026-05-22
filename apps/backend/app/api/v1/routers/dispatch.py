@@ -41,6 +41,7 @@ async def dispatch_ingress(
     return DispatchResponse(
         dispatch_id=result.dispatch_id,
         session_id=result.session_id,
+        execution_id=result.execution_id,
         governance_decision_id=result.governance_decision_id,
         verdict=result.verdict,
     )

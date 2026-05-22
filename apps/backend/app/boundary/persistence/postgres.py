@@ -1,16 +1,17 @@
 """Postgres implementation of :class:`BoundaryPersistenceProtocol`.
 
-Behavioural parity with :class:`InMemoryBoundaryPersistence` —
-write-once on each direction, tenant-scoped point + list reads,
-canonical ``(runtime_instance_id, sequence)`` ordering on each
-table independently.
+Behavioural parity with :class:`InMemoryBoundaryPersistence`:
+egress remains write-once by id; ingress duplicate replay keys,
+event ids, and ingress ids resolve to the original canonical record.
+Reads remain tenant-scoped, and list ordering remains canonical
+``(runtime_instance_id, sequence)`` ordering per table.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from app.boundary.db.models import (
@@ -47,16 +48,23 @@ class PostgresBoundaryPersistence(BaseRepository):
 
     # ─── Writes ──────────────────────────────────────────────────────
 
-    async def save_ingress(self, record: BoundaryIngressRecord) -> None:
+    async def save_ingress(
+        self, record: BoundaryIngressRecord
+    ) -> BoundaryIngressRecord:
         row = _ingress_record_to_row(record)
         try:
             # SAVEPOINT isolation — see governance repo for doctrine.
             async with self.session.begin_nested():
                 self.session.add(row)
         except IntegrityError as exc:
+            with self.session.no_autoflush:
+                existing = await self._find_duplicate_ingress(record)
+            if existing is not None:
+                return existing
             raise BoundaryPersistenceError(
                 f"duplicate ingress record: ingress_id={record.ingress_id}"
             ) from exc
+        return record
 
     async def save_egress(self, record: BoundaryEgressRecord) -> None:
         row = _egress_record_to_row(record)
@@ -67,6 +75,33 @@ class PostgresBoundaryPersistence(BaseRepository):
             raise BoundaryPersistenceError(
                 f"duplicate egress record: egress_id={record.egress_id}"
             ) from exc
+
+    async def _find_duplicate_ingress(
+        self, record: BoundaryIngressRecord
+    ) -> BoundaryIngressRecord | None:
+        predicates = [
+            BoundaryIngressRow.ingress_id == record.ingress_id
+        ]
+        if record.replay_key is not None:
+            predicates.append(
+                BoundaryIngressRow.replay_key == record.replay_key
+            )
+        if record.event_id is not None:
+            predicates.append(
+                BoundaryIngressRow.event_id == record.event_id
+            )
+        stmt = (
+            select(BoundaryIngressRow)
+            .where(or_(*predicates))
+            .order_by(
+                BoundaryIngressRow.received_at,
+                BoundaryIngressRow.runtime_instance_id,
+                BoundaryIngressRow.sequence,
+            )
+            .limit(1)
+        )
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        return None if row is None else _ingress_row_to_record(row)
 
     # ─── Point reads ─────────────────────────────────────────────────
 

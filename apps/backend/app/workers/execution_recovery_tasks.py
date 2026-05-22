@@ -1,0 +1,167 @@
+"""Execution recovery worker tasks.
+
+Celery is only the transport/scheduling surface here. The legitimacy
+and state transition authority stays inside ``ExecutionRuntime``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Coroutine
+from datetime import datetime, timedelta, timezone
+from threading import Thread
+from typing import Any, TypeVar
+
+from app.core.config import get_settings
+from app.db.session import get_session_factory
+from app.execution import (
+    ExecutionRecoverySweepResult,
+    ExecutionRuntime,
+    PostgresExecutionPersistence,
+)
+from app.workers.celery_app import celery_app
+
+_T = TypeVar("_T")
+
+
+@celery_app.task(name="recover_stale_executions", bind=True)
+def recover_stale_executions(
+    _self: Any,
+    *,
+    stale_before: str | None = None,
+    lease_seconds: int | None = None,
+    limit: int | None = None,
+    reason: str = "execution claim expired",
+) -> dict[str, object]:
+    """Recover a bounded page of stale execution claims."""
+
+    settings = get_settings()
+    if lease_seconds is not None and lease_seconds < 1:
+        raise ValueError("lease_seconds must be positive")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    recovered_at = datetime.now(tz=timezone.utc)
+    threshold = (
+        _parse_datetime(stale_before)
+        if stale_before is not None
+        else recovered_at
+        - timedelta(
+            seconds=(
+                lease_seconds
+                if lease_seconds is not None
+                else settings.EXECUTION_CLAIM_LEASE_SECONDS
+            )
+        )
+    )
+    return _run_async(
+        recover_stale_executions_runtime(
+            stale_before=threshold,
+            recovered_at=recovered_at,
+            limit=(
+                limit
+                if limit is not None
+                else settings.EXECUTION_RECOVERY_BATCH_SIZE
+            ),
+            reason=reason,
+        )
+    )
+
+
+async def recover_stale_executions_runtime(
+    *,
+    stale_before: datetime,
+    recovered_at: datetime | None = None,
+    limit: int = 100,
+    reason: str = "execution claim expired",
+) -> dict[str, object]:
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        runtime = ExecutionRuntime(
+            persistence=PostgresExecutionPersistence(session)
+        )
+        sweep = await runtime.recover_stale_executions(
+            stale_before=stale_before,
+            recovered_at=recovered_at,
+            limit=limit,
+            reason=reason,
+        )
+        await session.commit()
+        return _serialize_sweep(sweep)
+
+
+def _serialize_sweep(
+    sweep: ExecutionRecoverySweepResult,
+) -> dict[str, object]:
+    return {
+        "status": "completed",
+        "scanned": sweep.scanned,
+        "recovered_count": sweep.recovered_count,
+        "refused_count": sweep.refused_count,
+        "recovered": [
+            _serialize_recovery_result(result)
+            for result in sweep.recovered
+        ],
+        "refused": [
+            _serialize_recovery_result(result)
+            for result in sweep.refused
+        ],
+    }
+
+
+def _serialize_recovery_result(result) -> dict[str, object]:  # type: ignore[no-untyped-def]
+    execution = result.execution
+    attempt = result.attempt
+    return {
+        "recovered": result.recovered,
+        "reason": result.reason,
+        "execution_id": (
+            None if execution is None else str(execution.execution_id)
+        ),
+        "execution_state": (
+            None if execution is None else execution.state.value
+        ),
+        "attempt_id": (
+            None if attempt is None else str(attempt.attempt_id)
+        ),
+        "attempt_state": (
+            None if attempt is None else attempt.state.value
+        ),
+    }
+
+
+def _parse_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise ValueError("stale_before must be timezone-aware")
+    return parsed
+
+
+def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    results: list[_T] = []
+    errors: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            results.append(asyncio.run(coro))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread = Thread(target=_runner)
+    thread.start()
+    thread.join()
+    if errors:
+        raise errors[0]
+    if not results:
+        raise RuntimeError("execution recovery coroutine returned no result")
+    return results[0]
+
+
+__all__ = [
+    "recover_stale_executions",
+    "recover_stale_executions_runtime",
+]

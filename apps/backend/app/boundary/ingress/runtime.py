@@ -49,6 +49,7 @@ from app.boundary.identity import (
     generate_ingress_id,
 )
 from app.boundary.idempotency.detector import (
+    BoundaryReplayDecision,
     BoundaryReplayDetector,
 )
 from app.boundary.idempotency.registry import (
@@ -67,7 +68,9 @@ from app.boundary.normalization.normalizer import (
 from app.boundary.persistence.repository import (
     BoundaryPersistenceProtocol,
 )
+from app.boundary.persistence.records import BoundaryIngressRecord
 from app.boundary.persistence.serializers import (
+    ingress_record_to_result,
     ingress_result_to_record,
 )
 from app.boundary.registry.registry import (
@@ -96,7 +99,7 @@ class BoundaryIngressRuntime:
         self,
         *,
         adapters: BoundaryAdapterRegistry,
-        idempotency: BoundaryIdempotencyRegistry,
+        idempotency: BoundaryIdempotencyRegistry | None = None,
         normalizer: BoundaryNormalizer | None = None,
         detector: BoundaryReplayDetector | None = None,
         persistence: BoundaryPersistenceProtocol | None = None,
@@ -118,7 +121,7 @@ class BoundaryIngressRuntime:
         return self._adapters
 
     @property
-    def idempotency(self) -> BoundaryIdempotencyRegistry:
+    def idempotency(self) -> BoundaryIdempotencyRegistry | None:
         return self._idempotency
 
     @property
@@ -198,12 +201,12 @@ class BoundaryIngressRuntime:
                 )
             except ValueError:
                 replay_key = None
-        decision = await self._detector.classify(
+        fingerprint = content_fingerprint(
+            normalization.canonical_payload
+        )
+        decision = await self._classify_replay(
             replay_key=replay_key,
-            content_fingerprint=content_fingerprint(
-                normalization.canonical_payload
-            ),
-            registry=self._idempotency,
+            fingerprint=fingerprint,
         )
 
         # 3. Derive event id.
@@ -224,65 +227,66 @@ class BoundaryIngressRuntime:
 
         # 4. Replay-record bookkeeping. Lineage NEVER changes.
         original_event_id: BoundaryEventId | None = None
-        if (
-            decision.disposition is BoundaryReplayDisposition.NEW
-            and event_id is not None
-            and replay_key is not None
-        ):
-            try:
-                await self._idempotency.record_first_seen(
+        if self._idempotency is None:
+            if (
+                decision.disposition is BoundaryReplayDisposition.NEW
+                and event_id is not None
+            ):
+                original_event_id = event_id
+        else:
+            if (
+                decision.disposition is BoundaryReplayDisposition.NEW
+                and event_id is not None
+                and replay_key is not None
+            ):
+                try:
+                    await self._idempotency.record_first_seen(
+                        replay_key=replay_key,
+                        event_id=event_id,
+                        source_type=request.source.source_type,
+                        external_message_id=(
+                            normalization.external_message_id or ""
+                        ),
+                        tenant_id=resolution.tenant_id,
+                        content_fingerprint=fingerprint,
+                        seen_at=started_at,
+                    )
+                except ValueError:
+                    # Race — another caller registered the same key
+                    # between classify and record. Re-classify to pick
+                    # up the now-existing record.
+                    existing = await self._idempotency.get(
+                        replay_key
+                    )
+                    if existing is not None:
+                        decision = (
+                            await self._detector.classify(
+                                replay_key=replay_key,
+                                content_fingerprint=fingerprint,
+                                registry=self._idempotency,
+                            )
+                        )
+                        original_event_id = existing.event_id
+                        event_id = existing.event_id
+                original_event_id = original_event_id or event_id
+            elif (
+                decision.disposition
+                in {
+                    BoundaryReplayDisposition.REPLAY_OF_KNOWN,
+                    BoundaryReplayDisposition.LINEAGE_DRIFT,
+                }
+                and replay_key is not None
+            ):
+                await self._idempotency.record_observation(
                     replay_key=replay_key,
-                    event_id=event_id,
-                    source_type=request.source.source_type,
-                    external_message_id=(
-                        normalization.external_message_id or ""
-                    ),
-                    tenant_id=resolution.tenant_id,
-                    content_fingerprint=content_fingerprint(
-                        normalization.canonical_payload
-                    ),
+                    disposition=decision.disposition,
+                    observed_fingerprint=fingerprint,
                     seen_at=started_at,
                 )
-            except ValueError:
-                # Race — another caller registered the same key
-                # between classify and record. Re-classify to pick
-                # up the now-existing record.
-                existing = await self._idempotency.get(
-                    replay_key
-                )
-                if existing is not None:
-                    decision = (
-                        await self._detector.classify(
-                            replay_key=replay_key,
-                            content_fingerprint=content_fingerprint(
-                                normalization.canonical_payload
-                            ),
-                            registry=self._idempotency,
-                        )
-                    )
-                    original_event_id = existing.event_id
-                    event_id = existing.event_id
-            original_event_id = original_event_id or event_id
-        elif (
-            decision.disposition
-            in {
-                BoundaryReplayDisposition.REPLAY_OF_KNOWN,
-                BoundaryReplayDisposition.LINEAGE_DRIFT,
-            }
-            and replay_key is not None
-        ):
-            await self._idempotency.record_observation(
-                replay_key=replay_key,
-                disposition=decision.disposition,
-                observed_fingerprint=content_fingerprint(
-                    normalization.canonical_payload
-                ),
-                seen_at=started_at,
-            )
-            original_event_id = decision.original_event_id
-            # Replays inherit the ORIGINAL event_id — lineage never
-            # rewrites.
-            event_id = decision.original_event_id
+                original_event_id = decision.original_event_id
+                # Replays inherit the ORIGINAL event_id — lineage never
+                # rewrites.
+                event_id = decision.original_event_id
 
         # 5. Build canonical event when normalisation succeeded.
         event: ExternalBoundaryEvent | None = None
@@ -375,9 +379,20 @@ class BoundaryIngressRuntime:
         framework_error: BaseException | None = None
         if self._persistence is not None:
             try:
-                await self._persistence.save_ingress(
-                    ingress_result_to_record(result)
+                candidate_record = ingress_result_to_record(result)
+                persisted_record = await self._persistence.save_ingress(
+                    candidate_record
                 )
+                if persisted_record != candidate_record:
+                    result = ingress_record_to_result(
+                        persisted_record
+                    )
+                    trace = self._trace_from_record(
+                        persisted_record,
+                        tenant_authority_source=(
+                            resolution.source.value
+                        ),
+                    )
             except Exception as persistence_exc:  # noqa: BLE001
                 _logger.exception(
                     "boundary persistence failed for "
@@ -391,6 +406,30 @@ class BoundaryIngressRuntime:
         )
 
     # ─── helpers ─────────────────────────────────────────────────
+
+    async def _classify_replay(
+        self,
+        *,
+        replay_key: uuid.UUID | None,
+        fingerprint: str,
+    ) -> BoundaryReplayDecision:
+        if self._idempotency is None:
+            if replay_key is None:
+                return BoundaryReplayDecision(
+                    disposition=BoundaryReplayDisposition.INVALID_KEY,
+                    replay_key=None,
+                    original_event_id=None,
+                )
+            return BoundaryReplayDecision(
+                disposition=BoundaryReplayDisposition.NEW,
+                replay_key=replay_key,
+                original_event_id=None,
+            )
+        return await self._detector.classify(
+            replay_key=replay_key,
+            content_fingerprint=fingerprint,
+            registry=self._idempotency,
+        )
 
     def _resolve_adapter(self, name: str) -> BaseIngressAdapter:
         if not self._adapters.has(
@@ -517,6 +556,38 @@ class BoundaryIngressRuntime:
             normalization_status=normalization.status,
             replay_disposition=replay_disposition,
             tenant_authority_source=resolution.source.value,
+        )
+
+    @staticmethod
+    def _trace_from_record(
+        record: BoundaryIngressRecord,
+        *,
+        tenant_authority_source: str | None,
+    ) -> BoundaryTrace:
+        return BoundaryTrace(
+            direction=record.direction,
+            runtime_instance_id=record.runtime_instance_id,
+            sequence=record.sequence,
+            source_type=record.source_type,
+            source_id=record.source_id,
+            adapter_name=record.adapter_name,
+            started_at=record.started_at,
+            ended_at=record.ended_at,
+            latency_ms=record.latency_ms,
+            correlation_id=record.correlation_id,
+            request_id=record.request_id,
+            tenant_id=record.tenant_id,
+            external_message_id=record.external_message_id,
+            external_conversation_id=(
+                record.external_conversation_id
+            ),
+            ingress_id=record.ingress_id,
+            event_id=record.event_id,
+            normalization_status=record.normalization_status,
+            replay_disposition=record.replay_disposition,
+            error=record.error,
+            tenant_authority_source=tenant_authority_source,
+            metadata=dict(record.metadata),
         )
 
     def _failed_envelope(

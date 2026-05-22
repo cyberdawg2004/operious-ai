@@ -39,10 +39,11 @@ def _ingress_record(
     *,
     ingress_id: BoundaryIngressId | None = None,
     sequence: int = 1,
+    external_message_id: str = "evt-1",
 ) -> BoundaryIngressRecord:
     coords = {
         "source_type": "zendesk",
-        "external_message_id": "evt-1",
+        "external_message_id": external_message_id,
         "tenant_id": "t1",
     }
     return BoundaryIngressRecord(
@@ -60,15 +61,15 @@ def _ingress_record(
         replay_key=derive_replay_key(**coords),
         event_id=derive_event_id(**coords),
         original_event_id=derive_event_id(**coords),
-        external_message_id="evt-1",
+        external_message_id=external_message_id,
         external_conversation_id=None,
         external_emitted_at=None,
         received_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ended_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         latency_ms=1.0,
-        correlation_id="corr-1",
-        request_id="req-1",
+        correlation_id=f"corr-{external_message_id}",
+        request_id=f"req-{external_message_id}",
         canonical_payload={"a": 1},
         error=None,
     )
@@ -113,12 +114,30 @@ async def test_save_and_get_ingress_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_duplicate_ingress_save_raises() -> None:
+async def test_duplicate_ingress_save_returns_original() -> None:
     store = InMemoryBoundaryPersistence()
     record = _ingress_record()
-    await store.save_ingress(record)
-    with pytest.raises(BoundaryPersistenceError):
-        await store.save_ingress(record)
+    saved = await store.save_ingress(record)
+    duplicate = await store.save_ingress(record)
+    assert saved == record
+    assert duplicate == record
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ingress_replay_key_returns_original() -> None:
+    store = InMemoryBoundaryPersistence()
+    original = _ingress_record(external_message_id="evt-replay")
+    duplicate = _ingress_record(external_message_id="evt-replay")
+    assert duplicate.ingress_id != original.ingress_id
+
+    await store.save_ingress(original)
+    resolved = await store.save_ingress(duplicate)
+
+    assert resolved == original
+    page = await store.list_ingress(
+        BoundaryIngressQuery(replay_key=original.replay_key)
+    )
+    assert page.total == 1
 
 
 @pytest.mark.asyncio
@@ -142,9 +161,9 @@ async def test_duplicate_egress_save_raises() -> None:
 @pytest.mark.asyncio
 async def test_list_ingress_filters_and_paginates() -> None:
     store = InMemoryBoundaryPersistence()
-    a = _ingress_record(sequence=1)
-    b = _ingress_record(sequence=2)
-    c = _ingress_record(sequence=3)
+    a = _ingress_record(sequence=1, external_message_id="evt-a")
+    b = _ingress_record(sequence=2, external_message_id="evt-b")
+    c = _ingress_record(sequence=3, external_message_id="evt-c")
     await store.save_ingress(a)
     await store.save_ingress(b)
     await store.save_ingress(c)

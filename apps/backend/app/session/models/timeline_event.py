@@ -58,6 +58,10 @@ class SessionTimelineEvent:
                           handle linking this event to a
                           `SessionCorrelation`.
         annotation:      Free-form human-readable note.
+        idempotency_key: Optional replay-stable key. Duplicate
+                          appends with the same key return the
+                          original event instead of advancing
+                          chronology.
     """
 
     event_id: SessionEventId
@@ -70,6 +74,7 @@ class SessionTimelineEvent:
     payload: Mapping[str, Any] = field(default_factory=dict)
     correlation_id: SessionCorrelationId | None = None
     annotation: str | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         if self.sequence < 0:
@@ -85,6 +90,10 @@ class SessionTimelineEvent:
             raise ValueError(
                 "SessionTimelineEvent.recorded_at must be "
                 "timezone-aware (UTC)"
+            )
+        if self.idempotency_key is not None and not self.idempotency_key:
+            raise ValueError(
+                "SessionTimelineEvent.idempotency_key must be non-empty"
             )
 
 

@@ -16,26 +16,17 @@ from app.workers.agent_tasks import (
 class CeleryExecutionPublisher(ExecutionPublisher):
     """Publish execution intents through the worker transport."""
 
-    async def publish_diagnostic_execution(
+    async def publish_execution(
         self,
-        dispatch_id: str,
-        session_id: str,
-        tenant_id: str,
+        execution_id: str,
     ) -> None:
         task = cast(Any, execute_diagnostic_agent)
-        kwargs = {
-            "dispatch_id": dispatch_id,
-            "session_id": session_id,
-            "tenant_id": tenant_id,
-        }
         if _running_under_pytest():
             await execute_diagnostic_agent_runtime(
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
+                execution_id=execution_id,
             )
         else:
-            task.delay(**kwargs)
+            task.delay(execution_id=execution_id)
 
 
 def _running_under_pytest() -> bool:

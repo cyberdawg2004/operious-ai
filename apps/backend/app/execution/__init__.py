@@ -1,5 +1,83 @@
-"""Execution publishing boundary."""
+"""Execution substrate public surface."""
 
+from app.execution.enums import (
+    ExecutionAttemptState,
+    ExecutionKind,
+    ExecutionOutboxState,
+    ExecutionState,
+)
+from app.execution.identity import (
+    ExecutionAttemptId,
+    ExecutionId,
+    ExecutionOutboxId,
+    as_attempt_id,
+    as_execution_id,
+    as_outbox_id,
+    derive_attempt_id,
+    derive_execution_id,
+    derive_outbox_id,
+    generate_execution_id,
+)
+from app.execution.persistence import (
+    ExecutionAttemptPage,
+    ExecutionAttemptQuery,
+    ExecutionAttemptRecord,
+    ExecutionClaimRecord,
+    ExecutionPage,
+    ExecutionOutboxRecord,
+    ExecutionPersistenceProtocol,
+    ExecutionQuery,
+    ExecutionRecord,
+    InMemoryExecutionPersistence,
+    OutboxPage,
+    OutboxQuery,
+    PostgresExecutionPersistence,
+)
 from app.execution.publisher import ExecutionPublisher
+from app.execution.runtime import (
+    ExecutionClaimResult,
+    ExecutionOutboxClaimResult,
+    ExecutionRecoveryResult,
+    ExecutionRecoverySweepResult,
+    ExecutionRequestResult,
+    ExecutionRuntime,
+    ExecutionWorkerLegitimacyResult,
+)
 
-__all__ = ["ExecutionPublisher"]
+__all__ = [
+    "ExecutionAttemptId",
+    "ExecutionAttemptPage",
+    "ExecutionAttemptQuery",
+    "ExecutionAttemptRecord",
+    "ExecutionAttemptState",
+    "ExecutionClaimResult",
+    "ExecutionClaimRecord",
+    "ExecutionId",
+    "ExecutionKind",
+    "ExecutionOutboxId",
+    "ExecutionOutboxClaimResult",
+    "ExecutionOutboxRecord",
+    "ExecutionOutboxState",
+    "ExecutionPage",
+    "ExecutionPersistenceProtocol",
+    "ExecutionPublisher",
+    "ExecutionQuery",
+    "ExecutionRecord",
+    "ExecutionRecoveryResult",
+    "ExecutionRecoverySweepResult",
+    "ExecutionRequestResult",
+    "ExecutionRuntime",
+    "ExecutionState",
+    "ExecutionWorkerLegitimacyResult",
+    "InMemoryExecutionPersistence",
+    "OutboxPage",
+    "OutboxQuery",
+    "PostgresExecutionPersistence",
+    "as_attempt_id",
+    "as_execution_id",
+    "as_outbox_id",
+    "derive_attempt_id",
+    "derive_execution_id",
+    "derive_outbox_id",
+    "generate_execution_id",
+]

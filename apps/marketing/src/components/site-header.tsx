@@ -1,6 +1,10 @@
 import Link from 'next/link';
 import { Button } from '@operious/ui';
 
+const COMMAND_CENTER_URL =
+  process.env.NEXT_PUBLIC_OPERIOUS_COMMAND_CENTER_URL ??
+  'https://operious-ai-command-center.vercel.app';
+
 export const SiteHeader = () => (
   <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur">
     <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
@@ -28,11 +32,18 @@ export const SiteHeader = () => (
           </Link>
         ))}
       </nav>
-      <Link href="#pilot">
-        <Button variant="primary" size="sm">
-          Request Pilot
-        </Button>
-      </Link>
+      <div className="flex items-center gap-2">
+        <Link href={COMMAND_CENTER_URL}>
+          <Button variant="ghost" size="sm">
+            Command Center
+          </Button>
+        </Link>
+        <Link href="#pilot">
+          <Button variant="primary" size="sm">
+            Request Pilot
+          </Button>
+        </Link>
+      </div>
     </div>
   </header>
 );

@@ -33,6 +33,7 @@ class InMemorySessionPersistence:
     __slots__ = (
         "_sessions",
         "_events",
+        "_events_by_idempotency_key",
         "_events_by_session",
         "_correlations",
         "_lock",
@@ -42,6 +43,9 @@ class InMemorySessionPersistence:
         self._sessions: dict[SessionId, SessionRecord] = {}
         self._events: dict[
             SessionEventId, SessionEventRecord
+        ] = {}
+        self._events_by_idempotency_key: dict[
+            tuple[SessionId, str], SessionEventRecord
         ] = {}
         self._events_by_session: dict[
             SessionId, list[SessionEventRecord]
@@ -78,6 +82,13 @@ class InMemorySessionPersistence:
                 raise SessionPersistenceError(
                     f"duplicate event id: {record.event_id}"
                 )
+            if record.idempotency_key is not None:
+                key = (record.session_id, record.idempotency_key)
+                if key in self._events_by_idempotency_key:
+                    raise SessionPersistenceError(
+                        "duplicate event idempotency key: "
+                        f"{record.idempotency_key}"
+                    )
             bucket = self._events_by_session.setdefault(
                 record.session_id, []
             )
@@ -92,6 +103,10 @@ class InMemorySessionPersistence:
                     "first event of a session must have sequence 0"
                 )
             self._events[record.event_id] = record
+            if record.idempotency_key is not None:
+                self._events_by_idempotency_key[
+                    (record.session_id, record.idempotency_key)
+                ] = record
             bucket.append(record)
 
     # ─── Correlations: append-only by id ────────────────────────────
@@ -135,6 +150,27 @@ class InMemorySessionPersistence:
         expected_tenant_id: str | None = None,
     ) -> SessionEventRecord | None:
         record = self._events.get(event_id)
+        if record is None:
+            return None
+        if expected_tenant_id is not None:
+            session = self._sessions.get(record.session_id)
+            if (
+                session is None
+                or session.tenant_id != expected_tenant_id
+            ):
+                return None
+        return record
+
+    async def get_event_by_idempotency_key(
+        self,
+        *,
+        session_id: SessionId,
+        idempotency_key: str,
+        expected_tenant_id: str | None = None,
+    ) -> SessionEventRecord | None:
+        record = self._events_by_idempotency_key.get(
+            (session_id, idempotency_key)
+        )
         if record is None:
             return None
         if expected_tenant_id is not None:

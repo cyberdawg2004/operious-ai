@@ -252,7 +252,11 @@ async def pg_session(
     connection: AsyncConnection = await pg_engine.connect()
     transaction = await connection.begin()
     try:
-        session = AsyncSession(bind=connection, expire_on_commit=False)
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
         try:
             yield session
         finally:

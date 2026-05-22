@@ -29,6 +29,7 @@ from typing import Any, Mapping
 
 from app.events.causality import EventCausality
 from app.events.chronology import EventChronology
+from app.events.exceptions import EventCausalityError
 from app.events.identity import EventId
 from app.events.substrates import OperationalSubstrate
 from app.governance.capability.acts import OperationalAct
@@ -85,6 +86,20 @@ class OperationalEvent:
 
     # Opaque payload.
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.causality.is_root and self.causality.root_event_id != self.event_id:
+            raise EventCausalityError(
+                "root OperationalEvent must have causality.root_event_id "
+                "equal to event_id"
+            )
+        if (
+            self.causality.parent_event_id is not None
+            and self.causality.parent_event_id == self.event_id
+        ):
+            raise EventCausalityError(
+                "OperationalEvent cannot name itself as parent_event_id"
+            )
 
 
 __all__ = ["OperationalEvent"]

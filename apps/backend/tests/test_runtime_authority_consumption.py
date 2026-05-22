@@ -110,6 +110,7 @@ def test_request_authority_resolution_observed_fallback() -> None:
 # ─── arbitration ────────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 async def test_arbitration_consumes_typed_authority() -> None:
     from app.arbitration.contracts.requests import ArbitrationRequest
     from app.arbitration.evaluators.base import (
@@ -151,6 +152,7 @@ async def test_arbitration_consumes_typed_authority() -> None:
 # ─── session ────────────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 async def test_session_open_consumes_typed_authority() -> None:
     from app.session.contracts.requests import OpenSessionRequest
     from app.session.enums import SessionScope
@@ -204,6 +206,7 @@ def test_voice_ingress_consumes_typed_authority() -> None:
 # ─── OI sop ─────────────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 async def test_sop_ingest_consumes_typed_authority() -> None:
     from app.organizational_intelligence.contracts.requests import (
         IngestSopRequest,
@@ -231,6 +234,7 @@ async def test_sop_ingest_consumes_typed_authority() -> None:
 # ─── OI tonality ────────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 async def test_tonality_classify_consumes_typed_authority() -> None:
     from app.organizational_intelligence.contracts.requests import (
         ClassifyTonalityRequest,

@@ -19,6 +19,7 @@ from app.api.v1.routers.health import router as health_router
 from app.api.v1.routers.ingress import router as ingress_router
 from app.api.v1.routers.session import router as session_router
 from app.api.v1.routers.supervisor import router as supervisor_router
+from app.api.v1.routers.tenant import router as tenant_router
 
 api_router_v1 = APIRouter()
 api_router_v1.include_router(health_router)
@@ -33,5 +34,6 @@ api_router_v1.include_router(
 )
 api_router_v1.include_router(supervisor_router, prefix="/supervisor")
 api_router_v1.include_router(session_router, prefix="/session")
+api_router_v1.include_router(tenant_router, prefix="/tenant")
 
 __all__ = ["api_router_v1"]

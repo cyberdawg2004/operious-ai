@@ -174,6 +174,7 @@ def serialize_timeline_event(
                 else None
             ),
             "annotation": event.annotation,
+            "idempotency_key": event.idempotency_key,
         }
     )
 

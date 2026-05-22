@@ -139,6 +139,89 @@ async def test_append_event_increments_sequence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_append_event_idempotency_key_replays_existing_event() -> None:
+    rt = _runtime()
+    parent = await _open(rt)
+    sid = parent.session.identity.session_id
+    key = "execution.exec-1.attempt.attempt-1.event.started"
+
+    first = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+            payload={"attempt_number": 1},
+            idempotency_key=key,
+        )
+    )
+    second = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+            payload={"attempt_number": 999},
+            idempotency_key=key,
+        )
+    )
+
+    assert first.is_ok and second.is_ok
+    assert second.result.event.event_id == first.result.event.event_id
+    assert second.result.event.sequence == first.result.event.sequence
+    assert second.result.event.payload == first.result.event.payload
+    assert second.result.event.idempotency_key == key
+    assert second.result.session.sequence_head == 1
+    assert second.result.metadata["idempotent_replay"] is True
+
+    timeline = await rt.reconstruct(
+        ReconstructSessionRequest(session_id=sid)
+    )
+    assert timeline.is_ok
+    assert timeline.result.timeline.length == 2
+
+
+@pytest.mark.asyncio
+async def test_append_event_idempotency_conflict_replays_existing_event() -> None:
+    class RaceyInMemorySessionPersistence(InMemorySessionPersistence):
+        hide_next_idempotency_lookup = False
+
+        async def get_event_by_idempotency_key(self, **kwargs):
+            if self.hide_next_idempotency_lookup:
+                self.hide_next_idempotency_lookup = False
+                return None
+            return await super().get_event_by_idempotency_key(**kwargs)
+
+    store = RaceyInMemorySessionPersistence()
+    rt = SessionRuntime(persistence=store)
+    parent = await _open(rt)
+    sid = parent.session.identity.session_id
+    key = "execution.exec-1.attempt.attempt-1.event.completed"
+
+    first = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+            idempotency_key=key,
+        )
+    )
+    store.hide_next_idempotency_lookup = True
+    second = await rt.append_event(
+        AppendEventRequest(
+            session_id=sid,
+            kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+            occurred_at=_now(),
+            payload={"duplicate": True},
+            idempotency_key=key,
+        )
+    )
+
+    assert first.is_ok and second.is_ok
+    assert second.result.event.event_id == first.result.event.event_id
+    assert second.result.session.sequence_head == 1
+    assert second.result.metadata["idempotent_replay"] is True
+
+
+@pytest.mark.asyncio
 async def test_append_event_rejects_unknown_session() -> None:
     rt = _runtime()
     env = await rt.append_event(

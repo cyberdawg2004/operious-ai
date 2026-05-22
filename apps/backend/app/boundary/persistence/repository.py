@@ -25,8 +25,9 @@ class BoundaryPersistenceProtocol(Protocol):
 
     Implementations MUST:
 
-    * be write-once on `(direction, id)` (a re-save with the same
-      identifier raises `BoundaryPersistenceError`),
+    * be write-once on egress `(direction, id)`,
+    * resolve duplicate ingress replay keys, event ids, and ingress ids
+      by returning the original canonical ingress record,
     * return records in deterministic order (sorted by
       ``runtime_instance_id`` then ``sequence``).
 
@@ -40,7 +41,7 @@ class BoundaryPersistenceProtocol(Protocol):
 
     async def save_ingress(
         self, record: BoundaryIngressRecord
-    ) -> None: ...
+    ) -> BoundaryIngressRecord: ...
 
     async def save_egress(
         self, record: BoundaryEgressRecord

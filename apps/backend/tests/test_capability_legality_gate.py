@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from app.governance.capability import (
+    CAPABILITY_GOVERNED_ACTS,
     CapabilityLegalityRequest,
     OperationalAct,
     build_capability_context,
@@ -444,6 +445,7 @@ def test_capability_module_public_surface() -> None:
         "CapabilityDenied",
         "CapabilityGateOutcome",
         "CapabilityLegalityRequest",
+        "CAPABILITY_GOVERNED_ACTS",
         "GovernanceRuntime",
         "OperationalAct",
         "build_capability_context",
@@ -483,3 +485,48 @@ def test_operational_act_catalog_covers_p2a_runtimes() -> None:
         f"OperationalAct catalog missing entries for migrated "
         f"runtimes: {sorted(missing)}"
     )
+
+
+def test_capability_governed_acts_cover_p2a_runtimes() -> None:
+    """Capability gates remain bounded to runtime entry acts.
+
+    Event-fabric-only chronology acts may exist in ``OperationalAct``
+    without forcing policy expansion or per-event governance checks.
+    """
+    required = {
+        "arbitration:evaluate",
+        "boundary_translation:ingress",
+        "boundary_translation:egress",
+        "boundary_voice:ingress",
+        "boundary_voice:egress",
+        "coordination:dispatch",
+        "coordination_policy:evaluate",
+        "coordination_topology:evaluate",
+        "hardening:record_failure",
+        "oi_communication:register",
+        "oi_communication:retrieve",
+        "oi_memory:list",
+        "oi_memory:propose",
+        "oi_recommendation:generate",
+        "oi_sop:ingest",
+        "oi_tonality:classify",
+        "session:open",
+        "supervisor:inspect",
+    }
+    present = {a.value for a in CAPABILITY_GOVERNED_ACTS}
+    assert present == required
+
+
+def test_session_projection_acts_do_not_inflate_capability_governance() -> None:
+    projection_only = {
+        OperationalAct.SESSION_ATTACH_CONTEXT,
+        OperationalAct.SESSION_RECORD_CORRELATION,
+        OperationalAct.SESSION_LINK_LINEAGE,
+        OperationalAct.SESSION_RECLASSIFY_LIFECYCLE,
+        OperationalAct.SESSION_RECORD_DORMANCY,
+        OperationalAct.SESSION_RECORD_RESUMPTION,
+        OperationalAct.SESSION_RECORD_TERMINATION,
+        OperationalAct.SESSION_RECORD_ARCHIVAL,
+        OperationalAct.SESSION_OBSERVE_OPERATION,
+    }
+    assert projection_only.isdisjoint(CAPABILITY_GOVERNED_ACTS)

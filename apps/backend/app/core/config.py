@@ -183,6 +183,20 @@ class Settings(BaseSettings):
     GOVERNANCE_CONTENT_DENYLIST: str = ""  # comma-separated substrings
     GOVERNANCE_MAX_QUERY_LENGTH: int = 4000
 
+    # ─── Tenant-owned credentials (Phase 2.5-A) ─────────────────────
+    # Platform master key used only to derive per-tenant AES-256-GCM
+    # credential keys via HKDF. Empty by default so deployments must
+    # explicitly provide key material before channel credential write
+    # endpoints can be used.
+    TENANT_CREDENTIAL_MASTER_KEY: str = ""
+
+    # ─── Execution recovery (Phase 1-F) ──────────────────────────────
+    # Stale execution claim recovery remains owned by
+    # ``ExecutionRuntime``. Worker/scheduler transports may invoke the
+    # recovery task, but these knobs only bound the runtime sweep.
+    EXECUTION_CLAIM_LEASE_SECONDS: int = 900
+    EXECUTION_RECOVERY_BATCH_SIZE: int = 100
+
     # ─── Survivability (P2-E) ────────────────────────────────────────
     # Production-survivability knobs. These are operational
     # defaults consumed by the ``app.survivability`` primitives; no

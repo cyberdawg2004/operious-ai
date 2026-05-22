@@ -72,6 +72,7 @@ from app.session.enums import (
 from app.session.exceptions import (
     SessionLifecycleError,
     SessionNotFoundError,
+    SessionPersistenceError,
     SessionValidationError,
 )
 from app.session.identity import (
@@ -106,6 +107,7 @@ from app.session.persistence.repository import (
 )
 from app.session.persistence.serializers import (
     correlation_to_record,
+    event_record_to_model,
     event_to_record,
     record_to_session,
     session_to_record,
@@ -272,6 +274,13 @@ class SessionRuntime:
                     "external_handle": request.external_handle,
                     "tenant_id": resolution.tenant_id,
                     "principal_id": request.principal_id,
+                    "tenant_authority_source": resolution.source.value,
+                    "governance_decision_id": (
+                        str(gate_outcome.decision_id)
+                        if gate_outcome.decision_id is not None
+                        else None
+                    ),
+                    "governance_chain_id": gate_outcome.chain_id,
                     "parent_session_id": (
                         str(request.parent_session_id)
                         if request.parent_session_id is not None
@@ -407,6 +416,7 @@ class SessionRuntime:
             extra_metadata=dict(request.metadata),
             trace_kind=SessionTraceKind.APPEND_EVENT,
             external_correlation_id=request.external_correlation_id,
+            idempotency_key=request.idempotency_key,
         )
 
     # ─── record_lifecycle ───────────────────────────────────────────
@@ -947,6 +957,7 @@ class SessionRuntime:
         payload: Mapping[str, Any] | None,
         annotation: str | None,
         correlation_id: SessionCorrelationId | None = None,
+        idempotency_key: str | None = None,
     ) -> SessionTimelineEvent:
         if occurred_at.tzinfo is None:
             raise SessionValidationError(
@@ -966,6 +977,7 @@ class SessionRuntime:
             payload=canonicalize_payload(payload or {}),
             correlation_id=correlation_id,
             annotation=annotation,
+            idempotency_key=idempotency_key,
         )
 
     async def _persist_session_update(
@@ -997,11 +1009,31 @@ class SessionRuntime:
         extra_metadata: dict[str, object],
         trace_kind: SessionTraceKind,
         external_correlation_id: str | None,
+        idempotency_key: str | None = None,
     ) -> SessionEnvelope:
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
         try:
             session = await self._load_session(session_id)
+            if idempotency_key is not None:
+                existing_record = (
+                    await self._persistence.get_event_by_idempotency_key(
+                        session_id=session_id,
+                        idempotency_key=idempotency_key,
+                    )
+                )
+                if existing_record is not None:
+                    event = event_record_to_model(existing_record)
+                    return self._append_event_replay_envelope(
+                        trace_kind=trace_kind,
+                        session=session,
+                        event=event,
+                        started_at=started_at,
+                        t0=t0,
+                        request_correlation_id=request_correlation_id,
+                        request_request_id=request_request_id,
+                        idempotency_key=idempotency_key,
+                    )
             self._reject_terminal(session)
             event = self._build_next_event(
                 session=session,
@@ -1017,15 +1049,43 @@ class SessionRuntime:
                 },
                 annotation=annotation,
                 correlation_id=correlation_id,
+                idempotency_key=idempotency_key,
             )
             updated_session = _dc_replace(
                 session,
                 sequence_head=event.sequence,
                 revision=session.revision + 1,
             )
-            await self._persist_session_update(
-                session=updated_session, event=event
-            )
+            try:
+                await self._persist_session_update(
+                    session=updated_session, event=event
+                )
+            except SessionPersistenceError:
+                if idempotency_key is None:
+                    raise
+                existing_record = (
+                    await self._persistence.get_event_by_idempotency_key(
+                        session_id=session_id,
+                        idempotency_key=idempotency_key,
+                    )
+                )
+                if existing_record is None:
+                    raise
+                event = event_record_to_model(existing_record)
+                replay_session = await self._load_persisted_session(
+                    session_id=session_id,
+                    fallback=session,
+                )
+                return self._append_event_replay_envelope(
+                    trace_kind=trace_kind,
+                    session=replay_session,
+                    event=event,
+                    started_at=started_at,
+                    t0=t0,
+                    request_correlation_id=request_correlation_id,
+                    request_request_id=request_request_id,
+                    idempotency_key=idempotency_key,
+                )
         except (
             SessionLifecycleError,
             SessionValidationError,
@@ -1083,6 +1143,67 @@ class SessionRuntime:
             principal_id=updated_session.identity.principal_id,
         )
         return SessionEnvelope(trace=trace, result=result)
+
+    def _append_event_replay_envelope(
+        self,
+        *,
+        trace_kind: SessionTraceKind,
+        session: OperationalSession,
+        event: SessionTimelineEvent,
+        started_at: datetime,
+        t0: float,
+        request_correlation_id: str | None,
+        request_request_id: str | None,
+        idempotency_key: str,
+    ) -> SessionEnvelope:
+        ended_at = datetime.now(tz=timezone.utc)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        sequence = self._next_sequence()
+        result = AppendEventResult(
+            sequence=sequence,
+            runtime_instance_id=self._runtime_instance_id,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            correlation_id=request_correlation_id,
+            request_id=request_request_id,
+            event=event,
+            session=session,
+            metadata={
+                "idempotency_key": idempotency_key,
+                "idempotent_replay": True,
+            },
+        )
+        trace = self._build_trace(
+            kind=trace_kind,
+            session_id=session.identity.session_id,
+            event_id=event.event_id,
+            started_at=started_at,
+            ended_at=ended_at,
+            latency_ms=latency_ms,
+            sequence=sequence,
+            request_correlation_id=request_correlation_id,
+            request_request_id=request_request_id,
+            tenant_id=session.identity.tenant_id,
+            principal_id=session.identity.principal_id,
+        )
+        return SessionEnvelope(trace=trace, result=result)
+
+    async def _load_persisted_session(
+        self,
+        *,
+        session_id: SessionId,
+        fallback: OperationalSession,
+    ) -> OperationalSession:
+        record = await self._persistence.get_session(session_id)
+        if record is None:
+            return fallback
+        session = record_to_session(record)
+        try:
+            await self._registry.update(session)
+        except Exception:  # noqa: BLE001
+            pass
+        return session
 
     def _build_trace(  # type: ignore[no-untyped-def]
         self,

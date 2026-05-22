@@ -14,7 +14,7 @@ export const Topbar = () => {
     >
       <div className="flex items-center gap-3">
         <Badge tone="info">read-only inspection</Badge>
-        <span className="text-mono text-fg-subtle">env: dev · mock backend</span>
+        <span className="text-mono text-fg-subtle">env: staging · governed backend</span>
       </div>
       {principal ? (
         <div className="flex items-center gap-3 text-mono text-fg-muted">

@@ -22,6 +22,7 @@ from app.boundary.persistence.serializers import (
     egress_envelope_to_record,
     egress_result_to_record,
     ingress_envelope_to_record,
+    ingress_record_to_result,
     ingress_result_to_record,
 )
 
@@ -37,5 +38,6 @@ __all__ = [
     "egress_envelope_to_record",
     "egress_result_to_record",
     "ingress_envelope_to_record",
+    "ingress_record_to_result",
     "ingress_result_to_record",
 ]

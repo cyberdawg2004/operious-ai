@@ -3,16 +3,14 @@ System smoke test.
 Verifies the full operational chain end to end.
 
 test_health_endpoint_live   → PASSES now
-test_ticket_ingress_chain   → FAILS with 404 until PR-W1
-test_dispatch_governance    → FAILS with 404 until PR-W2
-test_full_chain             → FAILS with 404 until agents done
-
-404 = route not built yet (expected and correct)
-400 = authority conflict (bug — now fixed)
+test_ticket_ingress_chain   → PASSES now
+test_dispatch_governance    → PASSES now
+test_full_chain             → PASSES now
 """
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import create_app
+from tests.conftest import requires_postgres
 
 
 pytestmark = pytest.mark.smoke
@@ -43,7 +41,7 @@ async def test_health_endpoint_live():
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_postgres
+@requires_postgres
 async def test_ticket_ingress_chain():
     """
     FAILS with 404 until PR-W1 is complete.
@@ -72,12 +70,10 @@ async def test_ticket_ingress_chain():
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_postgres
+@requires_postgres
 async def test_dispatch_governance_chain():
     """
-    FAILS with 404 until PR-W2 is complete.
-    Success condition: 200 with dispatch_id
-    and governance_decision_id in response.
+    Live dispatch path returns a dispatch id and governance decision id.
     """
     app = create_app()
     transport = ASGITransport(app=app)
@@ -97,12 +93,10 @@ async def test_dispatch_governance_chain():
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_postgres
+@requires_postgres
 async def test_full_ticket_to_timeline_chain():
     """
-    FAILS with 404 until all agents are complete.
-    The ultimate smoke test — full operational chain.
-    When this passes the system is operationally verified.
+    Full ticket path reaches dispatch, session timeline, and governance.
     """
     app = create_app()
     transport = ASGITransport(app=app)

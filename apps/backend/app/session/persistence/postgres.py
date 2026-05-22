@@ -152,8 +152,11 @@ class PostgresSessionPersistence(BaseRepository):
             async with self.session.begin_nested():
                 self.session.add(row)
         except IntegrityError as exc:
+            reason = "duplicate event id"
+            if record.idempotency_key is not None:
+                reason = "duplicate event id or idempotency key"
             raise SessionPersistenceError(
-                f"duplicate event id: {record.event_id}"
+                f"{reason}: {record.event_id}"
             ) from exc
         # Suppress the unused-binding warning when head is None — we
         # only need it to confirm the parent session row exists at
@@ -200,6 +203,33 @@ class PostgresSessionPersistence(BaseRepository):
     ) -> SessionEventRecord | None:
         stmt = select(SessionEventRow).where(
             SessionEventRow.event_id == event_id
+        )
+        row = (
+            await self.session.execute(stmt)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        if expected_tenant_id is not None:
+            parent_stmt = select(SessionRow.tenant_id).where(
+                SessionRow.session_id == row.session_id
+            )
+            parent_tenant = (
+                await self.session.execute(parent_stmt)
+            ).scalar_one_or_none()
+            if parent_tenant != expected_tenant_id:
+                return None
+        return _event_row_to_record(row)
+
+    async def get_event_by_idempotency_key(
+        self,
+        *,
+        session_id: SessionId,
+        idempotency_key: str,
+        expected_tenant_id: str | None = None,
+    ) -> SessionEventRecord | None:
+        stmt = select(SessionEventRow).where(
+            SessionEventRow.session_id == session_id,
+            SessionEventRow.idempotency_key == idempotency_key,
         )
         row = (
             await self.session.execute(stmt)
@@ -470,6 +500,7 @@ def _event_record_to_row(
         payload=dict(record.payload),
         correlation_id=record.correlation_id,
         annotation=record.annotation,
+        idempotency_key=record.idempotency_key,
         governance_decision_id=record.governance_decision_id,
         governance_chain_id=record.governance_chain_id,
         metadata_json=dict(record.metadata),
@@ -541,6 +572,7 @@ def _event_row_to_record(row: SessionEventRow) -> SessionEventRecord:
             else None
         ),
         annotation=row.annotation,
+        idempotency_key=row.idempotency_key,
         governance_decision_id=row.governance_decision_id,
         governance_chain_id=row.governance_chain_id,
         metadata=dict(_as_dict_of_any(row.metadata_json)),

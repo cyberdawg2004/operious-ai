@@ -63,7 +63,9 @@ def _session_record(
     )
 
 
-def _event_record(*, sid, sequence: int) -> SessionEventRecord:
+def _event_record(
+    *, sid, sequence: int, idempotency_key: str | None = None
+) -> SessionEventRecord:
     return SessionEventRecord(
         event_id=derive_event_id(session_id=sid, sequence=sequence),
         session_id=sid,
@@ -74,6 +76,7 @@ def _event_record(*, sid, sequence: int) -> SessionEventRecord:
         continuity_mode=SessionContinuityMode.SYNCHRONOUS,
         occurred_at=_now(),
         recorded_at=_now(),
+        idempotency_key=idempotency_key,
     )
 
 
@@ -115,6 +118,33 @@ async def test_event_save_enforces_monotonic_sequence() -> None:
     await store.save_event(_event_record(sid=sid, sequence=0))
     with pytest.raises(SessionPersistenceError):
         await store.save_event(_event_record(sid=sid, sequence=2))
+
+
+@pytest.mark.asyncio
+async def test_event_idempotency_key_is_unique_per_session() -> None:
+    store = InMemorySessionPersistence()
+    sid = generate_session_id()
+    key = "execution.exec-1.attempt.attempt-1.event.completed"
+    await store.save_session(_session_record(sid=sid))
+    await store.save_event(_event_record(sid=sid, sequence=0))
+    record = _event_record(
+        sid=sid, sequence=1, idempotency_key=key
+    )
+    await store.save_event(record)
+
+    replay = await store.get_event_by_idempotency_key(
+        session_id=sid,
+        idempotency_key=key,
+        expected_tenant_id="t1",
+    )
+    assert replay == record
+
+    with pytest.raises(SessionPersistenceError):
+        await store.save_event(
+            _event_record(
+                sid=sid, sequence=2, idempotency_key=key
+            )
+        )
 
 
 @pytest.mark.asyncio

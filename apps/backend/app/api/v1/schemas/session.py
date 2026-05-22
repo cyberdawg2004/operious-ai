@@ -91,6 +91,7 @@ class SessionEventResponse(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     correlation_id: str | None = None
     annotation: str | None = None
+    idempotency_key: str | None = None
     governance_decision_id: str | None = None
     governance_chain_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -114,6 +115,7 @@ class SessionEventResponse(BaseModel):
                 else None
             ),
             annotation=record.annotation,
+            idempotency_key=record.idempotency_key,
             governance_decision_id=(
                 str(record.governance_decision_id)
                 if record.governance_decision_id is not None

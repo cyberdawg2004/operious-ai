@@ -42,12 +42,12 @@ from app.governance.persistence.records import (
     RuntimeRestrictionRecord,
 )
 from app.governance.persistence.repository import BaseGovernanceRepository
-from app.governance.persistence.serializers import (
-    decision_to_record,
-    enforcement_action_to_record,
-    record_to_decision,
-    trace_to_record,
-)
+_SERIALIZER_EXPORTS = {
+    "decision_to_record",
+    "enforcement_action_to_record",
+    "record_to_decision",
+    "trace_to_record",
+}
 
 __all__ = [
     # Records
@@ -61,13 +61,18 @@ __all__ = [
     # Models
     "DecisionQuery",
     "RecordPage",
-    # Serializers
-    "decision_to_record",
-    "record_to_decision",
-    "trace_to_record",
-    "enforcement_action_to_record",
     # Repositories
     "BaseGovernanceRepository",
     "InMemoryGovernanceRepository",
     "PostgresGovernanceRepository",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in _SERIALIZER_EXPORTS:
+        from app.governance.persistence import serializers
+
+        value = getattr(serializers, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(name)

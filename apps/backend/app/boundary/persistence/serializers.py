@@ -12,6 +12,18 @@ from app.boundary.envelopes import (
     BoundaryEgressEnvelope,
     BoundaryIngressEnvelope,
 )
+from app.boundary.enums import (
+    BoundaryNormalizationStatus,
+)
+from app.boundary.identity import (
+    as_external_conversation_id,
+    as_external_message_id,
+)
+from app.boundary.models.event import ExternalBoundaryEvent
+from app.boundary.models.normalization import (
+    BoundaryNormalizationResult,
+)
+from app.boundary.models.source import BoundarySource
 from app.boundary.persistence.records import (
     BoundaryEgressRecord,
     BoundaryIngressRecord,
@@ -80,6 +92,78 @@ def ingress_envelope_to_record(
     if envelope.result is None:
         return None
     return ingress_result_to_record(envelope.result)
+
+
+def ingress_record_to_result(
+    record: BoundaryIngressRecord,
+) -> BoundaryIngressResult:
+    """Rehydrate a persisted ingress record into runtime result shape."""
+    normalization = BoundaryNormalizationResult(
+        status=record.normalization_status,
+        message_type=record.message_type,
+        external_message_id=record.external_message_id,
+        external_conversation_id=record.external_conversation_id,
+        external_emitted_at=record.external_emitted_at,
+        canonical_payload=dict(record.canonical_payload),
+        error=(
+            record.error
+            if record.normalization_status
+            is not BoundaryNormalizationStatus.OK
+            else None
+        ),
+        metadata=dict(record.metadata),
+    )
+    event = None
+    if (
+        record.normalization_status is BoundaryNormalizationStatus.OK
+        and record.event_id is not None
+        and record.external_message_id
+    ):
+        event = ExternalBoundaryEvent(
+            event_id=record.event_id,
+            source=BoundarySource(
+                source_type=record.source_type,
+                source_id=record.source_id,
+                tenant_id=record.tenant_id,
+            ),
+            message_type=record.message_type,
+            external_message_id=as_external_message_id(
+                record.external_message_id
+            ),
+            canonical_payload=dict(record.canonical_payload),
+            received_at=record.received_at,
+            external_conversation_id=(
+                as_external_conversation_id(
+                    record.external_conversation_id
+                )
+                if record.external_conversation_id
+                else None
+            ),
+            external_emitted_at=record.external_emitted_at,
+            adapter_name=record.adapter_name,
+            metadata=dict(record.metadata),
+        )
+    return BoundaryIngressResult(
+        ingress_id=record.ingress_id,
+        direction=record.direction,
+        normalization=normalization,
+        replay_disposition=record.replay_disposition,
+        replay_key=record.replay_key,
+        adapter_name=record.adapter_name,
+        sequence=record.sequence,
+        runtime_instance_id=record.runtime_instance_id,
+        started_at=record.started_at,
+        ended_at=record.ended_at,
+        latency_ms=record.latency_ms,
+        event_id=record.event_id,
+        original_event_id=record.original_event_id,
+        event=event,
+        correlation_id=record.correlation_id,
+        request_id=record.request_id,
+        tenant_id=record.tenant_id,
+        error=record.error,
+        metadata=dict(record.metadata),
+    )
 
 
 def egress_result_to_record(
@@ -162,5 +246,6 @@ __all__ = [
     "egress_envelope_to_record",
     "egress_result_to_record",
     "ingress_envelope_to_record",
+    "ingress_record_to_result",
     "ingress_result_to_record",
 ]

@@ -7,12 +7,19 @@ in-memory backend.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+)
 
+from app.boundary.db.models import BoundaryIngressRow
 from app.boundary.enums import (
     BoundaryDirection,
     BoundaryMessageType,
@@ -23,7 +30,10 @@ from app.boundary.enums import (
 from app.boundary.exceptions import BoundaryPersistenceError
 from app.boundary.identity import (
     BoundaryEgressId,
+    BoundaryEventId,
     BoundaryIngressId,
+    derive_event_id,
+    derive_replay_key,
 )
 from app.boundary.persistence import (
     BoundaryEgressQuery,
@@ -47,6 +57,9 @@ def _ingress(
     runtime: uuid.UUID | None = None,
     sequence: int = 0,
     tenant_id: str | None = "tenant-acme",
+    external_message_id: str = "ext-1",
+    replay_key: uuid.UUID | None = None,
+    event_id: BoundaryEventId | None = None,
 ) -> BoundaryIngressRecord:
     return BoundaryIngressRecord(
         ingress_id=ingress_id or BoundaryIngressId(uuid.uuid4()),
@@ -60,10 +73,10 @@ def _ingress(
         normalization_status=BoundaryNormalizationStatus.OK,
         message_type=BoundaryMessageType.MESSAGE_RECEIVED,
         replay_disposition=BoundaryReplayDisposition.NEW,
-        replay_key=None,
-        event_id=None,
-        original_event_id=None,
-        external_message_id="ext-1",
+        replay_key=replay_key,
+        event_id=event_id,
+        original_event_id=event_id,
+        external_message_id=external_message_id,
         external_conversation_id=None,
         external_emitted_at=None,
         received_at=_at(),
@@ -147,9 +160,139 @@ async def test_postgres_ingress_write_once(
 ) -> None:
     repo = PostgresBoundaryPersistence(pg_session)
     record = _ingress()
-    await repo.save_ingress(record)
-    with pytest.raises(BoundaryPersistenceError, match="duplicate ingress"):
-        await repo.save_ingress(record)
+    saved = await repo.save_ingress(record)
+    duplicate = await repo.save_ingress(record)
+
+    assert saved.ingress_id == record.ingress_id
+    assert duplicate.ingress_id == record.ingress_id
+
+
+@pytest.mark.asyncio
+async def test_postgres_duplicate_replay_key_returns_original(
+    pg_session: AsyncSession,
+) -> None:
+    repo = PostgresBoundaryPersistence(pg_session)
+    external_message_id = f"dup-{uuid.uuid4()}"
+    replay_key = derive_replay_key(
+        source_type=BoundarySourceType.GENERIC.value,
+        external_message_id=external_message_id,
+        tenant_id="tenant-acme",
+    )
+    event_id = derive_event_id(
+        source_type=BoundarySourceType.GENERIC.value,
+        external_message_id=external_message_id,
+        tenant_id="tenant-acme",
+    )
+    original = _ingress(
+        external_message_id=external_message_id,
+        replay_key=replay_key,
+        event_id=event_id,
+    )
+    duplicate = _ingress(
+        external_message_id=external_message_id,
+        replay_key=replay_key,
+        event_id=event_id,
+    )
+
+    await repo.save_ingress(original)
+    resolved = await repo.save_ingress(duplicate)
+
+    assert resolved.ingress_id == original.ingress_id
+    page = await repo.list_ingress(
+        BoundaryIngressQuery(replay_key=replay_key)
+    )
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_duplicate_event_id_returns_original(
+    pg_session: AsyncSession,
+) -> None:
+    repo = PostgresBoundaryPersistence(pg_session)
+    event_id = derive_event_id(
+        source_type=BoundarySourceType.GENERIC.value,
+        external_message_id=f"event-{uuid.uuid4()}",
+        tenant_id="tenant-acme",
+    )
+    original = _ingress(
+        external_message_id="event-original",
+        replay_key=uuid.uuid4(),
+        event_id=event_id,
+    )
+    duplicate = _ingress(
+        external_message_id="event-duplicate",
+        replay_key=uuid.uuid4(),
+        event_id=event_id,
+    )
+
+    await repo.save_ingress(original)
+    resolved = await repo.save_ingress(duplicate)
+
+    assert resolved.ingress_id == original.ingress_id
+    page = await repo.list_ingress(
+        BoundaryIngressQuery(event_id=event_id)
+    )
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_duplicate_replay_key_resolves_once(
+    pg_engine: AsyncEngine,
+) -> None:
+    external_message_id = f"concurrent-{uuid.uuid4()}"
+    replay_key = derive_replay_key(
+        source_type=BoundarySourceType.GENERIC.value,
+        external_message_id=external_message_id,
+        tenant_id="tenant-acme",
+    )
+    event_id = derive_event_id(
+        source_type=BoundarySourceType.GENERIC.value,
+        external_message_id=external_message_id,
+        tenant_id="tenant-acme",
+    )
+    first = _ingress(
+        external_message_id=external_message_id,
+        replay_key=replay_key,
+        event_id=event_id,
+    )
+    second = _ingress(
+        external_message_id=external_message_id,
+        replay_key=replay_key,
+        event_id=event_id,
+    )
+    session_factory = async_sessionmaker(
+        pg_engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    async def _save(
+        record: BoundaryIngressRecord,
+    ) -> BoundaryIngressRecord:
+        async with session_factory() as session:
+            repo = PostgresBoundaryPersistence(session)
+            saved = await repo.save_ingress(record)
+            await session.commit()
+            return saved
+
+    try:
+        saved = await asyncio.gather(_save(first), _save(second))
+
+        assert saved[0].ingress_id == saved[1].ingress_id
+        async with session_factory() as session:
+            repo = PostgresBoundaryPersistence(session)
+            page = await repo.list_ingress(
+                BoundaryIngressQuery(replay_key=replay_key)
+            )
+            assert page.total == 1
+            assert page.ingress[0].ingress_id == saved[0].ingress_id
+    finally:
+        async with pg_engine.begin() as conn:
+            await conn.execute(
+                delete(BoundaryIngressRow).where(
+                    BoundaryIngressRow.replay_key == replay_key
+                )
+            )
 
 
 @pytest.mark.asyncio

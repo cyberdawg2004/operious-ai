@@ -37,6 +37,7 @@ class TimelineRuntime:
         event_type: str,
         payload: Mapping[str, Any] | None = None,
         timestamp: datetime | None = None,
+        idempotency_key: str | None = None,
     ) -> TimelineEvent:
         event_timestamp = _coerce_timestamp(timestamp)
         sid = as_session_id(session_id)
@@ -75,7 +76,9 @@ class TimelineRuntime:
                 metadata={
                     "dispatch_id": dispatch_id,
                     "event_type": event_type,
+                    "idempotency_key": idempotency_key,
                 },
+                idempotency_key=idempotency_key,
             )
         )
         if not envelope.is_ok or envelope.result is None:

@@ -1,10 +1,15 @@
-"""Operational act catalog — closed institutional vocabulary (P2-B).
+"""Operational act catalog — closed institutional vocabulary.
 
-Each value names ONE operational act that requires capability
-legality. Orchestration runtimes MUST import from this catalog
-rather than passing free-form strings; doing so prevents the
-distributed-policy-chaos failure mode where two callers spell the
-"same" act differently and develop divergent legality semantics.
+Each value names ONE operational act that can appear in governance,
+event-fabric, or replay chronology. Orchestration runtimes MUST
+import from this catalog rather than passing free-form strings; doing
+so prevents the distributed-policy-chaos failure mode where two callers
+spell the "same" act differently and develop divergent semantics.
+
+Not every operational act is capability-governed. Phase 2-C separates
+the broad event ontology from the narrower capability-legality subset:
+``CAPABILITY_GOVERNED_ACTS`` is the set that runtime entry points must
+gate. Projected chronology acts may exist only to name replay facts.
 
 Format invariant
 ────────────────
@@ -32,16 +37,21 @@ from enum import StrEnum
 
 
 class OperationalAct(StrEnum):
-    """Closed catalog of operational acts subject to capability legality.
+    """Closed catalog of operational acts.
 
-    The enum value is BOTH the canonical ``action`` string on the
-    :class:`GovernanceContext` and the ``required_capability`` on the
-    :class:`CapabilityGovernanceSubject`. Keeping the two aligned
-    eliminates a translation layer that historically produces drift.
+    When an act is present in :data:`CAPABILITY_GOVERNED_ACTS`, its
+    enum value is BOTH the canonical ``action`` string on the
+    :class:`GovernanceContext` and the ``required_capability`` on
+    the :class:`CapabilityGovernanceSubject`. Keeping the two aligned
+    for governed acts eliminates a translation layer that historically
+    produces drift.
     """
 
     # ─── arbitration ────────────────────────────────────────────────
     ARBITRATION_EVALUATE = "arbitration:evaluate"
+
+    # ─── boundary chronology projection ─────────────────────────────
+    BOUNDARY_INGEST = "boundary:ingest"
 
     # ─── boundary (translation) ─────────────────────────────────────
     BOUNDARY_TRANSLATION_INGRESS = "boundary_translation:ingress"
@@ -55,6 +65,21 @@ class OperationalAct(StrEnum):
     COORDINATION_DISPATCH = "coordination:dispatch"
     COORDINATION_POLICY_EVALUATE = "coordination_policy:evaluate"
     COORDINATION_TOPOLOGY_EVALUATE = "coordination_topology:evaluate"
+
+    # ─── governance chronology projection ───────────────────────────
+    GOVERNANCE_DECIDE = "governance:decide"
+
+    # ─── execution chronology projection ────────────────────────────
+    EXECUTION_REQUEST = "execution:request"
+    EXECUTION_OUTBOX_CREATE = "execution:outbox_create"
+    EXECUTION_OUTBOX_CLAIM = "execution:outbox_claim"
+    EXECUTION_OUTBOX_PUBLISH = "execution:outbox_publish"
+    EXECUTION_OUTBOX_FAIL = "execution:outbox_fail"
+    EXECUTION_CLAIM = "execution:claim"
+    EXECUTION_COMPLETE = "execution:complete"
+    EXECUTION_FAIL = "execution:fail"
+    EXECUTION_RECOVER = "execution:recover"
+    EXECUTION_DEAD_LETTER = "execution:dead_letter"
 
     # ─── hardening ──────────────────────────────────────────────────
     HARDENING_RECORD_FAILURE = "hardening:record_failure"
@@ -70,9 +95,42 @@ class OperationalAct(StrEnum):
 
     # ─── session ────────────────────────────────────────────────────
     SESSION_OPEN = "session:open"
+    SESSION_ATTACH_CONTEXT = "session:attach_context"
+    SESSION_RECORD_CORRELATION = "session:record_correlation"
+    SESSION_LINK_LINEAGE = "session:link_lineage"
+    SESSION_RECLASSIFY_LIFECYCLE = "session:reclassify_lifecycle"
+    SESSION_RECORD_DORMANCY = "session:record_dormancy"
+    SESSION_RECORD_RESUMPTION = "session:record_resumption"
+    SESSION_RECORD_TERMINATION = "session:record_termination"
+    SESSION_RECORD_ARCHIVAL = "session:record_archival"
+    SESSION_OBSERVE_OPERATION = "session:observe_operation"
 
     # ─── supervisor ─────────────────────────────────────────────────
     SUPERVISOR_INSPECT = "supervisor:inspect"
 
 
-__all__ = ["OperationalAct"]
+CAPABILITY_GOVERNED_ACTS: frozenset[OperationalAct] = frozenset(
+    {
+        OperationalAct.ARBITRATION_EVALUATE,
+        OperationalAct.BOUNDARY_TRANSLATION_INGRESS,
+        OperationalAct.BOUNDARY_TRANSLATION_EGRESS,
+        OperationalAct.BOUNDARY_VOICE_INGRESS,
+        OperationalAct.BOUNDARY_VOICE_EGRESS,
+        OperationalAct.COORDINATION_DISPATCH,
+        OperationalAct.COORDINATION_POLICY_EVALUATE,
+        OperationalAct.COORDINATION_TOPOLOGY_EVALUATE,
+        OperationalAct.HARDENING_RECORD_FAILURE,
+        OperationalAct.OI_COMMUNICATION_REGISTER,
+        OperationalAct.OI_COMMUNICATION_RETRIEVE,
+        OperationalAct.OI_MEMORY_LIST,
+        OperationalAct.OI_MEMORY_PROPOSE,
+        OperationalAct.OI_RECOMMENDATION_GENERATE,
+        OperationalAct.OI_SOP_INGEST,
+        OperationalAct.OI_TONALITY_CLASSIFY,
+        OperationalAct.SESSION_OPEN,
+        OperationalAct.SUPERVISOR_INSPECT,
+    }
+)
+
+
+__all__ = ["CAPABILITY_GOVERNED_ACTS", "OperationalAct"]

@@ -23,8 +23,22 @@ from app.events import (
     EventChronologyError,
     EventFabricError,
     EventId,
+    EventPersistenceError,
+    InMemoryOperationalEventPersistence,
     OperationalEvent,
+    OperationalEventAppendResult,
+    OperationalEventPage,
+    OperationalEventPersistenceProtocol,
+    OperationalEventQuery,
+    OperationalEventRuntime,
+    OperationalReplayFinding,
+    OperationalReplayFindingCode,
+    OperationalReplayFindingSeverity,
+    OperationalReplayRuntime,
+    OperationalReplayStatus,
+    OperationalReplayTrace,
     OperationalSubstrate,
+    PostgresOperationalEventPersistence,
     derive_event_id,
 )
 from app.governance.capability.acts import OperationalAct
@@ -286,14 +300,20 @@ def test_event_has_no_mutation_methods() -> None:
 
 def test_event_id_distinguishes_two_chronology_points() -> None:
     e1 = _make_event()
+    e2_id = derive_event_id(
+        operational_act=OperationalAct.SESSION_OPEN.value,
+        substrate=OperationalSubstrate.SESSION.value,
+        runtime_instance_id=_RUNTIME,
+        sequence=1,
+        tenant_id="acme",
+        parent_event_id=None,
+    )
     e2 = _make_event(
-        event_id=derive_event_id(
-            operational_act=OperationalAct.SESSION_OPEN.value,
-            substrate=OperationalSubstrate.SESSION.value,
-            runtime_instance_id=_RUNTIME,
-            sequence=1,
-            tenant_id="acme",
+        event_id=e2_id,
+        causality=EventCausality(
+            root_event_id=e2_id,
             parent_event_id=None,
+            depth=0,
         ),
         chronology=EventChronology(
             runtime_instance_id=_RUNTIME,
@@ -307,6 +327,18 @@ def test_event_id_distinguishes_two_chronology_points() -> None:
 def test_event_metadata_defaults_to_empty_mapping() -> None:
     event = _make_event()
     assert dict(event.metadata) == {}
+
+
+def test_event_query_rejects_invalid_replay_windows() -> None:
+    with pytest.raises(ValueError):
+        OperationalEventQuery(limit=0)
+    with pytest.raises(ValueError):
+        OperationalEventQuery(offset=-1)
+    with pytest.raises(ValueError):
+        OperationalEventQuery(
+            occurred_after_or_at=_NOW,
+            occurred_before_or_at=_NOW.replace(year=2024),
+        )
 
 
 # ─── catalog invariants ─────────────────────────────────────────────
@@ -331,6 +363,11 @@ def test_operational_substrate_includes_hardening() -> None:
     """Constitutional improvement over hardening's enum (which omits
     itself for ownership-boundary reasons)."""
     assert "hardening" in {s.value for s in OperationalSubstrate}
+
+
+def test_operational_substrate_includes_execution() -> None:
+    """Phase 1 execution sovereignty is now a first-class event substrate."""
+    assert "execution" in {s.value for s in OperationalSubstrate}
 
 
 def test_every_operational_act_prefix_maps_to_substrate() -> None:
@@ -474,9 +511,30 @@ def test_event_module_public_surface() -> None:
         "EventChronologyError",
         "EventFabricError",
         "EventId",
+        "EventPersistenceError",
+        "InMemoryOperationalEventPersistence",
+        "OperationalLineageEdge",
+        "OperationalLineageError",
+        "OperationalLineageGraph",
+        "OperationalLineageRelation",
+        "OperationalLineageRuntime",
+        "OperationalLineageUnresolvedReference",
         "OperationalEvent",
+        "OperationalEventAppendResult",
+        "OperationalEventPage",
+        "OperationalEventPersistenceProtocol",
+        "OperationalEventQuery",
+        "OperationalEventRuntime",
+        "OperationalReplayFinding",
+        "OperationalReplayFindingCode",
+        "OperationalReplayFindingSeverity",
+        "OperationalReplayRuntime",
+        "OperationalReplayStatus",
+        "OperationalReplayTrace",
         "OperationalSubstrate",
+        "PostgresOperationalEventPersistence",
         "derive_event_id",
+        "normalize_operational_lineage",
     }
 
 
@@ -486,4 +544,5 @@ def test_event_module_public_surface() -> None:
 def test_exception_hierarchy() -> None:
     assert issubclass(EventCausalityError, EventFabricError)
     assert issubclass(EventChronologyError, EventFabricError)
+    assert issubclass(EventPersistenceError, EventFabricError)
     assert issubclass(EventFabricError, Exception)

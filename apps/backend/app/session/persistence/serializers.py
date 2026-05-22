@@ -126,6 +126,7 @@ def event_to_record(
         payload=dict(event.payload),
         correlation_id=event.correlation_id,
         annotation=event.annotation,
+        idempotency_key=event.idempotency_key,
     )
 
 
@@ -143,6 +144,7 @@ def event_record_to_model(
         payload=dict(record.payload),
         correlation_id=record.correlation_id,
         annotation=record.annotation,
+        idempotency_key=record.idempotency_key,
     )
 
 

@@ -16,7 +16,7 @@ These tests pin the adoption contract on three axes:
    (``SessionRuntime``) folds a DENY verdict into its existing
    fail-fast envelope path without raising.
 3. **Static adoption invariant** — every runtime source file that
-   declares an ``OperationalAct`` from the catalog also calls
+   declares a capability-governed ``OperationalAct`` also calls
    ``gate_or_deny`` somewhere in that file. Drift here is how
    capability adoption silently regresses.
 """
@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from app.governance.capability import (
+    CAPABILITY_GOVERNED_ACTS,
     CapabilityDenied,
     CapabilityLegalityRequest,
     OperationalAct,
@@ -479,17 +480,17 @@ def test_every_p2a_runtime_adopts_the_capability_gate(
     )
 
 
-def test_capability_gate_adoption_covers_full_catalog() -> None:
-    """The adoption table covers every ``OperationalAct`` value.
+def test_capability_gate_adoption_covers_governed_catalog() -> None:
+    """The adoption table covers every capability-governed act.
 
-    A new act added without an adoption site fails this test —
-    forcing the developer to either adopt the gate or remove the
-    act from the catalog.
+    Phase 2-C separates event ontology from governance scope. A new
+    capability-governed act added without an adoption site fails this
+    test; projected chronology-only acts do not inflate governance.
     """
-    catalog = set(OperationalAct)
+    catalog = set(CAPABILITY_GOVERNED_ACTS)
     covered = set(_P2A_ADOPTION_SITES.keys())
     assert catalog == covered, (
-        f"OperationalAct ⇄ adoption-site drift. "
-        f"unmapped acts: {catalog - covered}; "
+        f"CAPABILITY_GOVERNED_ACTS ⇄ adoption-site drift. "
+        f"ungated governed acts: {catalog - covered}; "
         f"stale adoption sites: {covered - catalog}"
     )

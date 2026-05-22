@@ -10,11 +10,9 @@ from typing import Protocol
 
 
 class ExecutionPublisher(Protocol):
-    async def publish_diagnostic_execution(
+    async def publish_execution(
         self,
-        dispatch_id: str,
-        session_id: str,
-        tenant_id: str,
+        execution_id: str,
     ) -> None:
         ...
 

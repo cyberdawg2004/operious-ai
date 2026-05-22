@@ -34,6 +34,7 @@ class OperationalSubstrate(StrEnum):
     COORDINATION = "coordination"
     COORDINATION_POLICY = "coordination_policy"
     COORDINATION_TOPOLOGY = "coordination_topology"
+    EXECUTION = "execution"
     GOVERNANCE = "governance"
     HARDENING = "hardening"
     HUMAN = "human"

@@ -276,15 +276,17 @@ async def test_postgres_query_decisions_filters_by_tenant(
 ) -> None:
     repo = PostgresGovernanceRepository(pg_session)
     base = datetime(2026, 5, 19, 9, tzinfo=timezone.utc)
-    await repo.record_decision(_decision(tenant_id="tenant-acme", decided_at=base))
-    await repo.record_decision(_decision(tenant_id="tenant-acme", decided_at=base.replace(second=1)))
-    await repo.record_decision(_decision(tenant_id="tenant-other", decided_at=base.replace(second=2)))
+    tenant_id = f"tenant-acme-{uuid.uuid4()}"
+    other_tenant_id = f"tenant-other-{uuid.uuid4()}"
+    await repo.record_decision(_decision(tenant_id=tenant_id, decided_at=base))
+    await repo.record_decision(_decision(tenant_id=tenant_id, decided_at=base.replace(second=1)))
+    await repo.record_decision(_decision(tenant_id=other_tenant_id, decided_at=base.replace(second=2)))
 
     page = await repo.query_decisions(
-        DecisionQuery(tenant_id="tenant-acme", limit=10)
+        DecisionQuery(tenant_id=tenant_id, limit=10)
     )
     assert page.total == 2
-    assert all(r.tenant_id == "tenant-acme" for r in page.items)
+    assert all(r.tenant_id == tenant_id for r in page.items)
 
 
 @pytest.mark.asyncio
@@ -293,23 +295,26 @@ async def test_postgres_query_decisions_paginates(
 ) -> None:
     repo = PostgresGovernanceRepository(pg_session)
     base = datetime(2026, 5, 19, 9, tzinfo=timezone.utc)
+    tenant_id = f"tenant-page-{uuid.uuid4()}"
     for i in range(5):
         await repo.record_decision(
-            _decision(decided_at=base.replace(second=i))
+            _decision(tenant_id=tenant_id, decided_at=base.replace(second=i))
         )
 
-    page = await repo.query_decisions(DecisionQuery(limit=2, offset=0))
+    page = await repo.query_decisions(
+        DecisionQuery(tenant_id=tenant_id, limit=2, offset=0)
+    )
     assert page.total == 5
     assert len(page.items) == 2
 
     next_page = await repo.query_decisions(
-        DecisionQuery(limit=2, offset=2)
+        DecisionQuery(tenant_id=tenant_id, limit=2, offset=2)
     )
     assert next_page.total == 5
     assert len(next_page.items) == 2
 
     last_page = await repo.query_decisions(
-        DecisionQuery(limit=2, offset=4)
+        DecisionQuery(tenant_id=tenant_id, limit=2, offset=4)
     )
     assert last_page.total == 5
     assert len(last_page.items) == 1

@@ -24,8 +24,13 @@ class EventChronologyError(EventFabricError):
     monotonic sequence (e.g. negative)."""
 
 
+class EventPersistenceError(EventFabricError):
+    """Raised when durable event authority refuses an append."""
+
+
 __all__ = [
     "EventCausalityError",
     "EventChronologyError",
     "EventFabricError",
+    "EventPersistenceError",
 ]

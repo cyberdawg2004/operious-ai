@@ -1,5 +1,10 @@
+import Link from 'next/link';
 import { SectionShell } from '@/components/section-shell';
-import { Badge } from '@operious/ui';
+import { Badge, Button } from '@operious/ui';
+
+const COMMAND_CENTER_URL =
+  process.env.NEXT_PUBLIC_OPERIOUS_COMMAND_CENTER_URL ??
+  'https://operious-ai-command-center.vercel.app';
 
 const MODULES = [
   {
@@ -58,6 +63,13 @@ export const CommandCenterPreviewSection = () => (
           </div>
         </article>
       ))}
+    </div>
+    <div className="mt-8">
+      <Link href={COMMAND_CENTER_URL}>
+        <Button type="button" variant="primary" size="md">
+          Open Staging Command Center
+        </Button>
+      </Link>
     </div>
   </SectionShell>
 );

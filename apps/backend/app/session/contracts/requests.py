@@ -93,6 +93,10 @@ class AppendEventRequest:
                             correlation handle.
         correlation_id:    Lineage continuity handle.
         request_id:        Per-call lineage handle.
+        idempotency_key:   Optional replay-stable key. When supplied,
+                           the session runtime returns the original
+                           event for duplicate appends instead of
+                           advancing chronology.
         metadata:          Free-form, propagated.
     """
 
@@ -107,7 +111,20 @@ class AppendEventRequest:
     external_correlation_id: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
+    idempotency_key: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.idempotency_key is None:
+            return
+        if (
+            not self.idempotency_key
+            or len(self.idempotency_key) > 255
+        ):
+            raise ValueError(
+                "AppendEventRequest.idempotency_key must be a "
+                "non-empty string of at most 255 characters"
+            )
 
 
 @dataclass(frozen=True, slots=True)

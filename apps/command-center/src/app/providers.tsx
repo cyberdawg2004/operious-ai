@@ -24,6 +24,11 @@ interface ProvidersProps {
 const USE_MOCK_API =
   process.env.NEXT_PUBLIC_OPERIOUS_USE_MOCK_API === 'true';
 
+const OPERIOUS_API_BASE_URL =
+  process.env.NEXT_PUBLIC_OPERIOUS_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_OPERIOUS_API_URL ??
+  'https://operious-ai-imad.fly.dev';
+
 /**
  * 2.5-J2: the demo principal / token used to be unconditionally
  * injected at every render — meaning a production build would
@@ -41,7 +46,7 @@ const buildDemoPrincipal = (): AuthPrincipal =>
     principalId: 'principal-demo',
     tenantId: 'tenant-acme',
     displayName: 'Operations Operator',
-    email: 'ops@operious.local',
+    email: 'ops@operious.ai',
     roles: ['operations.read', 'cognition.review'],
   });
 
@@ -65,9 +70,7 @@ export const Providers = ({ children }: ProvidersProps) => {
   const [client] = useState(
     () =>
       new OperiousClient({
-        baseUrl:
-          process.env.NEXT_PUBLIC_OPERIOUS_API_BASE_URL ??
-          'https://operious.local',
+        baseUrl: OPERIOUS_API_BASE_URL,
         // `mockFetch` is dev-only and feature-gated. When the flag is
         // off (the production default) OperiousClient falls back to
         // its built-in platform transport, and the backend is the

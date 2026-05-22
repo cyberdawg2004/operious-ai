@@ -206,6 +206,9 @@ class SessionEventRow(Base):
         UUID(as_uuid=True), nullable=True, index=True
     )
     annotation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True, index=True
+    )
     # 2.5-G3 governance join axes.
     governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
@@ -226,6 +229,11 @@ class SessionEventRow(Base):
             "session_id",
             "sequence",
             name="uq_session_events_session_id_sequence",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "idempotency_key",
+            name="uq_session_events_session_id_idempotency_key",
         ),
     )
 

@@ -1,7 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Button } from '@operious/ui';
+
+const COMMAND_CENTER_URL =
+  process.env.NEXT_PUBLIC_OPERIOUS_COMMAND_CENTER_URL ??
+  'https://operious-ai-command-center.vercel.app';
 
 export const PilotCtaSection = () => (
   <section id="pilot" className="border-b border-line bg-bg-subtle py-24">
@@ -28,9 +33,11 @@ export const PilotCtaSection = () => (
           <Button size="md" variant="primary" type="button">
             Request Pilot
           </Button>
-          <Button size="md" variant="ghost" type="button">
-            Architecture Brief
-          </Button>
+          <Link href={COMMAND_CENTER_URL}>
+            <Button size="md" variant="ghost" type="button">
+              Inspect Command Center
+            </Button>
+          </Link>
         </div>
       </motion.div>
     </div>

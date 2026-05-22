@@ -1,5 +1,8 @@
 # Operious AI — Architecture Roadmap
 
+Current phase authority lives in
+[Operious AI Consolidated Master Plan](./operious-master-plan.md).
+
 ## Vision
 
 Operious AI is an AI-native operational infrastructure platform designed

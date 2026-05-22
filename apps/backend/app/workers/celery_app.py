@@ -12,7 +12,10 @@ celery_app = Celery(
     "operious",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.workers.agent_tasks"],
+    include=[
+        "app.workers.agent_tasks",
+        "app.workers.execution_recovery_tasks",
+    ],
 )
 
 celery_app.conf.update(

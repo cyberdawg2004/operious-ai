@@ -373,15 +373,17 @@ async def test_postgres_list_sessions_clamps_to_tenant(
     pg_session: AsyncSession,
 ) -> None:
     repo = PostgresSessionPersistence(pg_session)
-    await repo.save_session(_session(tenant_id="tenant-acme"))
-    await repo.save_session(_session(tenant_id="tenant-acme"))
-    await repo.save_session(_session(tenant_id="tenant-other"))
+    tenant_id = f"tenant-acme-{uuid.uuid4()}"
+    other_tenant_id = f"tenant-other-{uuid.uuid4()}"
+    await repo.save_session(_session(tenant_id=tenant_id))
+    await repo.save_session(_session(tenant_id=tenant_id))
+    await repo.save_session(_session(tenant_id=other_tenant_id))
 
     page = await repo.list_sessions(
-        SessionQuery(), expected_tenant_id="tenant-acme"
+        SessionQuery(), expected_tenant_id=tenant_id
     )
     assert page.total == 2
-    assert all(s.tenant_id == "tenant-acme" for s in page.sessions)
+    assert all(s.tenant_id == tenant_id for s in page.sessions)
 
 
 @pytest.mark.asyncio
@@ -406,8 +408,10 @@ async def test_postgres_list_correlations_clamps_via_parent_session(
     pg_session: AsyncSession,
 ) -> None:
     repo = PostgresSessionPersistence(pg_session)
-    acme_session = _session(tenant_id="tenant-acme")
-    other_session = _session(tenant_id="tenant-other")
+    tenant_id = f"tenant-acme-{uuid.uuid4()}"
+    other_tenant_id = f"tenant-other-{uuid.uuid4()}"
+    acme_session = _session(tenant_id=tenant_id)
+    other_session = _session(tenant_id=other_tenant_id)
     await repo.save_session(acme_session)
     await repo.save_session(other_session)
     await repo.save_correlation(
@@ -418,7 +422,7 @@ async def test_postgres_list_correlations_clamps_via_parent_session(
     )
 
     page = await repo.list_correlations(
-        SessionCorrelationQuery(), expected_tenant_id="tenant-acme"
+        SessionCorrelationQuery(), expected_tenant_id=tenant_id
     )
     assert page.total == 1
     assert page.correlations[0].external_id == "acme-1"
@@ -448,12 +452,19 @@ async def test_postgres_list_sessions_paginates(
     pg_session: AsyncSession,
 ) -> None:
     repo = PostgresSessionPersistence(pg_session)
+    tenant_id = f"tenant-page-{uuid.uuid4()}"
     for _ in range(5):
-        await repo.save_session(_session(tenant_id="tenant-acme"))
+        await repo.save_session(_session(tenant_id=tenant_id))
 
-    first = await repo.list_sessions(SessionQuery(limit=2, offset=0))
-    second = await repo.list_sessions(SessionQuery(limit=2, offset=2))
-    third = await repo.list_sessions(SessionQuery(limit=2, offset=4))
+    first = await repo.list_sessions(
+        SessionQuery(tenant_id=tenant_id, limit=2, offset=0)
+    )
+    second = await repo.list_sessions(
+        SessionQuery(tenant_id=tenant_id, limit=2, offset=2)
+    )
+    third = await repo.list_sessions(
+        SessionQuery(tenant_id=tenant_id, limit=2, offset=4)
+    )
     assert first.total == 5
     assert len(first.sessions) == 2
     assert len(second.sessions) == 2

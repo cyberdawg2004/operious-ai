@@ -136,6 +136,18 @@ class BoundaryIngressRow(Base):
             "runtime_instance_id",
             "sequence",
         ),
+        Index(
+            "uq_boundary_ingress_replay_key",
+            "replay_key",
+            unique=True,
+            postgresql_where=text("replay_key IS NOT NULL"),
+        ),
+        Index(
+            "uq_boundary_ingress_event_id",
+            "event_id",
+            unique=True,
+            postgresql_where=text("event_id IS NOT NULL"),
+        ),
     )
 
 

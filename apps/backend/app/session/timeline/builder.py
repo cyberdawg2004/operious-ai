@@ -57,6 +57,7 @@ def build_event(
     payload: Mapping[str, Any] | None = None,
     correlation_id: SessionCorrelationId | None = None,
     annotation: str | None = None,
+    idempotency_key: str | None = None,
 ) -> SessionTimelineEvent:
     """Construct one immutable timeline event."""
     return SessionTimelineEvent(
@@ -72,6 +73,7 @@ def build_event(
         payload=canonicalize_payload(payload or {}),
         correlation_id=correlation_id,
         annotation=annotation,
+        idempotency_key=idempotency_key,
     )
 
 

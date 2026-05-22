@@ -65,6 +65,7 @@ class SessionEventRecord:
     payload: Mapping[str, Any] = field(default_factory=dict)
     correlation_id: SessionCorrelationId | None = None
     annotation: str | None = None
+    idempotency_key: str | None = None
     # 2.5-G3: governance join axes (mirrors CoordinationRecord).
     governance_decision_id: uuid.UUID | None = None
     governance_chain_id: str | None = None

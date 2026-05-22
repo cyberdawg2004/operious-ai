@@ -73,12 +73,16 @@ def _zendesk_payload(
 
 
 def _runtime(
-    *, persistence: InMemoryBoundaryPersistence | None = None
+    *,
+    persistence: InMemoryBoundaryPersistence | None = None,
+    use_idempotency: bool = True,
 ) -> BoundaryIngressRuntime:
     reg = BoundaryAdapterRegistry([ZendeskWebhookAdapter()])
     return BoundaryIngressRuntime(
         adapters=reg,
-        idempotency=BoundaryIdempotencyRegistry(),
+        idempotency=(
+            BoundaryIdempotencyRegistry() if use_idempotency else None
+        ),
         persistence=persistence,
     )
 
@@ -309,29 +313,61 @@ async def test_persistence_writes_record() -> None:
 
 
 @pytest.mark.asyncio
-async def test_persistence_listing_filters_by_disposition() -> None:
+async def test_persistence_duplicate_replay_key_returns_canonical_record() -> None:
     store = InMemoryBoundaryPersistence()
     rt = _runtime(persistence=store)
     src = _zendesk_source()
     payload = _zendesk_payload()
-    await rt.ingest(
+    first = (await rt.ingest(
         BoundaryIngressRequest(
             source=src,
             adapter_name="zendesk_webhook_adapter",
             payload=payload,
         )
-    )
-    await rt.ingest(
+    )).unwrap()
+    second = (await rt.ingest(
         BoundaryIngressRequest(
             source=src,
             adapter_name="zendesk_webhook_adapter",
             payload=payload,
         )
-    )
+    )).unwrap()
+    assert second.ingress_id == first.ingress_id
+    assert second.event_id == first.event_id
+
     page = await store.list_ingress(
-        BoundaryIngressQuery(
-            replay_disposition=BoundaryReplayDisposition.REPLAY_OF_KNOWN
+        BoundaryIngressQuery(replay_key=first.replay_key)
+    )
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_persistent_runtime_does_not_need_request_local_registry() -> None:
+    store = InMemoryBoundaryPersistence()
+    rt = _runtime(persistence=store, use_idempotency=False)
+    src = _zendesk_source()
+    payload = _zendesk_payload(event_id="ze-durable-1")
+
+    first = (await rt.ingest(
+        BoundaryIngressRequest(
+            source=src,
+            adapter_name="zendesk_webhook_adapter",
+            payload=payload,
         )
+    )).unwrap()
+    second = (await rt.ingest(
+        BoundaryIngressRequest(
+            source=src,
+            adapter_name="zendesk_webhook_adapter",
+            payload=payload,
+        )
+    )).unwrap()
+
+    assert rt.idempotency is None
+    assert second.ingress_id == first.ingress_id
+    assert second.replay_key == first.replay_key
+    page = await store.list_ingress(
+        BoundaryIngressQuery(replay_key=first.replay_key)
     )
     assert page.total == 1
 

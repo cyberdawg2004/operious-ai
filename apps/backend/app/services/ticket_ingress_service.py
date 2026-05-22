@@ -14,7 +14,6 @@ from app.boundary.adapters.builtin import (
 )
 from app.boundary.contracts.requests import BoundaryIngressRequest
 from app.boundary.enums import BoundarySourceType
-from app.boundary.idempotency.registry import BoundaryIdempotencyRegistry
 from app.boundary.ingress import BoundaryIngressRuntime
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
@@ -54,7 +53,6 @@ class TicketIngressService:
     ) -> TicketIngressServiceResult:
         runtime = BoundaryIngressRuntime(
             adapters=_adapter_registry(),
-            idempotency=BoundaryIdempotencyRegistry(),
             persistence=self._persistence,
         )
         envelope = await runtime.ingest(

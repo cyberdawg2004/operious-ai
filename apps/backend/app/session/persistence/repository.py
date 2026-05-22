@@ -81,6 +81,21 @@ class SessionPersistenceProtocol(Protocol):
         """
         ...
 
+    async def get_event_by_idempotency_key(
+        self,
+        *,
+        session_id: SessionId,
+        idempotency_key: str,
+        expected_tenant_id: str | None = None,
+    ) -> SessionEventRecord | None:
+        """Point read by ``(session_id, idempotency_key)``.
+
+        Used by ``SessionRuntime.append_event`` to make operational
+        timeline projections replay-safe without moving chronology
+        authority out of the session substrate.
+        """
+        ...
+
     async def get_correlation(
         self,
         correlation_id: SessionCorrelationId,

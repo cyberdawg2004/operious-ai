@@ -9,7 +9,8 @@ This sub-package is the **singular** answer to the question:
 It exports exactly two things — no more, no less:
 
 * :class:`OperationalAct`         — the closed, namespaced catalog of
-                                    operational acts that require
+                                    operational acts.
+* ``CAPABILITY_GOVERNED_ACTS``    — the subset that must flow through
                                     capability legality.
 * :func:`evaluate_capability_legality` /
   :func:`build_capability_context` — the only legitimate construction
@@ -39,7 +40,10 @@ entry method, after :func:`request_authority_resolution`. On
 fail-fast envelope without further branching.
 """
 
-from app.governance.capability.acts import OperationalAct
+from app.governance.capability.acts import (
+    CAPABILITY_GOVERNED_ACTS,
+    OperationalAct,
+)
 from app.governance.capability.adoption import (
     CapabilityDenied,
     CapabilityGateOutcome,
@@ -57,6 +61,7 @@ __all__ = [
     "CapabilityDenied",
     "CapabilityGateOutcome",
     "CapabilityLegalityRequest",
+    "CAPABILITY_GOVERNED_ACTS",
     "GovernanceRuntime",
     "OperationalAct",
     "build_capability_context",

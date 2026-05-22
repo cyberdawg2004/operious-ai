@@ -28,6 +28,7 @@ from app.coordination.identity import (
 from app.coordination.models.payload import CoordinationPayload
 from app.coordination.models.recipients import CoordinationRecipient
 from app.coordination.runtime import CoordinationRuntime
+from app.execution import ExecutionRuntime
 from app.execution.publisher import ExecutionPublisher
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
@@ -59,6 +60,7 @@ _DISPATCH_RECIPIENT_ID = "agent:ticket-triage"
 class DispatchResult:
     dispatch_id: str
     session_id: str
+    execution_id: str
     governance_decision_id: str
     verdict: str
 
@@ -72,11 +74,13 @@ class DispatchService:
         coordination_runtime: CoordinationRuntime,
         boundary_ingress_repository: BoundaryIngressRepository,
         session_repository: SessionRepository,
+        execution_runtime: ExecutionRuntime,
         execution_publisher: ExecutionPublisher,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
         self._session_repository = session_repository
+        self._execution_runtime = execution_runtime
         self._execution_publisher = execution_publisher
 
     async def dispatch(
@@ -138,15 +142,27 @@ class DispatchService:
                 "session runtime returned an empty session"
             )
 
-        await self._execution_publisher.publish_diagnostic_execution(
-            dispatch_id=str(coordination_result.coordination_id),
-            session_id=str(session.identity.session_id),
-            tenant_id=tenant_id,
+        execution_request = (
+            await self._execution_runtime.request_diagnostic_execution(
+                dispatch_id=str(coordination_result.coordination_id),
+                session_id=str(session.identity.session_id),
+                tenant_id=tenant_id,
+                metadata={
+                    "boundary.ingress_id": str(ingress.ingress_id),
+                    "session.id": str(session.identity.session_id),
+                    "governance.decision_id": str(governance_decision_id),
+                },
+            )
+        )
+
+        await self._execution_publisher.publish_execution(
+            execution_id=str(execution_request.execution.execution_id),
         )
 
         return DispatchResult(
             dispatch_id=str(coordination_result.coordination_id),
             session_id=str(session.identity.session_id),
+            execution_id=str(execution_request.execution.execution_id),
             governance_decision_id=str(governance_decision_id),
             verdict=coordination_result.outcome.value,
         )

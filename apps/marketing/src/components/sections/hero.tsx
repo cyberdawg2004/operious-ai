@@ -4,6 +4,10 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Button } from '@operious/ui';
 
+const COMMAND_CENTER_URL =
+  process.env.NEXT_PUBLIC_OPERIOUS_COMMAND_CENTER_URL ??
+  'https://operious-ai-command-center.vercel.app';
+
 export const HeroSection = () => (
   <section className="relative overflow-hidden border-b border-line">
     <div className="absolute inset-0 grid-bg opacity-60" aria-hidden />
@@ -38,6 +42,11 @@ export const HeroSection = () => (
           <Link href="#architecture">
             <Button size="md" variant="ghost">
               Read the Architecture
+            </Button>
+          </Link>
+          <Link href={COMMAND_CENTER_URL}>
+            <Button size="md" variant="subtle">
+              Open Command Center
             </Button>
           </Link>
         </div>

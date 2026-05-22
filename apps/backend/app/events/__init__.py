@@ -55,8 +55,37 @@ from app.events.exceptions import (
     EventCausalityError,
     EventChronologyError,
     EventFabricError,
+    EventPersistenceError,
 )
 from app.events.identity import EventId, derive_event_id
+from app.events.lineage import (
+    OperationalLineageEdge,
+    OperationalLineageError,
+    OperationalLineageGraph,
+    OperationalLineageRelation,
+    OperationalLineageRuntime,
+    OperationalLineageUnresolvedReference,
+    normalize_operational_lineage,
+)
+from app.events.persistence import (
+    InMemoryOperationalEventPersistence,
+    OperationalEventPage,
+    OperationalEventPersistenceProtocol,
+    OperationalEventQuery,
+    PostgresOperationalEventPersistence,
+)
+from app.events.runtime import (
+    OperationalEventAppendResult,
+    OperationalEventRuntime,
+)
+from app.events.replay import (
+    OperationalReplayFinding,
+    OperationalReplayFindingCode,
+    OperationalReplayFindingSeverity,
+    OperationalReplayRuntime,
+    OperationalReplayStatus,
+    OperationalReplayTrace,
+)
 from app.events.substrates import OperationalSubstrate
 
 __all__ = [
@@ -66,7 +95,28 @@ __all__ = [
     "EventChronologyError",
     "EventFabricError",
     "EventId",
+    "EventPersistenceError",
+    "InMemoryOperationalEventPersistence",
+    "OperationalLineageEdge",
+    "OperationalLineageError",
+    "OperationalLineageGraph",
+    "OperationalLineageRelation",
+    "OperationalLineageRuntime",
+    "OperationalLineageUnresolvedReference",
     "OperationalEvent",
+    "OperationalEventAppendResult",
+    "OperationalEventPage",
+    "OperationalEventPersistenceProtocol",
+    "OperationalEventQuery",
+    "OperationalEventRuntime",
+    "OperationalReplayFinding",
+    "OperationalReplayFindingCode",
+    "OperationalReplayFindingSeverity",
+    "OperationalReplayRuntime",
+    "OperationalReplayStatus",
+    "OperationalReplayTrace",
     "OperationalSubstrate",
+    "PostgresOperationalEventPersistence",
     "derive_event_id",
+    "normalize_operational_lineage",
 ]

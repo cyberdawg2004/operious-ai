@@ -63,6 +63,7 @@ from app.coordination.runtime import CoordinationRuntime
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
+from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.execution.publisher import ExecutionPublisher
 from app.governance.enforcement.handlers import (
@@ -96,6 +97,12 @@ from app.supervisor.persistence import (
     BaseSupervisorRepository,
     PostgresSupervisorRepository,
 )
+from app.services.tenant_configuration_service import (
+    TenantConfigurationService,
+)
+from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.persistence import PostgresTenantConfigurationRepository
+from app.tenant.runtime import TenantConfigurationRuntime
 
 
 async def get_health_service() -> HealthService:
@@ -171,8 +178,14 @@ async def get_dispatch_service(
     ),
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
+    execution_runtime = ExecutionRuntime(
+        persistence=PostgresExecutionPersistence(session),
+    )
     deferred_execution_publisher = _DeferredExecutionPublisher(
-        execution_publisher
+        delegate=execution_publisher,
+        execution_runtime=execution_runtime,
+        session=session,
+        publisher_id="api:dispatch",
     )
     service = DispatchService(
         coordination_runtime=CoordinationRuntime(
@@ -184,6 +197,7 @@ async def get_dispatch_service(
         ),
         boundary_ingress_repository=PostgresBoundaryPersistence(session),
         session_repository=PostgresSessionPersistence(session),
+        execution_runtime=execution_runtime,
         execution_publisher=deferred_execution_publisher,
     )
     try:
@@ -200,6 +214,20 @@ def get_supervisor_repository(
 ) -> BaseSupervisorRepository:
     """Return the Postgres supervisor-persistence backend for this request."""
     return PostgresSupervisorRepository(session)
+
+
+def get_tenant_configuration_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> TenantConfigurationService:
+    """Return the tenant-owned configuration service for this request."""
+    settings = get_settings()
+    runtime = TenantConfigurationRuntime(
+        repository=PostgresTenantConfigurationRepository(session),
+        credential_encryptor=TenantCredentialEncryptor(
+            platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+        ),
+    )
+    return TenantConfigurationService(runtime=runtime, session=session)
 
 
 def _dispatch_coordination_registry() -> CoordinationRegistry:
@@ -252,39 +280,84 @@ def _governance_handler_registry() -> EnforcementHandlerRegistry:
 
 @dataclass(frozen=True, slots=True)
 class _DiagnosticExecutionIntent:
-    dispatch_id: str
-    session_id: str
-    tenant_id: str
+    execution_id: str
 
 
 class _DeferredExecutionPublisher(ExecutionPublisher):
-    """Request-scoped publisher that flushes after DB commit."""
+    """Request-scoped outbox publisher that flushes after DB commit."""
 
-    def __init__(self, delegate: ExecutionPublisher) -> None:
+    def __init__(
+        self,
+        *,
+        delegate: ExecutionPublisher,
+        execution_runtime: ExecutionRuntime,
+        session: AsyncSession,
+        publisher_id: str,
+    ) -> None:
         self._delegate = delegate
+        self._execution_runtime = execution_runtime
+        self._session = session
+        self._publisher_id = publisher_id
         self._diagnostic_executions: list[_DiagnosticExecutionIntent] = []
 
-    async def publish_diagnostic_execution(
+    async def publish_execution(
         self,
-        dispatch_id: str,
-        session_id: str,
-        tenant_id: str,
+        execution_id: str,
     ) -> None:
         self._diagnostic_executions.append(
-            _DiagnosticExecutionIntent(
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-            )
+            _DiagnosticExecutionIntent(execution_id=execution_id)
         )
 
     async def flush(self) -> None:
         for intent in self._diagnostic_executions:
-            await self._delegate.publish_diagnostic_execution(
-                dispatch_id=intent.dispatch_id,
-                session_id=intent.session_id,
-                tenant_id=intent.tenant_id,
+            claim = await self._execution_runtime.claim_outbox_for_execution(
+                execution_id=intent.execution_id,
+                publisher_id=self._publisher_id,
             )
+            if not claim.claimed or claim.outbox is None:
+                if claim.reason == "outbox_not_publishable:published":
+                    continue
+                raise ExecutionOutboxPublishError(
+                    intent.execution_id,
+                    claim.reason or "outbox_claim_refused",
+                )
+            await self._session.commit()
+            try:
+                await self._delegate.publish_execution(
+                    execution_id=intent.execution_id,
+                )
+            except Exception as exc:
+                await self._execution_runtime.mark_outbox_failed(
+                    outbox_id=claim.outbox.outbox_id,
+                    error=_bounded_publish_error(exc),
+                )
+                await self._session.commit()
+                raise ExecutionOutboxPublishError(
+                    intent.execution_id,
+                    _bounded_publish_error(exc),
+                ) from exc
+            await self._execution_runtime.mark_outbox_published(
+                outbox_id=claim.outbox.outbox_id,
+            )
+            await self._session.commit()
+
+
+class ExecutionOutboxPublishError(RuntimeError):
+    """Raised when a committed execution intent cannot be published."""
+
+    def __init__(self, execution_id: str, reason: str) -> None:
+        super().__init__(
+            f"execution outbox publish failed for {execution_id}: {reason}"
+        )
+        self.execution_id = execution_id
+        self.reason = reason
+
+
+def _bounded_publish_error(exc: BaseException) -> str:
+    message = f"{exc.__class__.__name__}: {exc}"
+    if len(message) > 240:
+        return f"{message[:237]}..."
+    return message
 
 
 __all__ = [
@@ -295,4 +368,5 @@ __all__ = [
     "get_health_service",
     "get_session_repository",
     "get_supervisor_repository",
+    "get_tenant_configuration_service",
 ]
