@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+SC:wght@600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -81,10 +80,10 @@
   --color-red-alert: var(--red-alert);
   --color-green-success: var(--green-success);
   --color-warning-amber: var(--warning-amber);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-serif: 'Cormorant SC', serif;
-  --font-mono-technical: 'IBM Plex Mono', monospace;
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-mono-technical), 'IBM Plex Mono', monospace;
+  --font-serif: var(--font-serif), 'Cormorant SC', Georgia, serif;
+  --font-technical: var(--font-mono-technical), 'IBM Plex Mono', monospace;
 }
 
 html {
@@ -104,22 +103,22 @@ body {
 
 /* Display typography - Cormorant SC for headings */
 .font-display {
-  font-family: 'Cormorant SC', serif;
+  font-family: var(--font-serif);
 }
 
 /* Technical typography - IBM Plex Mono for metadata */
 .font-technical {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-technical);
 }
 
 /* Monospace for code and data */
 .font-mono {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 /* Eyebrow label style - institutional governance */
 .eyebrow {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-technical);
   text-transform: uppercase;
   letter-spacing: 0.18em;
   font-size: 11px;
