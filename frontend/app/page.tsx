@@ -3,6 +3,7 @@ import { ProblemSection } from "@/components/problem-section";
 import { SubstrateStack } from "@/components/substrate-stack";
 import { DomainCards } from "@/components/domain-cards";
 import { TrustProof } from "@/components/trust-proof";
+import { ArticleCards } from "@/components/article-cards";
 
 export default function Home() {
   return (
@@ -12,6 +13,7 @@ export default function Home() {
       <SubstrateStack />
       <DomainCards />
       <TrustProof />
+      <ArticleCards />
     </main>
   );
 }
