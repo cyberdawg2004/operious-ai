@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/sidebar";
 import { OperationsQueue } from "@/components/operations-queue";
 import { TraceInspector } from "@/components/trace-inspector";
 import { CognitionHub } from "@/components/cognition-hub";
+import { KnowledgeBase } from "@/components/knowledge-base";
 
 export default function Home() {
   const [activeItem, setActiveItem] = useState("operations");
@@ -26,6 +27,8 @@ export default function Home() {
         <TraceInspector />
       ) : activeItem === "cognition" ? (
         <CognitionHub />
+      ) : activeItem === "knowledge" ? (
+        <KnowledgeBase />
       ) : (
         <main className="flex-1 p-8 bg-canvas">
           <div className="max-w-4xl">
