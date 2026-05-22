@@ -13,6 +13,15 @@ from app.boundary.adapters.base import (
     BaseEgressAdapter,
     BaseIngressAdapter,
 )
+from app.boundary.adapters.channel_webhooks import (
+    EmailWebhookAdapter,
+    LarkWebhookAdapter,
+    ShulexWebhookAdapter,
+    TenantWhatsAppWebhookAdapter,
+    canonical_channel_payload_keys,
+    extract_routing_address,
+    normalize_routing_address,
+)
 from app.boundary.adapters.builtin import (
     TwilioVoiceAdapter,
     WhatsAppWebhookAdapter,
@@ -22,7 +31,14 @@ from app.boundary.adapters.builtin import (
 __all__ = [
     "BaseEgressAdapter",
     "BaseIngressAdapter",
+    "EmailWebhookAdapter",
+    "LarkWebhookAdapter",
+    "ShulexWebhookAdapter",
+    "TenantWhatsAppWebhookAdapter",
     "TwilioVoiceAdapter",
     "WhatsAppWebhookAdapter",
     "ZendeskWebhookAdapter",
+    "canonical_channel_payload_keys",
+    "extract_routing_address",
+    "normalize_routing_address",
 ]

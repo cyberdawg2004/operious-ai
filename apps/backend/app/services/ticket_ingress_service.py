@@ -2,26 +2,43 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.boundary.adapters import (
+    BaseIngressAdapter,
+    EmailWebhookAdapter,
+    LarkWebhookAdapter,
+    ShulexWebhookAdapter,
+    TenantWhatsAppWebhookAdapter,
+    extract_routing_address,
+)
 from app.boundary.adapters.builtin import (
     TwilioVoiceAdapter,
     WhatsAppWebhookAdapter,
     ZendeskWebhookAdapter,
 )
 from app.boundary.contracts.requests import BoundaryIngressRequest
-from app.boundary.enums import BoundarySourceType
+from app.boundary.enums import (
+    BoundaryNormalizationStatus,
+    BoundarySourceType,
+)
+from app.boundary.identity import derive_ingress_id
 from app.boundary.ingress import BoundaryIngressRuntime
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
 from app.boundary.persistence import BoundaryPersistenceProtocol
 from app.boundary.registry import BoundaryAdapterRegistry
 from app.identity import AuthorityContext
+from app.tenant.enums import TenantChannelType
+from app.tenant.runtime import TenantConfigurationRuntime
 
 TicketChannel = Literal["email", "whatsapp", "voice"]
+WebhookTicketChannel = Literal["email", "whatsapp", "shulex", "lark"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,9 +55,11 @@ class TicketIngressService:
         *,
         persistence: BoundaryPersistenceProtocol,
         session: AsyncSession,
+        tenant_configuration_runtime: TenantConfigurationRuntime | None = None,
     ) -> None:
         self._persistence = persistence
         self._session = session
+        self._tenant_configuration_runtime = tenant_configuration_runtime
 
     async def process(
         self,
@@ -78,9 +97,147 @@ class TicketIngressService:
             canonical_envelope_id=str(result.event_id),
         )
 
+    async def process_channel_webhook(
+        self,
+        *,
+        channel_type: str,
+        body: Any,
+        headers: Mapping[str, str],
+        raw_body: bytes | None,
+        content_type: str | None,
+        tenant_hint: str | None = None,
+    ) -> TicketIngressServiceResult:
+        if self._tenant_configuration_runtime is None:
+            raise TicketIngressServiceError(
+                "tenant configuration runtime is not configured"
+            )
+        tenant_channel_type = _tenant_channel_type(channel_type)
+        routing_address = _routing_address_for_webhook(
+            channel_type=tenant_channel_type.value,
+            body=body,
+            headers=headers,
+        )
+        channel_config = (
+            await self._tenant_configuration_runtime
+            .resolve_active_channel_for_routing_address(
+                channel_type=tenant_channel_type,
+                routing_address=routing_address,
+            )
+        )
+        if channel_config is None:
+            raise TicketIngressRejected(
+                code="unknown_channel_route",
+                reason="channel route is not configured or active",
+            )
+        if tenant_hint is not None and tenant_hint != channel_config.tenant_id:
+            raise TicketIngressRejected(
+                code="tenant_route_mismatch",
+                reason="channel route does not belong to tenant scope",
+            )
+
+        adapter = _webhook_adapter_for_channel(
+            channel_type=tenant_channel_type,
+            webhook_secret=channel_config.webhook_secret,
+            routing_address=channel_config.routing_address,
+        )
+        payload = IngressPayload(
+            body=body,
+            content_type=content_type,
+            headers=dict(headers),
+            raw_bytes=raw_body,
+        )
+        runtime = BoundaryIngressRuntime(
+            adapters=BoundaryAdapterRegistry((adapter,)),
+            persistence=self._persistence,
+        )
+        envelope = await runtime.ingest(
+            BoundaryIngressRequest(
+                source=BoundarySource(
+                    source_type=_source_type_for_tenant_channel(
+                        tenant_channel_type
+                    ),
+                    source_id=channel_config.routing_address,
+                    tenant_id=channel_config.tenant_id,
+                    display_name=f"tenant {tenant_channel_type.value}",
+                    metadata={
+                        "tenant_channel.config_id": str(
+                            channel_config.config_id
+                        ),
+                    },
+                ),
+                adapter_name=adapter.name,
+                payload=payload,
+                correlation_id=_webhook_correlation_id(
+                    channel=tenant_channel_type.value,
+                    routing_address=channel_config.routing_address,
+                    body=body,
+                    raw_body=raw_body,
+                ),
+                request_id=_webhook_request_id(
+                    channel=tenant_channel_type.value,
+                    routing_address=channel_config.routing_address,
+                    body=body,
+                    raw_body=raw_body,
+                ),
+                ingress_id_override=derive_ingress_id(
+                    seed=_webhook_ingress_seed(
+                        tenant_id=channel_config.tenant_id,
+                        channel=tenant_channel_type.value,
+                        routing_address=channel_config.routing_address,
+                        body=body,
+                        raw_body=raw_body,
+                    )
+                ),
+                authority=AuthorityContext.from_raw(
+                    tenant_id=channel_config.tenant_id,
+                ),
+                metadata={
+                    "tenant_channel.config_id": str(
+                        channel_config.config_id
+                    ),
+                    "tenant_channel.channel_type": (
+                        tenant_channel_type.value
+                    ),
+                    "tenant_channel.routing_address": (
+                        channel_config.routing_address
+                    ),
+                },
+            )
+        )
+        await self._session.commit()
+        result = envelope.result
+        if result is None:
+            raise TicketIngressServiceError("channel webhook ingress failed")
+        if (
+            result.normalization.status
+            is BoundaryNormalizationStatus.UNAUTHENTICATED
+        ):
+            raise TicketIngressRejected(
+                code="channel_webhook_verification_failed",
+                reason=result.normalization.error or "verification failed",
+            )
+        if not result.normalization.is_ok or result.event_id is None:
+            raise TicketIngressRejected(
+                code="channel_webhook_rejected",
+                reason=result.normalization.error or "normalization failed",
+            )
+        return TicketIngressServiceResult(
+            ingress_id=str(result.ingress_id),
+            canonical_envelope_id=str(result.event_id),
+        )
+
 
 class TicketIngressServiceError(RuntimeError):
     """Raised when ticket ingress cannot be durably recorded."""
+
+
+class TicketIngressRejected(TicketIngressServiceError):
+    """Raised when an inbound channel webhook is rejected at boundary."""
+
+    def __init__(self, *, code: str, reason: str) -> None:
+        super().__init__(reason)
+        self.code = code
+        self.reason = reason
 
 
 def _adapter_registry() -> BoundaryAdapterRegistry:
@@ -196,8 +353,175 @@ def _payload_body_for_request(
     }
 
 
+def _tenant_channel_type(channel_type: str) -> TenantChannelType:
+    try:
+        parsed = TenantChannelType(channel_type)
+    except ValueError as exc:
+        raise TicketIngressRejected(
+            code="unsupported_channel_type",
+            reason="channel type is not supported for webhooks",
+        ) from exc
+    if parsed not in {
+        TenantChannelType.EMAIL,
+        TenantChannelType.WHATSAPP,
+        TenantChannelType.SHULEX,
+        TenantChannelType.LARK,
+    }:
+        raise TicketIngressRejected(
+            code="unsupported_channel_type",
+            reason="channel type is not supported for webhooks",
+        )
+    return parsed
+
+
+def _routing_address_for_webhook(
+    *,
+    channel_type: str,
+    body: Any,
+    headers: Mapping[str, str],
+) -> str:
+    try:
+        return extract_routing_address(
+            channel_type=channel_type,
+            body=body,
+            headers=headers,
+        )
+    except ValueError as exc:
+        raise TicketIngressRejected(
+            code="channel_routing_address_missing",
+            reason=str(exc),
+        ) from exc
+
+
+def _webhook_adapter_for_channel(
+    *,
+    channel_type: TenantChannelType,
+    webhook_secret: str,
+    routing_address: str,
+) -> BaseIngressAdapter:
+    if channel_type is TenantChannelType.EMAIL:
+        return EmailWebhookAdapter(
+            webhook_secret=webhook_secret,
+            routing_address=routing_address,
+        )
+    if channel_type is TenantChannelType.WHATSAPP:
+        return TenantWhatsAppWebhookAdapter(
+            webhook_secret=webhook_secret,
+            routing_address=routing_address,
+        )
+    if channel_type is TenantChannelType.SHULEX:
+        return ShulexWebhookAdapter(
+            webhook_secret=webhook_secret,
+            routing_address=routing_address,
+        )
+    if channel_type is TenantChannelType.LARK:
+        return LarkWebhookAdapter(
+            webhook_secret=webhook_secret,
+            routing_address=routing_address,
+        )
+    raise TicketIngressRejected(
+        code="unsupported_channel_type",
+        reason="channel type is not supported for webhooks",
+    )
+
+
+def _source_type_for_tenant_channel(
+    channel_type: TenantChannelType,
+) -> BoundarySourceType:
+    if channel_type is TenantChannelType.EMAIL:
+        return BoundarySourceType.EMAIL
+    if channel_type is TenantChannelType.WHATSAPP:
+        return BoundarySourceType.WHATSAPP
+    if channel_type is TenantChannelType.SHULEX:
+        return BoundarySourceType.SHULEX
+    if channel_type is TenantChannelType.LARK:
+        return BoundarySourceType.LARK
+    return BoundarySourceType.GENERIC
+
+
+def _webhook_ingress_seed(
+    *,
+    tenant_id: str,
+    channel: str,
+    routing_address: str,
+    body: Any,
+    raw_body: bytes | None,
+) -> str:
+    return "|".join(
+        (
+            "tenant-channel-webhook",
+            tenant_id,
+            channel,
+            routing_address,
+            _payload_fingerprint(body=body, raw_body=raw_body),
+        )
+    )
+
+
+def _webhook_correlation_id(
+    *,
+    channel: str,
+    routing_address: str,
+    body: Any,
+    raw_body: bytes | None,
+) -> str:
+    return "webhook:" + _short_fingerprint(
+        channel=channel,
+        routing_address=routing_address,
+        body=body,
+        raw_body=raw_body,
+    )
+
+
+def _webhook_request_id(
+    *,
+    channel: str,
+    routing_address: str,
+    body: Any,
+    raw_body: bytes | None,
+) -> str:
+    return "request:" + _short_fingerprint(
+        channel=channel,
+        routing_address=routing_address,
+        body=body,
+        raw_body=raw_body,
+    )
+
+
+def _short_fingerprint(
+    *,
+    channel: str,
+    routing_address: str,
+    body: Any,
+    raw_body: bytes | None,
+) -> str:
+    material = "|".join(
+        (
+            channel,
+            routing_address,
+            _payload_fingerprint(body=body, raw_body=raw_body),
+        )
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _payload_fingerprint(*, body: Any, raw_body: bytes | None) -> str:
+    if raw_body is not None:
+        payload = raw_body
+    else:
+        payload = json.dumps(
+            body,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 __all__ = [
     "TicketChannel",
+    "WebhookTicketChannel",
+    "TicketIngressRejected",
     "TicketIngressService",
     "TicketIngressServiceError",
     "TicketIngressServiceResult",

@@ -7,13 +7,67 @@ test_ticket_ingress_chain   → PASSES now
 test_dispatch_governance    → PASSES now
 test_full_chain             → PASSES now
 """
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
 import pytest
 from httpx import AsyncClient, ASGITransport
-from app.main import create_app
-from tests.conftest import requires_postgres
 
 
 pytestmark = pytest.mark.smoke
+
+
+def _load_dotenv_key(key: str) -> None:
+    """Load one simple KEY=VALUE entry from repo .env without logging it."""
+    if os.environ.get(key):
+        return
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip() != key:
+            continue
+        os.environ[key] = value.strip().strip('"').strip("'")
+        return
+
+
+for _env_key in ("DATABASE_URL", "TEST_DATABASE_URL"):
+    _load_dotenv_key(_env_key)
+
+test_database_url = os.environ.get("TEST_DATABASE_URL", "")
+if test_database_url.startswith("postgresql+asyncpg://"):
+    os.environ["DATABASE_URL"] = test_database_url
+elif not test_database_url:
+    database_url = os.environ.get("DATABASE_URL", "")
+    if database_url.startswith("postgresql+asyncpg://"):
+        os.environ["TEST_DATABASE_URL"] = database_url
+
+
+def _has_asyncpg_test_database_url() -> bool:
+    return os.environ.get("TEST_DATABASE_URL", "").startswith(
+        "postgresql+asyncpg://"
+    )
+
+
+requires_postgres = pytest.mark.skipif(
+    not _has_asyncpg_test_database_url(),
+    reason=(
+        "requires TEST_DATABASE_URL with an asyncpg DSN, for example "
+        "postgresql+asyncpg://test:test@localhost:5433/operious_test"
+    ),
+)
+
+
+def _create_app():
+    from app.main import create_app
+
+    return create_app()
 
 
 # Single authority source for all smoke tests.
@@ -28,7 +82,7 @@ async def test_health_endpoint_live():
     Baseline: system boots and health endpoint responds.
     MUST PASS before any other work begins.
     """
-    app = create_app()
+    app = _create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
@@ -47,7 +101,7 @@ async def test_ticket_ingress_chain():
     FAILS with 404 until PR-W1 is complete.
     Success condition: 200 with ingress_id in response.
     """
-    app = create_app()
+    app = _create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
@@ -75,7 +129,7 @@ async def test_dispatch_governance_chain():
     """
     Live dispatch path returns a dispatch id and governance decision id.
     """
-    app = create_app()
+    app = _create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,
@@ -98,7 +152,7 @@ async def test_full_ticket_to_timeline_chain():
     """
     Full ticket path reaches dispatch, session timeline, and governance.
     """
-    app = create_app()
+    app = _create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport,

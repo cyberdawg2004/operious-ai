@@ -14,7 +14,11 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "app.workers.agent_tasks",
+        "app.workers.escalation_tasks",
         "app.workers.execution_recovery_tasks",
+        "app.workers.qa_tasks",
+        "app.workers.sop_intelligence_tasks",
+        "app.workers.supervisor_tasks",
     ],
 )
 

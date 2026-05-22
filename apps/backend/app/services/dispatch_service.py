@@ -16,6 +16,7 @@ from app.coordination.contracts import (
     CoordinationDispatchRequest,
     CoordinationMessage,
 )
+from app.coordination.contracts.results import CoordinationDispatchOutcome
 from app.coordination.enums import (
     CoordinationDirection,
     CoordinationMessageType,
@@ -30,6 +31,7 @@ from app.coordination.models.recipients import CoordinationRecipient
 from app.coordination.runtime import CoordinationRuntime
 from app.execution import ExecutionRuntime
 from app.execution.publisher import ExecutionPublisher
+from app.escalation.publisher import EscalationPublisher
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
 from app.governance.enums import (
@@ -43,6 +45,10 @@ from app.governance.subjects.communication import (
     CommunicationGovernanceSubject,
 )
 from app.identity import AuthorityContext
+from app.runtime import (
+    DispatchArbitrationProposal,
+    DispatchArbitrationRuntime,
+)
 from app.session.contracts.requests import OpenSessionRequest
 from app.session.contracts.results import OpenSessionResult
 from app.session.enums import SessionScope
@@ -59,10 +65,14 @@ _DISPATCH_RECIPIENT_ID = "agent:ticket-triage"
 @dataclass(frozen=True, slots=True)
 class DispatchResult:
     dispatch_id: str
-    session_id: str
-    execution_id: str
+    session_id: str | None
+    execution_id: str | None
     governance_decision_id: str
     verdict: str
+    arbitration_evaluation_id: str | None = None
+    arbitration_outcome: str | None = None
+    halted: bool = False
+    halt_reason: str | None = None
 
 
 class DispatchService:
@@ -76,17 +86,22 @@ class DispatchService:
         session_repository: SessionRepository,
         execution_runtime: ExecutionRuntime,
         execution_publisher: ExecutionPublisher,
+        escalation_publisher: EscalationPublisher | None = None,
+        dispatch_arbitration_runtime: DispatchArbitrationRuntime | None = None,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
         self._session_repository = session_repository
         self._execution_runtime = execution_runtime
         self._execution_publisher = execution_publisher
+        self._escalation_publisher = escalation_publisher
+        self._dispatch_arbitration = dispatch_arbitration_runtime
 
     async def dispatch(
         self,
         ingress_id: str,
         tenant_id: str,
+        proposals: Sequence[DispatchArbitrationProposal] | None = None,
     ) -> DispatchResult:
         ingress = await self._load_ingress(
             ingress_id=ingress_id,
@@ -108,6 +123,40 @@ class DispatchService:
                 "coordination dispatch did not produce a governance decision"
             )
 
+        arbitration = None
+        if self._dispatch_arbitration is not None:
+            arbitration = await self._dispatch_arbitration.evaluate(
+                coordination_result=coordination_result,
+                proposals=tuple(proposals or _default_dispatch_proposals()),
+                tenant_id=tenant_id,
+                authority=authority,
+                correlation_id=str(coordination_result.trace.correlation_id)
+                if coordination_result.trace.correlation_id is not None
+                else _correlation_id_text(ingress),
+                request_id=ingress.request_id,
+                metadata={
+                    "boundary.ingress_id": str(ingress.ingress_id),
+                    "governance.decision_id": str(governance_decision_id),
+                },
+            )
+            if arbitration.envelope.result is None:
+                raise DispatchServiceError(
+                    "dispatch arbitration did not produce an evaluation"
+                )
+            if arbitration.should_halt:
+                return DispatchResult(
+                    dispatch_id=str(coordination_result.coordination_id),
+                    session_id=None,
+                    execution_id=None,
+                    governance_decision_id=str(governance_decision_id),
+                    verdict=arbitration.outcome
+                    or coordination_result.outcome.value,
+                    arbitration_evaluation_id=arbitration.evaluation_id,
+                    arbitration_outcome=arbitration.outcome,
+                    halted=True,
+                    halt_reason=arbitration.halt_reason,
+                )
+
         session_envelope = await SessionRuntime(
             persistence=self._session_repository,
         ).open_session(
@@ -123,6 +172,14 @@ class DispatchService:
                         coordination_result.coordination_id
                     ),
                     "governance.decision_id": str(governance_decision_id),
+                    "arbitration.evaluation_id": (
+                        arbitration.evaluation_id
+                        if arbitration is not None
+                        else None
+                    ),
+                    "arbitration.outcome": (
+                        arbitration.outcome if arbitration is not None else None
+                    ),
                 },
                 authority=authority,
             )
@@ -141,6 +198,15 @@ class DispatchService:
             raise DispatchServiceError(
                 "session runtime returned an empty session"
             )
+        if (
+            coordination_result.outcome is CoordinationDispatchOutcome.DENIED
+            and self._escalation_publisher is not None
+        ):
+            await self._escalation_publisher.publish_governance_denial(
+                governance_decision_id=str(governance_decision_id),
+                tenant_id=tenant_id,
+                session_id=str(session.identity.session_id),
+            )
 
         execution_request = (
             await self._execution_runtime.request_diagnostic_execution(
@@ -151,6 +217,14 @@ class DispatchService:
                     "boundary.ingress_id": str(ingress.ingress_id),
                     "session.id": str(session.identity.session_id),
                     "governance.decision_id": str(governance_decision_id),
+                    "arbitration.evaluation_id": (
+                        arbitration.evaluation_id
+                        if arbitration is not None
+                        else None
+                    ),
+                    "arbitration.outcome": (
+                        arbitration.outcome if arbitration is not None else None
+                    ),
                 },
             )
         )
@@ -165,6 +239,12 @@ class DispatchService:
             execution_id=str(execution_request.execution.execution_id),
             governance_decision_id=str(governance_decision_id),
             verdict=coordination_result.outcome.value,
+            arbitration_evaluation_id=(
+                arbitration.evaluation_id if arbitration is not None else None
+            ),
+            arbitration_outcome=(
+                arbitration.outcome if arbitration is not None else None
+            ),
         )
 
     async def _load_ingress(
@@ -297,6 +377,11 @@ def _to_coordination_request(
                         if ingress.event_id is not None
                         else None
                     ),
+                    "replay_key": (
+                        str(ingress.replay_key)
+                        if ingress.replay_key is not None
+                        else None
+                    ),
                     "source_type": ingress.source_type.value,
                     "source_id": ingress.source_id,
                     "external_message_id": ingress.external_message_id,
@@ -307,6 +392,11 @@ def _to_coordination_request(
             priority=CoordinationPriority.NORMAL,
             metadata={
                 "boundary.ingress_id": str(ingress.ingress_id),
+                "boundary.replay_key": (
+                    str(ingress.replay_key)
+                    if ingress.replay_key is not None
+                    else None
+                ),
             },
         ),
         direction=CoordinationDirection.RUNTIME_TO_AGENT,
@@ -323,7 +413,22 @@ def _to_coordination_request(
                 if ingress.event_id is not None
                 else None
             ),
+            "boundary.replay_key": (
+                str(ingress.replay_key)
+                if ingress.replay_key is not None
+                else None
+            ),
         },
+    )
+
+
+def _default_dispatch_proposals() -> tuple[DispatchArbitrationProposal, ...]:
+    return (
+        DispatchArbitrationProposal(
+            proposer_id=_DISPATCH_RECIPIENT_ID,
+            directive="diagnostic_execution:request",
+            reason="ticket triage agent accepts diagnostic dispatch",
+        ),
     )
 
 

@@ -81,6 +81,12 @@ class OperationalAct(StrEnum):
     EXECUTION_RECOVER = "execution:recover"
     EXECUTION_DEAD_LETTER = "execution:dead_letter"
 
+    # ─── escalation chronology projection ───────────────────────────
+    ESCALATION_CREATE = "escalation:create"
+    ESCALATION_REVIEW = "escalation:review"
+    ESCALATION_APPROVE = "escalation:approve"
+    ESCALATION_REJECT = "escalation:reject"
+
     # ─── hardening ──────────────────────────────────────────────────
     HARDENING_RECORD_FAILURE = "hardening:record_failure"
 
@@ -92,6 +98,9 @@ class OperationalAct(StrEnum):
     OI_RECOMMENDATION_GENERATE = "oi_recommendation:generate"
     OI_SOP_INGEST = "oi_sop:ingest"
     OI_TONALITY_CLASSIFY = "oi_tonality:classify"
+
+    # ─── QA chronology projection ───────────────────────────────────
+    QA_SCORE = "qa:score"
 
     # ─── session ────────────────────────────────────────────────────
     SESSION_OPEN = "session:open"

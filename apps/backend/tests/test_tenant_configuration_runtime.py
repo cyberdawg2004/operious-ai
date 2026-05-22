@@ -158,6 +158,43 @@ async def test_tenant_isolation_on_reads() -> None:
 
 
 @pytest.mark.asyncio
+async def test_active_channel_route_resolution_fails_closed() -> None:
+    runtime = _runtime()
+    await runtime.configure_channel(
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="support@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="webhook-secret",
+        status=TenantChannelStatus.ACTIVE,
+    )
+    await runtime.configure_channel(
+        tenant_id="tenant-paused",
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="paused@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="webhook-secret",
+        status=TenantChannelStatus.PAUSED,
+    )
+
+    resolved = await runtime.resolve_active_channel_for_routing_address(
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="support@example.com",
+    )
+
+    assert resolved is not None
+    assert resolved.tenant_id == "tenant-acme"
+    assert await runtime.resolve_active_channel_for_routing_address(
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="paused@example.com",
+    ) is None
+    assert await runtime.resolve_active_channel_for_routing_address(
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="missing@example.com",
+    ) is None
+
+
+@pytest.mark.asyncio
 async def test_knowledge_and_policy_versions_increment() -> None:
     runtime = _runtime()
     first_doc = await runtime.create_knowledge_document(

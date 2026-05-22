@@ -115,6 +115,25 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             offset=query.offset,
         )
 
+    async def resolve_channel_configuration(
+        self,
+        *,
+        channel_type: str,
+        routing_address: str,
+    ) -> TenantChannelConfigurationRecord | None:
+        stmt = (
+            select(TenantChannelConfigurationRow)
+            .where(
+                TenantChannelConfigurationRow.channel_type == channel_type,
+                TenantChannelConfigurationRow.routing_address == routing_address,
+            )
+            .limit(2)
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        if len(rows) != 1:
+            return None
+        return _channel_row_to_record(rows[0])
+
     async def save_knowledge_document(
         self,
         record: TenantKnowledgeDocumentRecord,

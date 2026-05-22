@@ -43,6 +43,7 @@ from app.arbitration.exceptions import (
     ArbitrationConfigurationError,
     ArbitrationEvaluationError,
     ArbitrationPersistenceError,
+    DuplicateArbitrationRecordError,
 )
 from app.arbitration.identity import (
     ArbitrationChainId,
@@ -364,6 +365,28 @@ class OperationalArbitrationRuntime:
         if self._persistence is not None:
             try:
                 await self._persistence.save(result_to_record(result))
+            except DuplicateArbitrationRecordError as persistence_exc:
+                if request.evaluation_id_override is not None:
+                    _logger.info(
+                        "arbitration persistence replay reused "
+                        "evaluation_id=%s",
+                        evaluation_id,
+                    )
+                    return ArbitrationEnvelope(
+                        trace=trace,
+                        result=result,
+                        error=framework_error,
+                    )
+                _logger.exception(
+                    "arbitration persistence failed for "
+                    "evaluation_id=%s",
+                    evaluation_id,
+                )
+                return ArbitrationEnvelope(
+                    trace=trace,
+                    result=result,
+                    error=persistence_exc,
+                )
             except (
                 ArbitrationPersistenceError,
                 Exception,

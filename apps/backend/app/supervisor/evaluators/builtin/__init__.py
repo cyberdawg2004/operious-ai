@@ -23,8 +23,20 @@ from app.supervisor.evaluators.builtin.state_machine_health import (
 from app.supervisor.evaluators.builtin.tool_invocation import (
     ToolInvocationEvaluator,
 )
+from app.supervisor.evaluators.registry import EvaluatorRegistry
+
+
+def build_default_evaluator_registry() -> EvaluatorRegistry:
+    """Build the default supervisor evaluator registry."""
+    registry = EvaluatorRegistry()
+    registry.register(ExecutionCompletionEvaluator())
+    registry.register(ToolInvocationEvaluator())
+    registry.register(GovernanceComplianceEvaluator())
+    registry.register(StateMachineHealthEvaluator())
+    return registry
 
 __all__ = [
+    "build_default_evaluator_registry",
     "ExecutionCompletionEvaluator",
     "ToolInvocationEvaluator",
     "GovernanceComplianceEvaluator",

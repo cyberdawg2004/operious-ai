@@ -34,6 +34,7 @@ class OperationalSubstrate(StrEnum):
     COORDINATION = "coordination"
     COORDINATION_POLICY = "coordination_policy"
     COORDINATION_TOPOLOGY = "coordination_topology"
+    ESCALATION = "escalation"
     EXECUTION = "execution"
     GOVERNANCE = "governance"
     HARDENING = "hardening"
@@ -49,6 +50,7 @@ class OperationalSubstrate(StrEnum):
     OI_RECOMMENDATION = "oi_recommendation"
     OI_SOP = "oi_sop"
     OI_TONALITY = "oi_tonality"
+    QA = "qa"
     SESSION = "session"
     SUPERVISOR = "supervisor"
 

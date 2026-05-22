@@ -47,6 +47,9 @@ from app.boundary.db import models as _boundary_models  # noqa: F401  # pyright:
 from app.execution.db import models as _execution_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.events.db import models as _event_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.tenant.db import models as _tenant_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.qa.db import models as _qa_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.escalation.db import models as _escalation_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.sop_intelligence.db import models as _sop_intelligence_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

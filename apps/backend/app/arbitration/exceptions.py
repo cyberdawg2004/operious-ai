@@ -13,6 +13,9 @@
 * `ArbitrationPersistenceError`    — persistence backend rejected a
                                       write or read (e.g. write-once
                                       violation).
+* `DuplicateArbitrationRecordError`
+                                    — write-once duplicate for an
+                                      existing evaluation id.
 
 `OperationalArbitrationRuntime.evaluate()` NEVER raises. The
 exception classes are the *internal* discriminators the runtime
@@ -47,9 +50,14 @@ class ArbitrationPersistenceError(ArbitrationError):
     """Persistence-layer failure (write-once violation, backend I/O)."""
 
 
+class DuplicateArbitrationRecordError(ArbitrationPersistenceError):
+    """Raised when a write attempts to recreate an existing record."""
+
+
 __all__ = [
     "ArbitrationError",
     "ArbitrationConfigurationError",
+    "DuplicateArbitrationRecordError",
     "ArbitrationEvaluationError",
     "ArbitrationPersistenceError",
 ]

@@ -21,6 +21,12 @@ _FINDING_NAMESPACE = uuid.UUID("a8f4c2d6-1b3e-4f5a-9c7d-1234567890ab")
 _ESCALATION_NAMESPACE = uuid.UUID("b2e7d3a8-5c9f-4e6b-8a1d-fedcba987654")
 _EVALUATION_NAMESPACE = uuid.UUID("c4d1e8b3-7a2f-4c5e-9b6d-abcdef123456")
 _INSPECTION_NAMESPACE = uuid.UUID("d5e2f9c4-8b3a-4d6f-ac7e-bcdef0123456")
+_SESSION_INSPECTION_NAMESPACE = uuid.UUID(
+    "d5e2f9c4-8b3a-4d6f-ac7e-bcdef0123457"
+)
+_SESSION_DECISION_NAMESPACE = uuid.UUID(
+    "d5e2f9c4-8b3a-4d6f-ac7e-bcdef0123458"
+)
 
 
 def derive_finding_id(
@@ -78,9 +84,27 @@ def derive_inspection_id(
     return uuid.uuid5(_INSPECTION_NAMESPACE, seed)
 
 
+def derive_session_inspection_id(
+    *,
+    session_id: uuid.UUID | str,
+    execution_id: uuid.UUID | str,
+    tenant_id: str | None,
+) -> uuid.UUID:
+    """Derive the canonical inspection id for session-based evaluation."""
+    seed = f"{session_id}:{execution_id}:{tenant_id}"
+    return uuid.uuid5(_SESSION_INSPECTION_NAMESPACE, seed)
+
+
+def derive_session_decision_id(*, inspection_id: uuid.UUID | str) -> uuid.UUID:
+    """Derive the canonical decision id for a session inspection."""
+    return uuid.uuid5(_SESSION_DECISION_NAMESPACE, str(inspection_id))
+
+
 __all__ = [
     "derive_finding_id",
     "derive_escalation_id",
     "derive_evaluation_id",
     "derive_inspection_id",
+    "derive_session_decision_id",
+    "derive_session_inspection_id",
 ]

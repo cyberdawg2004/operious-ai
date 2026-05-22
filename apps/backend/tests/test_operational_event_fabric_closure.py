@@ -24,8 +24,11 @@ ADOPTED_SOURCE_ROOTS: frozenset[str] = frozenset(
     {
         "arbitration",
         "boundary",
+        "coordination",
+        "escalation",
         "execution",
         "governance",
+        "qa",
         "session",
         "supervisor",
     }
@@ -55,8 +58,11 @@ EXPECTED_PROJECTION_MODULES: frozenset[str] = frozenset(
     {
         "arbitration_event_projection.py",
         "boundary_event_projection.py",
+        "coordination_event_projection.py",
+        "escalation_event_projection.py",
         "execution_event_projection.py",
         "governance_event_projection.py",
+        "qa_event_projection.py",
         "session_event_projection.py",
         "supervisor_event_projection.py",
     }
@@ -157,8 +163,11 @@ def test_operational_event_runtime_is_only_used_by_event_or_projection_layers() 
         "events/",
         "runtime/arbitration_event_projection.py",
         "runtime/boundary_event_projection.py",
+        "runtime/coordination_event_projection.py",
+        "runtime/escalation_event_projection.py",
         "runtime/execution_event_projection.py",
         "runtime/governance_event_projection.py",
+        "runtime/qa_event_projection.py",
         "runtime/session_event_projection.py",
         "runtime/supervisor_event_projection.py",
     )

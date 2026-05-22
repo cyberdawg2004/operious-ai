@@ -44,6 +44,7 @@ from app.supervisor.evaluators import BaseEvaluator, EvaluatorRegistry
 from app.supervisor.exceptions import (
     EvaluatorConfigurationError,
     InspectionRequestError,
+    SupervisorEvaluationError,
     SupervisorError,
     SupervisorPersistenceError,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "SupervisorError",
     "EvaluatorConfigurationError",
     "InspectionRequestError",
+    "SupervisorEvaluationError",
     "SupervisorPersistenceError",
     # Models
     "EvaluationEvidence",

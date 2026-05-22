@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.arbitration.exceptions import (
-    ArbitrationPersistenceError,
-)
+from app.arbitration.exceptions import DuplicateArbitrationRecordError
 from app.arbitration.identity import ArbitrationEvaluationId
 from app.arbitration.persistence.models import (
     ArbitrationQuery,
@@ -29,7 +27,7 @@ class InMemoryArbitrationPersistence:
     async def save(self, record: ArbitrationRecord) -> None:
         async with self._lock:
             if record.evaluation_id in self._records:
-                raise ArbitrationPersistenceError(
+                raise DuplicateArbitrationRecordError(
                     "duplicate arbitration record: "
                     f"evaluation_id={record.evaluation_id}"
                 )

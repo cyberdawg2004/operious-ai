@@ -172,6 +172,20 @@ class TenantConfigurationRuntime:
             expected_tenant_id=tenant_id,
         )
 
+    async def resolve_active_channel_for_routing_address(
+        self,
+        *,
+        channel_type: TenantChannelType,
+        routing_address: str,
+    ) -> TenantChannelConfigurationRecord | None:
+        record = await self._repository.resolve_channel_configuration(
+            channel_type=channel_type.value,
+            routing_address=routing_address,
+        )
+        if record is None or record.status is not TenantChannelStatus.ACTIVE:
+            return None
+        return record
+
     async def load_channel_credentials(
         self,
         *,

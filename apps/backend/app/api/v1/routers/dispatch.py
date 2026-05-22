@@ -44,6 +44,10 @@ async def dispatch_ingress(
         execution_id=result.execution_id,
         governance_decision_id=result.governance_decision_id,
         verdict=result.verdict,
+        arbitration_evaluation_id=result.arbitration_evaluation_id,
+        arbitration_outcome=result.arbitration_outcome,
+        halted=result.halted,
+        halt_reason=result.halt_reason,
     )
 
 

@@ -110,7 +110,10 @@ def inspection_result_to_records(
         ended_at=result.ended_at.isoformat(),
         latency_ms=result.latency_ms,
         error=None,
-        metadata=dict(result.metadata),
+        metadata={
+            **dict(result.metadata),
+            "compliance_score": result.decision.aggregate_score,
+        },
     )
 
     return InspectionRecordSet(

@@ -87,6 +87,22 @@ class InMemoryTenantConfigurationRepository:
         rows.sort(key=lambda r: (r.channel_type.value, r.routing_address))
         return _channel_page(rows, query.limit, query.offset)
 
+    async def resolve_channel_configuration(
+        self,
+        *,
+        channel_type: str,
+        routing_address: str,
+    ) -> TenantChannelConfigurationRecord | None:
+        matches = [
+            r
+            for r in self._channels.values()
+            if r.channel_type.value == channel_type
+            and r.routing_address == routing_address
+        ]
+        if len(matches) != 1:
+            return None
+        return matches[0]
+
     async def save_knowledge_document(
         self,
         record: TenantKnowledgeDocumentRecord,

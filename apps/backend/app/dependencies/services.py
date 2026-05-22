@@ -66,6 +66,10 @@ from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.execution.publisher import ExecutionPublisher
+from app.escalation.celery_publisher import CeleryEscalationPublisher
+from app.escalation.persistence import PostgresEscalationPersistence
+from app.escalation.publisher import EscalationPublisher
+from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.enforcement.handlers import (
     AllowHandler,
     DegradeHandler,
@@ -83,16 +87,22 @@ from app.governance.persistence import (
     PostgresGovernanceRepository,
 )
 from app.governance.policies.chain import PolicyChain
+from app.runtime import make_postgres_dispatch_arbitration_runtime
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
 )
+from app.services.escalation_service import EscalationService
 from app.services.health_service import HealthService
+from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.ticket_ingress_service import TicketIngressService
+from app.qa.persistence import PostgresQAPersistence
 from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
 )
+from app.sop_intelligence.persistence import PostgresSOPApprovalPersistence
+from app.sop_intelligence.runtime import SOPIntelligenceRuntime
 from app.supervisor.persistence import (
     BaseSupervisorRepository,
     PostgresSupervisorRepository,
@@ -160,9 +170,19 @@ def get_ticket_ingress_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> TicketIngressService:
     """Return the ticket-ingress write service for this request."""
+    settings = get_settings()
+    tenant_runtime: TenantConfigurationRuntime | None = None
+    if settings.TENANT_CREDENTIAL_MASTER_KEY:
+        tenant_runtime = TenantConfigurationRuntime(
+            repository=PostgresTenantConfigurationRepository(session),
+            credential_encryptor=TenantCredentialEncryptor(
+                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+            ),
+        )
     return TicketIngressService(
         persistence=PostgresBoundaryPersistence(session),
         session=session,
+        tenant_configuration_runtime=tenant_runtime,
     )
 
 
@@ -187,6 +207,9 @@ async def get_dispatch_service(
         session=session,
         publisher_id="api:dispatch",
     )
+    deferred_escalation_publisher = _DeferredEscalationPublisher(
+        delegate=CeleryEscalationPublisher(),
+    )
     service = DispatchService(
         coordination_runtime=CoordinationRuntime(
             governance_runtime=_dispatch_governance_runtime(
@@ -199,10 +222,15 @@ async def get_dispatch_service(
         session_repository=PostgresSessionPersistence(session),
         execution_runtime=execution_runtime,
         execution_publisher=deferred_execution_publisher,
+        escalation_publisher=deferred_escalation_publisher,
+        dispatch_arbitration_runtime=(
+            make_postgres_dispatch_arbitration_runtime(session=session)
+        ),
     )
     try:
         yield service
         await session.commit()
+        await deferred_escalation_publisher.flush()
         await deferred_execution_publisher.flush()
     except Exception:
         await session.rollback()
@@ -214,6 +242,20 @@ def get_supervisor_repository(
 ) -> BaseSupervisorRepository:
     """Return the Postgres supervisor-persistence backend for this request."""
     return PostgresSupervisorRepository(session)
+
+
+def get_escalation_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> EscalationService:
+    """Return the Command Center escalation service for this request."""
+    return EscalationService(
+        runtime=EscalationAgentRuntime(
+            escalation_persistence=PostgresEscalationPersistence(session),
+            governance_repository=PostgresGovernanceRepository(session),
+            session_persistence=PostgresSessionPersistence(session),
+        ),
+        session=session,
+    )
 
 
 def get_tenant_configuration_service(
@@ -228,6 +270,24 @@ def get_tenant_configuration_service(
         ),
     )
     return TenantConfigurationService(runtime=runtime, session=session)
+
+
+def get_sop_intelligence_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> SOPIntelligenceService:
+    """Return the SOP intelligence proposal service for this request."""
+    return SOPIntelligenceService(
+        runtime=SOPIntelligenceRuntime(
+            approval_persistence=PostgresSOPApprovalPersistence(session),
+            session_persistence=PostgresSessionPersistence(session),
+            supervisor_repository=PostgresSupervisorRepository(session),
+            qa_persistence=PostgresQAPersistence(session),
+            governance_repository=PostgresGovernanceRepository(session),
+            tenant_configuration_repository=(
+                PostgresTenantConfigurationRepository(session)
+            ),
+        )
+    )
 
 
 def _dispatch_coordination_registry() -> CoordinationRegistry:
@@ -281,6 +341,44 @@ def _governance_handler_registry() -> EnforcementHandlerRegistry:
 @dataclass(frozen=True, slots=True)
 class _DiagnosticExecutionIntent:
     execution_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _EscalationIntent:
+    governance_decision_id: str
+    tenant_id: str
+    session_id: str | None
+
+
+class _DeferredEscalationPublisher(EscalationPublisher):
+    """Request-scoped escalation publisher that flushes after DB commit."""
+
+    def __init__(self, *, delegate: EscalationPublisher) -> None:
+        self._delegate = delegate
+        self._intents: list[_EscalationIntent] = []
+
+    async def publish_governance_denial(
+        self,
+        *,
+        governance_decision_id: str,
+        tenant_id: str,
+        session_id: str | None = None,
+    ) -> None:
+        self._intents.append(
+            _EscalationIntent(
+                governance_decision_id=governance_decision_id,
+                tenant_id=tenant_id,
+                session_id=session_id,
+            )
+        )
+
+    async def flush(self) -> None:
+        for intent in self._intents:
+            await self._delegate.publish_governance_denial(
+                governance_decision_id=intent.governance_decision_id,
+                tenant_id=intent.tenant_id,
+                session_id=intent.session_id,
+            )
 
 
 class _DeferredExecutionPublisher(ExecutionPublisher):
@@ -364,9 +462,11 @@ __all__ = [
     "get_arbitration_repository",
     "get_boundary_repository",
     "get_coordination_repository",
+    "get_escalation_service",
     "get_governance_repository",
     "get_health_service",
     "get_session_repository",
+    "get_sop_intelligence_service",
     "get_supervisor_repository",
     "get_tenant_configuration_service",
 ]

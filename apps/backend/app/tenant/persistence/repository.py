@@ -54,6 +54,13 @@ class TenantConfigurationRepository(Protocol):
         expected_tenant_id: str,
     ) -> TenantChannelConfigurationPage: ...
 
+    async def resolve_channel_configuration(
+        self,
+        *,
+        channel_type: str,
+        routing_address: str,
+    ) -> TenantChannelConfigurationRecord | None: ...
+
     async def save_knowledge_document(
         self,
         record: TenantKnowledgeDocumentRecord,

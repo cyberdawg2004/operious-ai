@@ -15,6 +15,7 @@ Validates the apex evaluator's end-to-end behaviour:
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -479,6 +480,46 @@ async def test_persistence_failure_does_not_lose_result() -> None:
     envelope = await rt.evaluate(ArbitrationRequest(case=case))
     assert envelope.is_ok
     assert envelope.error is not None
+
+
+@pytest.mark.asyncio
+async def test_duplicate_pinned_evaluation_id_is_quiet_replay(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = InMemoryArbitrationPersistence()
+    rt = _runtime(persistence=store)
+    case = ArbitrationCase(
+        case_id=derive_case_id(seed="c-pinned-replay"),
+        signals=(
+            _sig(
+                "gov-pinned-replay",
+                authority=ArbitrationAuthorityLevel.GOVERNANCE,
+                verdict=ArbitrationVerdictKind.ALLOW,
+            ),
+        ),
+    )
+    evaluation_id = derive_evaluation_id(seed="pinned-replay")
+    request = ArbitrationRequest(
+        case=case,
+        evaluation_id_override=evaluation_id,
+        tenant_id="tenant-replay",
+    )
+
+    first = await rt.evaluate(request)
+    with caplog.at_level(
+        logging.ERROR,
+        logger="app.arbitration.runtime.runtime",
+    ):
+        second = await rt.evaluate(request)
+
+    assert first.is_fully_clean
+    assert second.is_fully_clean
+    page = await store.list_records(
+        ArbitrationQuery(tenant_id="tenant-replay"),
+        expected_tenant_id="tenant-replay",
+    )
+    assert page.total == 1
+    assert "arbitration persistence failed" not in caplog.text
 
 
 @pytest.mark.asyncio

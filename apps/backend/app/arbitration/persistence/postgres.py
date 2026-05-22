@@ -26,7 +26,7 @@ from app.arbitration.enums import (
     ArbitrationDeadlockKind,
     ArbitrationOutcome,
 )
-from app.arbitration.exceptions import ArbitrationPersistenceError
+from app.arbitration.exceptions import DuplicateArbitrationRecordError
 from app.arbitration.identity import (
     ArbitrationCaseId,
     ArbitrationChainId,
@@ -59,7 +59,7 @@ class PostgresArbitrationPersistence(BaseRepository):
             async with self.session.begin_nested():
                 self.session.add(row)
         except IntegrityError as exc:
-            raise ArbitrationPersistenceError(
+            raise DuplicateArbitrationRecordError(
                 f"duplicate arbitration record: evaluation_id="
                 f"{record.evaluation_id}"
             ) from exc

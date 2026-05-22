@@ -23,6 +23,8 @@ _SOURCE_TYPE_WIRE: dict[BoundarySourceType, str] = {
     BoundarySourceType.TWILIO_VOICE: "twilio_voice",
     BoundarySourceType.TWILIO_SMS: "twilio_sms",
     BoundarySourceType.EMAIL: "email",
+    BoundarySourceType.SHULEX: "shulex",
+    BoundarySourceType.LARK: "lark",
     BoundarySourceType.SLACK: "slack",
     BoundarySourceType.REST_API: "rest_api",
     BoundarySourceType.GENERIC: "generic",

@@ -262,6 +262,11 @@ class InspectionRecord:
     tenant_authority_source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    @property
+    def compliance_score(self) -> float:
+        """Supervisor compliance score carried by the embedded decision."""
+        return self.decision.aggregate_score
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "inspection_id": self.inspection_id,
@@ -278,6 +283,7 @@ class InspectionRecord:
             "ended_at": self.ended_at,
             "latency_ms": self.latency_ms,
             "error": self.error,
+            "compliance_score": self.compliance_score,
             "metadata": dict(self.metadata),
         }
 

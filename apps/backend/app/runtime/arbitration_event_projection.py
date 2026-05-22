@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 import uuid
 
 from app.arbitration.identity import (
@@ -37,6 +37,9 @@ from app.events import (
 )
 from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
+
+if TYPE_CHECKING:
+    from app.runtime.dispatch_arbitration import DispatchArbitrationRuntime
 
 
 class ArbitrationEventProjectionError(RuntimeError):
@@ -205,6 +208,57 @@ class ArbitrationOperationalEventProjector:
             if page.total >= 0 and offset >= page.total:
                 break
         return tuple(records)
+
+
+def make_postgres_dispatch_arbitration_runtime(
+    *,
+    session: Any,
+) -> "DispatchArbitrationRuntime":
+    """Compose the Postgres-backed dispatch arbitration facade.
+
+    Kept on this existing Phase 2-I bridge so request/service layers
+    can depend on ``app.runtime`` without importing projection modules
+    or event-fabric authority directly.
+    """
+
+    from app.arbitration.evaluators.builtin import (
+        DeadlockDetectionEvaluator,
+        EscalationConflictEvaluator,
+        FindingConflictEvaluator,
+        RecommendationConflictEvaluator,
+        SupervisorDisagreementEvaluator,
+    )
+    from app.arbitration.persistence import PostgresArbitrationPersistence
+    from app.arbitration.registry import ArbitrationEvaluatorRegistry
+    from app.arbitration.runtime import OperationalArbitrationRuntime
+    from app.events import (
+        OperationalEventRuntime,
+        PostgresOperationalEventPersistence,
+    )
+    from app.runtime.dispatch_arbitration import DispatchArbitrationRuntime
+
+    arbitration_persistence = PostgresArbitrationPersistence(session)
+    event_runtime = OperationalEventRuntime(
+        persistence=PostgresOperationalEventPersistence(session)
+    )
+    return DispatchArbitrationRuntime(
+        arbitration_runtime=OperationalArbitrationRuntime(
+            registry=ArbitrationEvaluatorRegistry(
+                (
+                    DeadlockDetectionEvaluator(),
+                    EscalationConflictEvaluator(),
+                    FindingConflictEvaluator(),
+                    RecommendationConflictEvaluator(),
+                    SupervisorDisagreementEvaluator(),
+                )
+            ),
+            persistence=arbitration_persistence,
+        ),
+        projector=ArbitrationOperationalEventProjector(
+            arbitration_persistence=arbitration_persistence,
+            event_runtime=event_runtime,
+        ),
+    )
 
 
 def project_arbitration_record(
@@ -488,5 +542,6 @@ __all__ = [
     "ArbitrationEventProjectionError",
     "ArbitrationOperationalEventProjection",
     "ArbitrationOperationalEventProjector",
+    "make_postgres_dispatch_arbitration_runtime",
     "project_arbitration_record",
 ]

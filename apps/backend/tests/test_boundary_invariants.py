@@ -45,7 +45,7 @@ _BOUNDARY_ROOT = Path("app/boundary")
 _FORBIDDEN_PARENT_IMPORT_RE = re.compile(
     r"^(?:from|import)\s+app\.(?:agents|supervisor|coordination|"
     r"memory|arbitration|embeddings|events|replay|tracing|providers|db|"
-    r"governance)\b",
+    r"governance|session|execution)\b",
     re.MULTILINE,
 )
 # PR-B1 / PR-B7: ``app.db.base`` and ``app.db.repository`` are
@@ -214,6 +214,10 @@ def test_substrate_exports_canonical_surface() -> None:
         "ZendeskWebhookAdapter",
         "WhatsAppWebhookAdapter",
         "TwilioVoiceAdapter",
+        "EmailWebhookAdapter",
+        "TenantWhatsAppWebhookAdapter",
+        "ShulexWebhookAdapter",
+        "LarkWebhookAdapter",
         # Idempotency
         "BoundaryIdempotencyRegistry",
         "BoundaryReplayDecision",

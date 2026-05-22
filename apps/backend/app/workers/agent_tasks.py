@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Coroutine, Mapping
 from threading import Thread
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,11 +19,13 @@ from app.db.session import get_session_factory
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.session.identity import as_session_id
+from app.session.lifecycle.classifier import is_terminal as is_terminal_session
 from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
 )
 from app.workers.celery_app import celery_app
+from app.workers.supervisor_tasks import evaluate_session_supervisor
 
 _T = TypeVar("_T")
 _STARTED = "diagnostic_execution_started"
@@ -169,6 +171,11 @@ async def execute_diagnostic_agent_runtime(
                 result=completed_payload,
             )
             await session.commit()
+            supervisor_queued = await _queue_supervisor_if_closed(
+                session_repo=session_repo,
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
             return {
                 "execution_id": str(execution.execution_id),
                 "attempt_id": str(attempt.attempt_id),
@@ -177,6 +184,7 @@ async def execute_diagnostic_agent_runtime(
                 "session_id": session_id,
                 "tenant_id": tenant_id,
                 "status": "completed",
+                "supervisor_evaluation_queued": supervisor_queued,
                 "summary": result.summary,
                 "category": result.category,
                 "confidence": result.confidence,
@@ -303,6 +311,22 @@ def _extract_text(payload: Mapping[str, Any]) -> str:
         if isinstance(value, str) and value.strip()
     ]
     return " ".join(text_values)
+
+
+async def _queue_supervisor_if_closed(
+    *,
+    session_repo: SessionPersistenceProtocol,
+    session_id: str,
+    tenant_id: str,
+) -> bool:
+    session = await session_repo.get_session(
+        as_session_id(session_id),
+        expected_tenant_id=tenant_id,
+    )
+    if session is None or not is_terminal_session(session.lifecycle_phase):
+        return False
+    cast(Any, evaluate_session_supervisor).delay(session_id)
+    return True
 
 
 async def _append_failure_event(

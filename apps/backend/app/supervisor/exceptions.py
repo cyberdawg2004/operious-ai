@@ -24,6 +24,10 @@ class InspectionRequestError(SupervisorError):
     records provided)."""
 
 
+class SupervisorEvaluationError(SupervisorError):
+    """Persisted-evidence supervisor evaluation could not complete."""
+
+
 class SupervisorPersistenceError(SupervisorError):
     """Persistence-layer failure (write-once violation, missing id)."""
 
@@ -32,5 +36,6 @@ __all__ = [
     "SupervisorError",
     "EvaluatorConfigurationError",
     "InspectionRequestError",
+    "SupervisorEvaluationError",
     "SupervisorPersistenceError",
 ]

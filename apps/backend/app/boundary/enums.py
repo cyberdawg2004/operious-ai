@@ -51,6 +51,8 @@ class BoundarySourceType(StrEnum):
     TWILIO_VOICE = "twilio_voice"
     TWILIO_SMS = "twilio_sms"
     EMAIL = "email"
+    SHULEX = "shulex"
+    LARK = "lark"
     SLACK = "slack"
     REST_API = "rest_api"
     GENERIC = "generic"

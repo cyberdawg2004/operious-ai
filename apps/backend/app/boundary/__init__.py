@@ -37,9 +37,16 @@ in `tests/test_boundary_invariants.py`.
 from app.boundary.adapters import (
     BaseEgressAdapter,
     BaseIngressAdapter,
+    EmailWebhookAdapter,
+    LarkWebhookAdapter,
+    ShulexWebhookAdapter,
+    TenantWhatsAppWebhookAdapter,
     TwilioVoiceAdapter,
     WhatsAppWebhookAdapter,
     ZendeskWebhookAdapter,
+    canonical_channel_payload_keys,
+    extract_routing_address,
+    normalize_routing_address,
 )
 from app.boundary.contracts import (
     BoundaryEgressRequest,
@@ -178,9 +185,16 @@ __all__ = [
     # Adapters
     "BaseEgressAdapter",
     "BaseIngressAdapter",
+    "EmailWebhookAdapter",
+    "LarkWebhookAdapter",
+    "ShulexWebhookAdapter",
+    "TenantWhatsAppWebhookAdapter",
     "TwilioVoiceAdapter",
     "WhatsAppWebhookAdapter",
     "ZendeskWebhookAdapter",
+    "canonical_channel_payload_keys",
+    "extract_routing_address",
+    "normalize_routing_address",
     # Idempotency
     "BoundaryIdempotencyRegistry",
     "BoundaryReplayDecision",

@@ -67,6 +67,7 @@ from app.arbitration.evaluators import (
 )
 from app.arbitration.exceptions import (
     ArbitrationConfigurationError,
+    DuplicateArbitrationRecordError,
     ArbitrationError,
     ArbitrationEvaluationError,
     ArbitrationPersistenceError,
@@ -151,6 +152,7 @@ __all__ = [
     "ArbitrationVerdictKind",
     # Exceptions
     "ArbitrationConfigurationError",
+    "DuplicateArbitrationRecordError",
     "ArbitrationError",
     "ArbitrationEvaluationError",
     "ArbitrationPersistenceError",

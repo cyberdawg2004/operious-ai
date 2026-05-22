@@ -46,6 +46,9 @@ from app.governance.capability import (
 )
 from app.identity import AuthorityResolution, resolve_authority
 from app.observability.context import get_request_id
+from app.execution.persistence import ExecutionPersistenceProtocol
+from app.governance.persistence import BaseGovernanceRepository
+from app.session.persistence import SessionPersistenceProtocol
 from app.supervisor.contracts.decisions import (
     SupervisorDecision,
     build_supervisor_decision,
@@ -61,8 +64,27 @@ from app.supervisor.enums import (
 )
 from app.supervisor.evaluators.base import BaseEvaluator
 from app.supervisor.evaluators.registry import EvaluatorRegistry
-from app.supervisor.exceptions import InspectionRequestError
+from app.supervisor.exceptions import (
+    InspectionRequestError,
+    SupervisorEvaluationError,
+    SupervisorPersistenceError,
+)
+from app.supervisor.identity import (
+    derive_session_decision_id,
+    derive_session_inspection_id,
+)
 from app.supervisor.models.view import InspectionView
+from app.supervisor.persistence import (
+    BaseSupervisorRepository,
+    InspectionRecord,
+)
+from app.supervisor.persistence.serializers import (
+    InspectionRecordSet,
+    inspection_envelope_to_records,
+)
+from app.supervisor.runtime.session_evidence import (
+    load_session_inspection_evidence,
+)
 from app.supervisor.runtime.view_builder import (
     build_inspection_view_from_envelope,
     build_inspection_view_from_records,
@@ -79,12 +101,20 @@ class SupervisorRuntime:
         evaluator_registry: EvaluatorRegistry,
         scoring_weights: Mapping[str, float] | None = None,
         governance: GovernanceRuntime | None = None,
+        supervisor_repository: BaseSupervisorRepository | None = None,
+        session_persistence: SessionPersistenceProtocol | None = None,
+        execution_persistence: ExecutionPersistenceProtocol | None = None,
+        governance_repository: BaseGovernanceRepository | None = None,
     ) -> None:
         self._registry = evaluator_registry
         self._scoring_weights: dict[str, float] = dict(scoring_weights or {})
         self._instance_id = uuid.uuid4()
         # 2.75-\u03b1: capability legality gate. Inert when None.
         self._capability_governance = governance
+        self._supervisor_repository = supervisor_repository
+        self._session_persistence = session_persistence
+        self._execution_persistence = execution_persistence
+        self._governance_repository = governance_repository
 
     # ─── Inspection ───────────────────────────────────────────────────
 
@@ -249,7 +279,94 @@ class SupervisorRuntime:
 
         return ExecutionInspectionEnvelope(trace=trace, result=result)
 
+    async def evaluate_session(self, session_id: str) -> InspectionRecord:
+        """Evaluate one closed session from persisted evidence only.
+
+        Phase 3-A intentionally exposes a one-argument entrypoint. The
+        runtime reconstructs the tenant, timeline, terminal execution,
+        and governance evidence from persistence; callers never supply
+        live runtime objects or reconstructed records.
+        """
+
+        repository = self._supervisor_repository
+        session_persistence = self._session_persistence
+        execution_persistence = self._execution_persistence
+        if (
+            repository is None
+            or session_persistence is None
+            or execution_persistence is None
+        ):
+            raise SupervisorEvaluationError(
+                "evaluate_session requires supervisor, session, and "
+                "execution persistence dependencies"
+            )
+
+        evidence = await load_session_inspection_evidence(
+            session_id=session_id,
+            session_persistence=session_persistence,
+            execution_persistence=execution_persistence,
+            governance_repository=self._governance_repository,
+        )
+        inspection_id = derive_session_inspection_id(
+            session_id=evidence.session.session_id,
+            execution_id=evidence.execution.execution_id,
+            tenant_id=evidence.tenant_id,
+        )
+        existing = await repository.get_inspection(
+            str(inspection_id),
+            expected_tenant_id=evidence.tenant_id,
+        )
+        if existing is not None:
+            return existing
+
+        envelope = await self.inspect(
+            ExecutionInspectionRequest(
+                execution_id=uuid.UUID(str(evidence.execution.execution_id)),
+                tenant_id=evidence.tenant_id,
+                recorded_execution=evidence.recorded_execution,
+                recorded_tool_invocations=evidence.recorded_tool_invocations,
+                recorded_governance_decisions=evidence.governance_decisions,
+                inspection_id_override=inspection_id,
+                decision_id_override=derive_session_decision_id(
+                    inspection_id=inspection_id
+                ),
+                metadata=evidence.metadata(),
+            )
+        )
+        record_set = inspection_envelope_to_records(envelope)
+        if record_set is None:
+            raise SupervisorEvaluationError(
+                "persisted session supervisor evaluation failed"
+            ) from envelope.error
+        try:
+            await self._record_inspection_set(record_set)
+        except SupervisorPersistenceError:
+            existing = await repository.get_inspection(
+                str(inspection_id),
+                expected_tenant_id=evidence.tenant_id,
+            )
+            if existing is not None:
+                return existing
+            raise
+        return record_set.inspection
+
     # ─── Internals ────────────────────────────────────────────────────
+
+    async def _record_inspection_set(
+        self, record_set: InspectionRecordSet
+    ) -> None:
+        repository = self._supervisor_repository
+        if repository is None:
+            raise SupervisorEvaluationError(
+                "evaluate_session requires supervisor persistence"
+            )
+        await repository.record_inspection(record_set.inspection)
+        for finding in record_set.findings:
+            await repository.record_finding(finding)
+        for evaluation in record_set.evaluations:
+            await repository.record_evaluation(evaluation)
+        for escalation in record_set.escalations:
+            await repository.record_escalation(escalation)
 
     @staticmethod
     def _extract_observed_tenant_id(
