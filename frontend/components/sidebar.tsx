@@ -1,0 +1,189 @@
+"use client";
+
+import { useState } from "react";
+import { cn } from "@/lib/utils";
+import { KernelSeal } from "./kernel-seal";
+import {
+  Building2,
+  ChevronDown,
+  LayoutList,
+  Network,
+  Brain,
+  BookOpen,
+  Gavel,
+  GitBranch,
+  Radio,
+  Users,
+  FileSearch,
+  Settings,
+  LogOut,
+} from "lucide-react";
+
+interface NavItem {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+}
+
+const navItems: NavItem[] = [
+  { id: "operations", label: "Operations Queue", icon: LayoutList },
+  { id: "trace", label: "Trace Inspector", icon: Network },
+  { id: "cognition", label: "Cognition Hub", icon: Brain },
+  { id: "knowledge", label: "Knowledge Base", icon: BookOpen },
+  { id: "governance", label: "Governance Policies", icon: Gavel },
+  { id: "topology", label: "Topology", icon: GitBranch },
+  { id: "channels", label: "Channels", icon: Radio },
+  { id: "team", label: "Team & Roles", icon: Users },
+  { id: "audit", label: "Audit & Exports", icon: FileSearch },
+  { id: "settings", label: "Settings", icon: Settings },
+];
+
+interface SidebarProps {
+  activeItem?: string;
+  onNavigate?: (itemId: string) => void;
+  tenantName?: string;
+  userName?: string;
+  userRole?: string;
+  className?: string;
+}
+
+export function Sidebar({
+  activeItem = "operations",
+  onNavigate,
+  tenantName = "Acme Corp",
+  userName = "Sarah Chen",
+  userRole = "Operator",
+  className,
+}: SidebarProps) {
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+
+  return (
+    <aside
+      className={cn(
+        "w-[240px] h-screen flex flex-col shrink-0",
+        "bg-surface-raised border-r border-border-subtle",
+        className
+      )}
+    >
+      {/* Top section - Logo and tenant selector */}
+      <div className="p-6">
+        {/* Logo */}
+        <div className="flex items-center gap-3">
+          <KernelSeal size={32} />
+          <span className="font-display text-[18px] font-semibold text-ink-primary tracking-tight">
+            Operious
+          </span>
+        </div>
+
+        {/* Tenant selector */}
+        <button
+          className={cn(
+            "mt-6 w-full flex items-center gap-2 px-3 py-2",
+            "border border-border-subtle rounded",
+            "transition-all duration-160",
+            "hover:bg-surface hover:border-border-defined"
+          )}
+        >
+          <Building2 
+            size={14} 
+            strokeWidth={1.5} 
+            className="text-ink-tertiary shrink-0" 
+          />
+          <span className="text-[13px] font-medium text-ink-primary flex-1 text-left truncate">
+            {tenantName}
+          </span>
+          <ChevronDown 
+            size={12} 
+            strokeWidth={1.5} 
+            className="text-ink-tertiary shrink-0" 
+          />
+        </button>
+      </div>
+
+      {/* Navigation section */}
+      <nav className="flex-1 overflow-y-auto px-4 py-4">
+        <ul className="space-y-1">
+          {navItems.map((item) => {
+            const isActive = activeItem === item.id;
+            const isHovered = hoveredItem === item.id;
+            const Icon = item.icon;
+
+            return (
+              <li key={item.id}>
+                <button
+                  onClick={() => onNavigate?.(item.id)}
+                  onMouseEnter={() => setHoveredItem(item.id)}
+                  onMouseLeave={() => setHoveredItem(null)}
+                  className={cn(
+                    "w-full h-9 flex items-center gap-3 rounded",
+                    "transition-all duration-160",
+                    isActive
+                      ? "bg-[rgba(168,136,44,0.06)] border-l-4 border-l-gold pl-2 pr-3"
+                      : "px-3",
+                    !isActive && isHovered && "bg-[rgba(10,15,28,0.04)]"
+                  )}
+                >
+                  <Icon
+                    size={16}
+                    strokeWidth={1.5}
+                    className={cn(
+                      "shrink-0 transition-colors duration-160",
+                      isActive ? "text-gold" : "text-ink-secondary"
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "text-[13px] font-medium transition-colors duration-160",
+                      isActive ? "text-ink-primary" : "text-ink-secondary"
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {/* Divider */}
+      <div className="mx-4 h-px bg-border-subtle" />
+
+      {/* Bottom section - User profile */}
+      <div className="p-4">
+        <div
+          className={cn(
+            "flex items-center gap-3 px-3 py-2 rounded",
+            "transition-all duration-160",
+            "hover:bg-[rgba(10,15,28,0.04)] cursor-pointer"
+          )}
+        >
+          {/* Avatar */}
+          <div className="w-8 h-8 rounded-full bg-ink-tertiary/20 flex items-center justify-center shrink-0">
+            <span className="text-[11px] font-medium text-ink-secondary">
+              {userName
+                .split(" ")
+                .map((n) => n[0])
+                .join("")}
+            </span>
+          </div>
+
+          {/* User info */}
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-medium text-ink-primary truncate">
+              {userName}
+            </p>
+            <p className="eyebrow text-ink-tertiary">{userRole}</p>
+          </div>
+
+          {/* Logout icon */}
+          <LogOut
+            size={14}
+            strokeWidth={1.5}
+            className="text-ink-tertiary shrink-0 hover:text-ink-secondary transition-colors"
+          />
+        </div>
+      </div>
+    </aside>
+  );
+}
