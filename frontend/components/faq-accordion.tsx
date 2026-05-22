@@ -45,10 +45,13 @@ export function FaqAccordion() {
   };
 
   return (
-    <section className="bg-canvas py-[160px] px-16">
+    <section className="bg-canvas py-20 sm:py-28 lg:py-40 px-4 sm:px-8 lg:px-16">
       <div className="mx-auto max-w-[880px]">
         {/* Section Title */}
-        <h2 className="font-[var(--font-cormorant-sc)] text-[64px] font-bold leading-[1.1] tracking-[-0.02em] text-ink-primary mb-16">
+        <h2
+          className="text-[36px] sm:text-[48px] lg:text-[64px] font-bold leading-[1.1] tracking-[-0.02em] text-ink-primary mb-10 sm:mb-12 lg:mb-16"
+          style={{ fontFamily: "var(--font-cormorant-sc)" }}
+        >
           Frequently considered questions.
         </h2>
 
@@ -84,7 +87,10 @@ function AccordionItem({ question, answer, isOpen, onToggle }: AccordionItemProp
         className="w-full py-6 flex items-start justify-between text-left transition-colors duration-100"
         whileHover={{ backgroundColor: "rgba(168, 136, 44, 0.04)" }}
       >
-        <span className="font-[var(--font-cormorant-sc)] text-[22px] font-semibold leading-[1.4] text-ink-primary pr-8">
+        <span
+          className="text-[18px] sm:text-[20px] lg:text-[22px] font-semibold leading-[1.4] text-ink-primary pr-6 sm:pr-8"
+          style={{ fontFamily: "var(--font-cormorant-sc)" }}
+        >
           {question}
         </span>
         <motion.div
@@ -108,7 +114,7 @@ function AccordionItem({ question, answer, isOpen, onToggle }: AccordionItemProp
             }}
             className="overflow-hidden"
           >
-            <p className="pb-6 pt-4 text-[16px] leading-[1.6] text-ink-body font-sans">
+            <p className="pb-6 pt-2 sm:pt-4 text-[14px] sm:text-[15px] lg:text-[16px] leading-[1.6] text-ink-body font-sans">
               {answer}
             </p>
           </motion.div>

@@ -38,23 +38,23 @@ const domains = [
 
 export function DomainCards() {
   return (
-    <section className="bg-canvas py-[160px] px-16">
+    <section className="bg-canvas py-20 sm:py-28 lg:py-40 px-4 sm:px-8 lg:px-16">
       <div className="mx-auto max-w-[1280px]">
         {/* Section Header */}
-        <div className="mb-16">
+        <div className="mb-12 sm:mb-16">
           <p
-            className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-gold mb-4"
+            className="font-mono text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.18em] text-gold mb-3 sm:mb-4"
             style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
           >
             §03 · DOMAINS
           </p>
           <h2
-            className="text-[64px] font-bold text-ink-primary leading-[1.05] mb-6"
+            className="text-[36px] sm:text-[48px] lg:text-[64px] font-bold text-ink-primary leading-[1.05] mb-4 sm:mb-6"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}
           >
             Built for operationally regulated environments.
           </h2>
-          <p className="text-[18px] text-ink-body leading-relaxed max-w-[760px]">
+          <p className="text-[15px] sm:text-[16px] lg:text-[18px] text-ink-body leading-relaxed max-w-[760px]">
             Operious deploys across industries where execution correctness,
             policy compliance, and forensic auditability are non-negotiable.
             Each deployment is tenant-isolated by default. Configuration,
@@ -64,15 +64,15 @@ export function DomainCards() {
         </div>
 
         {/* 3x2 Grid */}
-        <div className="grid grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
           {domains.map((domain, index) => (
             <motion.div
               key={index}
-              className="group flex flex-col gap-4 bg-white border border-border-subtle rounded-lg p-8 min-h-[240px] cursor-pointer"
-              initial={{ y: 0, boxShadow: "0 1px 0 var(--border-subtle)" }}
+              className="group flex flex-col gap-4 bg-white border border-border-subtle rounded-lg p-6 sm:p-8 min-h-[200px] sm:min-h-[240px] cursor-pointer"
+              initial={{ y: 0, boxShadow: "var(--shadow-card)" }}
               whileHover={{
                 y: -4,
-                boxShadow: "0 8px 24px rgba(10,15,28,0.08)",
+                boxShadow: "var(--shadow-card-hover)",
               }}
               transition={{
                 duration: 0.24,
@@ -80,25 +80,29 @@ export function DomainCards() {
               }}
             >
               <h3
-                className="text-[22px] font-semibold text-ink-primary"
+                className="text-[18px] sm:text-[20px] lg:text-[22px] font-semibold text-ink-primary"
                 style={{ fontFamily: "var(--font-cormorant-sc)" }}
               >
                 {domain.name}
               </h3>
-              <p className="text-[15px] text-ink-body leading-[1.6] flex-grow">
+              <p className="text-[14px] sm:text-[15px] text-ink-body leading-[1.6] flex-grow">
                 {domain.description}
               </p>
-              <div className="flex items-center gap-1.5 text-gold">
-                <span className="text-[14px] font-medium">Learn more</span>
+              <motion.div 
+                className="flex items-center gap-1.5 text-gold"
+                whileHover="hover"
+              >
+                <span className="text-[13px] sm:text-[14px] font-medium">Learn more</span>
                 <motion.span
                   className="inline-block"
-                  initial={{ x: 0 }}
-                  whileHover={{ x: 4 }}
+                  variants={{
+                    hover: { x: 4 }
+                  }}
                   transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
                 >
                   <ArrowRight className="w-[14px] h-[14px]" strokeWidth={1.5} />
                 </motion.span>
-              </div>
+              </motion.div>
             </motion.div>
           ))}
         </div>

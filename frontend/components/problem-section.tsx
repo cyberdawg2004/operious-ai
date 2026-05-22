@@ -187,7 +187,7 @@ const itemVariants = {
 
 export function ProblemSection() {
   return (
-    <section className="bg-canvas py-[160px] px-[64px]">
+    <section className="bg-canvas py-20 sm:py-28 lg:py-40 px-4 sm:px-8 lg:px-16">
       <div className="max-w-[1280px] mx-auto">
         {/* Section header */}
         <motion.div
@@ -198,7 +198,7 @@ export function ProblemSection() {
         >
           {/* Section label */}
           <p
-            className="font-mono text-[11px] uppercase tracking-[0.18em] text-gold mb-[24px]"
+            className="font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.18em] text-gold mb-4 sm:mb-6"
             style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
           >
             §01 · THE PROBLEM
@@ -206,14 +206,14 @@ export function ProblemSection() {
 
           {/* Section title */}
           <h2
-            className="text-[64px] font-bold tracking-[-0.015em] leading-[1.08] text-ink-primary max-w-[880px] mb-[32px]"
+            className="text-[36px] sm:text-[48px] lg:text-[64px] font-bold tracking-[-0.015em] leading-[1.08] text-ink-primary max-w-[880px] mb-6 sm:mb-8"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}
           >
             Enterprise operations were never built for autonomy.
           </h2>
 
           {/* Section intro */}
-          <p className="text-[18px] leading-[1.55] text-ink-body max-w-[760px] mb-[96px]">
+          <p className="text-[15px] sm:text-[16px] lg:text-[18px] leading-[1.55] text-ink-body max-w-[760px] mb-16 sm:mb-20 lg:mb-24">
             For decades, mission-critical operational workflows have depended on
             human improvisation, undocumented knowledge, and audit trails that
             exist only in case management software. Generative AI promised
@@ -224,7 +224,7 @@ export function ProblemSection() {
 
         {/* Three-column grid */}
         <motion.div
-          className="grid grid-cols-3 gap-[48px] items-start"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12 lg:gap-12 items-start"
           variants={containerVariants}
           initial="hidden"
           whileInView="visible"
@@ -241,14 +241,14 @@ export function ProblemSection() {
 
                 {/* Subtitle */}
                 <h3
-                  className="text-[28px] font-semibold tracking-[-0.005em] leading-[1.25] text-ink-primary mt-[32px] mb-[16px]"
+                  className="text-[22px] sm:text-[24px] lg:text-[28px] font-semibold tracking-[-0.005em] leading-[1.25] text-ink-primary mt-6 sm:mt-8 mb-4"
                   style={{ fontFamily: "var(--font-cormorant-sc)" }}
                 >
                   {column.subtitle}
                 </h3>
 
                 {/* Body */}
-                <p className="text-[16px] leading-[1.6] text-ink-body mb-[24px]">
+                <p className="text-[14px] sm:text-[15px] lg:text-[16px] leading-[1.6] text-ink-body mb-6">
                   {column.body}
                 </p>
 

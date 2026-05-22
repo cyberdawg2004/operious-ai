@@ -112,12 +112,15 @@ function StatCell({
       }}
     >
       <div
-        className="font-mono text-[80px] font-medium leading-none text-gold-bright"
-        style={{ fontVariantNumeric: "tabular-nums" }}
+        className="font-mono text-[48px] sm:text-[60px] lg:text-[80px] font-medium leading-none text-gold-bright"
+        style={{ fontVariantNumeric: "tabular-nums", fontFamily: "var(--font-ibm-plex-mono)" }}
       >
         {displayValue()}
       </div>
-      <p className="mt-6 max-w-[240px] font-serif-display text-[18px] italic leading-[1.4] text-[#D8E4F4]">
+      <p
+        className="mt-4 sm:mt-6 max-w-[240px] text-[15px] sm:text-[16px] lg:text-[18px] italic leading-[1.4] text-[#D8E4F4]"
+        style={{ fontFamily: "var(--font-cormorant)" }}
+      >
         {stat.description}
       </p>
     </motion.div>
@@ -131,7 +134,7 @@ export function TrustProof() {
   return (
     <section
       ref={sectionRef}
-      className="relative bg-[#05080F] py-40 px-16"
+      className="relative bg-[#05080F] py-20 sm:py-28 lg:py-40 px-4 sm:px-8 lg:px-16"
     >
       {/* Atmospheric corner gradients */}
       <div
@@ -157,18 +160,24 @@ export function TrustProof() {
       <div className="relative mx-auto max-w-[1280px]">
         {/* Section header */}
         <div>
-          <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-gold">
+          <span
+            className="font-mono text-[10px] sm:text-[11px] uppercase tracking-[0.18em] text-gold"
+            style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
+          >
             §05 · GUARANTEES
           </span>
-          <h2 className="mt-6 font-serif-display text-[64px] font-bold leading-[1.1] text-[#D8E4F4]">
+          <h2
+            className="mt-4 sm:mt-6 text-[36px] sm:text-[48px] lg:text-[64px] font-bold leading-[1.1] text-[#D8E4F4]"
+            style={{ fontFamily: "var(--font-cormorant-sc)" }}
+          >
             Mathematical guarantees,
-            <br />
+            <br className="hidden sm:block" />
             not marketing claims.
           </h2>
         </div>
 
         {/* Four-column grid */}
-        <div className="mt-24 grid grid-cols-2 gap-12 lg:grid-cols-4">
+        <div className="mt-12 sm:mt-16 lg:mt-24 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10 lg:gap-12">
           {stats.map((stat, index) => (
             <StatCell key={index} stat={stat} index={index} inView={isInView} />
           ))}
@@ -176,7 +185,7 @@ export function TrustProof() {
 
         {/* Pull quote */}
         <motion.div
-          className="mx-auto mt-24 max-w-[800px] text-center"
+          className="mx-auto mt-12 sm:mt-16 lg:mt-24 max-w-[800px] text-center px-4"
           initial={{ opacity: 0, y: 16 }}
           animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }}
           transition={{
@@ -185,7 +194,10 @@ export function TrustProof() {
             ease: [0.16, 1, 0.3, 1],
           }}
         >
-          <p className="font-serif-display text-[32px] italic font-medium leading-[1.4] text-gold">
+          <p
+            className="text-[24px] sm:text-[28px] lg:text-[32px] italic font-medium leading-[1.4] text-gold"
+            style={{ fontFamily: "var(--font-cormorant)" }}
+          >
             &ldquo;Determinism is the precondition for trust. We refuse to ship
             anything that cannot be reconstructed.&rdquo;
           </p>

@@ -63,10 +63,52 @@
   
   /* Shadow tokens */
   --shadow-dropdown: 0 8px 32px rgba(10, 15, 28, 0.12), 0 2px 8px rgba(10, 15, 28, 0.08);
+  --shadow-card: 0 1px 3px rgba(10, 15, 28, 0.04);
+  --shadow-card-hover: 0 12px 32px rgba(10, 15, 28, 0.1), 0 4px 12px rgba(10, 15, 28, 0.06);
+  --shadow-elevated: 0 24px 48px rgba(10, 15, 28, 0.12);
+  
+  /* Radius tokens */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  
+  /* Transition tokens */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --duration-fast: 160ms;
+  --duration-normal: 240ms;
+  --duration-slow: 400ms;
 }
 
 body {
   background: var(--canvas);
   color: var(--ink-primary);
   font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Selection styling */
+::selection {
+  background-color: rgba(168, 136, 44, 0.2);
+  color: var(--ink-primary);
+}
+
+/* Focus visible styling for accessibility */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

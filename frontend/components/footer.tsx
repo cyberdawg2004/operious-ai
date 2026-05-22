@@ -114,27 +114,27 @@ const socialIcons = [
 
 export function Footer() {
   return (
-    <footer className="bg-[#05080F] pt-24 pb-8 px-16">
+    <footer className="bg-[#05080F] pt-16 sm:pt-20 lg:pt-24 pb-6 sm:pb-8 px-4 sm:px-8 lg:px-16">
       <div className="max-w-[1440px] mx-auto">
         {/* Top section - Logo and tagline */}
-        <div className="flex items-center gap-4">
-          <KernelSealLogo size={48} />
+        <div className="flex items-center gap-3 sm:gap-4">
+          <KernelSealLogo size={40} />
           <span
-            className="font-[var(--font-cormorant-sc)] text-[28px] font-semibold text-[#D8E4F4]"
+            className="text-[22px] sm:text-[26px] lg:text-[28px] font-semibold text-[#D8E4F4]"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}
           >
             Operious
           </span>
         </div>
         <p
-          className="mt-4 text-[11px] uppercase tracking-[0.18em] text-[#C9A84C]"
+          className="mt-3 sm:mt-4 text-[10px] sm:text-[11px] uppercase tracking-[0.18em] text-[#C9A84C]"
           style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
         >
           DETERMINISTIC ENTERPRISE OPERATIONS
         </p>
 
         {/* Five-column grid */}
-        <div className="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-12">
+        <div className="mt-12 sm:mt-14 lg:mt-16 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8 sm:gap-10 lg:gap-12">
           {footerColumns.map((column) => (
             <div key={column.title}>
               <h4
@@ -174,20 +174,20 @@ export function Footer() {
         </div>
 
         {/* Bottom strip */}
-        <div className="mt-24 pt-8 border-t border-[#1A2744]">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="mt-16 sm:mt-20 lg:mt-24 pt-6 sm:pt-8 border-t border-[#1A2744]">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
             {/* Left - Copyright */}
-            <p className="text-[13px] text-[#7A90B4]">
+            <p className="text-[12px] sm:text-[13px] text-[#7A90B4] text-center lg:text-left">
               © 2026 Operious AI. All operational guarantees reserved.
             </p>
 
             {/* Center - Links */}
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
               {bottomLinks.map((link) => (
                 <Link
                   key={link}
                   href="#"
-                  className="text-[13px] text-[#7A90B4] hover:text-[#C9A84C] transition-colors duration-[160ms]"
+                  className="text-[12px] sm:text-[13px] text-[#7A90B4] hover:text-[#C9A84C] transition-colors duration-[160ms]"
                 >
                   {link}
                 </Link>
@@ -195,7 +195,7 @@ export function Footer() {
             </div>
 
             {/* Right - Social icons */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
               {socialIcons.map((social) => (
                 <a
                   key={social.name}

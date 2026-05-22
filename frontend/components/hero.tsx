@@ -4,16 +4,14 @@ import { motion } from "framer-motion";
 import { ArrowRight, Play } from "lucide-react";
 
 // Animated KernelSeal Logo with three-phase entry
-function KernelSealLogo() {
+function KernelSealLogo({ className }: { className?: string }) {
   return (
     <motion.svg
-      width="280"
-      height="280"
       viewBox="0 0 280 280"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className="relative"
-      style={{ marginTop: "-20px" }} // Optical compensation
+      className={className}
+      aria-hidden="true"
     >
       {/* Outer hexagon - Phase 1: stroke draw animation */}
       <motion.path
@@ -156,7 +154,7 @@ function AnimatedHeadline() {
 
   return (
     <h1
-      className="text-[88px] font-bold leading-[1.05] tracking-[-0.02em] text-[#D8E4F4] max-w-[760px]"
+      className="text-[40px] sm:text-[56px] md:text-[72px] lg:text-[88px] font-bold leading-[1.05] tracking-[-0.02em] text-[#D8E4F4]"
       style={{ fontFamily: "var(--font-cormorant-sc)" }}
     >
       {words.map((word, i) => (
@@ -187,11 +185,11 @@ function AnimatedHeadline() {
 export function Hero() {
   return (
     <section
-      className="relative min-h-[720px] h-screen flex items-center"
+      className="relative min-h-[720px] lg:min-h-screen flex items-center"
       style={{ backgroundColor: "#05080F" }}
     >
       {/* Atmospheric background - CSS only */}
-      <div className="absolute inset-0 overflow-hidden">
+      <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
         {/* Radial gradient top-left (gold) */}
         <div
           className="absolute top-0 left-0 w-[60%] h-[60%]"
@@ -219,22 +217,27 @@ export function Hero() {
       </div>
 
       {/* Container */}
-      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-16 pt-[72px]">
-        {/* Two-column grid */}
-        <div className="grid grid-cols-[40%_60%] gap-24 items-center">
-          {/* LEFT COLUMN - Logo */}
-          <div className="flex items-center justify-center">
-            <KernelSealLogo />
+      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-16 pt-[72px]">
+        {/* Two-column grid - stacks on mobile */}
+        <div className="grid grid-cols-1 lg:grid-cols-[40%_60%] gap-12 lg:gap-24 items-center py-12 lg:py-0">
+          {/* LEFT COLUMN - Logo (hidden on mobile, shown in background) */}
+          <div className="hidden lg:flex items-center justify-center">
+            <KernelSealLogo className="w-[280px] h-[280px] -mt-5" />
+          </div>
+
+          {/* Mobile Logo - smaller, centered above content */}
+          <div className="flex lg:hidden items-center justify-center mb-8">
+            <KernelSealLogo className="w-[160px] h-[160px] sm:w-[200px] sm:h-[200px]" />
           </div>
 
           {/* RIGHT COLUMN - Content */}
-          <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-6 lg:gap-8 text-center lg:text-left">
             {/* Eyebrow label */}
             <motion.p
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.4, delay: 1.1, ease: "easeOut" }}
-              className="text-[11px] uppercase tracking-[0.18em] text-[#C9A84C]"
+              className="text-[10px] sm:text-[11px] uppercase tracking-[0.18em] text-[#C9A84C]"
               style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
             >
               Operational Infrastructure · v1.0
@@ -248,7 +251,7 @@ export function Hero() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 1.8, ease: "easeOut" }}
-              className="text-[22px] font-normal leading-[1.55] tracking-[-0.011em] text-[#7A90B4] max-w-[540px]"
+              className="text-[16px] sm:text-[18px] lg:text-[22px] font-normal leading-[1.55] tracking-[-0.011em] text-[#7A90B4] max-w-[540px] mx-auto lg:mx-0"
             >
               Operious AI is a deterministic execution substrate for enterprise
               operations. Every action is governed by mathematically enforced
@@ -261,21 +264,21 @@ export function Hero() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 2.1, ease: "easeOut" }}
-              className="flex items-center gap-4 mt-4"
+              className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 sm:gap-4 mt-4"
             >
               {/* Primary CTA */}
               <a
                 href="/demo"
-                className="group inline-flex items-center justify-center h-14 px-8 text-[15px] font-semibold tracking-[-0.01em] text-[#05080F] bg-[#C9A84C] rounded-md hover:bg-[#D4B85A] transition-colors"
+                className="group inline-flex items-center justify-center w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-[#05080F] bg-[#C9A84C] rounded-md hover:bg-[#D4B85A] transition-colors duration-[160ms]"
               >
                 <span>Request Infrastructure Briefing</span>
-                <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover:translate-x-1" />
+                <ArrowRight className="ml-2 w-4 sm:w-5 h-4 sm:h-5 transition-transform group-hover:translate-x-1" />
               </a>
 
               {/* Secondary CTA */}
               <a
                 href="/platform"
-                className="group inline-flex items-center justify-center h-14 px-8 text-[15px] font-medium tracking-[-0.01em] text-[#7A90B4] border border-[#2A3548] rounded-md hover:border-[#3A4558] hover:text-[#9AAFCC] transition-colors"
+                className="group inline-flex items-center justify-center w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-[14px] sm:text-[15px] font-medium tracking-[-0.01em] text-[#7A90B4] border border-[#2A3548] rounded-md hover:border-[#3A4558] hover:text-[#9AAFCC] transition-colors duration-[160ms]"
               >
                 <Play className="mr-2 w-4 h-4" />
                 <span>Watch Platform Overview</span>

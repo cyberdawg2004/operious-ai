@@ -42,7 +42,7 @@ export function SubstrateStack() {
   return (
     <section
       ref={sectionRef}
-      className="relative min-h-screen py-40 px-16 bg-[#05080F]"
+      className="relative min-h-screen py-20 sm:py-28 lg:py-40 px-4 sm:px-8 lg:px-16 bg-[#05080F]"
     >
       {/* Atmospheric gradients */}
       <div
@@ -57,21 +57,21 @@ export function SubstrateStack() {
 
       <div className="relative mx-auto max-w-[1280px]">
         {/* Section Header */}
-        <div className="mb-24">
+        <div className="mb-12 sm:mb-16 lg:mb-24">
           <p
-            className="mb-4 font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-gold"
+            className="mb-3 sm:mb-4 font-mono text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.18em] text-gold"
             style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
           >
             §02 · THE KERNEL
           </p>
           <h2
-            className="mb-6 text-[64px] font-bold leading-[1.05] tracking-[-0.015em] text-[#D8E4F4]"
+            className="mb-4 sm:mb-6 text-[36px] sm:text-[48px] lg:text-[64px] font-bold leading-[1.05] tracking-[-0.015em] text-[#D8E4F4]"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}
           >
             An execution substrate, not a chatbot wrapper.
           </h2>
           <p
-            className="max-w-[760px] text-[18px] leading-relaxed text-[#7A90B4]"
+            className="max-w-[760px] text-[15px] sm:text-[16px] lg:text-[18px] leading-relaxed text-[#7A90B4]"
             style={{ fontFamily: "var(--font-geist-sans)" }}
           >
             Operious is built on a layered operational kernel. Each layer
@@ -82,7 +82,7 @@ export function SubstrateStack() {
         </div>
 
         {/* Two Column Layout */}
-        <div className="grid grid-cols-[60%_40%] gap-24">
+        <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-12 lg:gap-24">
           {/* Left Column - Stack Visualization */}
           <div ref={stackRef} className="relative">
             {/* Animated vertical line */}
