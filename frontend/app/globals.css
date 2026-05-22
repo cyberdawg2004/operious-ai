@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+:root {
+  /* Light surface (marketing default) */
+  --canvas: #F8F5EE;
+  --surface: #FFFFFF;
+  --surface-raised: #FBF9F4;
+  --border-subtle: #EAE6DE;
+  --border-defined: #D4CFC4;
+  --ink-primary: #0A0F1C;
+  --ink-body: #2A3548;
+  --ink-secondary: #4A5468;
+  --ink-tertiary: #8A93A4;
+  
+  /* Dark surface */
+  --bg-dark: #05080F;
+  --surface-dark: #0B1120;
+  --border-dark: #1A2744;
+  --ink-dark: #D8E4F4;
+  --ink-dark-body: #7A90B4;
+  
+  /* Accents */
+  --gold: #A8882C;
+  --gold-bright: #C9A84C;
+  --blue-signal: #2A5CAA;
+  --blue-glow: #3D7DD4;
+  --status-success: #2A7A4C;
+  --status-warning: #B8860B;
+  --status-error: #8B2A2A;
+  
+  /* Legacy tokens mapped */
+  --background: var(--canvas);
+  --foreground: var(--ink-primary);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-defined: var(--border-defined);
+  --color-ink-primary: var(--ink-primary);
+  --color-ink-body: var(--ink-body);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-tertiary: var(--ink-tertiary);
+  --color-bg-dark: var(--bg-dark);
+  --color-surface-dark: var(--surface-dark);
+  --color-border-dark: var(--border-dark);
+  --color-ink-dark: var(--ink-dark);
+  --color-ink-dark-body: var(--ink-dark-body);
+  --color-gold: var(--gold);
+  --color-gold-bright: var(--gold-bright);
+  --color-blue-signal: var(--blue-signal);
+  --color-blue-glow: var(--blue-glow);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-error: var(--status-error);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-ibm-plex-mono);
+  --font-serif: var(--font-cormorant-sc);
+  
+  /* Shadow tokens */
+  --shadow-dropdown: 0 8px 32px rgba(10, 15, 28, 0.12), 0 2px 8px rgba(10, 15, 28, 0.08);
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink-primary);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
