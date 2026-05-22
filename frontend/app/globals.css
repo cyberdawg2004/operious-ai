@@ -44,6 +44,7 @@
    DARK MODE — BLOOMBERG/LINEAR OPERATIONAL STYLE
    Default for Command Center operators
 ═══════════════════════════════════════════ */
+:root.dark,
 .dark {
   --canvas: #0A0A0C;
   --surface: #131316;
