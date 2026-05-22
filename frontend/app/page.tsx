@@ -1,14 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { OperationsQueue } from "@/components/operations-queue";
 import { TraceInspector } from "@/components/trace-inspector";
 import { CognitionHub } from "@/components/cognition-hub";
 import { KnowledgeBase } from "@/components/knowledge-base";
+import { CommandPalette } from "@/components/command-palette";
 
 export default function Home() {
   const [activeItem, setActiveItem] = useState("operations");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  // Global keyboard shortcut for command palette
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-canvas">
@@ -41,6 +55,13 @@ export default function Home() {
           </div>
         </main>
       )}
+
+      {/* Command Palette */}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onNavigate={(route) => setActiveItem(route)}
+      />
     </div>
   );
 }
