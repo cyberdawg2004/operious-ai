@@ -1,429 +1,438 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
   Copy,
-  Cpu,
-  ExternalLink,
+  FileJson,
+  GitBranch,
   Search,
-  Shield,
-  XCircle,
+  X,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import {
-  type ApiPage,
-  getApiBaseUrl,
-  listTraceSpans,
-  type OperationalTraceSpan,
-} from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { apiRequest } from "@/lib/api";
 import { useApiResource } from "@/lib/use-api-resource";
+import { cn } from "@/lib/utils";
 
-const substrateColors: Record<string, string> = {
-  BOUNDARY: "#1A4A9A",
-  GOVERNANCE: "#A8882C",
-  COORDINATION: "#4A5468",
-  SESSION: "#2E7D5C",
-  EXECUTION: "#0D2860",
-  SUPERVISOR: "#6B5418",
-  ARBITRATION: "#A6342D",
-  HARDENING: "#8A93A4",
+export type TraceLookup = {
+  value: string;
+  mode?: "session_id" | "event_id" | "root_event_id" | "governance_decision_id";
+};
+
+type SessionTimelineEvent = {
+  timeline_event_id: string;
+  session_id: string;
+  dispatch_id: string | null;
+  tenant_id: string | null;
+  event_type: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+type SessionTimelineResponse = {
+  events: SessionTimelineEvent[];
+  total: number;
+};
+
+type SessionEventRecord = {
+  event_id: string;
+  session_id: string;
+  sequence: number;
+  kind: string;
+  continuity_mode: string;
+  occurred_at: string;
+  recorded_at: string;
+  payload: Record<string, unknown>;
+  correlation_id: string | null;
+  annotation: string | null;
+  governance_decision_id: string | null;
+  governance_chain_id: string | null;
+  metadata: Record<string, unknown>;
+};
+
+type SessionEventsResponse = {
+  items: SessionEventRecord[];
+  total: number;
+};
+
+type SessionTraceResponse = {
+  timeline: SessionTimelineResponse;
+  sessionEvents: SessionEventsResponse;
+};
+
+type TimelineEventView = SessionTimelineEvent & {
+  sequence: number | null;
+  correlation_id: string | null;
+  continuity_mode: string | null;
+  governance_decision_id: string | null;
+  governance_chain_id: string | null;
+  recorded_at: string | null;
+  metadata: Record<string, unknown>;
 };
 
 type TraceInspectorProps = {
   initialTraceId?: string | null;
+  initialLookup?: TraceLookup | null;
 };
 
-export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
-  const [searchValue, setSearchValue] = useState(initialTraceId ?? "");
-  const [loadedTraceId, setLoadedTraceId] = useState<string | null>(
-    initialTraceId?.trim() || null
+const emptyTrace: SessionTraceResponse = {
+  timeline: { events: [], total: 0 },
+  sessionEvents: { items: [], total: 0 },
+};
+
+export function TraceInspector({ initialTraceId, initialLookup }: TraceInspectorProps) {
+  const initialSessionId = initialLookup?.value ?? initialTraceId ?? "";
+  const [searchValue, setSearchValue] = useState(initialSessionId);
+  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(
+    initialSessionId.trim() || null
   );
-  const [selectedSpan, setSelectedSpan] = useState<OperationalTraceSpan | null>(null);
+  const [expandedPayloads, setExpandedPayloads] = useState<Set<string>>(new Set());
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [showRawJson, setShowRawJson] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
-  const loadTraceSpans = useCallback(async (): Promise<ApiPage<OperationalTraceSpan>> => {
-    if (!loadedTraceId) {
-      return { items: [], total: 0, offset: 0 };
-    }
-    return listTraceSpans({
-      trace_id: loadedTraceId,
-      limit: 100,
-      offset: 0,
-    });
-  }, [loadedTraceId]);
+  const loadTrace = useCallback(async (): Promise<SessionTraceResponse> => {
+    if (!loadedSessionId) return emptyTrace;
+    const encodedSessionId = encodeURIComponent(loadedSessionId);
+    const [timeline, sessionEvents] = await Promise.all([
+      apiRequest<SessionTimelineResponse>(`/session/${encodedSessionId}/timeline`),
+      apiRequest<SessionEventsResponse>(`/session/sessions/${encodedSessionId}/events`),
+    ]);
+    return { timeline, sessionEvents };
+  }, [loadedSessionId]);
 
-  const { data, error, isLoading, reload } = useApiResource(loadTraceSpans);
-  const spans = useMemo(() => data?.items ?? [], [data?.items]);
-  const total = data?.total ?? 0;
-  const currentSpan =
-    selectedSpan && spans.some((span) => span.span_id === selectedSpan.span_id)
-      ? selectedSpan
-      : spans[0] ?? null;
-  const selectedMetric = currentSpan
-    ? extractAttribute(currentSpan, ["confidence", "score"])
-    : null;
-  const metadata = useMemo(() => deriveTraceMetadata(spans), [spans]);
+  const { data, error, isLoading, reload } = useApiResource(loadTrace);
+  const trace = data ?? emptyTrace;
+  const events = useMemo(() => mergeTimelineEvents(trace), [trace]);
+  const selectedEvent = useMemo(
+    () =>
+      events.find((event) => event.timeline_event_id === selectedEventId) ??
+      events[0] ??
+      null,
+    [events, selectedEventId]
+  );
+  const metadata = useMemo(
+    () => deriveTraceMetadata(loadedSessionId, events),
+    [events, loadedSessionId]
+  );
 
   const handleOpenTrace = () => {
     const normalized = searchValue.trim();
-    setLoadedTraceId(normalized || null);
-    setSelectedSpan(null);
+    setLoadedSessionId(normalized || null);
+    setSelectedEventId(null);
+    setExpandedPayloads(new Set());
     setCopyStatus(null);
     setShowRawJson(false);
   };
 
-  const handleCopySpan = async () => {
-    if (!currentSpan) return;
+  const togglePayload = (eventId: string) => {
+    setExpandedPayloads((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  };
+
+  const copyText = async (value: string | null | undefined, label: string) => {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(JSON.stringify(currentSpan, null, 2));
-      setCopyStatus("Event data copied");
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(`${label} copied`);
     } catch {
-      setCopyStatus("Clipboard access denied");
+      setCopyStatus("Clipboard denied");
     }
   };
 
-  const handleOpenRawEndpoint = () => {
-    if (!loadedTraceId) return;
-    const url = new URL(`${getApiBaseUrl()}/observability/traces`);
-    url.searchParams.set("trace_id", loadedTraceId);
-    url.searchParams.set("limit", "100");
-    url.searchParams.set("offset", "0");
-    window.open(url.toString(), "_blank", "noopener,noreferrer");
-  };
-
   return (
-    <div
-      className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8"
-      style={{ backgroundColor: "var(--canvas)" }}
-    >
+    <div className="min-w-0 flex-1 bg-canvas px-4 py-5 sm:px-6 lg:px-8">
       <div className="mb-6">
-        <div
-          className="font-mono text-[11px] uppercase tracking-[0.18em] mb-2"
-          style={{ color: "var(--gold-primary)" }}
-        >
-          TRACE · INSPECTOR
+        <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-gold-primary">
+          TRACE - SESSION TIMELINE
         </div>
 
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <h1
-            className="font-display text-[32px] font-bold"
-            style={{ color: "var(--ink-primary)" }}
-          >
+          <h1 className="font-display text-[32px] font-bold text-ink-primary">
             Trace Inspector
           </h1>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative min-w-0">
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-                style={{ color: "var(--ink-tertiary)" }}
-              />
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
               <input
                 type="text"
-                placeholder="Trace ID or Session ID..."
+                placeholder="Session ID..."
                 value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-                className="h-11 w-full rounded pl-9 pr-4 font-sans text-[13px] outline-none transition-all duration-160 sm:h-10 sm:w-[360px]"
-                style={{
-                  backgroundColor: "var(--surface-raised)",
-                  border: "1px solid var(--border-subtle)",
-                  color: "var(--ink-primary)",
-                }}
-                onFocus={(e) =>
-                  (e.target.style.borderColor = "var(--gold-primary)")
-                }
-                onBlur={(e) =>
-                  (e.target.style.borderColor = "var(--border-subtle)")
-                }
-                onKeyDown={(e) => e.key === "Enter" && handleOpenTrace()}
+                onChange={(event) => setSearchValue(event.target.value)}
+                className="h-11 w-full rounded border border-border-subtle bg-surface-raised pl-9 pr-4 font-sans text-[13px] text-ink-primary outline-none transition-colors duration-160 placeholder:text-ink-tertiary focus:border-gold-primary sm:h-10 sm:w-[380px]"
+                onKeyDown={(event) => event.key === "Enter" && handleOpenTrace()}
               />
             </div>
             <button
+              type="button"
               onClick={handleOpenTrace}
-              className="h-11 rounded px-4 font-sans text-[13px] font-medium text-white transition-opacity duration-160 hover:opacity-90 sm:h-10"
-              style={{ backgroundColor: "var(--ink-primary)" }}
+              className="h-11 rounded bg-ink-primary px-4 font-sans text-[13px] font-medium text-white transition-opacity duration-160 hover:opacity-90 sm:h-10"
             >
               Open Trace
             </button>
+            {loadedSessionId && (
+              <button
+                type="button"
+                onClick={() => void copyText(loadedSessionId, "Session ID")}
+                className="inline-flex h-11 items-center gap-2 rounded border border-border-subtle px-3 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary sm:h-10"
+              >
+                <Copy className="h-3.5 w-3.5" strokeWidth={1.5} />
+                Copy Session ID
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {!loadedTraceId && !isLoading && (
+      {!loadedSessionId && !isLoading && (
         <EmptyState
-          title="No trace selected"
-          message="Enter a trace ID or session ID to request recorded spans from the observability endpoint."
+          title="No session trace selected"
+          message="Select a session from the Operations Queue or enter a session ID to load its tenant-scoped timeline."
         />
       )}
 
-      {isLoading && <LoadingState label="Loading trace spans..." />}
+      {isLoading && <LoadingState label="Loading session timeline..." />}
 
       {error && !isLoading && (
         <ErrorState
-          title="Trace data unavailable"
+          title="Session timeline unavailable"
           message={error}
           actionLabel="Retry"
           onAction={reload}
         />
       )}
 
-      {loadedTraceId && !isLoading && !error && spans.length === 0 && (
+      {loadedSessionId && !isLoading && !error && events.length === 0 && (
         <EmptyState
-          title="No spans recorded"
-          message="The backend returned an empty trace span page for this identifier."
+          title="No timeline events"
+          message="The backend returned no timeline events for this session."
           actionLabel="Refresh trace"
           onAction={reload}
         />
       )}
 
-      {loadedTraceId && spans.length > 0 && !isLoading && !error && (
+      {loadedSessionId && events.length > 0 && !isLoading && !error && (
         <>
-          <div
-            className="mb-6 overflow-x-auto rounded-lg p-3"
-            style={{
-              backgroundColor: "var(--surface-raised)",
-              border: "1px solid var(--border-subtle)",
-            }}
-          >
-            <div className="flex min-w-[980px] items-stretch">
-              <MetadataField label="TRACE ID" value={loadedTraceId} mono />
+          <div className="mb-6 overflow-x-auto rounded-lg border border-border-subtle bg-surface-raised p-3">
+            <div className="flex min-w-[900px] items-stretch">
+              <MetadataField label="SESSION" value={shortId(loadedSessionId)} mono />
               <Divider />
               <MetadataField label="TENANT" value={metadata.tenantId} />
               <Divider />
-              <MetadataField label="FIRST SPAN" value={metadata.firstSpan} mono />
+              <MetadataField label="EVENTS" value={String(trace.timeline.total)} mono />
               <Divider />
-              <MetadataField label="STATUS" value={<TraceStatusBadge hasErrors={metadata.hasErrors} />} />
+              <MetadataField label="ENRICHED" value={String(trace.sessionEvents.total)} mono />
               <Divider />
-              <MetadataField label="TOTAL SPANS" value={String(total)} mono />
+              <MetadataField label="FIRST EVENT" value={metadata.firstEvent} mono />
               <Divider />
               <MetadataField label="DURATION" value={metadata.duration} mono />
               <Divider />
-              <MetadataField label="POLICY CHAIN" value={metadata.policyChain} mono />
+              <MetadataField
+                label="RAW"
+                value={
+                  <button
+                    type="button"
+                    onClick={() => setShowRawJson(true)}
+                    className="inline-flex h-8 items-center gap-2 rounded border border-border-subtle px-2 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary"
+                  >
+                    <FileJson className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    View Raw JSON
+                  </button>
+                }
+              />
             </div>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-            <div
-              className="min-w-0 rounded-lg p-4 sm:p-5"
-              style={{
-                backgroundColor: "var(--surface-raised)",
-                border: "1px solid var(--border-subtle)",
-                minHeight: "520px",
-              }}
-            >
-              <div
-                className="font-mono text-[11px] uppercase tracking-[0.18em] mb-4"
-                style={{ color: "var(--ink-tertiary)" }}
-              >
-                OPERATIONAL TIMELINE
+          {copyStatus && (
+            <div className="mb-4 rounded border border-border-subtle bg-surface-raised px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+              {copyStatus}
+            </div>
+          )}
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
+            <div className="min-w-0 rounded-lg border border-border-subtle bg-surface-raised p-4 sm:p-5">
+              <div className="mb-5 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
+                Canonical Timeline
               </div>
 
-              <div
-                className="mb-4 flex flex-wrap gap-3 border-b border-border-subtle pb-4"
-              >
-                {Object.entries(substrateColors).map(([name, color]) => (
-                  <div key={name} className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                    <span
-                      className="font-mono text-[11px] uppercase"
-                      style={{ color: "var(--ink-secondary)" }}
-                    >
-                      {name}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <div className="relative space-y-4 pl-7">
+                <div className="absolute bottom-0 left-[13px] top-0 w-px bg-border-subtle" />
+                {events.map((event) => {
+                  const isExpanded = expandedPayloads.has(event.timeline_event_id);
+                  const eventColor = colorForEventType(event.event_type);
 
-              <div className="relative overflow-x-auto">
-                <div
-                  className="absolute left-[60px] top-0 bottom-0 w-px"
-                  style={{ backgroundColor: "var(--border-subtle)" }}
-                />
+                  return (
+                    <div key={event.timeline_event_id} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedEventId(event.timeline_event_id)}
+                        className={cn(
+                          "absolute -left-[21px] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-[var(--surface-raised)] transition-transform",
+                          selectedEvent?.timeline_event_id === event.timeline_event_id && "scale-125"
+                        )}
+                        style={{ backgroundColor: eventColor }}
+                        aria-label={`Select event ${event.event_type}`}
+                      />
 
-                <div className="min-w-[660px] space-y-1">
-                  {spans.map((span) => (
-                    <button
-                      key={span.span_id}
-                      onClick={() => {
-                        setSelectedSpan(span);
-                        setShowRawJson(false);
-                        setCopyStatus(null);
-                      }}
-                      className={cn(
-                        "flex h-11 w-full items-center gap-4 rounded px-3 text-left transition-all duration-160 sm:h-10",
-                        currentSpan?.span_id === span.span_id
-                          ? "ring-2"
-                          : "hover:bg-[var(--surface-sunken)]"
-                      )}
-                      style={{
-                        backgroundColor:
-                          currentSpan?.span_id === span.span_id
-                            ? "rgba(183, 135, 38, 0.08)"
-                            : "transparent",
-                        ["--tw-ring-color" as string]: "var(--gold-primary)",
-                      }}
-                    >
-                      <span
-                        className="font-mono text-[11px] w-[52px] shrink-0 tabular-nums"
-                        style={{ color: "var(--ink-tertiary)" }}
+                      <div
+                        className={cn(
+                          "rounded border bg-surface p-4 transition-colors",
+                          selectedEvent?.timeline_event_id === event.timeline_event_id
+                            ? "border-gold-primary"
+                            : "border-border-subtle"
+                        )}
                       >
-                        {formatClock(span.started_at)}
-                      </span>
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEventId(event.timeline_event_id)}
+                            className="min-w-0 text-left"
+                          >
+                            <div className="font-mono text-[12px] uppercase tracking-[0.08em]" style={{ color: eventColor }}>
+                              {formatEventLabel(event.event_type)}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span
+                                className="font-technical text-[11px] tabular-nums text-ink-secondary"
+                                title={formatAbsoluteTime(event.timestamp)}
+                              >
+                                {formatRelativeTime(event.timestamp)}
+                              </span>
+                              {event.dispatch_id && (
+                                <span className="font-technical text-[11px] tabular-nums text-ink-tertiary">
+                                  dispatch {shortId(event.dispatch_id)}
+                                </span>
+                              )}
+                              {event.sequence !== null && (
+                                <span className="font-technical text-[11px] tabular-nums text-ink-tertiary">
+                                  seq {event.sequence}
+                                </span>
+                              )}
+                            </div>
+                          </button>
 
-                      <div className="relative z-10">
-                        <span
-                          className="block w-3 h-3 rounded-full ring-2 ring-[var(--surface-raised)]"
-                          style={{ backgroundColor: colorForSubstrate(span.substrate) }}
-                        />
-                      </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            {event.dispatch_id && (
+                              <button
+                                type="button"
+                                onClick={() => void copyText(event.dispatch_id, "Dispatch ID")}
+                                className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-2 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary"
+                              >
+                                <Copy className="h-3.5 w-3.5" strokeWidth={1.5} />
+                                Dispatch
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => togglePayload(event.timeline_event_id)}
+                              className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-2 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5" strokeWidth={1.5} />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} />
+                              )}
+                              Payload
+                            </button>
+                          </div>
+                        </div>
 
-                      <div className="flex-1 min-w-0">
-                        <span className="font-mono text-[12px] uppercase tracking-wide">
-                          <span style={{ color: colorForSubstrate(span.substrate) }}>
-                            {span.substrate}
-                          </span>
-                          <span style={{ color: "var(--ink-primary)" }}>
-                            .{span.operation || span.span_name}
-                          </span>
-                        </span>
-                      </div>
+                        {event.correlation_id && (
+                          <div className="mt-3 inline-flex items-center gap-2 rounded bg-surface-sunken px-2 py-1 font-technical text-[11px] text-ink-secondary">
+                            <GitBranch className="h-3.5 w-3.5 text-ink-tertiary" strokeWidth={1.5} />
+                            correlation {shortId(event.correlation_id)}
+                          </div>
+                        )}
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span
-                          className="font-mono text-[11px] tabular-nums"
-                          style={{ color: "var(--ink-tertiary)" }}
-                        >
-                          {formatLatency(span.latency_ms)}
-                        </span>
-                        <StatusIcon status={span.status} />
+                        {isExpanded && (
+                          <div className="mt-4 rounded border border-border-subtle bg-surface-sunken p-3">
+                            <JsonTree value={event.payload} />
+                          </div>
+                        )}
                       </div>
-                    </button>
-                  ))}
-                </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            <div
-              className="min-w-0 rounded-lg"
-              style={{
-                backgroundColor: "var(--surface-raised)",
-                border: "1px solid var(--border-subtle)",
-                minHeight: "520px",
-              }}
-            >
-              <div
-                className="flex items-center justify-between px-4 py-3 sm:px-5"
-                style={{ borderBottom: "1px solid var(--border-subtle)" }}
-              >
-                <span
-                  className="font-mono text-[11px] uppercase tracking-[0.18em]"
-                  style={{ color: "var(--ink-tertiary)" }}
-                >
-                  EVENT INSPECTOR
+            <div className="min-w-0 rounded-lg border border-border-subtle bg-surface-raised">
+              <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3 sm:px-5">
+                <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
+                  Event Detail
                 </span>
-                {currentSpan && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleCopySpan}
-                      className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)] sm:h-9 sm:w-9"
-                      title="Copy event data"
-                    >
-                      <Copy className="w-4 h-4" style={{ color: "var(--ink-tertiary)" }} />
-                    </button>
-                    <button
-                      onClick={handleOpenRawEndpoint}
-                      className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)] sm:h-9 sm:w-9"
-                      title="Open trace endpoint"
-                    >
-                      <ExternalLink className="w-4 h-4" style={{ color: "var(--ink-tertiary)" }} />
-                    </button>
-                  </div>
+                {selectedEvent && (
+                  <button
+                    type="button"
+                    onClick={() => void copyText(JSON.stringify(selectedEvent, null, 2), "Event JSON")}
+                    className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)] sm:h-9 sm:w-9"
+                    aria-label="Copy selected event JSON"
+                  >
+                    <Copy className="h-4 w-4 text-ink-tertiary" strokeWidth={1.5} />
+                  </button>
                 )}
               </div>
 
-              {currentSpan ? (
+              {selectedEvent ? (
                 <div className="space-y-5 p-4 sm:p-5">
                   <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <StatusIcon status={currentSpan.status} />
-                      {copyStatus && (
-                        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-                          {copyStatus}
-                        </span>
-                      )}
-                    </div>
-                    <h3 className="font-mono text-[14px] uppercase tracking-wide mb-1">
-                      <span style={{ color: colorForSubstrate(currentSpan.substrate) }}>
-                        {currentSpan.substrate}
-                      </span>
-                      <span style={{ color: "var(--ink-primary)" }}>
-                        .{currentSpan.operation || currentSpan.span_name}
-                      </span>
-                    </h3>
-                    <p
-                      className="font-mono text-[12px]"
-                      style={{ color: "var(--ink-tertiary)" }}
+                    <div
+                      className="mb-1 font-mono text-[14px] uppercase tracking-wide"
+                      style={{ color: colorForEventType(selectedEvent.event_type) }}
                     >
-                      {currentSpan.span_id} · {formatClock(currentSpan.started_at)}
+                      {formatEventLabel(selectedEvent.event_type)}
+                    </div>
+                    <p
+                      className="font-mono text-[12px] text-ink-tertiary"
+                      title={formatAbsoluteTime(selectedEvent.timestamp)}
+                    >
+                      {formatRelativeTime(selectedEvent.timestamp)} - {selectedEvent.timeline_event_id}
                     </p>
                   </div>
 
-                  <div
-                    className="flex flex-wrap gap-3 rounded-lg p-3"
-                    style={{ backgroundColor: "var(--surface-sunken)" }}
-                  >
-                    <Metric icon={<Clock className="w-4 h-4" />} value={formatLatency(currentSpan.latency_ms)} />
-                    <Metric icon={<Cpu className="w-4 h-4" />} value={currentSpan.span_name} />
-                    {selectedMetric !== null && selectedMetric !== undefined && (
-                      <Metric
-                        icon={<Shield className="w-4 h-4" />}
-                        value={String(selectedMetric)}
-                      />
+                  <div className="flex flex-wrap gap-3 rounded-lg bg-surface-sunken p-3">
+                    <Metric icon={<Clock className="h-4 w-4" />} value={formatAbsoluteTime(selectedEvent.timestamp)} />
+                    {selectedEvent.sequence !== null && (
+                      <Metric icon={<CheckCircle2 className="h-4 w-4" />} value={`sequence ${selectedEvent.sequence}`} />
+                    )}
+                    {selectedEvent.correlation_id && (
+                      <Metric icon={<GitBranch className="h-4 w-4" />} value={shortId(selectedEvent.correlation_id)} />
                     )}
                   </div>
 
                   <div className="space-y-4">
-                    <DetailRow label="SPAN NAME" value={currentSpan.span_name} />
-                    <DetailRow label="STATUS" value={currentSpan.status} />
-                    {currentSpan.error && <DetailRow label="ERROR" value={currentSpan.error} />}
-                    {Object.entries(currentSpan.attributes).map(([key, value]) => (
-                      <DetailRow key={key} label={key} value={stringifyValue(value)} />
-                    ))}
-                  </div>
-
-                  <div>
-                    <button
-                      onClick={() => setShowRawJson((open) => !open)}
-                      className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors duration-160"
-                      style={{ color: "var(--ink-tertiary)" }}
-                    >
-                      {showRawJson ? (
-                        <ChevronDown className="w-3 h-3" />
-                      ) : (
-                        <ChevronRight className="w-3 h-3" />
-                      )}
-                      View Raw JSON
-                    </button>
-                    {showRawJson && (
-                      <pre className="mt-3 max-h-[260px] overflow-auto rounded border border-border-subtle bg-surface-sunken p-3 text-[11px] leading-relaxed text-ink-secondary">
-                        {JSON.stringify(currentSpan, null, 2)}
-                      </pre>
+                    <DetailRow label="TIMELINE EVENT ID" value={selectedEvent.timeline_event_id} />
+                    <DetailRow label="SESSION ID" value={selectedEvent.session_id} />
+                    {selectedEvent.dispatch_id && (
+                      <DetailRow label="DISPATCH ID" value={selectedEvent.dispatch_id} />
+                    )}
+                    {selectedEvent.continuity_mode && (
+                      <DetailRow label="CONTINUITY" value={selectedEvent.continuity_mode} />
+                    )}
+                    {selectedEvent.governance_decision_id && (
+                      <DetailRow label="GOVERNANCE DECISION" value={selectedEvent.governance_decision_id} />
+                    )}
+                    {selectedEvent.governance_chain_id && (
+                      <DetailRow label="GOVERNANCE CHAIN" value={selectedEvent.governance_chain_id} />
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-[500px]">
-                  <p
-                    className="font-sans text-[14px] italic"
-                    style={{ color: "var(--ink-tertiary)" }}
-                  >
+                <div className="flex h-[420px] items-center justify-center">
+                  <p className="font-sans text-[14px] italic text-ink-tertiary">
                     Select an event to inspect
                   </p>
                 </div>
@@ -432,33 +441,124 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
           </div>
         </>
       )}
+
+      {showRawJson && (
+        <RawJsonModal
+          response={trace.timeline}
+          onClose={() => setShowRawJson(false)}
+          onCopy={() =>
+            void copyText(JSON.stringify(trace.timeline, null, 2), "Timeline response")
+          }
+        />
+      )}
     </div>
   );
 }
 
-function TraceStatusBadge({ hasErrors }: { hasErrors: boolean }) {
+function mergeTimelineEvents(trace: SessionTraceResponse): TimelineEventView[] {
+  const enrichedSessionIds = new Set(
+    trace.sessionEvents.items.map((event) => event.session_id)
+  );
+  const eventDetails = new Map(
+    trace.sessionEvents.items.map((event) => [event.event_id, event])
+  );
+
+  return trace.timeline.events
+    .filter((event) => enrichedSessionIds.size === 0 || enrichedSessionIds.has(event.session_id))
+    .map((event) => {
+      const details = eventDetails.get(event.timeline_event_id);
+      return {
+        ...event,
+        sequence: details?.sequence ?? null,
+        correlation_id: details?.correlation_id ?? null,
+        continuity_mode: details?.continuity_mode ?? null,
+        governance_decision_id: details?.governance_decision_id ?? null,
+        governance_chain_id: details?.governance_chain_id ?? null,
+        recorded_at: details?.recorded_at ?? null,
+        metadata: details?.metadata ?? {},
+      };
+    })
+    .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+}
+
+function RawJsonModal({
+  response,
+  onClose,
+  onCopy,
+}: {
+  response: SessionTimelineResponse;
+  onClose: () => void;
+  onCopy: () => void;
+}) {
   return (
-    <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium uppercase"
-      style={{
-        backgroundColor: hasErrors ? "rgba(220, 38, 38, 0.1)" : "rgba(22, 163, 74, 0.1)",
-        color: hasErrors ? "var(--red-alert)" : "var(--green-success)",
-      }}
-    >
-      {hasErrors ? "ERRORS RECORDED" : "RECORDED"}
-    </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Raw timeline JSON"
+        className="flex max-h-[86vh] w-full max-w-4xl flex-col rounded-lg border border-border-subtle bg-surface-raised shadow-2xl"
+      >
+        <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
+          <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
+            Raw Timeline Response
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onCopy}
+              className="flex h-10 w-10 items-center justify-center rounded transition-colors hover:bg-surface-sunken"
+              aria-label="Copy raw timeline JSON"
+            >
+              <Copy className="h-4 w-4 text-ink-secondary" strokeWidth={1.5} />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded transition-colors hover:bg-surface-sunken"
+              aria-label="Close raw timeline JSON"
+            >
+              <X className="h-4 w-4 text-ink-secondary" strokeWidth={1.5} />
+            </button>
+          </div>
+        </div>
+        <pre className="overflow-auto p-4 text-[11px] leading-relaxed text-ink-secondary">
+          {JSON.stringify(response, null, 2)}
+        </pre>
+      </div>
+    </div>
   );
 }
 
-function StatusIcon({ status }: { status: string }) {
-  const normalized = status.toLowerCase();
-  if (normalized.includes("error") || normalized.includes("fail")) {
-    return <XCircle className="w-4 h-4 text-red-alert" />;
+function JsonTree({ value }: { value: unknown }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="font-mono text-[11px] text-ink-tertiary">[]</span>;
+    return (
+      <div className="space-y-1 pl-3">
+        {value.map((item, index) => (
+          <div key={index} className="font-mono text-[11px] leading-relaxed text-ink-secondary">
+            <span className="text-ink-tertiary">[{index}]</span>{" "}
+            <JsonTree value={item} />
+          </div>
+        ))}
+      </div>
+    );
   }
-  if (normalized.includes("warn") || normalized.includes("degraded")) {
-    return <AlertTriangle className="w-4 h-4 text-warning-amber" />;
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return <span className="font-mono text-[11px] text-ink-tertiary">{"{}"}</span>;
+    return (
+      <div className="space-y-1 pl-3">
+        {entries.map(([key, item]) => (
+          <div key={key} className="font-mono text-[11px] leading-relaxed text-ink-secondary">
+            <span className="text-gold-primary">{key}</span>: <JsonTree value={item} />
+          </div>
+        ))}
+      </div>
+    );
   }
-  return <CheckCircle2 className="w-4 h-4 text-green-success" />;
+
+  return <span className="font-mono text-[11px] text-ink-primary">{stringifyValue(value)}</span>;
 }
 
 function MetadataField({
@@ -467,25 +567,16 @@ function MetadataField({
   mono = false,
 }: {
   label: string;
-  value: React.ReactNode;
+  value: ReactNode;
   mono?: boolean;
 }) {
   return (
     <div className="flex-1 px-4 first:pl-0 last:pr-0">
-      <div
-        className="font-mono text-[10px] uppercase tracking-[0.18em] mb-1"
-        style={{ color: "var(--ink-tertiary)" }}
-      >
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
         {label}
       </div>
       {typeof value === "string" ? (
-        <div
-          className={cn(
-            "text-[13px] font-medium",
-            mono ? "font-mono" : "font-sans"
-          )}
-          style={{ color: "var(--ink-primary)" }}
-        >
+        <div className={cn("text-[13px] font-medium text-ink-primary", mono ? "font-mono" : "font-sans")}>
           {value}
         </div>
       ) : (
@@ -496,106 +587,112 @@ function MetadataField({
 }
 
 function Divider() {
-  return (
-    <div
-      className="w-px self-stretch mx-2"
-      style={{ backgroundColor: "var(--border-subtle)" }}
-    />
-  );
+  return <div className="mx-2 w-px self-stretch bg-border-subtle" />;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div
-        className="font-mono text-[10px] uppercase tracking-[0.18em] mb-1"
-        style={{ color: "var(--ink-tertiary)" }}
-      >
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
         {label}
       </div>
-      <div
-        className="font-mono text-[13px] break-words"
-        style={{ color: "var(--ink-primary)" }}
-      >
+      <div className="break-words font-mono text-[13px] text-ink-primary">
         {value}
       </div>
     </div>
   );
 }
 
-function Metric({ icon, value }: { icon: React.ReactNode; value: string }) {
+function Metric({ icon, value }: { icon: ReactNode; value: string }) {
   return (
-    <div className="flex items-center gap-2 min-w-0">
+    <div className="flex min-w-0 items-center gap-2">
       <span className="text-ink-tertiary">{icon}</span>
-      <span className="font-mono text-[13px] text-ink-primary truncate">
+      <span className="truncate font-mono text-[13px] text-ink-primary">
         {value}
       </span>
     </div>
   );
 }
 
-function deriveTraceMetadata(spans: OperationalTraceSpan[]) {
-  if (spans.length === 0) {
+function deriveTraceMetadata(
+  sessionId: string | null,
+  events: TimelineEventView[]
+) {
+  if (events.length === 0) {
     return {
       tenantId: "No tenant",
-      firstSpan: "No spans",
-      duration: "No spans",
-      policyChain: "Not recorded",
-      hasErrors: false,
+      firstEvent: sessionId ? "No events" : "No session",
+      duration: "No events",
     };
   }
-  const sorted = [...spans].sort(
-    (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
-  );
-  const first = sorted[0];
-  const startedAt = new Date(first.started_at).getTime();
-  const endedAt = Math.max(...sorted.map((span) => new Date(span.ended_at).getTime()));
-  const policyChain = sorted
-    .map((span) => extractAttribute(span, ["governance_chain_id", "policy_chain", "policy_id", "policyId"]))
-    .find((value): value is string => typeof value === "string" && value.length > 0);
+
+  const first = events[0];
+  const last = events[events.length - 1];
+  const startedAt = new Date(first.timestamp).getTime();
+  const endedAt = new Date(last.timestamp).getTime();
   return {
-    tenantId: first.tenant_id,
-    firstSpan: first.span_name,
+    tenantId: first.tenant_id ?? "No tenant",
+    firstEvent: formatEventLabel(first.event_type),
     duration:
       Number.isNaN(startedAt) || Number.isNaN(endedAt)
         ? "Unknown"
-        : formatLatency(Math.max(0, endedAt - startedAt)),
-    policyChain: policyChain ?? "Not recorded",
-    hasErrors: sorted.some((span) => {
-      const status = span.status.toLowerCase();
-      return status.includes("error") || status.includes("fail");
-    }),
+        : formatDuration(Math.max(0, endedAt - startedAt)),
   };
 }
 
-function extractAttribute(span: OperationalTraceSpan, keys: string[]): unknown {
-  for (const key of keys) {
-    if (key in span.attributes) return span.attributes[key];
-  }
-  return null;
+function colorForEventType(eventType: string): string {
+  if (eventType.startsWith("diagnostic_")) return "#1A4A9A";
+  if (eventType.startsWith("governance_")) return "#C9A84C";
+  if (eventType.startsWith("session_")) return "#8A93A4";
+  if (eventType.startsWith("escalation_")) return "#B8821C";
+  if (eventType.startsWith("sop_")) return "#7C3AED";
+  return "#8A93A4";
 }
 
-function colorForSubstrate(substrate: string): string {
-  return substrateColors[substrate.toUpperCase()] ?? "#8A93A4";
+function formatEventLabel(eventType: string): string {
+  return eventType.replaceAll("_", " ");
 }
 
-function formatClock(value: string): string {
+function formatRelativeTime(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Invalid";
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date);
+  if (Number.isNaN(date.getTime())) return "unknown";
+
+  const diffMs = Date.now() - date.getTime();
+  const absMs = Math.abs(diffMs);
+  const units = [
+    { label: "d", ms: 86_400_000 },
+    { label: "h", ms: 3_600_000 },
+    { label: "m", ms: 60_000 },
+  ];
+
+  for (const unit of units) {
+    if (absMs >= unit.ms) {
+      const valueInUnit = Math.floor(absMs / unit.ms);
+      return diffMs >= 0 ? `${valueInUnit}${unit.label} ago` : `in ${valueInUnit}${unit.label}`;
+    }
+  }
+
+  return diffMs >= 0 ? "just now" : "in less than 1m";
 }
 
-function formatLatency(milliseconds: number): string {
+function formatAbsoluteTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  return date.toISOString();
+}
+
+function formatDuration(milliseconds: number): string {
   if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`;
   const totalSeconds = Math.round(milliseconds / 1000);
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
+}
+
+function shortId(value: string): string {
+  if (value.length <= 14) return value;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
 function stringifyValue(value: unknown): string {
