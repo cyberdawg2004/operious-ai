@@ -14,6 +14,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.operious.com"),
   title: "Operious AI | Deterministic Multi-Agent Operating System",
   description:
     "Enterprise governed execution infrastructure for Fortune 500 companies in regulated industries.",

@@ -10,7 +10,7 @@ export type LinkGroup = {
 };
 
 export const commandCenterUrl =
-  process.env.NEXT_PUBLIC_COMMAND_CENTER_URL ?? "https://command.operious.ai";
+  process.env.NEXT_PUBLIC_COMMAND_CENTER_URL ?? "https://app.operious.com";
 
 export const platformLinks: SiteLink[] = [
   {

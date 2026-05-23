@@ -44,18 +44,18 @@ export function Footer() {
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
           <a
-            href="mailto:enterprise@operious.ai"
+            href="mailto:hello@operious.com"
             className="flex min-h-11 items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
           >
             <Mail className="h-3 w-3" />
-            enterprise@operious.ai
+            hello@operious.com
           </a>
           <a
-            href="mailto:security@operious.ai"
+            href="mailto:security@operious.com"
             className="flex min-h-11 items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
           >
             <Mail className="h-3 w-3" />
-            security@operious.ai
+            security@operious.com
           </a>
         </div>
 

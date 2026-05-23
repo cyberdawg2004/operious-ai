@@ -1,32 +1,281 @@
 # Operious AI Consolidated Master Plan
 
-Updated baseline after Phase 6-D plus Pre-6-E Enterprise Trust
-Hardening phases A-H and the re-run final Pre-6-E gate. This document
-is the canonical handoff plan for the next Codex session.
+Updated baseline after Phase 6-D, Pre-6-E Enterprise Trust Hardening
+phases A-H, the re-run final Pre-6-E gate, and Phase 6-E Frontend
+Hydration, plus the Phase 3-D.1 ApprovalRecord projection follow-up.
+This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
-- Tests: 2,192 passed, 2 skipped, 0 xfailed after
-  Pre-6-E Enterprise Trust Hardening phases A-H and the final gate.
+- Tests: 2,206 passed, 2 skipped, 0 xfailed after Phase 3-D.1
+  ApprovalRecord projection.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
-  closed. Phase 6-E may begin after explicit user confirmation.
+  closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 676 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
 - Alembic current: `0031_dead_letter_tasks (head)` on the
-  `operious_test` database after final-gate verification.
+  `operious_test` database after Phase 3-D.1 verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
-  Phase 3-D, Phase 3-E, Phase 4-A, Phase 4-B, Phase 4-C, and
-  Phase 5-A, Phase 5-B, Phase 5-C, Phase 6-A, Phase 6-B,
-  Phase 6-C, Phase 6-D, and the Pre-6-E constitutional correctness
-  wedge, plus Pre-6-E Enterprise Trust Hardening Phase A,
+  Phase 3-D, Phase 3-D.1, Phase 3-E, Phase 4-A, Phase 4-B,
+  Phase 4-C, and Phase 5-A, Phase 5-B, Phase 5-C, Phase 6-A, Phase 6-B,
+  Phase 6-C, Phase 6-D, Phase 6-E, and the Pre-6-E constitutional
+  correctness wedge, plus Pre-6-E Enterprise Trust Hardening Phase A,
   Phase B, Phase C, Phase D, Phase E, Phase F, Phase G, Phase H, and
   the final Pre-6-E gate.
-- Next phase: Phase 6-E Frontend Hydration, queued pending explicit
-  user confirmation.
+- Current frontend gate: Command Center 2 Critical Fixes Phase E Final
+  Gate has passed local build/deploy checks, but remains open for live
+  Auth0 environment configuration and custom-domain confirmation.
+  Phases A-D are closed and pushed to `phase-2-2-stabilized`.
+- Public domain plan: Marketing will live at `https://www.operious.com`;
+  Command Center will live at `https://app.operious.com`.
+- Official public inboxes: `ops@operious.com`, `info@operious.com`,
+  `security@operious.com`, `hello@operious.com`, and
+  `careers@operious.com`.
+
+## 2026-05-24 Frontend Final-Gate and Deployment Report
+
+This report captures the frontend and deployment work completed in the
+current Codex session across `apps/marketing2/frontend` and
+`apps/command-center2/frontend`. It was an out-of-band frontend
+execution thread; Phase 6-E later reconciled the Command Center
+hydration work with the master-plan baseline while the marketing and
+deployment portions remain out of the backend hardening line.
+
+### Scope Rules Observed
+
+- Backend code was not modified during the frontend UX, config, and
+  deployment work.
+- Verification avoided headless Chrome, Playwright, Puppeteer, browser
+  screenshots, and any GUI browser invocation.
+- Verification used source inspection, `npm run build`, `npm run lint`,
+  Vercel CLI output, and `curl`.
+- Vercel production deployment was explicitly requested by the user after
+  the earlier instruction to avoid deployment was superseded.
+
+### Phase A Through Phase F Marketing and Command Center Execution
+
+- Phase A verification/audit was treated as a read-only phase before code
+  work. The target apps were inspected for build health, route coverage,
+  functional links, placeholder behavior, and mock or non-functional UI
+  patterns.
+- Phase B removed Command Center mock behavior and replaced mock-style
+  surfaces with backend API-backed loading, empty, and error states where
+  endpoints existed. Where no backend endpoint existed, the UI uses real
+  pending-integration empty states rather than fabricated data.
+- Phase C built the Marketing 2 App Router structure with real pages for
+  all required marketing, platform, industry, trust, insight, pricing,
+  company, and legal destinations.
+- Phase D wrote the strategic marketing content layer positioning Operious
+  as governed execution infrastructure for regulated enterprise
+  operations. The content emphasizes constitutional governance,
+  reconstructible organizational truth, deterministic multi-agent
+  coordination, tenant isolation, append-only event fabric, replay, and
+  honest compliance posture.
+- Phase E wired functional interactions:
+  - Header `Sign In` opens the Command Center deployment target.
+  - `Request Access`, architecture review, and industry CTAs route to the
+    enterprise contact page.
+  - Article cards route to real article pages.
+  - Footer links resolve to real pages.
+  - The contact form posts to `/api/contact`, validates input, returns
+    success and error states, and can forward to a configured intake
+    endpoint through `CONTACT_ENDPOINT_URL`.
+- Phase F final-gate verification was run locally and in production.
+  Local build and lint passed for both apps. Production deployment was
+  completed for both apps on Vercel and verified with `curl`.
+
+### Marketing 2 Routes Implemented and Verified
+
+The Marketing 2 deployment contains and served HTTP 200 for all required
+routes:
+
+- `/`
+- `/platform`
+- `/platform/governance`
+- `/platform/replay`
+- `/platform/agents`
+- `/industries`
+- `/industries/hardware`
+- `/industries/financial-services`
+- `/industries/healthcare`
+- `/industries/insurance`
+- `/industries/telecom`
+- `/industries/logistics`
+- `/industries/public-sector`
+- `/trust`
+- `/trust/architecture`
+- `/trust/compliance`
+- `/insights`
+- `/insights/constitutional-ai-governance`
+- `/insights/reconstructible-truth`
+- `/insights/beyond-llm-wrappers`
+- `/insights/audit-trail-as-product`
+- `/insights/multi-language-operations`
+- `/pricing`
+- `/company`
+- `/company/contact`
+- `/legal/privacy`
+- `/legal/terms`
+- `/legal/security`
+
+Content coverage now includes:
+
+- Home page with governed execution infrastructure positioning.
+- Platform overview plus governance, replay, and agents deep dives.
+- Industries overview plus hardware, financial services, healthcare,
+  insurance, telecommunications, logistics, and public-sector pages.
+- Trust overview plus security architecture and compliance-roadmap pages.
+- Five long-form insights articles:
+  constitutional AI governance, reconstructible truth, beyond LLM
+  wrappers, audit trail as product, and multi-language operations.
+- Pricing page with Foundation, Operational, and Enterprise tiers using
+  custom-pricing language rather than fabricated dollar amounts.
+- Company and contact pages.
+- Privacy, terms, and security legal pages marked as May 2026 templates.
+
+### Enterprise UX and Brand Polish
+
+The subsequent frontend polish directive completed the following:
+
+- Added a unified code-native KernelSeal logo component to both apps.
+- Updated both app nav surfaces to use the shared logo component.
+- Standardized the frontend typography around a premium geometric sans
+  stack with Geist/Inter-style application typography and IBM Plex Mono
+  for technical labels.
+- Reworked the Command Center shell into a denser enterprise SaaS layout:
+  collapsible sidebar, sticky top header, breadcrumbs, operator controls,
+  command button, and mobile drawer behavior.
+- Increased data density and table hierarchy in Command Center surfaces
+  including operations, traces, runtime settings, knowledge base, and
+  cognition views.
+- Reworked the Marketing home page with professional motion using
+  `framer-motion`, staggered reveal primitives, stronger CTAs, social
+  proof/domain strip, feature/value sections, trust, insights, and final
+  conversion CTA.
+- Completed mobile touch-target and layout polish:
+  - Minimum 44px mobile touch targets enforced through global CSS.
+  - Mobile drawers lock both `body` and `documentElement` scrolling.
+  - Mobile navigation drawers use overscroll containment and smooth
+    transform transitions.
+  - Dense Command Center tables scroll horizontally where stacking would
+    damage data fidelity.
+  - Legacy Command Center views now use responsive padding and mobile
+    controls.
+  - Footer and cookie-consent controls have mobile-safe hit areas.
+
+### Next.js Performance and Build Configuration
+
+Both `apps/marketing2/frontend/next.config.ts` and
+`apps/command-center2/frontend/next.config.ts` were updated for the final
+frontend gate:
+
+- `experimental.workerThreads` is set to `false`.
+- `experimental.cpus` is set to `1`.
+- Development webpack devtools are disabled by setting
+  `config.devtool = false` when `dev` is true.
+- `outputFileTracingRoot` and `turbopack.root` are aligned to the repo
+  root to avoid the Vercel root-mismatch warning.
+- `swcMinify` was intentionally not left in the final config because
+  Next.js 16.2.6 emits an invalid-config warning for that key. SWC
+  minification is already the default in modern Next.js, and the final
+  gate required no missing-key warnings.
+
+### Local Verification Results
+
+Final local verification after config cleanup:
+
+- `apps/marketing2/frontend`
+  - `npm run build`: passed.
+  - `npm run lint`: passed.
+  - Build rendered 32 app routes including the 28 required marketing
+    routes plus Next internals/dynamic contact surfaces.
+- `apps/command-center2/frontend`
+  - `npm run build`: passed.
+  - `npm run lint`: passed.
+  - Build rendered the Command Center root and not-found route.
+
+The existing frontend invariant test command was also run:
+
+- Command: `npm run test:frontend`
+- Result: 59 tests executed, 57 passed, 2 failed.
+- The failures were not caused by the `marketing2` or `command-center2`
+  config changes. They are legacy path assumptions in `tests-frontend`:
+  - The demo identity isolation test expects
+    `apps/command-center/src/app/providers.tsx`.
+  - The marketing isolation test expects TypeScript files under
+    `apps/marketing/src`.
+- Those tests currently target the older `apps/marketing` and
+  `apps/command-center` paths rather than the `*2/frontend` apps.
+
+### Vercel Project Configuration Changes
+
+The existing Vercel projects were still configured for deleted or absent
+legacy roots:
+
+- `operious-ai-marketing` originally pointed to `apps/marketing`.
+- `operious-ai-command-center` originally pointed to
+  `apps/command-center`.
+
+The project roots were updated through the Vercel API:
+
+- `operious-ai-marketing` root directory:
+  `apps/marketing2/frontend`
+- `operious-ai-command-center` root directory:
+  `apps/command-center2/frontend`
+
+Both projects remain on Vercel Node.js `24.x`.
+
+Planned custom production domains:
+
+- Marketing site: `https://www.operious.com`
+- Command Center: `https://app.operious.com`
+
+### Production Deployment Results
+
+Marketing production deployment:
+
+- Project: `operious-ai-marketing`
+- Production alias: `https://operious-ai-marketing.vercel.app`
+- Deployment URL:
+  `https://operious-ai-marketing-k2epohnd6-cyberdawg2004s-projects.vercel.app`
+- Deployment id: `dpl_7YVsZPxtwD5oeESWH1SNkSXGamve`
+- Ready state: `READY`
+- Production curl checks:
+  - Home page returned HTTP 200.
+  - `/insights/reconstructible-truth` returned HTTP 200.
+  - All 28 required marketing routes returned HTTP 200.
+  - `/api/contact` accepted a live JSON POST and returned HTTP 202 with
+    request id `e361727f-73e9-429f-b213-2f86b19d5e79`.
+
+Command Center production deployment:
+
+- Project: `operious-ai-command-center`
+- Production alias: `https://operious-ai-command-center.vercel.app`
+- Deployment URL:
+  `https://operious-ai-command-center-mwjs0fgid-cyberdawg2004s-projects.vercel.app`
+- Deployment id: `dpl_J727ctPShQj95YfF1RuHZp3CGddz`
+- Ready state: `READY`
+- Production curl check:
+  - Home page returned HTTP 200.
+
+### Remaining Caveats and Follow-Ups
+
+- Browser/manual visual verification was intentionally not performed in
+  this session because the user explicitly prohibited browser,
+  screenshot, Playwright, Puppeteer, and Chrome verification.
+- The `tests-frontend` suite should be updated in a future frontend
+  invariant maintenance pass so it targets `apps/marketing2/frontend`
+  and `apps/command-center2/frontend`, or the legacy projects should be
+  restored if those tests are meant to stay canonical.
+- Vercel project root directory changes are deployment-critical and
+  should be treated as the new production project configuration.
+- The backend constitutional baseline remains the source of truth for
+  backend phase closure. This frontend deployment report does not close
+  any backend phase by itself.
 
 ## Completed Work Ledger
 
@@ -371,15 +620,41 @@ is the canonical handoff plan for the next Codex session.
 - [x] Verified baseline after closure: 2,046 passed, 2 skipped; smoke
   tests 4/4 green; Alembic current `0018_approval_records (head)`.
 
-## Phase 3-D.1 Follow-Up - Scheduled
+## Phase 3-D.1 Follow-Up - Done
 
-- [ ] Project SOP intelligence `ApprovalRecord` proposals into the
-  canonical event fabric through an `app.runtime` projection bridge.
-- [ ] Preserve proposal-only authority: projection must not apply,
-  approve, reject, or mutate `tenant_knowledge_documents`.
-- [ ] Keep this non-blocking for Phase 4, but land it before the demo
-  trace-inspector milestone so proposal lineage appears in forensic
-  reconstruction.
+- [x] Closed on 2026-05-24 before the demo Trace Inspector milestone.
+- [x] Added deterministic UUID5 approval-event identity via
+  `derive_approval_event_id`, with one event identity per
+  `ApprovalRecord` lifecycle status.
+- [x] Added projection-only SOP approval operational acts:
+  `oi_sop:approval_propose`, `oi_sop:approval_approve`,
+  `oi_sop:approval_reject`, and `oi_sop:approval_apply`.
+- [x] Added `SOPApprovalOperationalEventProjector` in `app.runtime`.
+  The bridge reads persisted `ApprovalRecord` state and appends
+  canonical `operational_events`; source SOP Intelligence runtime still
+  does not import `app.events`.
+- [x] Preserved proposal-only authority. Projection does not approve,
+  reject, apply, or mutate `tenant_knowledge_documents`.
+- [x] Added lineage normalization from SOP approval projection events to
+  evidence session roots using
+  `sop_approval_evidences_session`, so proposal lineage appears in
+  canonical forensic reconstruction.
+- [x] Wired the SOP intelligence worker to compose the projection
+  through an `app.runtime` factory after proposal creation. Celery
+  remains transport only; the worker does not compose
+  `OperationalEventRuntime` directly.
+- [x] Extended the Anker PowerCore full ticket lifecycle proof so the
+  canonical sequence includes a proposal-only SOP approval event linked
+  back to the evidence session.
+- [x] Verification completed:
+  - Focused Phase 3-D.1 tests: 40 passed.
+  - Operational fabric closure and projection tests: 16 passed.
+  - Required invariant subset: 162 passed, 2 skipped.
+  - Smoke tests: 4 passed.
+  - Alembic current: `0031_dead_letter_tasks (head)`.
+  - Full backend regression with asyncpg `TEST_DATABASE_URL`:
+    2,206 passed, 2 skipped.
+  - Pyright across `apps/backend/app`: 0 errors, 676 warnings.
 
 ## Phase 2.5 - Tenant Infrastructure + Boundary/Coordination Closure
 
@@ -1211,8 +1486,8 @@ hydration exposes the platform to enterprise operators.
 #### Final Pre-6-E Gate - Done
 
 - [x] Re-ran the Final Pre-6-E gate on 2026-05-23 before Phase 6-E.
-  Phase 6-E remains untouched and queued pending explicit user
-  confirmation.
+  At that gate, Phase 6-E remained untouched and queued pending explicit
+  user confirmation.
 - [x] Verified Alembic current at `0031_dead_letter_tasks (head)` on
   the `operious_test` database.
 - [x] Ran the expanded final invariant bundle, including router,
@@ -1231,19 +1506,207 @@ hydration exposes the platform to enterprise operators.
   guards. Pillars are assessed at 9/10 or better, with infrastructure
   physics upgraded to elite posture.
 
-### 6-E: Frontend Hydration - Items 7, PR_W15 - Queued
+### 6-E: Frontend Hydration - Items 7, PR_W15 - Done
 
-- Not started. Pre-6-E Enterprise Trust Hardening Phase H and the final
-  gate are closed; begin Phase 6-E only after explicit user
-  confirmation.
-- Command Center connected to real APIs.
-- Trace Inspector renders `operational_events`.
-- Operations Queue renders escalation records.
-- Cognition Hub renders ApprovalRecord pipeline.
-- Channel configuration UI for tenant-owned credentials.
-- Knowledge base UI for SOP upload, indexing status, and versioning.
-- Policy editor UI for governance parameters.
-- Signed session auth hydration.
+- [x] Closed on 2026-05-24 after explicit user confirmation to start
+  Phase 6-E.
+- [x] Added tenant-scoped read-only operational event API hydration
+  endpoints under `/api/v1/operational-events` and
+  `/api/v1/operational-events/replay`, preserving router -> service ->
+  runtime -> persistence layering.
+- [x] Trace Inspector now renders canonical `operational_events`,
+  replay status, findings, causal lineage edges, unresolved replay
+  edges, event metadata, and raw event payloads through the existing
+  replay runtime authority.
+- [x] Operations Queue now renders escalation records and calls the real
+  approve/reject endpoints, with trace lookup by
+  `governance_decision_id`.
+- [x] Cognition Hub remains wired to the ApprovalRecord pipeline and
+  lifecycle approve/apply flow.
+- [x] Channel configuration UI can create, update, and verify
+  tenant-owned channel credentials without reading, returning, or
+  displaying stored secrets.
+- [x] Knowledge Base can upload/update/list SOP documents, show indexing
+  and version status, and trigger ingestion.
+- [x] Governance Policies UI can create and update tenant governance
+  policy parameters.
+- [x] Settings hydrates signed session authority through `/auth/me` and
+  supports bearer-token save, clear, and refresh controls.
+- [x] No database migration was required; Alembic remains at
+  `0031_dead_letter_tasks (head)`.
+- [x] Replay, governance, tenant isolation, chronology, deterministic
+  lineage, and Celery transport constraints were preserved.
+- [x] Verification completed:
+  - Command Center `npm run lint`: passed.
+  - Command Center `npm run build`: passed.
+  - Focused operational event router and router invariant tests:
+    89 passed, 2 skipped.
+  - Required invariant subset: 162 passed, 2 skipped.
+  - Smoke tests: 4 passed.
+  - Full backend regression with asyncpg `TEST_DATABASE_URL`:
+    2,201 passed, 2 skipped.
+  - Pyright across `apps/backend/app`: 0 errors, 676 warnings.
+
+## Queued Pre-Wedge Command Center 2 Critical Fixes
+
+These phases are queued before reliability/security wedges begin and
+before the Command Center is demo-ready. They target
+`apps/command-center2/frontend/` only unless Phase A endpoint
+verification proves a backend contract mismatch that requires a
+separate confirmed backend wedge.
+
+Rules of engagement:
+
+- Zero regression tolerance: everything Phase 6-E built must still work.
+- Surgical precision: touch only what is named in each phase.
+- Commit after every phase and push to `phase-2-2-stabilized`.
+- Pause and wait for human confirmation before each next phase.
+- No mocks, no hardcoded tokens, and no placeholder tenant IDs.
+
+### Command Center 2 Phase A - Endpoint Verification - Done
+
+- [x] Closed read-only with no code changes.
+- [x] Confirmed live backend endpoints:
+  - `GET /api/v1/health`
+  - `GET /api/v1/session/sessions`
+  - `GET /api/v1/session/{session_id}/timeline`
+  - `GET /api/v1/session/sessions/{session_id}/events`
+- [x] Confirmed missing endpoints that must not be called:
+  - `/api/v1/sessions`
+  - `/api/v1/escalations`
+  - `/api/v1/timeline/{session_id}`
+  - `/api/v1/operational-events/replay`
+
+### Command Center 2 Phase B - Operations Queue Sessions Primary - Done
+
+- [x] Closed and pushed as commit
+  `a8d677c frontend: operations queue wired to /api/v1/session/sessions`.
+- [x] Operations Queue primary source is
+  `GET /api/v1/session/sessions?limit=50`.
+- [x] Rows render `session_id`, `external_handle`, lifecycle badge,
+  relative `opened_at`, `sequence_head`, and `View Trace`.
+- [x] Replaced escalation tabs with lifecycle filter dropdown:
+  All, Processing, Resolved, Suspended, and Failed.
+- [x] Search filters by `session_id` and `external_handle`.
+- [x] Manual refresh and 30-second interval refresh use real refetches.
+- [x] Empty/error states contain no mocks.
+
+### Command Center 2 Phase C - Trace Inspector Endpoint Wiring - Done
+
+- [x] Closed and pushed as commit
+  `68e8740 frontend: trace inspector wired to /api/v1/session/{session_id}/timeline`.
+- [x] Trace Inspector primary source is
+  `GET /api/v1/session/{session_id}/timeline`.
+- [x] It also fetches
+  `GET /api/v1/session/sessions/{session_id}/events` for deeper
+  causality detail.
+- [x] Timeline nodes render event type, relative/absolute timestamp,
+  dispatch id, payload expansion, color coding by event prefix, raw JSON
+  modal, and clipboard actions.
+- [x] Removed Trace Inspector dependence on
+  `/api/v1/operational-events/replay`.
+
+### Command Center 2 Phase D - Auth0 Login Flow Completion - Done
+
+- [x] Closed and pushed as commit
+  `e4951f1 frontend: auth0 login flow completion`.
+- [x] Auth route exports `GET = handleAuth()` for
+  `@auth0/nextjs-auth0` v3.
+- [x] Added Auth0 route protection middleware.
+- [x] Sign-in redirects to `/api/auth/login?returnTo=/dashboard`.
+- [x] Added shared API client token hydration through
+  `/api/auth/access-token` and tenant header attachment.
+- [x] Replaced sidebar user display with Auth0 `useUser()` data and
+  sign-out link.
+- [x] Required Auth0 dashboard URLs remain:
+  callback `https://app.operious.com/api/auth/callback` and
+  `http://localhost:3000/api/auth/callback`; logout
+  `https://app.operious.com` and `http://localhost:3000`; web origins
+  `https://app.operious.com` and `http://localhost:3000`.
+
+### Command Center 2 Phase E - Final Gate - Open On External Auth/Domain
+
+- [x] Command Center `npm run lint`: passed.
+- [x] Command Center `npm run build`: passed.
+- [x] Marketing `npm run lint`: passed after official domain/email
+  updates.
+- [x] Marketing `npm run build`: passed after official domain/email
+  updates.
+- [x] Local dev/browser verification is intentionally skipped unless the
+  user explicitly asks for it, because the prior dev-server pass caused
+  laptop lag and a hard restart.
+- [x] Public site domain/email updates:
+  - Marketing metadata base: `https://www.operious.com`.
+  - Command Center metadata base: `https://app.operious.com`.
+  - Marketing sign-in fallback target: `https://app.operious.com`.
+  - Official public inboxes used in the site:
+    `ops@operious.com`, `info@operious.com`,
+    `security@operious.com`, `hello@operious.com`, and
+    `careers@operious.com`.
+- [x] Added Command Center `.npmrc` with `legacy-peer-deps=true` so
+  Vercel production installs match the local Auth0 v3 / Next 16 build
+  resolution.
+- [x] Added a fail-closed Auth0 environment guard in middleware so
+  missing production Auth0 env redirects to sign-in instead of throwing
+  `MIDDLEWARE_INVOCATION_FAILED`.
+- [x] Wrapped the Auth0 v3 App Router handler so Next 16 async route
+  params are resolved before delegating to `handleAuth()`.
+- [x] Production deploy to the intended Vercel project succeeded:
+  - Project: `operious-ai-command-center`
+  - Deployment id: `dpl_2Qbd7tLYb8pDuXTWCyyB7N4aWei6`
+  - Deployment URL:
+    `https://operious-ai-command-center-54qw4tx0b-cyberdawg2004s-projects.vercel.app`
+  - Production alias:
+    `https://operious-ai-command-center.vercel.app`
+  - Ready state: `READY`
+- [x] Lightweight production HTTP checks:
+  - `https://operious-ai-command-center.vercel.app/` returned HTTP 307
+    to `/sign-in?auth=unconfigured`.
+  - `/sign-in` returned HTTP 200.
+  - `/api/auth/login` returned HTTP 307 to
+    `/sign-in?auth=unconfigured` while Auth0 production env is absent.
+- [ ] Vercel production env is still missing the Auth0 v3 server-side
+  variables required for real login:
+  `AUTH0_SECRET`, `AUTH0_BASE_URL`, `AUTH0_ISSUER_BASE_URL`,
+  `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`,
+  `NEXT_PUBLIC_API_BASE_URL`, and `NEXT_PUBLIC_DEFAULT_TENANT_ID`.
+  Existing production env currently uses older `NEXT_PUBLIC_AUTH0_*`
+  and `NEXT_PUBLIC_OPERIOUS_*` names.
+- [ ] `https://app.operious.com` does not resolve yet; DNS/custom-domain
+  aliasing remains external setup.
+- [ ] Live browser/Auth0 flow confirmation remains open because local
+  dev/browser verification was skipped per user instruction after the
+  laptop lag/hard restart.
+
+## Queued Roadmap After Command Center 2 Fixes
+
+- Phase 6-F: Anker demo scenario. Complete the demo path now that
+  Phase 3-D.1 makes SOP approval lineage visible in canonical replay.
+- Wedge 1 - Reliability Before Anker Goes Live:
+  ASGI-level webhook body enforcement before `await request.body()`;
+  escalation outbox claim/publish/mark/recover discipline; webhook
+  freshness and replay windows for all four channel adapters. Expected
+  effort: one Codex session and one escalation-outbox migration.
+- Wedge 2 - Celery/Redis Hardening:
+  `task_ignore_result=True` for fire-and-forget tasks, `result_expires`,
+  queue-depth admission before publishing, Redis memory policy and
+  Upstash configuration documentation, and DLQ routing for
+  dead-lettered tasks. Expected effort: one Codex session, no migration.
+- Wedge 3 - UUID4 Fallback Elimination:
+  eliminate UUID4 fallbacks in arbitration, supervisor, boundary, and
+  session substrates; add invariants that fail if those paths call
+  `uuid.uuid4()` without an explicit deterministic seed. Dispatch path
+  is already clean. Expected effort: one Codex session, no migration.
+- Wedge 4 - Multi-Tenant Security Before Second Client:
+  `ALTER TABLE ... FORCE ROW LEVEL SECURITY` on tenant-scoped tables and
+  remove nullable tenant allowance from those tables. Must land before a
+  second enterprise client. Expected effort: one migration and careful
+  testing.
+- Vector retrieval SQL-native:
+  push `LIMIT`, tenant filter, and ranking to Postgres instead of
+  Python-side slicing on the full knowledge corpus. Low priority until
+  Anker uploads significant SOP volume.
+- Pilot launch follows the above sequence.
 
 ## Platform-Owned vs Tenant-Owned
 
@@ -1271,13 +1734,13 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Final Pre-6-E gate closed; Phase 6-E Frontend Hydration is queued pending user confirmation.
-Current test baseline: 2,192 passed, 2 skipped; smoke tests 4/4 green.
+Current phase: Command Center 2 Critical Fixes Phase E has passed build/deploy checks but remains open for live Auth0 env and app.operious.com DNS/custom-domain confirmation.
+Current test baseline: 2,206 passed, 2 skipped; smoke tests 4/4 green.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
 Current Alembic head: 0031_dead_letter_tasks.
 
-Completed before this phase:
-- Phase 6-A through Phase 6-D are closed.
+Completed before the next phase:
+- Phase 6-A through Phase 6-E are closed.
 - Pre-6-E constitutional correctness wedge is closed.
 - Pre-6-E Enterprise Trust Phase A is closed: Governance non-optional and admission-bound.
 - Pre-6-E Enterprise Trust Phase B is closed: Chronology append-only with approval lineage and cryptographic chains.
@@ -1289,9 +1752,38 @@ Completed before this phase:
 - Pre-6-E Enterprise Trust Phase H is closed: Celery backlog physics.
 - Final Pre-6-E gate is closed and was re-run on 2026-05-23:
   full backend, Pyright, invariants, smoke, Alembic, and audit rerun.
+- Phase 6-E Frontend Hydration is closed on 2026-05-24:
+  Command Center API hydration, Trace Inspector operational_events replay,
+  escalation queue actions, tenant channel configuration, knowledge
+  ingestion, governance policy editing, and signed auth hydration.
+- Phase 3-D.1 ApprovalRecord projection is closed on 2026-05-24:
+  SOP approval proposals project into canonical operational_events via
+  an app.runtime bridge, preserve proposal-only authority, and link
+  approval lineage to evidence sessions in replay.
 
-Remaining before Phase 6-E:
-- Explicit user confirmation to start Phase 6-E.
+- Command Center 2 Critical Fixes Phase A is closed:
+  live endpoint verification proved the `/api/v1/session/*` routes and
+  proved `/sessions`, `/escalations`, `/timeline/{session_id}`, and
+  `/operational-events/replay` are not live backend contracts.
+- Command Center 2 Critical Fixes Phase B is closed and pushed:
+  Operations Queue uses `GET /api/v1/session/sessions`.
+- Command Center 2 Critical Fixes Phase C is closed and pushed:
+  Trace Inspector uses
+  `GET /api/v1/session/{session_id}/timeline` plus the session events
+  endpoint for deeper causality detail.
+- Command Center 2 Critical Fixes Phase D is closed and pushed:
+  Auth0 v3 login, route protection, token hydration, and real user
+  display are wired.
+
+Remaining before the next wedge:
+- Configure the missing Vercel production Auth0 env and map
+  `https://app.operious.com` to the Command Center deployment.
+- Re-run live Auth0/browser flow confirmation after env and DNS are in
+  place, without starting a local dev server unless the user explicitly
+  allows it.
+- Do not start Phase 6-F, Wedge 1, Wedge 2, Wedge 3, Wedge 4, or vector
+  retrieval SQL-native until their phase boundaries are explicitly
+  confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -1315,7 +1807,9 @@ pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coor
 pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
-Do not start Phase 6-E until the user confirms the next phase boundary.
+Do not start the next master-plan wedge until the user confirms the
+phase boundary. The current boundary is Command Center 2 Critical
+Fixes Phase E - Final Gate.
 ```
 
 ## New Chat Hyperprompt
@@ -1325,7 +1819,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Final Pre-6-E gate closed; Phase 6-E Frontend Hydration is queued pending user confirmation.
+Current phase: Command Center 2 Critical Fixes Phase E has passed build/deploy checks but remains open for live Auth0 env and app.operious.com DNS/custom-domain confirmation.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -1361,11 +1855,11 @@ Current source of truth:
 - Pre-6-E Enterprise Trust Phase G is closed.
 - Pre-6-E Enterprise Trust Phase H is closed.
 - Final Pre-6-E gate is closed and was re-run on 2026-05-23.
-- Phase 6-E is queued and must not start until the user explicitly
-  confirms that phase boundary.
+- Phase 6-E is closed.
+- Phase 3-D.1 ApprovalRecord projection follow-up is closed.
 
 Current verified baseline:
-- Tests: 2,192 passed, 2 skipped, 0 xfailed.
+- Tests: 2,206 passed, 2 skipped, 0 xfailed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
 - Pyright warnings: 676; warnings must not grow phase over phase.
@@ -1383,6 +1877,8 @@ Current verified baseline:
 - Phase 3-B complete: QA Agent - Item 6.
 - Phase 3-C complete: Escalation Agent + Human Approval Queue - Item 4.
 - Phase 3-D complete: SOP Intelligence Agent - Item 5.
+- Phase 3-D.1 complete: ApprovalRecord projection into canonical event
+  fabric.
 - Phase 3-E complete: Phase 3 Closure Gate.
 - Phase 4-A complete: Arbitration Runtime Wiring - PR_W6.
 - Phase 4-B complete: Multi-Agent Coordination Hardening - PR_W8.
@@ -1394,6 +1890,7 @@ Current verified baseline:
 - Phase 6-B complete: Execution Governance Hardening - PR_W10.
 - Phase 6-C complete: Distributed Runtime Resilience - PR_W11.
 - Phase 6-D complete: Multi-Tenant Production Hardening - PR_W14.
+- Phase 6-E complete: Frontend Hydration - Items 7, PR_W15.
 - Pre-6-E Phase A complete: Governance Non-Optional and Admission-Bound.
 - Pre-6-E Phase B complete: Chronology Append-Only with Cryptographic Lineage.
 - Pre-6-E Phase C complete: UUID5 Determinism in All Lineage Paths.
@@ -1404,18 +1901,44 @@ Current verified baseline:
 - Pre-6-E Phase H complete: Celery Backlog Physics.
 - Final Pre-6-E gate complete and re-run on 2026-05-23: full backend,
   Pyright, invariants, smoke, Alembic, and enterprise-trust audit rerun.
-- Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
-  canonical event fabric before the demo trace-inspector milestone.
+- Phase 6-E complete on 2026-05-24: Command Center API hydration,
+  operational event replay Trace Inspector, escalation queue actions,
+  tenant channel configuration, knowledge ingestion, governance policy
+  editing, and signed auth hydration.
+- Phase 3-D.1 complete on 2026-05-24: ApprovalRecord proposals project
+  into canonical operational_events via app.runtime; replay links SOP
+  approval lineage back to evidence sessions; proposal-only authority is
+  preserved.
 
 Goal for this chat:
-Await user confirmation, then start Phase 6-E only.
+Complete the remaining external Command Center 2 Phase E checks after
+Auth0 production env and `app.operious.com` DNS/custom-domain mapping
+are configured. Do not start a local dev server unless the user
+explicitly allows it.
 
-Phase 6-E scope:
-- Frontend Hydration - Items 7, PR_W15.
-- Do not start Phase 6-E until the user confirms the phase boundary.
+Current Command Center 2 status:
+- Phase A complete: endpoint verification confirmed
+  `/api/v1/session/sessions`,
+  `/api/v1/session/{session_id}/timeline`, and
+  `/api/v1/session/sessions/{session_id}/events`.
+- Phase B complete and pushed:
+  `a8d677c frontend: operations queue wired to /api/v1/session/sessions`.
+- Phase C complete and pushed:
+  `68e8740 frontend: trace inspector wired to /api/v1/session/{session_id}/timeline`.
+- Phase D complete and pushed:
+  `e4951f1 frontend: auth0 login flow completion`.
+- Phase E build/deploy complete:
+  `dpl_2Qbd7tLYb8pDuXTWCyyB7N4aWei6` is READY and aliased at
+  `https://operious-ai-command-center.vercel.app`.
+- Phase E open items: configure missing Vercel Auth0 v3 env, map
+  `https://app.operious.com`, and then verify the live Auth0 browser
+  flow.
 
-Queued after Phase 6-E:
-- TBD by the next confirmed master-plan wedge.
+Queued next:
+- After Command Center 2 fixes: Phase 6-F Anker demo scenario, then
+  Wedge 1 Reliability, Wedge 2 Celery/Redis Hardening, Wedge 3 UUID4
+  Fallback Elimination, Wedge 4 RLS Force, Vector Retrieval SQL-native,
+  then Pilot Launch.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.
@@ -1435,18 +1958,19 @@ Constitutional rules:
 - Supervisor, QA, SOP Intelligence are observation substrates. They
   never mutate execution, session, or governance records.
 - Celery remains transport only.
-- Frontend remains untouched until Phase 6-E starts.
+- Frontend changes require an explicit confirmed wedge.
+- No mocks, no hardcoded tokens, and no placeholder tenant IDs.
 
 Before editing:
-- Inspect frontend hydration scope, Command Center routes/components,
-  backend API schemas, and current master plan before making changes.
+- Inspect the confirmed wedge scope, affected routes/components, backend
+  API schemas, and current master plan before making changes.
 - Preserve existing router/service/runtime/persistence layering.
 - Do not weaken tenant scoping, deterministic identity, RLS, governance,
-  chronology, or replay constraints while hardening broker physics.
-- Modify only what is necessary to close Phase 6-E.
+  chronology, replay constraints, or transport boundaries.
+- Modify only what is necessary to close the confirmed wedge.
 
-After Phase 6-E:
-- Run focused frontend/backend checks for hydrated surfaces.
+After the next wedge:
+- Run focused checks for changed surfaces.
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
@@ -1460,5 +1984,5 @@ Final answer must include:
 - Runtime/service/router changes.
 - Replay, governance, frontend, and transport implications.
 - Tests run and results.
-- Whether Phase 6-E is closed or still open.
+- Whether the confirmed wedge is closed or still open.
 ```

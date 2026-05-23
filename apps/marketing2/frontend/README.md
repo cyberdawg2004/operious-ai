@@ -12,7 +12,7 @@ Open `http://localhost:3000`.
 
 ## Environment
 
-`NEXT_PUBLIC_COMMAND_CENTER_URL` controls the header Sign In destination.
+`NEXT_PUBLIC_COMMAND_CENTER_URL` controls the header Sign In destination. When unset, the site links to `https://app.operious.com`.
 
 `CONTACT_ENDPOINT_URL` configures the server-side destination for enterprise access requests. The `/api/contact` route forwards validated JSON submissions to this endpoint when it is set.
 

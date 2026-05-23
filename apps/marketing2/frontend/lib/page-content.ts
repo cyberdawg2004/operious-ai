@@ -1749,7 +1749,7 @@ else:
       {
         title: "Privacy rights and contact",
         body: [
-          "Depending on location, individuals may have rights to access, correct, delete, restrict, or object to certain processing of personal information. Requests can be sent to privacy@operious.ai. Enterprise users may also need to contact their employer or the relevant customer administrator because Operious often acts as a processor or service provider.",
+          "Depending on location, individuals may have rights to access, correct, delete, restrict, or object to certain processing of personal information. Requests can be sent to info@operious.com. Enterprise users may also need to contact their employer or the relevant customer administrator because Operious often acts as a processor or service provider.",
         ],
       },
     ],
@@ -1803,7 +1803,7 @@ else:
       {
         title: "Contact",
         body: [
-          "Questions about these terms can be sent to legal@operious.ai. Security matters should be sent to security@operious.ai.",
+          "Questions about these terms can be sent to info@operious.com. Security matters should be sent to security@operious.com.",
         ],
       },
     ],
@@ -1815,7 +1815,7 @@ else:
     subtitle: "Last updated: May 2026.",
     intro: [
       "Operious welcomes responsible security research and treats credible reports as part of maintaining trustworthy enterprise infrastructure. This page describes how to report vulnerabilities and what researchers can expect.",
-      "Security review for enterprise customers is handled through the applicable procurement, legal, and architecture review process. Responsible disclosure reports can be sent directly to security@operious.ai.",
+      "Security review for enterprise customers is handled through the applicable procurement, legal, and architecture review process. Responsible disclosure reports can be sent directly to security@operious.com.",
     ],
     sections: [
       {

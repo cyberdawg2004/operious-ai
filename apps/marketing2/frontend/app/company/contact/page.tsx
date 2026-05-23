@@ -52,6 +52,23 @@ export default async function ContactPage({ searchParams }: ContactPageProps) {
               you want Operious to review. The next step is an architecture conversation,
               not a generic product demo.
             </p>
+            <div className="mt-8 grid gap-2 text-[14px] text-ink-body">
+              <a className="transition-colors hover:text-gold" href="mailto:hello@operious.com">
+                hello@operious.com
+              </a>
+              <a className="transition-colors hover:text-gold" href="mailto:info@operious.com">
+                info@operious.com
+              </a>
+              <a className="transition-colors hover:text-gold" href="mailto:ops@operious.com">
+                ops@operious.com
+              </a>
+              <a className="transition-colors hover:text-gold" href="mailto:security@operious.com">
+                security@operious.com
+              </a>
+              <a className="transition-colors hover:text-gold" href="mailto:careers@operious.com">
+                careers@operious.com
+              </a>
+            </div>
             {context && (
               <p
                 className="mt-6 text-[11px] uppercase tracking-[0.18em] text-gold"

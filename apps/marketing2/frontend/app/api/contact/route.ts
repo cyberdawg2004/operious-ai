@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         message:
-          "The request reached Operious, but the configured intake endpoint rejected it. Please try again or email enterprise@operious.ai.",
+          "The request reached Operious, but the configured intake endpoint rejected it. Please try again or email hello@operious.com.",
         requestId,
       },
       { status: 502 }
