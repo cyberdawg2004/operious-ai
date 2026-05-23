@@ -1,6 +1,10 @@
 "use client";
 
-// Official Operious AI KernelSeal - Brand Identity System v1.0
+import { motion } from "framer-motion";
+
+// Official Operious AI KernelSeal - Exact match to brand image
+// Features: Concentric hexagons, gold corner accents, center dot
+
 const C = {
   bg: "#05080F",
   surface: "#0B1120",
@@ -12,19 +16,18 @@ const C = {
   blueMid: "#1A4A9A",
   blueLo: "#0D2860",
   textHi: "#D8E4F4",
-  textMid: "#7A90B4",
-  textLo: "#3A4E6A",
+  hexStroke: "#2A3A5A", // Subtle blue-gray for hexagons
 };
 
-function hexPts(cx: number, cy: number, r: number): [number, number][] {
+function hexPoints(cx: number, cy: number, r: number): [number, number][] {
   return Array.from({ length: 6 }, (_, i) => {
-    const a = (60 * i * Math.PI) / 180;
-    return [cx + r * Math.sin(a), cy - r * Math.cos(a)] as [number, number];
+    const angle = (Math.PI / 3) * i - Math.PI / 2;
+    return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)] as [number, number];
   });
 }
 
-function pStr(pts: [number, number][]): string {
-  return pts.map((p) => p.join(",")).join(" ");
+function pointsToPath(pts: [number, number][]): string {
+  return pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0]},${p[1]}`).join(' ') + ' Z';
 }
 
 interface KernelSealProps {
@@ -32,33 +35,67 @@ interface KernelSealProps {
   phase?: 0 | 1 | 2 | 3;
   className?: string;
   showBackground?: boolean;
+  animated?: boolean;
 }
 
 export function KernelSeal({
   size = 80,
   phase = 3,
   className,
-  showBackground = true,
+  showBackground = false,
+  animated = true,
 }: KernelSealProps) {
   const cx = size / 2;
   const cy = size / 2;
-  const rO = size * 0.375;
-  const rM = size * 0.265;
-  const rI = size * 0.175;
-  const sw = size * 0.026;
+  
+  // Hexagon radii (from outer to inner)
+  const rOuter = size * 0.42;
+  const rMid = size * 0.30;
+  const rInner = size * 0.18;
+  
+  const sw = Math.max(1, size * 0.012); // Stroke width
 
-  const ptO = hexPts(cx, cy, rO);
-  const ptM = hexPts(cx, cy, rM);
-  const ptI = hexPts(cx, cy, rI);
-
-  const bW = size * 0.13;
-  const bH = size * 0.022;
-  const gap = size * 0.042;
+  const ptsOuter = hexPoints(cx, cy, rOuter);
+  const ptsMid = hexPoints(cx, cy, rMid);
+  const ptsInner = hexPoints(cx, cy, rInner);
 
   const uid = `ks-${size}-${Math.random().toString(36).slice(2, 7)}`;
   const gradId = `${uid}-grad`;
   const glowId = `${uid}-glow`;
-  const glowId2 = `${uid}-glow2`;
+
+  // Corner accent positions (top-left and top-right outer corners)
+  const cornerLength = size * 0.08;
+  
+  // Animation variants
+  const hexVariants = {
+    hidden: { pathLength: 0, opacity: 0 },
+    visible: (delay: number) => ({
+      pathLength: 1,
+      opacity: 1,
+      transition: {
+        pathLength: { duration: 1.2, delay, ease: [0.22, 1, 0.36, 1] },
+        opacity: { duration: 0.3, delay },
+      },
+    }),
+  };
+
+  const dotVariants = {
+    hidden: { scale: 0, opacity: 0 },
+    visible: {
+      scale: 1,
+      opacity: 1,
+      transition: { duration: 0.5, delay: 1.2, ease: [0.22, 1, 0.36, 1] },
+    },
+  };
+
+  const accentVariants = {
+    hidden: { opacity: 0, pathLength: 0 },
+    visible: (delay: number) => ({
+      opacity: 1,
+      pathLength: 1,
+      transition: { duration: 0.6, delay, ease: "easeOut" },
+    }),
+  };
 
   return (
     <svg
@@ -68,134 +105,129 @@ export function KernelSeal({
       fill="none"
       className={className}
       aria-hidden="true"
-      style={{
-        flexShrink: 0,
-        opacity: phase >= 1 ? 1 : 0,
-        transition: "opacity 0.6s ease",
-      }}
     >
       <defs>
-        {/* Gold to Blue vertical gradient */}
+        {/* Gold gradient */}
         <linearGradient id={gradId} x1="50%" y1="0%" x2="50%" y2="100%">
           <stop offset="0%" stopColor={C.goldHi} />
-          <stop offset="55%" stopColor={C.goldMid} />
-          <stop offset="100%" stopColor={C.blueHi} />
+          <stop offset="100%" stopColor={C.goldMid} />
         </linearGradient>
 
-        {/* Glow filter for vertices and top bar */}
-        <filter id={glowId} x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation={size * 0.045} result="b" />
+        {/* Glow filter */}
+        <filter id={glowId} x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation={size * 0.02} result="blur" />
           <feMerge>
-            <feMergeNode in="b" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-
-        {/* Ambient glow filter */}
-        <filter id={glowId2} x="-80%" y="-80%" width="260%" height="260%">
-          <feGaussianBlur stdDeviation={size * 0.1} result="b" />
-          <feMerge>
-            <feMergeNode in="b" />
+            <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
           </feMerge>
         </filter>
       </defs>
 
-      {/* Background plate */}
+      {/* Background */}
       {showBackground && (
         <rect
           x={0}
           y={0}
           width={size}
           height={size}
-          rx={size * 0.18}
-          fill={C.surface}
+          rx={size * 0.12}
+          fill={C.bg}
         />
       )}
 
-      {/* Ambient inner glow */}
-      <circle
+      {/* Outer hexagon */}
+      <motion.path
+        d={pointsToPath(ptsOuter)}
+        stroke={C.hexStroke}
+        strokeWidth={sw * 1.5}
+        fill="none"
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={hexVariants}
+        custom={0}
+      />
+
+      {/* Middle hexagon */}
+      <motion.path
+        d={pointsToPath(ptsMid)}
+        stroke={C.hexStroke}
+        strokeWidth={sw}
+        fill="none"
+        opacity={0.7}
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={hexVariants}
+        custom={0.3}
+      />
+
+      {/* Inner hexagon */}
+      <motion.path
+        d={pointsToPath(ptsInner)}
+        stroke={C.hexStroke}
+        strokeWidth={sw * 0.8}
+        fill="none"
+        opacity={0.5}
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={hexVariants}
+        custom={0.5}
+      />
+
+      {/* Gold corner accents - top left */}
+      <motion.path
+        d={`M${ptsOuter[5][0] - cornerLength * 0.7},${ptsOuter[5][1] + cornerLength * 0.4} L${ptsOuter[5][0]},${ptsOuter[5][1]} L${ptsOuter[5][0] + cornerLength * 0.7},${ptsOuter[5][1] + cornerLength * 0.4}`}
+        stroke={C.goldHi}
+        strokeWidth={sw * 2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        filter={`url(#${glowId})`}
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={accentVariants}
+        custom={0.8}
+      />
+
+      {/* Gold corner accents - top right */}
+      <motion.path
+        d={`M${ptsOuter[0][0] - cornerLength * 0.7},${ptsOuter[0][1] + cornerLength * 0.4} L${ptsOuter[0][0]},${ptsOuter[0][1]} L${ptsOuter[0][0] + cornerLength * 0.7},${ptsOuter[0][1] + cornerLength * 0.4}`}
+        stroke={C.goldHi}
+        strokeWidth={sw * 2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        filter={`url(#${glowId})`}
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={accentVariants}
+        custom={0.9}
+      />
+
+      {/* Gold corner accents - bottom */}
+      <motion.path
+        d={`M${ptsOuter[2][0] + cornerLength * 0.7},${ptsOuter[2][1] - cornerLength * 0.4} L${ptsOuter[2][0]},${ptsOuter[2][1]} L${ptsOuter[2][0] - cornerLength * 0.7},${ptsOuter[2][1] - cornerLength * 0.4}`}
+        stroke={C.goldHi}
+        strokeWidth={sw * 2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+        filter={`url(#${glowId})`}
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={accentVariants}
+        custom={1.0}
+      />
+
+      {/* Center dot */}
+      <motion.circle
         cx={cx}
         cy={cy}
-        r={rO * 0.9}
-        fill={C.blueLo}
-        opacity={0.35}
-        filter={`url(#${glowId2})`}
+        r={size * 0.025}
+        fill={C.textHi}
+        initial={animated ? "hidden" : "visible"}
+        animate="visible"
+        variants={dotVariants}
       />
-
-      {/* Outer hex */}
-      <polygon
-        points={pStr(ptO)}
-        stroke={`url(#${gradId})`}
-        strokeWidth={sw * 1.4}
-        fill="none"
-        style={{
-          opacity: phase >= 1 ? 1 : 0,
-          transition: "opacity 0.5s ease 0.1s",
-        }}
-      />
-
-      {/* Mid hex */}
-      <polygon
-        points={pStr(ptM)}
-        stroke={`url(#${gradId})`}
-        strokeWidth={sw * 0.85}
-        fill="none"
-        style={{
-          opacity: phase >= 2 ? 0.55 : 0,
-          transition: "opacity 0.5s ease 0.35s",
-        }}
-      />
-
-      {/* Inner hex */}
-      <polygon
-        points={pStr(ptI)}
-        stroke={`url(#${gradId})`}
-        strokeWidth={sw * 0.5}
-        fill="none"
-        style={{
-          opacity: phase >= 2 ? 0.3 : 0,
-          transition: "opacity 0.5s ease 0.55s",
-        }}
-      />
-
-      {/* Six vertex dots on outer hex */}
-      {ptO.map(([x, y], i) => (
-        <circle
-          key={i}
-          cx={x}
-          cy={y}
-          r={sw * 0.8}
-          fill={i === 0 ? C.goldHi : C.blueHi}
-          filter={`url(#${glowId})`}
-          style={{
-            opacity: phase >= 2 ? (i === 0 ? 1 : 0.6) : 0,
-            transition: `opacity 0.3s ease ${0.5 + i * 0.06}s`,
-          }}
-        />
-      ))}
-
-      {/* Center kernel bars (governance stack) */}
-      {[0, 1, 2].map((j) => {
-        const w = bW * (1 - j * 0.22);
-        const y = cy - gap + j * gap - bH / 2;
-        return (
-          <rect
-            key={j}
-            x={cx - w / 2}
-            y={y}
-            width={w}
-            height={bH}
-            rx={bH * 0.4}
-            fill={`url(#${gradId})`}
-            filter={j === 0 ? `url(#${glowId})` : undefined}
-            style={{
-              opacity: phase >= 3 ? 1 - j * 0.25 : 0,
-              transition: `opacity 0.4s ease ${0.9 + j * 0.1}s`,
-            }}
-          />
-        );
-      })}
     </svg>
   );
 }
@@ -214,11 +246,11 @@ export function Lockup({
   phase = 3,
   theme = "dark",
   className,
-  showBackground = true,
+  showBackground = false,
 }: LockupProps) {
   const isDark = theme === "dark";
   const nameColor = isDark ? C.textHi : "#0B1526";
-  const tagColor = isDark ? C.textLo : "#7A90B4";
+  const tagColor = isDark ? "#5A6A8A" : "#7A90B4";
   const badgeBorder = isDark ? C.border : "#B8CAE4";
   const badgeText = isDark ? C.blueHi : C.blueMid;
 
@@ -242,7 +274,10 @@ export function Lockup({
       >
         {/* Name row */}
         <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
-          <span
+          <motion.span
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, delay: 0.8, ease: [0.22, 1, 0.36, 1] }}
             style={{
               fontFamily: "var(--font-cormorant-sc), 'Cormorant SC', serif",
               fontWeight: 700,
@@ -250,19 +285,18 @@ export function Lockup({
               letterSpacing: "0.04em",
               color: nameColor,
               lineHeight: 1,
-              opacity: phase >= 2 ? 1 : 0,
-              transform: phase >= 2 ? "translateX(0)" : "translateX(-8px)",
-              transition: "opacity 0.6s ease 0.6s, transform 0.6s ease 0.6s",
             }}
           >
             Operious
-          </span>
+          </motion.span>
 
           {/* AI badge */}
-          <span
+          <motion.span
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 1.2 }}
             style={{
-              fontFamily:
-                "var(--font-ibm-plex-mono), 'IBM Plex Mono', monospace",
+              fontFamily: "var(--font-ibm-plex-mono), 'IBM Plex Mono', monospace",
               fontWeight: 500,
               fontSize: iconSize * 0.175,
               letterSpacing: "0.18em",
@@ -272,16 +306,17 @@ export function Lockup({
               borderRadius: 3,
               lineHeight: 1,
               marginBottom: iconSize * 0.04,
-              opacity: phase >= 3 ? 1 : 0,
-              transition: "opacity 0.5s ease 1.1s",
             }}
           >
             AI
-          </span>
+          </motion.span>
         </div>
 
         {/* Tagline */}
-        <span
+        <motion.span
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 1.4 }}
           style={{
             fontFamily: "var(--font-ibm-plex-mono), 'IBM Plex Mono', monospace",
             fontWeight: 300,
@@ -289,12 +324,10 @@ export function Lockup({
             letterSpacing: "0.22em",
             color: tagColor,
             textTransform: "uppercase",
-            opacity: phase >= 3 ? 1 : 0,
-            transition: "opacity 0.5s ease 1.3s",
           }}
         >
           Deterministic Enterprise Operations
-        </span>
+        </motion.span>
       </div>
     </div>
   );
