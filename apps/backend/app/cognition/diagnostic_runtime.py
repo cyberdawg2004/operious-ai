@@ -6,7 +6,9 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
+
+from pydantic import ValidationError
 
 from app.cognition.exceptions import (
     CognitionGovernanceRejectionError,
@@ -26,6 +28,7 @@ from app.cognition.models import (
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
     DiagnosticLLMCompletion,
+    DiagnosticLLMOutput,
     DiagnosticReasoningResult,
 )
 from app.cognition.persistence import CognitionUsagePersistenceProtocol
@@ -52,23 +55,12 @@ from app.knowledge.runtime import KnowledgeRuntime
 
 _SYSTEM_PROMPT = """You are Operious diagnostic cognition.
 Classify the support ticket using only the ticket text and cited tenant SOP
-context. Return compact JSON only with keys: summary, category, confidence.
+context. Return compact JSON only with keys: summary, category, confidence,
+reasoning.
 Use canonical English. Preserve any governance-significant terms present in
 the input or citations, and do not invent refunds, approvals, denials,
 chargebacks, RMA, legal, fraud, compliance, replacement, credit, or escalation
 terms that are not grounded in the input or citations."""
-_ALLOWED_OUTPUT_KEYS = frozenset(
-    {"summary", "category", "confidence", "reasoning"}
-)
-_ALLOWED_CATEGORIES = frozenset(
-    {
-        "account_issue",
-        "charging_issue",
-        "connectivity_issue",
-        "refund_issue",
-        "unknown_issue",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +145,7 @@ class DiagnosticCognitionRuntime:
             semantic = validate_governance_terms(
                 canonical_text=f"{content}\n\n{_context_text(retrieval)}",
                 output_text=(
-                    f"{parsed.summary}\n{parsed.category}"
+                    f"{parsed.summary}\n{parsed.category.value}"
                 ),
             )
             governance_decision_id = await self._govern_output(
@@ -193,7 +185,7 @@ class DiagnosticCognitionRuntime:
             await self._save_usage(record, tenant_id=tenant_id)
             return DiagnosticReasoningResult(
                 summary=parsed.summary,
-                category=parsed.category,
+                category=parsed.category.value,
                 confidence=parsed.confidence,
                 provider=completion.provider,
                 model=completion.model,
@@ -308,7 +300,7 @@ class DiagnosticCognitionRuntime:
         content: str,
         retrieval: KnowledgeRetrievalResult,
         completion: DiagnosticLLMCompletion,
-        parsed: "_ParsedDiagnosticOutput",
+        parsed: DiagnosticLLMOutput,
         semantic_terms: tuple[str, ...],
         semantic_valid: bool,
     ) -> str | None:
@@ -323,7 +315,7 @@ class DiagnosticCognitionRuntime:
             estimated_tokens=retrieval.total_tokens + completion.usage.total_tokens,
             grounding_strategy="tenant_sop_rag",
             metadata={
-                "category": parsed.category,
+                "category": parsed.category.value,
                 "confidence": parsed.confidence,
                 "provider": completion.provider,
                 "model": completion.model,
@@ -496,13 +488,6 @@ class DiagnosticCognitionRuntime:
         await self._save_usage(record, tenant_id=tenant_id)
 
 
-@dataclass(frozen=True, slots=True)
-class _ParsedDiagnosticOutput:
-    summary: str
-    category: str
-    confidence: float
-
-
 def _governance_runtime(
     *,
     governance_repository: BaseGovernanceRepository | None,
@@ -534,39 +519,19 @@ def _governance_runtime(
     )
 
 
-def _parse_output(text: str) -> _ParsedDiagnosticOutput:
+def _parse_output(text: str) -> DiagnosticLLMOutput:
     try:
         raw = json.loads(_extract_json(text))
     except json.JSONDecodeError as exc:
         raise CognitionLLMProviderError("diagnostic model returned invalid JSON") from exc
     if not isinstance(raw, Mapping):
         raise CognitionLLMProviderError("diagnostic model returned non-object JSON")
-    data = cast(Mapping[str, Any], raw)
-    extra_keys = set(data) - _ALLOWED_OUTPUT_KEYS
-    if extra_keys:
+    try:
+        return DiagnosticLLMOutput.model_validate(raw)
+    except ValidationError as exc:
         raise CognitionLLMProviderError(
-            "diagnostic model returned unsupported keys"
-        )
-    summary = data.get("summary")
-    category = data.get("category")
-    confidence = data.get("confidence")
-    if not isinstance(summary, str) or not summary.strip():
-        raise CognitionLLMProviderError("diagnostic model summary is missing")
-    if not isinstance(category, str) or not category.strip():
-        raise CognitionLLMProviderError("diagnostic model category is missing")
-    category_text = category.strip()
-    if category_text not in _ALLOWED_CATEGORIES:
-        raise CognitionLLMProviderError("diagnostic model category is unsupported")
-    if not isinstance(confidence, (int, float)):
-        raise CognitionLLMProviderError("diagnostic model confidence is missing")
-    confidence_float = float(confidence)
-    if not 0.0 <= confidence_float <= 1.0:
-        raise CognitionLLMProviderError("diagnostic model confidence must be in [0, 1]")
-    return _ParsedDiagnosticOutput(
-        summary=summary.strip(),
-        category=category_text,
-        confidence=confidence_float,
-    )
+            "diagnostic model output failed schema validation"
+        ) from exc
 
 
 def _extract_json(text: str) -> str:

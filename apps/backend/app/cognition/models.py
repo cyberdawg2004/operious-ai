@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Mapping
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 from app.cognition.identity import CognitionAuditId, CognitionLLMUsageId
 from app.knowledge.models import KnowledgeRetrievalResult
 from app.sop_intelligence.persistence import ApprovalRecord
@@ -46,6 +48,36 @@ class CognitionLLMUsageStatus(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     FAILED = "failed"
+
+
+class DiagnosticCategory(StrEnum):
+    ACCOUNT_ISSUE = "account_issue"
+    CHARGING_ISSUE = "charging_issue"
+    CONNECTIVITY_ISSUE = "connectivity_issue"
+    REFUND_ISSUE = "refund_issue"
+    UNKNOWN_ISSUE = "unknown_issue"
+
+
+class DiagnosticLLMOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1, max_length=4000)
+    category: DiagnosticCategory
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str = Field(max_length=4000, default="")
+
+    @field_validator("summary")
+    @classmethod
+    def _summary_not_blank(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("summary must not be blank")
+        return text
+
+    @field_validator("reasoning")
+    @classmethod
+    def _normalize_reasoning(cls, value: str) -> str:
+        return value.strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +156,9 @@ __all__ = [
     "CognitionAuditRecord",
     "CognitionLLMUsageRecord",
     "CognitionLLMUsageStatus",
+    "DiagnosticCategory",
     "DiagnosticLLMCompletion",
+    "DiagnosticLLMOutput",
     "DiagnosticLLMUsage",
     "DiagnosticReasoningResult",
     "KnowledgeRollbackResult",
