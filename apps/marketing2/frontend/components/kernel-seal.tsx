@@ -43,7 +43,7 @@ export function KernelSeal({
   size = 80,
   className,
   showBackground = false,
-  animated = true,
+  animated = false,
 }: KernelSealProps) {
   const cx = size / 2;
   const cy = size / 2;

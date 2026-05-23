@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useScroll, useTransform } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { KernelSeal } from "./kernel-seal";
@@ -196,16 +196,7 @@ function MobileNav({
 export function Navigation() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { scrollY } = useScroll();
   const navRef = useRef<HTMLElement>(null);
-
-  const backgroundColor = useTransform(
-    scrollY,
-    [0, 80],
-    ["rgba(248, 245, 238, 0)", "rgba(248, 245, 238, 0.95)"]
-  );
-  const borderOpacity = useTransform(scrollY, [0, 80], [0, 1]);
-  const backdropBlur = useTransform(scrollY, [0, 80], ["blur(0px)", "blur(16px)"]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -229,19 +220,10 @@ export function Navigation() {
     <>
       <motion.nav
         ref={navRef}
-        className="fixed left-0 right-0 top-0 z-50 h-[72px]"
-        style={{
-          backgroundColor,
-          backdropFilter: backdropBlur,
-        }}
+        className="fixed left-0 right-0 top-0 z-50 h-[72px] border-b border-border-subtle bg-canvas/95 backdrop-blur-[16px]"
         role="navigation"
         aria-label="Main navigation"
       >
-        <motion.div
-          className="absolute inset-x-0 bottom-0 h-px bg-border-subtle"
-          style={{ opacity: borderOpacity }}
-        />
-
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-3">
             <KernelSeal size={32} phase={3} />
