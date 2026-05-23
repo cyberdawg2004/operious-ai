@@ -100,10 +100,10 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
 
   return (
     <div
-      className="flex-1 min-h-screen py-8 px-12"
+      className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8"
       style={{ backgroundColor: "var(--canvas)" }}
     >
-      <div className="mb-8">
+      <div className="mb-6">
         <div
           className="font-mono text-[11px] uppercase tracking-[0.18em] mb-2"
           style={{ color: "var(--gold-primary)" }}
@@ -111,7 +111,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
           TRACE · INSPECTOR
         </div>
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <h1
             className="font-display text-[32px] font-bold"
             style={{ color: "var(--ink-primary)" }}
@@ -119,8 +119,8 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
             Trace Inspector
           </h1>
 
-          <div className="flex items-center gap-3">
-            <div className="relative">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative min-w-0">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
                 style={{ color: "var(--ink-tertiary)" }}
@@ -130,7 +130,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                 placeholder="Trace ID or Session ID..."
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
-                className="w-[320px] h-9 pl-9 pr-4 rounded font-sans text-[13px] outline-none transition-all duration-160"
+                className="h-10 w-full rounded pl-9 pr-4 font-sans text-[13px] outline-none transition-all duration-160 sm:w-[360px]"
                 style={{
                   backgroundColor: "var(--surface-raised)",
                   border: "1px solid var(--border-subtle)",
@@ -147,7 +147,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
             </div>
             <button
               onClick={handleOpenTrace}
-              className="h-9 px-4 rounded font-sans text-[13px] font-medium text-white transition-opacity duration-160 hover:opacity-90"
+              className="h-10 rounded px-4 font-sans text-[13px] font-medium text-white transition-opacity duration-160 hover:opacity-90"
               style={{ backgroundColor: "var(--ink-primary)" }}
             >
               Open Trace
@@ -186,34 +186,36 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
       {loadedTraceId && spans.length > 0 && !isLoading && !error && (
         <>
           <div
-            className="flex items-stretch rounded-lg p-4 mb-6"
+            className="mb-6 overflow-x-auto rounded-lg p-3"
             style={{
               backgroundColor: "var(--surface-raised)",
               border: "1px solid var(--border-subtle)",
             }}
           >
-            <MetadataField label="TRACE ID" value={loadedTraceId} mono />
-            <Divider />
-            <MetadataField label="TENANT" value={metadata.tenantId} />
-            <Divider />
-            <MetadataField label="FIRST SPAN" value={metadata.firstSpan} mono />
-            <Divider />
-            <MetadataField label="STATUS" value={<TraceStatusBadge hasErrors={metadata.hasErrors} />} />
-            <Divider />
-            <MetadataField label="TOTAL SPANS" value={String(total)} mono />
-            <Divider />
-            <MetadataField label="DURATION" value={metadata.duration} mono />
-            <Divider />
-            <MetadataField label="POLICY CHAIN" value={metadata.policyChain} mono />
+            <div className="flex min-w-[980px] items-stretch">
+              <MetadataField label="TRACE ID" value={loadedTraceId} mono />
+              <Divider />
+              <MetadataField label="TENANT" value={metadata.tenantId} />
+              <Divider />
+              <MetadataField label="FIRST SPAN" value={metadata.firstSpan} mono />
+              <Divider />
+              <MetadataField label="STATUS" value={<TraceStatusBadge hasErrors={metadata.hasErrors} />} />
+              <Divider />
+              <MetadataField label="TOTAL SPANS" value={String(total)} mono />
+              <Divider />
+              <MetadataField label="DURATION" value={metadata.duration} mono />
+              <Divider />
+              <MetadataField label="POLICY CHAIN" value={metadata.policyChain} mono />
+            </div>
           </div>
 
-          <div className="flex gap-6">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
             <div
-              className="w-[60%] rounded-lg p-6"
+              className="min-w-0 rounded-lg p-4 sm:p-5"
               style={{
                 backgroundColor: "var(--surface-raised)",
                 border: "1px solid var(--border-subtle)",
-                minHeight: "600px",
+                minHeight: "520px",
               }}
             >
               <div
@@ -224,8 +226,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
               </div>
 
               <div
-                className="flex flex-wrap gap-4 mb-6 pb-4"
-                style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                className="mb-4 flex flex-wrap gap-3 border-b border-border-subtle pb-4"
               >
                 {Object.entries(substrateColors).map(([name, color]) => (
                   <div key={name} className="flex items-center gap-1.5">
@@ -240,13 +241,13 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                 ))}
               </div>
 
-              <div className="relative">
+              <div className="relative overflow-x-auto">
                 <div
                   className="absolute left-[60px] top-0 bottom-0 w-px"
                   style={{ backgroundColor: "var(--border-subtle)" }}
                 />
 
-                <div className="space-y-1">
+                <div className="min-w-[660px] space-y-1">
                   {spans.map((span) => (
                     <button
                       key={span.span_id}
@@ -256,7 +257,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                         setCopyStatus(null);
                       }}
                       className={cn(
-                        "w-full flex items-center gap-4 px-3 py-2.5 rounded-lg text-left transition-all duration-160",
+                        "flex h-10 w-full items-center gap-4 rounded px-3 text-left transition-all duration-160",
                         currentSpan?.span_id === span.span_id
                           ? "ring-2"
                           : "hover:bg-[var(--surface-sunken)]"
@@ -310,15 +311,15 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
             </div>
 
             <div
-              className="w-[40%] rounded-lg"
+              className="min-w-0 rounded-lg"
               style={{
                 backgroundColor: "var(--surface-raised)",
                 border: "1px solid var(--border-subtle)",
-                minHeight: "600px",
+                minHeight: "520px",
               }}
             >
               <div
-                className="px-6 py-4 flex items-center justify-between"
+                className="flex items-center justify-between px-4 py-3 sm:px-5"
                 style={{ borderBottom: "1px solid var(--border-subtle)" }}
               >
                 <span
@@ -331,14 +332,14 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleCopySpan}
-                      className="p-1.5 rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
+                      className="flex h-9 w-9 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
                       title="Copy event data"
                     >
                       <Copy className="w-4 h-4" style={{ color: "var(--ink-tertiary)" }} />
                     </button>
                     <button
                       onClick={handleOpenRawEndpoint}
-                      className="p-1.5 rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
+                      className="flex h-9 w-9 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
                       title="Open trace endpoint"
                     >
                       <ExternalLink className="w-4 h-4" style={{ color: "var(--ink-tertiary)" }} />
@@ -348,7 +349,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
               </div>
 
               {currentSpan ? (
-                <div className="p-6 space-y-6">
+                <div className="space-y-5 p-4 sm:p-5">
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <StatusIcon status={currentSpan.status} />
@@ -375,7 +376,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                   </div>
 
                   <div
-                    className="flex flex-wrap gap-4 p-4 rounded-lg"
+                    className="flex flex-wrap gap-3 rounded-lg p-3"
                     style={{ backgroundColor: "var(--surface-sunken)" }}
                   >
                     <Metric icon={<Clock className="w-4 h-4" />} value={formatLatency(currentSpan.latency_ms)} />

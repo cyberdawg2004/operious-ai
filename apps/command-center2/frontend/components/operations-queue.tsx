@@ -152,18 +152,18 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
   };
 
   return (
-    <main className={cn("flex-1 bg-canvas py-8 px-12 overflow-auto", className)}>
+    <main className={cn("min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8", className)}>
       <div className="eyebrow text-ink-tertiary mb-2">
         OPERATIONS · LIVE QUEUE
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <h1 className="font-display font-bold text-[32px] text-ink-primary">
           Operations Queue
         </h1>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="flex flex-wrap items-center gap-2">
             {filterPills.map((pill) => (
               <button
                 key={pill}
@@ -193,7 +193,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Session ID, principal, classification..."
               className={cn(
-                "h-9 w-[300px] pl-9 pr-3 rounded",
+                "h-10 w-full min-w-0 rounded pl-9 pr-3 md:w-[320px]",
                 "bg-surface border border-border-subtle",
                 "text-[13px] text-ink-primary placeholder:text-ink-tertiary",
                 "focus:outline-none focus:border-border-defined",
@@ -205,7 +205,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
           <button
             onClick={reload}
             className={cn(
-              "w-9 h-9 flex items-center justify-center rounded",
+              "flex h-10 w-10 items-center justify-center rounded",
               "border border-border-subtle bg-surface",
               "hover:border-border-defined transition-all duration-160"
             )}
@@ -251,26 +251,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
             />
           </div>
 
-          <div className="mt-8 bg-surface border border-border-subtle rounded-lg overflow-hidden">
-            <div className="h-10 px-4 flex items-center bg-surface-raised border-b border-border-subtle">
-              <div className="w-10 flex items-center justify-center">
-                <input
-                  type="checkbox"
-                  checked={allFilteredSelected}
-                  onChange={toggleAllRows}
-                  className="w-3.5 h-3.5 rounded border-border-defined accent-gold cursor-pointer"
-                />
-              </div>
-              <TableHeader className="w-[128px]">SESSION</TableHeader>
-              <TableHeader className="flex-1 min-w-[160px]">PRINCIPAL</TableHeader>
-              <TableHeader className="w-[180px]">CLASSIFICATION</TableHeader>
-              <TableHeader className="w-[120px]">STATUS</TableHeader>
-              <TableHeader className="w-[120px]">EVENTS</TableHeader>
-              <TableHeader className="w-[140px]">OPENED</TableHeader>
-              <TableHeader className="w-[96px]">AGE</TableHeader>
-              <TableHeader className="w-[80px] text-right">ACTIONS</TableHeader>
-            </div>
-
+          <div className="mt-6 overflow-hidden rounded-lg border border-border-subtle bg-surface">
             {filteredSessions.length === 0 ? (
               <div className="p-6">
                 <EmptyState
@@ -281,21 +262,42 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
                 />
               </div>
             ) : (
-              <div>
-                {filteredSessions.map((session, index) => (
-                  <TableRow
-                    key={session.session_id}
-                    session={session}
-                    isSelected={selectedRows.has(session.session_id)}
-                    onSelect={() => toggleRowSelection(session.session_id)}
-                    onOpenTrace={() => onOpenTrace?.(session.session_id)}
-                    isOdd={index % 2 === 1}
-                  />
-                ))}
+              <div className="overflow-x-auto">
+                <div className="min-w-[1080px]">
+                  <div className="flex h-9 items-center border-b border-border-subtle bg-surface-raised px-3">
+                    <div className="flex w-10 items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={toggleAllRows}
+                        className="h-3.5 w-3.5 cursor-pointer rounded border-border-defined accent-gold"
+                      />
+                    </div>
+                    <TableHeader className="w-[128px]">SESSION</TableHeader>
+                    <TableHeader className="flex-1 min-w-[160px]">PRINCIPAL</TableHeader>
+                    <TableHeader className="w-[180px]">CLASSIFICATION</TableHeader>
+                    <TableHeader className="w-[120px]">STATUS</TableHeader>
+                    <TableHeader className="w-[120px]">EVENTS</TableHeader>
+                    <TableHeader className="w-[140px]">OPENED</TableHeader>
+                    <TableHeader className="w-[96px]">AGE</TableHeader>
+                    <TableHeader className="w-[80px] text-right">ACTIONS</TableHeader>
+                  </div>
+
+                  {filteredSessions.map((session, index) => (
+                    <TableRow
+                      key={session.session_id}
+                      session={session}
+                      isSelected={selectedRows.has(session.session_id)}
+                      onSelect={() => toggleRowSelection(session.session_id)}
+                      onOpenTrace={() => onOpenTrace?.(session.session_id)}
+                      isOdd={index % 2 === 1}
+                    />
+                  ))}
+                </div>
               </div>
             )}
 
-            <div className="h-12 px-4 flex items-center justify-between border-t border-border-subtle">
+            <div className="flex min-h-12 flex-col gap-3 border-t border-border-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-[12px] text-ink-tertiary">
                 Showing {filteredSessions.length} of {data.total} sessions
               </span>
@@ -348,9 +350,9 @@ function SummaryCard({
   valueColor?: string;
 }) {
   return (
-    <div className="h-24 p-5 bg-surface border border-border-subtle rounded-lg flex flex-col gap-2">
+    <div className="flex h-20 flex-col gap-1.5 rounded-lg border border-border-subtle bg-surface p-4">
       <span className="eyebrow text-ink-tertiary">{label}</span>
-      <span className={cn("font-technical font-medium text-[32px] tabular-nums", valueColor)}>
+      <span className={cn("font-technical text-[26px] font-medium tabular-nums", valueColor)}>
         {value}
       </span>
     </div>
@@ -365,7 +367,7 @@ function TableHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("eyebrow text-ink-tertiary px-2", className)}>
+    <div className={cn("px-2 font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary", className)}>
       {children}
     </div>
   );
@@ -391,19 +393,19 @@ function TableRow({
   return (
     <div
       className={cn(
-        "h-12 px-4 flex items-center",
+        "flex h-10 items-center px-3",
         "border-b border-border-subtle last:border-b-0",
         "transition-colors duration-160",
         isOdd ? "bg-canvas/50" : "bg-surface",
         "hover:bg-[var(--surface-sunken)]"
       )}
     >
-      <div className="w-10 flex items-center justify-center">
+      <div className="flex w-10 items-center justify-center">
         <input
           type="checkbox"
           checked={isSelected}
           onChange={onSelect}
-          className="w-3.5 h-3.5 rounded border-border-defined accent-gold cursor-pointer"
+          className="h-3.5 w-3.5 cursor-pointer rounded border-border-defined accent-gold"
         />
       </div>
 
@@ -463,7 +465,7 @@ function TableRow({
         <button
           onClick={onOpenTrace}
           className={cn(
-            "w-7 h-7 flex items-center justify-center rounded",
+            "flex h-8 w-8 items-center justify-center rounded",
             "border border-border-subtle",
             "hover:border-border-defined hover:bg-surface-raised",
             "transition-all duration-160"

@@ -171,7 +171,7 @@ export function AuditExportsView() {
 
 export function TeamRolesView() {
   return (
-    <main className="flex-1 p-8 bg-canvas">
+    <main className="min-w-0 flex-1 bg-canvas p-4 sm:p-6 lg:p-8">
       <PendingIntegrationState
         title="Team directory pending integration"
         message="No user or role-management endpoint exists in the current backend router set. The command center will render tenant team data here once an identity administration endpoint is available."
@@ -183,18 +183,37 @@ export function TeamRolesView() {
 export function SettingsView() {
   const tenantId = getConfiguredTenantId();
   const principalId = getConfiguredPrincipalId();
+  const rows = [
+    ["API base URL", getApiBaseUrl()],
+    ["Tenant scope", tenantId ?? "Not configured"],
+    ["Principal scope", principalId ?? "Not configured"],
+    ["Operator label", getConfiguredOperatorLabel()],
+  ] as const;
+
   return (
-    <main className="flex-1 p-8 bg-canvas">
-      <div className="max-w-4xl">
+    <main className="min-w-0 flex-1 bg-canvas p-4 sm:p-6 lg:p-8">
+      <div className="max-w-5xl">
         <div className="eyebrow text-ink-tertiary mb-2">SETTINGS · RUNTIME</div>
         <h1 className="font-display text-[32px] font-semibold text-ink-primary mb-6">
           Settings
         </h1>
-        <div className="grid gap-4">
-          <SettingRow label="API base URL" value={getApiBaseUrl()} />
-          <SettingRow label="Tenant scope" value={tenantId ?? "Not configured"} />
-          <SettingRow label="Principal scope" value={principalId ?? "Not configured"} />
-          <SettingRow label="Operator label" value={getConfiguredOperatorLabel()} />
+        <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
+          <div className="overflow-x-auto">
+            <div className="min-w-[640px]">
+              <div className="grid h-9 grid-cols-[220px_minmax(0,1fr)] items-center border-b border-border-subtle bg-surface-raised px-4">
+                <DenseHeader>Tenant Runtime Field</DenseHeader>
+                <DenseHeader>Resolved Value</DenseHeader>
+              </div>
+              {rows.map(([label, value], index) => (
+                <SettingRow
+                  key={label}
+                  label={label}
+                  value={value}
+                  isOdd={index % 2 === 1}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -212,15 +231,15 @@ function RecordListView<T>({
   const { data, error, isLoading, reload } = useApiResource(load);
 
   return (
-    <main className="flex-1 p-8 bg-canvas overflow-auto">
+    <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
       <div className="eyebrow text-ink-tertiary mb-2">{eyebrow}</div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="font-display text-[32px] font-semibold text-ink-primary">
           {title}
         </h1>
         <button
           onClick={reload}
-          className="rounded border border-border-subtle bg-surface px-4 py-2 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+          className="h-10 rounded border border-border-subtle bg-surface px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
         >
           Refresh
         </button>
@@ -234,7 +253,7 @@ function RecordListView<T>({
         <EmptyState title={emptyTitle} message={emptyMessage} onAction={reload} actionLabel="Refresh" />
       )}
       {data && !isLoading && !error && data.items.length > 0 && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
           {data.items.map((item, index) => (
             <div key={index}>{renderItem(item)}</div>
           ))}
@@ -254,16 +273,16 @@ function RecordCard({
   fields: [string, string][];
 }) {
   return (
-    <article className="rounded-lg border border-border-subtle bg-surface p-5">
+    <article className="rounded-lg border border-border-subtle bg-surface p-4">
       <div className="flex items-start justify-between gap-4">
-        <h2 className="font-display text-[22px] font-semibold text-ink-primary">
+        <h2 className="text-[18px] font-semibold text-ink-primary">
           {title}
         </h2>
         <span className="shrink-0 rounded border border-border-subtle px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
           {meta}
         </span>
       </div>
-      <div className="mt-4 grid gap-3">
+      <div className="mt-4 grid gap-2">
         {fields.map(([label, value]) => (
           <div key={label}>
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
@@ -279,13 +298,29 @@ function RecordCard({
   );
 }
 
-function SettingRow({ label, value }: { label: string; value: string }) {
+function DenseHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border-subtle bg-surface p-4">
+    <div className="font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary">
+      {children}
+    </div>
+  );
+}
+
+function SettingRow({
+  label,
+  value,
+  isOdd,
+}: {
+  label: string;
+  value: string;
+  isOdd: boolean;
+}) {
+  return (
+    <div className={`grid min-h-10 grid-cols-[220px_minmax(0,1fr)] items-center border-b border-border-subtle px-4 last:border-b-0 ${isOdd ? "bg-canvas/50" : "bg-surface"}`}>
       <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
         {label}
       </div>
-      <div className="mt-1 break-words text-[14px] text-ink-primary">{value}</div>
+      <div className="break-words font-mono text-[12px] text-ink-primary">{value}</div>
     </div>
   );
 }
