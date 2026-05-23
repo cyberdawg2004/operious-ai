@@ -2,45 +2,7 @@
 
 import Link from "next/link";
 import { Mail } from "lucide-react";
-
-const KernelSealLogo = ({ size = 48 }: { size?: number }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 48 48"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    {/* Outer hexagonal ring */}
-    <path
-      d="M24 2L44 13.5V36.5L24 48L4 36.5V13.5L24 2Z"
-      stroke="#A8882C"
-      strokeWidth="1.5"
-      fill="none"
-    />
-    {/* Inner hexagonal ring */}
-    <path
-      d="M24 8L38 16.5V33.5L24 42L10 33.5V16.5L24 8Z"
-      stroke="#0A0F1C"
-      strokeWidth="1"
-      fill="none"
-    />
-    {/* Center kernel glyph */}
-    <path
-      d="M24 14L32 19V29L24 34L16 29V19L24 14Z"
-      fill="#A8882C"
-      fillOpacity="0.3"
-    />
-    <path
-      d="M24 14L32 19V29L24 34L16 29V19L24 14Z"
-      stroke="#A8882C"
-      strokeWidth="1"
-      fill="none"
-    />
-    {/* Center dot */}
-    <circle cx="24" cy="24" r="2" fill="#A8882C" />
-  </svg>
-);
+import { KernelSeal } from "./kernel-seal";
 
 const footerColumns = [
   {
@@ -118,7 +80,7 @@ export function Footer() {
       <div className="max-w-[1440px] mx-auto">
         {/* Top section - Logo and tagline */}
         <div className="flex items-center gap-3 sm:gap-4">
-          <KernelSealLogo size={40} />
+          <KernelSeal size={40} phase={3} />
           <span
             className="text-[22px] sm:text-[26px] lg:text-[28px] font-semibold text-[#D8E4F4]"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}

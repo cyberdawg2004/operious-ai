@@ -1,130 +1,14 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight, Play } from "lucide-react";
-
-// Animated KernelSeal Logo with three-phase entry
-function KernelSealLogo({ className }: { className?: string }) {
-  return (
-    <motion.svg
-      viewBox="0 0 280 280"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      {/* Outer hexagon - Phase 1: stroke draw animation */}
-      <motion.path
-        d="M140 20L240 70V180L140 260L40 180V70L140 20Z"
-        stroke="#0A0F1C"
-        strokeWidth="2"
-        fill="none"
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-      />
-      
-      {/* Second hexagon ring */}
-      <motion.path
-        d="M140 45L215 85V165L140 235L65 165V85L140 45Z"
-        stroke="#1A2538"
-        strokeWidth="1.5"
-        fill="none"
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={{ duration: 0.4, ease: "easeOut", delay: 0.1 }}
-      />
-      
-      {/* Third hexagon ring */}
-      <motion.path
-        d="M140 70L190 100V150L140 210L90 150V100L140 70Z"
-        stroke="#2A3548"
-        strokeWidth="1"
-        fill="none"
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={{ duration: 0.4, ease: "easeOut", delay: 0.2 }}
-      />
-
-      {/* Inner glyph - Phase 2: fade and scale */}
-      <motion.g
-        initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5, delay: 0.7, ease: "easeOut" }}
-      >
-        {/* Central kernel shape */}
-        <path
-          d="M140 95L170 115V155L140 175L110 155V115L140 95Z"
-          fill="#0A0F1C"
-          stroke="#3A4558"
-          strokeWidth="1"
-        />
-        {/* Inner diamond */}
-        <path
-          d="M140 110L155 125V145L140 160L125 145V125L140 110Z"
-          fill="#1A2538"
-        />
-        {/* Center dot */}
-        <circle cx="140" cy="135" r="6" fill="#0A0F1C" />
-      </motion.g>
-
-      {/* Gold accent strokes - Phase 3: illuminate */}
-      <motion.g
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.4, delay: 1.0, ease: "easeOut" }}
-      >
-        {/* Top accent */}
-        <path
-          d="M140 20L180 45"
-          stroke="#A8882C"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M140 20L100 45"
-          stroke="#A8882C"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        {/* Bottom accent */}
-        <path
-          d="M140 260L180 235"
-          stroke="#A8882C"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M140 260L100 235"
-          stroke="#A8882C"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        {/* Side accents */}
-        <path
-          d="M40 100L40 150"
-          stroke="#A8882C"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M240 100L240 150"
-          stroke="#A8882C"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        {/* Inner glow dots */}
-        <circle cx="140" cy="135" r="3" fill="#C9A84C" />
-      </motion.g>
-    </motion.svg>
-  );
-}
+import { ArrowRight } from "lucide-react";
+import { KernelSeal } from "./kernel-seal";
 
 // Animated headline with word-by-word animation
 function AnimatedHeadline() {
   const words = ["Operational", "infrastructure", "that", "cannot"];
   const italicWord = "deviate.";
-  
+
   const wordVariants = {
     hidden: { opacity: 0, y: 24 },
     visible: (i: number) => ({
@@ -222,12 +106,12 @@ export function Hero() {
         <div className="grid grid-cols-1 lg:grid-cols-[40%_60%] gap-12 lg:gap-24 items-center py-12 lg:py-0">
           {/* LEFT COLUMN - Logo (hidden on mobile, shown in background) */}
           <div className="hidden lg:flex items-center justify-center">
-            <KernelSealLogo className="w-[280px] h-[280px] -mt-5" />
+            <KernelSeal size={280} phase={3} className="-mt-5" />
           </div>
 
           {/* Mobile Logo - smaller, centered above content */}
           <div className="flex lg:hidden items-center justify-center mb-8">
-            <KernelSealLogo className="w-[160px] h-[160px] sm:w-[200px] sm:h-[200px]" />
+            <KernelSeal size={160} phase={3} className="sm:w-[200px] sm:h-[200px]" />
           </div>
 
           {/* RIGHT COLUMN - Content */}
@@ -266,22 +150,22 @@ export function Hero() {
               transition={{ duration: 0.5, delay: 2.1, ease: "easeOut" }}
               className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3 sm:gap-4 mt-4"
             >
-              {/* Primary CTA */}
+              {/* Primary CTA - Request Enterprise Access */}
               <a
-                href="/demo"
+                href="/enterprise"
                 className="group inline-flex items-center justify-center w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-[14px] sm:text-[15px] font-semibold tracking-[-0.01em] text-[#05080F] bg-[#C9A84C] rounded-md hover:bg-[#D4B85A] transition-colors duration-[160ms]"
               >
-                <span>Request Infrastructure Briefing</span>
+                <span>Request Enterprise Access</span>
                 <ArrowRight className="ml-2 w-4 sm:w-5 h-4 sm:h-5 transition-transform group-hover:translate-x-1" />
               </a>
 
-              {/* Secondary CTA */}
+              {/* Secondary CTA - Read the architecture */}
               <a
-                href="/platform"
-                className="group inline-flex items-center justify-center w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-[14px] sm:text-[15px] font-medium tracking-[-0.01em] text-[#7A90B4] border border-[#2A3548] rounded-md hover:border-[#3A4558] hover:text-[#9AAFCC] transition-colors duration-[160ms]"
+                href="/architecture"
+                className="group inline-flex items-center justify-center w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-[14px] sm:text-[15px] font-medium tracking-[-0.01em] text-[#7A90B4] hover:text-[#C9A84C] transition-colors duration-[160ms]"
               >
-                <Play className="mr-2 w-4 h-4" />
-                <span>Watch Platform Overview</span>
+                <span>Read the architecture</span>
+                <ArrowRight className="ml-1.5 w-4 h-4 transition-transform group-hover:translate-x-1" />
               </a>
             </motion.div>
           </div>

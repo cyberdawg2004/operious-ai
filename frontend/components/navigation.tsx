@@ -4,53 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
 import { ChevronDown, Menu, X } from "lucide-react";
 import Link from "next/link";
-
-// KernelSeal Logo Component - Hexagonal seal with geometric glyph
-function KernelSeal({ className }: { className?: string }) {
-  return (
-    <svg
-      width="32"
-      height="32"
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-    >
-      {/* Outer hexagonal ring */}
-      <path
-        d="M16 2L28.124 9V23L16 30L3.876 23V9L16 2Z"
-        stroke="#0A0F1C"
-        strokeWidth="1.5"
-        fill="none"
-      />
-      {/* Inner hexagonal ring */}
-      <path
-        d="M16 6L24.66 11V21L16 26L7.34 21V11L16 6Z"
-        stroke="#A8882C"
-        strokeWidth="1"
-        fill="none"
-      />
-      {/* Central geometric kernel glyph - three interlocking triangles */}
-      <path
-        d="M16 10L20.5 17H11.5L16 10Z"
-        fill="#0A0F1C"
-      />
-      <path
-        d="M13 14L17.5 21H8.5L13 14Z"
-        fill="#A8882C"
-        fillOpacity="0.6"
-      />
-      <path
-        d="M19 14L23.5 21H14.5L19 14Z"
-        fill="#A8882C"
-        fillOpacity="0.6"
-      />
-      {/* Central node */}
-      <circle cx="16" cy="16" r="1.5" fill="#A8882C" />
-    </svg>
-  );
-}
+import { KernelSeal } from "./kernel-seal";
 
 // Navigation dropdown data
 const navigationItems = {
@@ -277,7 +231,7 @@ function MobileNav({
               {/* Header */}
               <div className="flex items-center justify-between mb-8">
                 <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-                  <KernelSeal />
+                  <KernelSeal size={32} phase={3} />
                   <span
                     className="text-[20px] font-semibold tracking-[-0.01em] text-ink-primary"
                     style={{ fontFamily: "var(--font-cormorant-sc)" }}
@@ -440,7 +394,7 @@ export function Navigation() {
         <div className="max-w-7xl mx-auto h-full px-4 sm:px-6 lg:px-8 flex items-center justify-between">
           {/* Left side - Logo and Wordmark */}
           <Link href="/" className="flex items-center gap-3">
-            <KernelSeal />
+            <KernelSeal size={32} phase={3} />
             <span
               className="text-[18px] sm:text-[20px] font-semibold tracking-[-0.01em] text-ink-primary"
               style={{ fontFamily: "var(--font-cormorant-sc)" }}

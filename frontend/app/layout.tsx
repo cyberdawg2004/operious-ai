@@ -9,6 +9,7 @@ const cormorantSC = Cormorant_SC({
   variable: "--font-cormorant-sc",
   subsets: ["latin"],
   weight: ["600", "700"],
+  display: "swap",
 });
 
 const cormorant = Cormorant({
@@ -16,12 +17,14 @@ const cormorant = Cormorant({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   style: ["normal", "italic"],
+  display: "swap",
 });
 
 const ibmPlexMono = IBM_Plex_Mono({
   variable: "--font-ibm-plex-mono",
   subsets: ["latin"],
   weight: ["400", "500"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
