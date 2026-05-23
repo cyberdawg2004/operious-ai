@@ -76,12 +76,12 @@ def test_task_results_expire_within_ttl() -> None:
         "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
     }
     assert celery_app.conf.task_ignore_result is False
-    assert evaluate_session_supervisor.ignore_result is True
-    assert score_supervisor_inspection.ignore_result is True
-    assert propose_sop_intelligence_change.ignore_result is True
-    assert create_governance_escalation.ignore_result is True
-    assert reconcile_stale_execution_outbox.ignore_result is True
-    assert reconcile_stale_escalation_outbox.ignore_result is True
+    assert getattr(evaluate_session_supervisor, "ignore_result") is True
+    assert getattr(score_supervisor_inspection, "ignore_result") is True
+    assert getattr(propose_sop_intelligence_change, "ignore_result") is True
+    assert getattr(create_governance_escalation, "ignore_result") is True
+    assert getattr(reconcile_stale_execution_outbox, "ignore_result") is True
+    assert getattr(reconcile_stale_escalation_outbox, "ignore_result") is True
 
 
 @requires_postgres

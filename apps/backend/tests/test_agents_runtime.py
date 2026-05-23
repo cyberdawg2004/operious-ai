@@ -74,6 +74,7 @@ class _OkAgent(BaseAgent):
             ToolInvocationRequest(tool_name="echo", payload={"v": 1})
         )
         assert env.is_ok
+        assert env.result is not None
         return AgentExecutionResult(output={"echoed": env.result.output})
 
 
@@ -168,6 +169,7 @@ async def test_failing_agent_lands_in_failed_state() -> None:
     env = await rt.execute("boom", {})
     assert not env.is_ok
     assert env.error is not None
+    assert env.trace.error is not None
     assert env.trace.final_state is ExecutionState.FAILED
     assert "agent exploded" in env.trace.error
     # Final transition is RUNNING → FAILED.
@@ -201,6 +203,7 @@ async def test_tool_raising_inside_agent_does_not_fail_runtime() -> None:
     tool_env = env.tool_envelopes[0]
     assert not tool_env.is_ok
     assert tool_env.error is not None
+    assert tool_env.trace.error is not None
     assert "tool exploded" in tool_env.trace.error
 
 

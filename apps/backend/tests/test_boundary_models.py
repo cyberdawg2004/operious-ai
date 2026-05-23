@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
+from typing import TypedDict
 
 import pytest
 
@@ -27,6 +28,12 @@ from app.boundary.models.payload import (
 )
 from app.boundary.models.replay import BoundaryReplayRecord
 from app.boundary.models.source import BoundarySource
+
+
+class _BoundaryCoordinates(TypedDict):
+    source_type: str
+    external_message_id: str
+    tenant_id: str | None
 
 
 def _source() -> BoundarySource:
@@ -68,7 +75,7 @@ def test_external_boundary_event_is_frozen_and_slotted() -> None:
 
 
 def test_boundary_replay_record_is_frozen() -> None:
-    coords = {
+    coords: _BoundaryCoordinates = {
         "source_type": "zendesk",
         "external_message_id": "x",
         "tenant_id": None,

@@ -122,4 +122,5 @@ async def test_execution_governance_denies_when_provider_circuit_open() -> None:
     assert not evaluation.allowed
     assert evaluation.reason == "execution_governance:provider_circuit_open"
     assert evaluation.provider_circuit_state == opened.state.value
+    assert opened.open_until is not None
     assert evaluation.metadata["provider_open_until"] == opened.open_until.isoformat()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TypeGuard
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
@@ -70,7 +71,7 @@ def _parents(tree: ast.AST) -> dict[ast.AST, ast.AST]:
     return result
 
 
-def _is_all_call(node: ast.AST) -> bool:
+def _is_all_call(node: ast.AST) -> TypeGuard[ast.Call]:
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)

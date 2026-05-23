@@ -14,6 +14,14 @@ from app.session.contracts.requests import (
     RecordCorrelationRequest,
     RecordLifecycleRequest,
 )
+from app.session.contracts.results import (
+    AppendEventResult,
+    OpenSessionResult,
+    ReconstructSessionResult,
+    RecordContextResult,
+    RecordCorrelationResult,
+    RecordLifecycleResult,
+)
 from app.session.enums import (
     SessionContinuityMode,
     SessionCorrelationKind,
@@ -24,6 +32,7 @@ from app.session.enums import (
 )
 from app.session.identity import generate_session_id
 from app.session.models.context import SessionContext
+from app.session.models.session import OperationalSession
 from app.session.persistence.memory import (
     InMemorySessionPersistence,
 )
@@ -40,7 +49,9 @@ def _runtime() -> SessionRuntime:
     )
 
 
-async def _open(rt: SessionRuntime, *, handle: str = "h1"):
+async def _open(
+    rt: SessionRuntime, *, handle: str = "h1"
+) -> OperationalSession:
     env = await rt.open_session(
         OpenSessionRequest(
             scope=SessionScope.TENANT,
@@ -50,7 +61,9 @@ async def _open(rt: SessionRuntime, *, handle: str = "h1"):
         )
     )
     assert env.is_ok, (env.error, env.trace.error)
-    return env.result
+    assert isinstance(env.result, OpenSessionResult)
+    assert env.result.session is not None
+    return env.result.session
 
 
 # ─── open_session ──────────────────────────────────────────────────
@@ -59,9 +72,7 @@ async def _open(rt: SessionRuntime, *, handle: str = "h1"):
 @pytest.mark.asyncio
 async def test_open_session_creates_root_session() -> None:
     rt = _runtime()
-    result = await _open(rt)
-    session = result.session
-    assert session is not None
+    session = await _open(rt)
     assert session.lifecycle.phase is SessionLifecyclePhase.INITIATED
     assert session.lineage.is_root
     assert session.sequence_head == 0
@@ -71,12 +82,13 @@ async def test_open_session_creates_root_session() -> None:
 @pytest.mark.asyncio
 async def test_open_session_persists_opened_event() -> None:
     rt = _runtime()
-    result = await _open(rt)
-    sid = result.session.identity.session_id
+    session = await _open(rt)
+    sid = session.identity.session_id
     env = await rt.reconstruct(
         ReconstructSessionRequest(session_id=sid)
     )
     assert env.is_ok
+    assert isinstance(env.result, ReconstructSessionResult)
     timeline = env.result.timeline
     assert timeline is not None
     assert timeline.length == 1
@@ -103,7 +115,7 @@ async def test_open_session_rejects_unknown_parent() -> None:
 async def test_open_session_with_parent_extends_lineage() -> None:
     rt = _runtime()
     parent = await _open(rt, handle="root")
-    parent_sid = parent.session.identity.session_id
+    parent_sid = parent.identity.session_id
     env = await rt.open_session(
         OpenSessionRequest(
             scope=SessionScope.TENANT,
@@ -112,10 +124,12 @@ async def test_open_session_with_parent_extends_lineage() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, OpenSessionResult)
     child = env.result.session
+    assert child is not None
     assert child.lineage.depth == 1
     assert child.lineage.parent_session_id == parent_sid
-    assert child.lineage.lineage_id == parent.session.lineage.lineage_id
+    assert child.lineage.lineage_id == parent.lineage.lineage_id
 
 
 # ─── append_event ──────────────────────────────────────────────────
@@ -125,7 +139,7 @@ async def test_open_session_with_parent_extends_lineage() -> None:
 async def test_append_event_increments_sequence() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     env = await rt.append_event(
         AppendEventRequest(
             session_id=sid,
@@ -134,6 +148,9 @@ async def test_append_event_increments_sequence() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, AppendEventResult)
+    assert env.result.event is not None
+    assert env.result.session is not None
     assert env.result.event.sequence == 1
     assert env.result.session.sequence_head == 1
 
@@ -142,7 +159,7 @@ async def test_append_event_increments_sequence() -> None:
 async def test_append_event_idempotency_key_replays_existing_event() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     key = "execution.exec-1.attempt.attempt-1.event.started"
 
     first = await rt.append_event(
@@ -165,6 +182,11 @@ async def test_append_event_idempotency_key_replays_existing_event() -> None:
     )
 
     assert first.is_ok and second.is_ok
+    assert isinstance(first.result, AppendEventResult)
+    assert isinstance(second.result, AppendEventResult)
+    assert first.result.event is not None
+    assert second.result.event is not None
+    assert second.result.session is not None
     assert second.result.event.event_id == first.result.event.event_id
     assert second.result.event.sequence == first.result.event.sequence
     assert second.result.event.payload == first.result.event.payload
@@ -176,6 +198,8 @@ async def test_append_event_idempotency_key_replays_existing_event() -> None:
         ReconstructSessionRequest(session_id=sid)
     )
     assert timeline.is_ok
+    assert isinstance(timeline.result, ReconstructSessionResult)
+    assert timeline.result.timeline is not None
     assert timeline.result.timeline.length == 2
 
 
@@ -193,7 +217,7 @@ async def test_append_event_idempotency_conflict_replays_existing_event() -> Non
     store = RaceyInMemorySessionPersistence()
     rt = SessionRuntime(persistence=store)
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     key = "execution.exec-1.attempt.attempt-1.event.completed"
 
     first = await rt.append_event(
@@ -216,6 +240,11 @@ async def test_append_event_idempotency_conflict_replays_existing_event() -> Non
     )
 
     assert first.is_ok and second.is_ok
+    assert isinstance(first.result, AppendEventResult)
+    assert isinstance(second.result, AppendEventResult)
+    assert first.result.event is not None
+    assert second.result.event is not None
+    assert second.result.session is not None
     assert second.result.event.event_id == first.result.event.event_id
     assert second.result.session.sequence_head == 1
     assert second.result.metadata["idempotent_replay"] is True
@@ -247,7 +276,7 @@ async def test_append_event_threads_request_correlation_into_event() -> None:
 
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
 
     env = await rt.append_event(
         AppendEventRequest(
@@ -258,6 +287,8 @@ async def test_append_event_threads_request_correlation_into_event() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, AppendEventResult)
+    assert env.result.event is not None
     expected = derive_correlation_id(
         session_id=sid,
         kind="request_correlation",
@@ -279,6 +310,8 @@ async def test_append_event_threads_request_correlation_into_event() -> None:
         )
     )
     assert env2.is_ok
+    assert isinstance(env2.result, AppendEventResult)
+    assert env2.result.event is not None
     assert env2.result.event.correlation_id == expected
 
 
@@ -289,7 +322,7 @@ async def test_append_event_without_request_correlation_keeps_none() -> None:
     cross-substrate joining."""
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     env = await rt.append_event(
         AppendEventRequest(
             session_id=sid,
@@ -298,6 +331,8 @@ async def test_append_event_without_request_correlation_keeps_none() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, AppendEventResult)
+    assert env.result.event is not None
     assert env.result.event.correlation_id is None
 
 
@@ -308,7 +343,7 @@ async def test_append_event_without_request_correlation_keeps_none() -> None:
 async def test_record_lifecycle_classifies_dormant() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     env = await rt.record_lifecycle(
         RecordLifecycleRequest(
             session_id=sid,
@@ -317,6 +352,9 @@ async def test_record_lifecycle_classifies_dormant() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, RecordLifecycleResult)
+    assert env.result.event is not None
+    assert env.result.session is not None
     assert (
         env.result.event.kind is SessionEventKind.DORMANCY_RECORDED
     )
@@ -330,7 +368,7 @@ async def test_record_lifecycle_classifies_dormant() -> None:
 async def test_record_lifecycle_terminal_then_reject() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     await rt.record_lifecycle(
         RecordLifecycleRequest(
             session_id=sid,
@@ -355,7 +393,7 @@ async def test_record_lifecycle_terminal_then_reject() -> None:
 async def test_record_context_appends_event_and_updates_session() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     ctx = SessionContext(
         environment="staging",
         labels=("urgent", "ops"),
@@ -365,6 +403,9 @@ async def test_record_context_appends_event_and_updates_session() -> None:
         RecordContextRequest(session_id=sid, context=ctx)
     )
     assert env.is_ok
+    assert isinstance(env.result, RecordContextResult)
+    assert env.result.event is not None
+    assert env.result.session is not None
     assert (
         env.result.event.kind is SessionEventKind.CONTEXT_ATTACHED
     )
@@ -378,7 +419,7 @@ async def test_record_context_appends_event_and_updates_session() -> None:
 async def test_record_correlation_is_idempotent_in_id() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     env_a = await rt.record_correlation(
         RecordCorrelationRequest(
             session_id=sid,
@@ -394,6 +435,9 @@ async def test_record_correlation_is_idempotent_in_id() -> None:
         )
     )
     assert env_a.is_ok and env_b.is_ok
+    assert isinstance(env_a.result, RecordCorrelationResult)
+    assert isinstance(env_b.result, RecordCorrelationResult)
+    assert env_a.result.correlation is not None
     # Same (session_id, kind, external_id) → byte-identical id
     again = await rt.record_correlation(
         RecordCorrelationRequest(
@@ -405,12 +449,13 @@ async def test_record_correlation_is_idempotent_in_id() -> None:
     # The substrate persists each observation as a new event,
     # but the derived correlation_id is the same for the first
     # observation and the new identical one.
-    assert (
-        env_a.result.correlation.correlation_id
-        == again.result.correlation.correlation_id
-        if again.is_ok
-        else True
-    )
+    if again.is_ok:
+        assert isinstance(again.result, RecordCorrelationResult)
+        assert again.result.correlation is not None
+        assert (
+            env_a.result.correlation.correlation_id
+            == again.result.correlation.correlation_id
+        )
 
 
 # ─── reconstruct ────────────────────────────────────────────────────
@@ -420,7 +465,7 @@ async def test_record_correlation_is_idempotent_in_id() -> None:
 async def test_reconstruct_pristine() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     for i in range(3):
         await rt.append_event(
             AppendEventRequest(
@@ -434,6 +479,8 @@ async def test_reconstruct_pristine() -> None:
         ReconstructSessionRequest(session_id=sid)
     )
     assert env.is_ok
+    assert isinstance(env.result, ReconstructSessionResult)
+    assert env.result.timeline is not None
     assert (
         env.result.status is SessionReconstructionStatus.PRISTINE
     )
@@ -448,7 +495,7 @@ async def test_reconstruct_pristine() -> None:
 async def test_reconstruct_partial_with_window() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     base = _now()
     for i in range(3):
         await rt.append_event(
@@ -466,6 +513,8 @@ async def test_reconstruct_partial_with_window() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, ReconstructSessionResult)
+    assert env.result.timeline is not None
     assert (
         env.result.status is SessionReconstructionStatus.PARTIAL
     )
@@ -481,6 +530,7 @@ async def test_reconstruct_not_found() -> None:
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, ReconstructSessionResult)
     assert (
         env.result.status is SessionReconstructionStatus.NOT_FOUND
     )
@@ -491,7 +541,7 @@ async def test_replay_equivalence_byte_identical_ids() -> None:
     """Two reconstructions of the same persistence produce byte-identical events."""
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     for i in range(4):
         await rt.append_event(
             AppendEventRequest(
@@ -507,6 +557,10 @@ async def test_replay_equivalence_byte_identical_ids() -> None:
     env_b = await rt.reconstruct(
         ReconstructSessionRequest(session_id=sid)
     )
+    assert isinstance(env_a.result, ReconstructSessionResult)
+    assert isinstance(env_b.result, ReconstructSessionResult)
+    assert env_a.result.timeline is not None
+    assert env_b.result.timeline is not None
     a_ids = [e.event_id for e in env_a.result.timeline.events]
     b_ids = [e.event_id for e in env_b.result.timeline.events]
     assert a_ids == b_ids
@@ -519,9 +573,10 @@ async def test_replay_equivalence_byte_identical_ids() -> None:
 async def test_get_session_returns_apex_record() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     env = await rt.get_session(sid)
     assert env.is_ok
+    assert isinstance(env.result, OperationalSession)
     assert env.result.identity.session_id == sid
 
 
@@ -529,7 +584,9 @@ async def test_get_session_returns_apex_record() -> None:
 async def test_get_timeline_returns_reconstruct_result() -> None:
     rt = _runtime()
     parent = await _open(rt)
-    sid = parent.session.identity.session_id
+    sid = parent.identity.session_id
     env = await rt.get_timeline(sid)
     assert env.is_ok
+    assert isinstance(env.result, ReconstructSessionResult)
+    assert env.result.timeline is not None
     assert env.result.timeline.length == 1

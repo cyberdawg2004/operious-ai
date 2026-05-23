@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -46,6 +47,12 @@ from app.runtime.boundary_event_projection import (
 _NS = uuid.UUID("f07f9a2f-4f3a-46af-a912-d0104810f25c")
 
 
+class _BoundaryCoordinates(TypedDict):
+    source_type: str
+    external_message_id: str
+    tenant_id: str | None
+
+
 def _at(second: int = 0) -> datetime:
     return datetime(2026, 5, 22, 12, 0, second, tzinfo=timezone.utc)
 
@@ -63,7 +70,7 @@ def _ingress(
     with_event_id: bool = True,
     with_replay_key: bool = True,
 ) -> BoundaryIngressRecord:
-    coords = {
+    coords: _BoundaryCoordinates = {
         "source_type": BoundarySourceType.ZENDESK.value,
         "external_message_id": external_message_id,
         "tenant_id": tenant_id,
@@ -153,6 +160,7 @@ def test_boundary_projection_can_derive_identity_from_replay_key() -> None:
 
     projected = project_boundary_ingress_record(record)
 
+    assert record.replay_key is not None
     assert projected.event_id == derive_operational_event_id(
         operational_act=OperationalAct.BOUNDARY_INGEST.value,
         substrate=OperationalSubstrate.BOUNDARY.value,

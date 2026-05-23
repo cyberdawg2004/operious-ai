@@ -6,8 +6,10 @@ import pytest
 
 from app.boundary.translation import (
     EgressLocalizeRequest,
+    EgressLocalizeResult,
     InMemoryTranslationPersistence,
     IdentityTranslationProvider,
+    IngressTranslateResult,
     IngressTranslateRequest,
     LocalizationContext,
     LocalizationFormality,
@@ -48,6 +50,8 @@ async def test_ingress_translate_returns_canonical_envelope(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, IngressTranslateResult)
+    assert env.result.projection is not None
     assert env.result.projection.canonical_payload.language == "en"
     assert env.result.replay is not None
 
@@ -98,6 +102,8 @@ async def test_egress_localize_persists_lineage(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, EgressLocalizeResult)
+    assert env.result.identity is not None
     lineage = await runtime.persistence.reconstruct_lineage(
         env.result.identity.correlation_id
     )
@@ -149,6 +155,10 @@ async def test_replay_records_are_byte_stable(
             correlation_id="conv-r2",
         )
     )
+    assert isinstance(a.result, IngressTranslateResult)
+    assert isinstance(b.result, IngressTranslateResult)
+    assert a.result.replay is not None
+    assert b.result.replay is not None
     assert (
         a.result.replay.canonical_fingerprint
         != b.result.replay.canonical_fingerprint

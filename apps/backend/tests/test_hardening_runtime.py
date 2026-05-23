@@ -5,10 +5,13 @@ from __future__ import annotations
 import pytest
 
 from app.hardening import (
+    AuditDependenciesResult,
     AuditDependenciesRequest,
     ClassifyContainmentRequest,
+    ClassifyContainmentResult,
     ContainmentClassification,
     DetectContaminationRequest,
+    DetectContaminationResult,
     FailureClassification,
     HardeningRuntime,
     HardeningSeverity,
@@ -19,11 +22,17 @@ from app.hardening import (
     SubstrateName,
     SurvivabilityStatus,
     ValidateAuthorityOwnershipRequest,
+    ValidateAuthorityOwnershipResult,
     ValidateLineageRequest,
+    ValidateLineageResult,
     ValidateOrderingRequest,
+    ValidateOrderingResult,
     ValidateReconstructionRequest,
+    ValidateReconstructionResult,
     ValidateReplayRequest,
+    ValidateReplayResult,
     ValidateSurvivabilityRequest,
+    ValidateSurvivabilityResult,
 )
 
 
@@ -50,6 +59,7 @@ async def test_validate_authority_ownership_persists_audit(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, ValidateAuthorityOwnershipResult)
     assert env.result.containment is not None
     assert len(env.result.violations) == 1
     audits = await runtime.persistence.list_audits()
@@ -67,6 +77,7 @@ async def test_validate_lineage_passes(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, ValidateLineageResult)
     assert env.result.integrity_status is IntegrityStatus.PASSED
 
 
@@ -81,6 +92,8 @@ async def test_validate_replay_byte_identical(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, ValidateReplayResult)
+    assert env.result.finding is not None
     assert env.result.finding.is_byte_identical
 
 
@@ -95,6 +108,8 @@ async def test_validate_reconstruction_drift_recorded(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, ValidateReconstructionResult)
+    assert env.result.finding is not None
     assert env.result.finding.status is ReplayStatus.DRIFTED
 
 
@@ -114,10 +129,12 @@ async def test_validate_ordering(
             key_fn=lambda x: x,
         )
     )
+    assert isinstance(env_pass.result, ValidateOrderingResult)
     assert (
         env_pass.result.integrity_status
         is IntegrityStatus.PASSED
     )
+    assert isinstance(env_fail.result, ValidateOrderingResult)
     assert (
         env_fail.result.integrity_status
         is IntegrityStatus.FAILED
@@ -141,6 +158,7 @@ async def test_detect_contamination_with_injected_source(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, DetectContaminationResult)
     assert (
         env.result.integrity_status is IntegrityStatus.FAILED
     )
@@ -171,6 +189,8 @@ async def test_audit_dependencies(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, AuditDependenciesResult)
+    assert env.result.finding is not None
     assert env.result.finding.forbidden_edges
     assert (
         env.result.finding.forbidden_edges[0].source
@@ -189,6 +209,7 @@ async def test_validate_survivability(
             scope="memory",
         )
     )
+    assert isinstance(env.result, ValidateSurvivabilityResult)
     assert (
         env.result.survivability_status
         is SurvivabilityStatus.SURVIVED
@@ -228,6 +249,7 @@ async def test_classify_containment(
             ),
         )
     )
+    assert isinstance(env.result, ClassifyContainmentResult)
     assert (
         env.result.classification
         is ContainmentClassification.LEAKED

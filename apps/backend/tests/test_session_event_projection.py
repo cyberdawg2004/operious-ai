@@ -24,6 +24,10 @@ from app.session.contracts.requests import (
     AppendEventRequest,
     OpenSessionRequest,
 )
+from app.session.contracts.results import (
+    AppendEventResult,
+    OpenSessionResult,
+)
 from app.session.enums import (
     SessionContinuityMode,
     SessionEventKind,
@@ -49,7 +53,9 @@ async def _opened_session(
         )
     )
     assert envelope.is_ok, envelope.trace.error
+    assert isinstance(envelope.result, OpenSessionResult)
     session = envelope.result.session
+    assert session is not None
     page = await store.list_events(
         SessionEventQuery(
             session_id=session.identity.session_id,
@@ -81,7 +87,9 @@ async def _session_with_all_event_kinds(
             )
         )
         assert appended.is_ok, appended.trace.error
+        assert isinstance(appended.result, AppendEventResult)
         session = appended.result.session
+        assert session is not None
     return session
 
 
@@ -162,6 +170,9 @@ async def test_non_open_session_event_projects_with_own_act() -> None:
         )
     )
     assert appended.is_ok
+    assert isinstance(appended.result, AppendEventResult)
+    assert appended.result.session is not None
+    assert appended.result.event is not None
 
     projected = project_session_timeline_event(
         session=appended.result.session,

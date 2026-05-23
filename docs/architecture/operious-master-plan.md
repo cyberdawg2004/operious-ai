@@ -1,21 +1,21 @@
 # Operious AI Consolidated Master Plan
 
 Updated baseline after Phase 6-D plus Pre-6-E Enterprise Trust
-Hardening phases A-H and recovery verification. This document is the
+Hardening phases A-H and the final Pre-6-E gate. This document is the
 canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
 - Tests: 2,192 passed, 2 skipped, 0 xfailed after
-  Pre-6-E Enterprise Trust Hardening phases A-H.
+  Pre-6-E Enterprise Trust Hardening phases A-H and the final gate.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
-  Phase D, Phase E, Phase F, Phase G, and Phase H are closed. The
-  final Pre-6-E gate remains before Phase 6-E may begin.
+  Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
+  closed. Phase 6-E may begin after explicit user confirmation.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 676 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
 - Alembic current: `0031_dead_letter_tasks (head)` on the
-  `operious_test` database after Phase H verification.
+  `operious_test` database after final-gate verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -23,9 +23,10 @@ canonical handoff plan for the next Codex session.
   Phase 5-A, Phase 5-B, Phase 5-C, Phase 6-A, Phase 6-B,
   Phase 6-C, Phase 6-D, and the Pre-6-E constitutional correctness
   wedge, plus Pre-6-E Enterprise Trust Hardening Phase A,
-  Phase B, Phase C, Phase D, Phase E, Phase F, Phase G, and Phase H.
-- Next phase: Final Pre-6-E gate and enterprise-trust audit rerun.
-  Phase 6-E remains queued until that gate is closed.
+  Phase B, Phase C, Phase D, Phase E, Phase F, Phase G, Phase H, and
+  the final Pre-6-E gate.
+- Next phase: Phase 6-E Frontend Hydration, queued pending explicit
+  user confirmation.
 
 ## Completed Work Ledger
 
@@ -1203,14 +1204,35 @@ hydration exposes the platform to enterprise operators.
 - [x] Phase H: Celery Backlog Physics. Add broker/result TTL controls,
   queue depth admission, dead-letter task records, and Redis memory
   policy health checks.
-- [ ] Final Pre-6-E Gate. Re-run full backend tests, Pyright, hardening
+- [x] Final Pre-6-E Gate. Re-run full backend tests, Pyright, hardening
   invariants, smoke tests, and the enterprise-trust audit before
   starting frontend hydration.
 
+#### Final Pre-6-E Gate - Done
+
+- [x] Verified Alembic current at `0031_dead_letter_tasks (head)` on
+  the `operious_test` database.
+- [x] Ran the expanded final invariant bundle, including router,
+  hardening, boundary, coordination, session, no-UUID4 lineage, and
+  no-load-all persistence scans: 160 passed, 2 skipped.
+- [x] Ran smoke tests: 4 passed.
+- [x] Ran full backend regression:
+  2,192 passed, 2 skipped, 0 xfailed.
+- [x] Ran Pyright across `apps/backend/app`: 0 errors, 676 warnings.
+- [x] Re-ran the enterprise-trust audit as a Codex architectural pass
+  against the final gate evidence. No standalone audit runner exists in
+  the repository; the executable audit surface is the invariant suite,
+  full backend regression, Pyright, migration head, and smoke tests.
+- [x] Audit result: all Pre-6-E target vulnerabilities are closed by
+  runtime enforcement plus invariant or database-level regression
+  guards. Pillars are assessed at 9/10 or better, with infrastructure
+  physics upgraded to elite posture.
+
 ### 6-E: Frontend Hydration - Items 7, PR_W15 - Queued
 
-- Not started. Do not begin Phase 6-E until Pre-6-E Enterprise Trust
-  Hardening Phase H and the final gate are closed.
+- Not started. Pre-6-E Enterprise Trust Hardening Phase H and the final
+  gate are closed; begin Phase 6-E only after explicit user
+  confirmation.
 - Command Center connected to real APIs.
 - Trace Inspector renders `operational_events`.
 - Operations Queue renders escalation records.
@@ -1246,7 +1268,7 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Phase H closed; Final Pre-6-E gate and enterprise-trust audit rerun are queued pending user confirmation.
+Current phase: Final Pre-6-E gate closed; Phase 6-E Frontend Hydration is queued pending user confirmation.
 Current test baseline: 2,192 passed, 2 skipped; smoke tests 4/4 green.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
 Current Alembic head: 0031_dead_letter_tasks.
@@ -1262,9 +1284,10 @@ Completed before this phase:
 - Pre-6-E Enterprise Trust Phase F is closed: Webhook surface hardening.
 - Pre-6-E Enterprise Trust Phase G is closed: Escalation outbox and full cognition forensics.
 - Pre-6-E Enterprise Trust Phase H is closed: Celery backlog physics.
+- Final Pre-6-E gate is closed: full backend, Pyright, invariants, smoke, Alembic, and audit rerun.
 
 Remaining before Phase 6-E:
-- Final Pre-6-E gate and enterprise-trust audit rerun.
+- Explicit user confirmation to start Phase 6-E.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -1288,7 +1311,7 @@ pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coor
 pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
-Do not start the final Pre-6-E gate or Phase 6-E until the user confirms the next phase boundary.
+Do not start Phase 6-E until the user confirms the next phase boundary.
 ```
 
 ## New Chat Hyperprompt
@@ -1298,7 +1321,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Phase H closed; Final Pre-6-E gate and enterprise-trust audit rerun are queued pending user confirmation.
+Current phase: Final Pre-6-E gate closed; Phase 6-E Frontend Hydration is queued pending user confirmation.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -1333,8 +1356,9 @@ Current source of truth:
 - Pre-6-E Enterprise Trust Phase F is closed.
 - Pre-6-E Enterprise Trust Phase G is closed.
 - Pre-6-E Enterprise Trust Phase H is closed.
-- Phase 6-E is queued and must not start until the final Pre-6-E gate
-  is closed.
+- Final Pre-6-E gate is closed.
+- Phase 6-E is queued and must not start until the user explicitly
+  confirms that phase boundary.
 
 Current verified baseline:
 - Tests: 2,192 passed, 2 skipped, 0 xfailed.
@@ -1374,20 +1398,20 @@ Current verified baseline:
 - Pre-6-E Phase F complete: Webhook Surface Hardening.
 - Pre-6-E Phase G complete: Escalation Outbox and Full Cognition Forensics.
 - Pre-6-E Phase H complete: Celery Backlog Physics.
+- Final Pre-6-E gate complete: full backend, Pyright, invariants,
+  smoke, Alembic, and enterprise-trust audit rerun.
 - Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
   canonical event fabric before the demo trace-inspector milestone.
 
 Goal for this chat:
-Await user confirmation, then run the final Pre-6-E gate only.
+Await user confirmation, then start Phase 6-E only.
 
-Final gate scope:
-- Full backend regression, Pyright, hardening invariants, smoke tests,
-  and enterprise-trust audit rerun.
-- Do not start the final gate or Phase 6-E until the user confirms the
-  phase boundary.
+Phase 6-E scope:
+- Frontend Hydration - Items 7, PR_W15.
+- Do not start Phase 6-E until the user confirms the phase boundary.
 
-Queued after the final gate:
-- Phase 6-E: Frontend Hydration - Items 7, PR_W15.
+Queued after Phase 6-E:
+- TBD by the next confirmed master-plan wedge.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.
@@ -1410,16 +1434,15 @@ Constitutional rules:
 - Frontend remains untouched until Phase 6-E starts.
 
 Before editing:
-- Inspect the final-gate commands, audit expectations, current
-  migrations, tests, and invariants before making any changes.
+- Inspect frontend hydration scope, Command Center routes/components,
+  backend API schemas, and current master plan before making changes.
 - Preserve existing router/service/runtime/persistence layering.
 - Do not weaken tenant scoping, deterministic identity, RLS, governance,
   chronology, or replay constraints while hardening broker physics.
-- Modify only what is necessary to close the final gate if verification
-  exposes a defect.
+- Modify only what is necessary to close Phase 6-E.
 
-After the final gate:
-- Run the final gate checks from the master directive.
+After Phase 6-E:
+- Run focused frontend/backend checks for hydrated surfaces.
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
@@ -1433,5 +1456,5 @@ Final answer must include:
 - Runtime/service/router changes.
 - Replay, governance, frontend, and transport implications.
 - Tests run and results.
-- Whether the final gate is closed or still open.
+- Whether Phase 6-E is closed or still open.
 ```

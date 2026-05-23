@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 import pytest
 
 from app.boundary.enums import (
@@ -20,7 +22,15 @@ from app.boundary.idempotency.registry import (
 )
 
 
-def _coords(*, msg: str = "evt-1", tenant: str | None = None):
+class _BoundaryCoordinates(TypedDict):
+    source_type: str
+    external_message_id: str
+    tenant_id: str | None
+
+
+def _coords(
+    *, msg: str = "evt-1", tenant: str | None = None
+) -> _BoundaryCoordinates:
     return {
         "source_type": "zendesk",
         "external_message_id": msg,

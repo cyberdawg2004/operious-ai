@@ -37,13 +37,15 @@ from app.governance.persistence import (
     GovernanceDecisionRecord,
     GovernanceTraceRecord,
     InMemoryGovernanceRepository,
+)
+from app.governance.persistence.records import (
+    PolicyEvaluationTraceRecord,
+)
+from app.governance.persistence.serializers import (
     decision_to_record,
     enforcement_action_to_record,
     record_to_decision,
     trace_to_record,
-)
-from app.governance.persistence.records import (
-    PolicyEvaluationTraceRecord,
 )
 from app.governance.tracing import GovernanceTrace, PolicyEvaluationTrace
 from app.governance.value_objects import RuntimeRestriction

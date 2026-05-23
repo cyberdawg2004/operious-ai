@@ -9,7 +9,9 @@ from app.boundary.voice import (
     DeterministicStubSpeechToTextProvider,
     DeterministicStubTextToSpeechProvider,
     EgressSynthesizeRequest,
+    EgressSynthesizeResult,
     InMemoryVoicePersistence,
+    IngressTranscribeResult,
     IngressTranscribeRequest,
     VoiceAudioHandle,
     VoiceContainmentError,
@@ -57,6 +59,8 @@ async def test_ingress_transcribe_uses_baked_transcript(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, IngressTranscribeResult)
+    assert env.result.transcript is not None
     assert (
         env.result.transcript.text
         == "Hola, necesito ayuda"
@@ -117,6 +121,8 @@ async def test_egress_synthesize_persists_lineage(
         )
     )
     assert env.is_ok
+    assert isinstance(env.result, EgressSynthesizeResult)
+    assert env.result.identity is not None
     lineage = await runtime.persistence.reconstruct_lineage(
         env.result.identity.correlation_id
     )
@@ -163,6 +169,9 @@ async def test_voice_replay_verifies_with_recorded_fingerprints(
             correlation_id="conv-r",
         )
     )
+    assert isinstance(env.result, IngressTranscribeResult)
+    assert env.result.replay is not None
+    assert env.result.transcript is not None
     assert verify_voice_replay(
         replay=env.result.replay,
         audio=audio,

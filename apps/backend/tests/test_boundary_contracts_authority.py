@@ -119,6 +119,7 @@ def test_boundary_ingress_request_accepts_typed_authority() -> None:
         authority=authority,
     )
     assert req.authority is authority
+    assert req.authority is not None
     assert req.authority.tenant_id == "acme"
 
 

@@ -11,7 +11,8 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any, Union
+from datetime import date, datetime
+from typing import Any, Union, cast
 
 import sqlalchemy as sa
 from alembic import op
@@ -318,24 +319,27 @@ def _canonical_sha256(payload: Mapping[str, Any]) -> str:
 
 def _json_safe(value: object) -> object:
     if isinstance(value, Mapping):
-        return {str(k): _json_safe(v) for k, v in value.items()}
+        mapping = cast(Mapping[object, object], value)
+        return {str(k): _json_safe(v) for k, v in mapping.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
+        sequence = cast(Sequence[object], value)
+        return [_json_safe(item) for item in sequence]
     if isinstance(value, uuid.UUID):
         return str(value)
-    if hasattr(value, "isoformat"):
-        return value.isoformat()  # type: ignore[no-any-return]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
     return value
 
 
 def _mapping(value: object) -> dict[str, Any]:
     if isinstance(value, Mapping):
-        return {str(key): item for key, item in value.items()}
+        mapping = cast(Mapping[object, Any], value)
+        return {str(key): item for key, item in mapping.items()}
     return {}
 
 
 def _iso(value: object) -> str:
-    if hasattr(value, "isoformat"):
+    if isinstance(value, (datetime, date)):
         return str(value.isoformat())
     return str(value)
 

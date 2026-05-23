@@ -64,12 +64,13 @@ async def test_anthropic_429_transitions_circuit_open() -> None:
 @pytest.mark.asyncio
 async def test_anthropic_circuit_respects_retry_after_header() -> None:
     breaker = ProviderCircuitBreaker()
+    now = datetime.now(timezone.utc)
     await breaker.open(
         tenant_id=TENANT_ID,
         provider_name="anthropic",
         reason="rate_limit",
-        open_until=NOW + timedelta(seconds=30),
-        now=NOW,
+        open_until=now + timedelta(seconds=30),
+        now=now,
     )
     seen_requests = 0
 

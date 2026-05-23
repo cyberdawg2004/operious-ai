@@ -176,6 +176,7 @@ async def test_governance_prevails_resolved() -> None:
         result.decision.outcome
         is ArbitrationOutcome.ARBITRATION_RESOLVED
     )
+    assert result.decision.prevailing_authority is not None
     assert (
         result.decision.prevailing_authority.level
         is ArbitrationAuthorityLevel.GOVERNANCE
