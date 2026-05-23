@@ -124,7 +124,7 @@ class GovernanceRuntime:
 
         chain = self._chains.get(context.stage)
         if chain is None:
-            return self._fail_envelope(
+            return await self._fail_envelope(
                 error=GovernanceConfigurationError(
                     f"no policy chain configured for stage "
                     f"{context.stage.value!r}"
@@ -320,7 +320,7 @@ class GovernanceRuntime:
 
     # ─── Internals ────────────────────────────────────────────────────
 
-    def _fail_envelope(
+    async def _fail_envelope(
         self,
         *,
         error: BaseException,
@@ -332,13 +332,39 @@ class GovernanceRuntime:
         loop = asyncio.get_event_loop()
         ended_at = datetime.now(timezone.utc)
         latency_ms = round((loop.time() - loop_start) * 1000, 2)
-        from app.governance.enums import Decision as _D
+        decision_id = (
+            _decision_id_from_context_seed(context)
+            or generate_decision_id()
+        )
+        decision = build_decision(
+            stage=context.stage,
+            policy_chain_id=chain_id,
+            evaluation_results=(),
+            metadata={
+                **dict(context.metadata),
+                "action": context.action,
+                "resource": context.resource,
+                "tenant_id": context.tenant_id,
+                "subject_kind": context.subject.kind.value,
+                "request_id": (
+                    str(context.request_id)
+                    if context.request_id is not None
+                    else None
+                ),
+                "correlation_id": (
+                    str(context.correlation_id)
+                    if context.correlation_id is not None
+                    else None
+                ),
+                "governance_version": "unversioned",
+                "failure": type(error).__name__,
+            },
+            decided_at=ended_at,
+            decision_id=decision_id,
+        )
 
         trace = GovernanceTrace(
-            decision_id=(
-                _decision_id_from_context_seed(context)
-                or generate_decision_id()
-            ),
+            decision_id=decision.decision_id,
             request_id=context.request_id,
             stage=context.stage,
             action=context.action,
@@ -349,12 +375,12 @@ class GovernanceRuntime:
             ended_at=ended_at,
             latency_ms=latency_ms,
             status="failed",
-            final_decision=_D.DENY,
+            final_decision=decision.decision,
             policy_chain_id=chain_id,
             policy_traces=(),
-            rule_count=0,
-            violation_count=0,
-            restriction_count=0,
+            rule_count=len(decision.evaluated_rules),
+            violation_count=len(decision.violations),
+            restriction_count=len(decision.restrictions),
             subject_kind=context.subject.kind.value,
             correlation_id=context.correlation_id,
             error=f"{type(error).__name__}: {error}",
@@ -366,14 +392,15 @@ class GovernanceRuntime:
             action=context.action,
             tenant_id=context.tenant_id,
             policy_chain_id=chain_id,
-            final_decision=_D.DENY.value,
+            final_decision=decision.decision.value,
             policy_count=0,
-            rule_count=0,
-            violation_count=0,
-            restriction_count=0,
+            rule_count=len(decision.evaluated_rules),
+            violation_count=len(decision.violations),
+            restriction_count=len(decision.restrictions),
             latency_ms=latency_ms,
             status="failed",
         )
+        await self._persist_failure(decision=decision, trace=trace)
         return GovernanceEnvelope(trace=trace, error=error)
 
     async def _persist_success(

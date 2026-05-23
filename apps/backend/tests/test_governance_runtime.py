@@ -20,7 +20,7 @@ Properties pinned:
 
 from __future__ import annotations
 
-from typing import ClassVar, FrozenSet, Sequence
+from typing import Any, ClassVar, FrozenSet, Mapping, Sequence
 
 import pytest
 
@@ -45,6 +45,7 @@ from app.governance.exceptions import (
     EnforcementExecutionError,
     GovernanceConfigurationError,
 )
+from app.governance.identity.decision_ids import derive_decision_id
 from app.governance.policies.base import BaseGovernancePolicy
 from app.governance.policies.chain import PolicyChain
 from app.governance.persistence import (
@@ -117,6 +118,7 @@ def _runtime_with(
 def _ctx(
     *,
     stage: EnforcementStage = EnforcementStage.PRE_RETRIEVAL,
+    metadata: Mapping[str, Any] | None = None,
 ) -> GovernanceContext:
     from app.governance.subjects.base import GenericGovernanceSubject
 
@@ -128,6 +130,7 @@ def _ctx(
         tenant_id=TenantId("t"),
         request_id="req-1",
         subject=GenericGovernanceSubject(data={"query": "hello"}),
+        metadata=dict(metadata or {}),
     )
 
 
@@ -194,6 +197,44 @@ async def test_missing_chain_for_stage_yields_failed_envelope() -> None:
     assert not env.is_ok
     assert isinstance(env.error, GovernanceConfigurationError)
     assert env.trace.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_missing_chain_governance_failure_is_persisted() -> None:
+    repo = InMemoryGovernanceRepository()
+    runtime = GovernanceRuntime(
+        engine=PolicyEvaluationEngine(),
+        handler_registry=_registry(),
+        chains={},
+        persistence=repo,
+    )
+    decision_seed = "tenant:t|request:req-1|missing-chain"
+
+    env = await runtime.evaluate(
+        _ctx(metadata={"governance.decision_seed": decision_seed})
+    )
+    expected_decision_id = derive_decision_id(seed=decision_seed)
+
+    stored_decision = await repo.get_decision(
+        str(expected_decision_id),
+        expected_tenant_id="t",
+    )
+    stored_trace = await repo.get_trace(
+        str(expected_decision_id),
+        expected_tenant_id="t",
+    )
+
+    assert not env.is_ok
+    assert env.trace.decision_id == expected_decision_id
+    assert stored_decision is not None
+    assert stored_decision.decision == Decision.DENY.value
+    assert (
+        stored_decision.evaluated_rules[0].rule_id
+        == "no_governance_evaluated"
+    )
+    assert stored_trace is not None
+    assert stored_trace.status == "failed"
+    assert stored_trace.error is not None
 
 
 def test_incomplete_handler_registry_fails_at_composition_time() -> None:
