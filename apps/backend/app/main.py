@@ -33,6 +33,7 @@ from app.middleware.authority_context import (
     AuthorityContextMiddleware,
 )
 from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.request_body_limit import RequestBodyLimitMiddleware
 from app.middleware.trusted_ingress import (
     IPNetwork,
     TrustedIngressMiddleware,
@@ -294,8 +295,8 @@ def create_app(
     # build wraps in REVERSED order, so the LAST registered class
     # ends up OUTERMOST in the request flow. We want:
     #
-    #     CORS (outermost) → RequestContext → TrustedIngress
-    #         → AuthorityContext (innermost) → Router
+    #     RequestBodyLimit (outermost) → CORS → RequestContext
+    #         → TrustedIngress → AuthorityContext (innermost) → Router
     #
     # so the request id is bound BEFORE the authority middleware
     # logs / returns a 400 — every authority-extraction error then
@@ -352,6 +353,12 @@ def create_app(
         logger.info("middleware_cors_register_complete")
     else:
         logger.info("middleware_cors_register_skipped")
+    logger.info("middleware_request_body_limit_register_begin")
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_bytes=settings.SURVIVABILITY_REQUEST_BODY_MAX_BYTES,
+    )
+    logger.info("middleware_request_body_limit_register_complete")
 
     logger.info("router_registration_begin")
     app.include_router(build_api_router(settings))

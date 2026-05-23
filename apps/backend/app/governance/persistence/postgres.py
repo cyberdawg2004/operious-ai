@@ -48,6 +48,7 @@ from app.governance.db.models import (
     GovernanceTraceRow,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import SERVER_PAGE_HARD_CAP, fetch_scalar_page
 from app.governance.persistence.models import DecisionQuery, RecordPage
 from app.governance.persistence.records import (
     EnforcementActionRecord,
@@ -230,8 +231,13 @@ class PostgresGovernanceRepository(BaseRepository):
             .where(EnforcementActionRow.decision_id == UUID(decision_id))
             .order_by(EnforcementActionRow.applied_at)
         )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return tuple(_action_row_to_record(r) for r in rows)
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=SERVER_PAGE_HARD_CAP,
+            offset=0,
+        )
+        return tuple(_action_row_to_record(r) for r in page.items)
 
     # ─── Queries ─────────────────────────────────────────────────────
 
@@ -241,27 +247,17 @@ class PostgresGovernanceRepository(BaseRepository):
         stmt = select(GovernanceDecisionRow)
         stmt = _apply_decision_filters(stmt, query)
         stmt = stmt.order_by(GovernanceDecisionRow.decided_at)
-        rows = list(
-            (
-                await self.session.execute(
-                    stmt.offset(query.offset).limit(query.limit)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        # ``total`` mirrors the in-memory implementation: the matching
-        # count BEFORE pagination. We compute it via a second roundtrip
-        # rather than emit a window function so the query plan stays
-        # legible. Backends with cheap COUNT(*) can do this in one
-        # roundtrip; we keep parity with the in-memory contract.
-        count_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
         return RecordPage(
-            items=tuple(_decision_row_to_record(r) for r in rows),
-            total=len(count_rows),
-            offset=query.offset,
+            items=tuple(_decision_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def query_traces(
@@ -270,22 +266,17 @@ class PostgresGovernanceRepository(BaseRepository):
         stmt = select(GovernanceTraceRow)
         stmt = _apply_trace_filters(stmt, query)
         stmt = stmt.order_by(GovernanceTraceRow.started_at)
-        rows = list(
-            (
-                await self.session.execute(
-                    stmt.offset(query.offset).limit(query.limit)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        count_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
         return RecordPage(
-            items=tuple(_trace_row_to_record(r) for r in rows),
-            total=len(count_rows),
-            offset=query.offset,
+            items=tuple(_trace_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 
@@ -328,6 +319,10 @@ def _apply_decision_filters(stmt, query):  # type: ignore[no-untyped-def]
     if query.final_decision is not None:
         stmt = stmt.where(
             GovernanceDecisionRow.decision == query.final_decision
+        )
+    if query.decided_after_or_at is not None:
+        stmt = stmt.where(
+            GovernanceDecisionRow.decided_at >= query.decided_after_or_at
         )
     return stmt
 

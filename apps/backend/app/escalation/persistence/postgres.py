@@ -15,6 +15,7 @@ from app.escalation.exceptions import EscalationPersistenceError
 from app.escalation.persistence.models import EscalationPage, EscalationQuery
 from app.escalation.persistence.records import EscalationRecord
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 
 
 class PostgresEscalationPersistence(BaseRepository):
@@ -119,13 +120,17 @@ class PostgresEscalationPersistence(BaseRepository):
             EscalationRecordRow.created_at,
             EscalationRecordRow.escalation_id,
         )
-        all_rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return EscalationPage(
-            items=tuple(_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return EscalationPage(
+            items=tuple(_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 

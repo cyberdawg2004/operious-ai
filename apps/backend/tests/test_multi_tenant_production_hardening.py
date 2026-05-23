@@ -162,6 +162,7 @@ async def test_credential_rotation_preserves_previous_secret_during_grace_window
         "message_id": "email-message-6d",
         "to": "support@example.com",
         "text": "old signatures still land during grace",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     result = await service.process_channel_webhook(
         channel_type="email",

@@ -14,6 +14,7 @@ from app.qa.exceptions import QAPersistenceError
 from app.qa.persistence.models import QAScorePage, QAScoreQuery
 from app.qa.persistence.records import QAScoreRecord
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 
 
 class PostgresQAPersistence(BaseRepository):
@@ -77,13 +78,17 @@ class PostgresQAPersistence(BaseRepository):
             expected_tenant_id=expected_tenant_id,
         )
         stmt = stmt.order_by(QAScoreRow.scored_at, QAScoreRow.score_id)
-        all_rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return QAScorePage(
-            items=tuple(_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return QAScorePage(
+            items=tuple(_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 

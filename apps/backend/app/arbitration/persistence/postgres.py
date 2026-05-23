@@ -44,6 +44,7 @@ from app.arbitration.persistence.records import (
     ArbitrationRecord,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 
 
 class PostgresArbitrationPersistence(BaseRepository):
@@ -123,16 +124,17 @@ class PostgresArbitrationPersistence(BaseRepository):
             ArbitrationEvaluationRow.runtime_instance_id,
             ArbitrationEvaluationRow.sequence,
         )
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        total = len(all_rows)
-        sliced = all_rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return RecordPage(
-            records=tuple(_row_to_record(r) for r in sliced),
-            total=total,
+            records=tuple(_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 

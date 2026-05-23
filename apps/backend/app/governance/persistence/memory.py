@@ -12,6 +12,8 @@ layer.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.governance.persistence.models import DecisionQuery, RecordPage
 from app.governance.persistence.records import (
     EnforcementActionRecord,
@@ -154,6 +156,9 @@ def _matches_decision(
         return False
     if query.final_decision is not None and record.decision != query.final_decision:
         return False
+    if query.decided_after_or_at is not None:
+        if datetime.fromisoformat(record.decided_at) < query.decided_after_or_at:
+            return False
     return True
 
 

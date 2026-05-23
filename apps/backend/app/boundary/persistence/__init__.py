@@ -14,6 +14,7 @@ from app.boundary.persistence.postgres import (
 from app.boundary.persistence.records import (
     BoundaryEgressRecord,
     BoundaryIngressRecord,
+    WebhookNonceRecord,
 )
 from app.boundary.persistence.repository import (
     BoundaryPersistenceProtocol,
@@ -35,6 +36,7 @@ __all__ = [
     "BoundaryRecordPage",
     "InMemoryBoundaryPersistence",
     "PostgresBoundaryPersistence",
+    "WebhookNonceRecord",
     "egress_envelope_to_record",
     "egress_result_to_record",
     "ingress_envelope_to_record",

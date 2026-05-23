@@ -46,6 +46,7 @@ from app.execution.persistence.records import (
     ExecutionRecord,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 
 
 class PostgresExecutionPersistence(BaseRepository):
@@ -570,19 +571,32 @@ class PostgresExecutionPersistence(BaseRepository):
             stmt = stmt.where(ExecutionRow.tenant_id == query.tenant_id)
         if query.state is not None:
             stmt = stmt.where(ExecutionRow.state == query.state.value)
+        if query.requested_after_or_at is not None:
+            stmt = stmt.where(
+                ExecutionRow.requested_at >= query.requested_after_or_at
+            )
+        if query.failed_after_or_at is not None:
+            stmt = stmt.where(
+                ExecutionRow.failed_at.is_not(None),
+                ExecutionRow.failed_at >= query.failed_after_or_at,
+            )
         if query.claimed_before_or_at is not None:
             stmt = stmt.where(
                 ExecutionRow.claimed_at.is_not(None),
                 ExecutionRow.claimed_at <= query.claimed_before_or_at,
             )
         stmt = stmt.order_by(ExecutionRow.requested_at, ExecutionRow.execution_id)
-        all_rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return ExecutionPage(
-            executions=tuple(_row_to_execution(r) for r in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return ExecutionPage(
+            executions=tuple(_row_to_execution(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_attempts(
@@ -606,13 +620,17 @@ class PostgresExecutionPersistence(BaseRepository):
             ExecutionAttemptRow.started_at,
             ExecutionAttemptRow.attempt_number,
         )
-        all_rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return ExecutionAttemptPage(
-            attempts=tuple(_row_to_attempt(r) for r in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return ExecutionAttemptPage(
+            attempts=tuple(_row_to_attempt(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_outbox(
@@ -634,13 +652,17 @@ class PostgresExecutionPersistence(BaseRepository):
         stmt = stmt.order_by(
             ExecutionOutboxRow.created_at, ExecutionOutboxRow.outbox_id
         )
-        all_rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return OutboxPage(
-            records=tuple(_row_to_outbox(r) for r in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return OutboxPage(
+            records=tuple(_row_to_outbox(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def _latest_attempt_id(

@@ -24,8 +24,8 @@ from app.services.cognition_service import CognitionService
 router = APIRouter(tags=["cognition"])
 
 _MIN_LIMIT = 1
-_MAX_LIMIT = 200
-_DEFAULT_LIMIT = 50
+_MAX_LIMIT = 100
+_DEFAULT_LIMIT = 25
 
 
 @router.post(

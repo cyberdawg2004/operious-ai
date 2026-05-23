@@ -12,9 +12,10 @@ import base64
 import hashlib
 import hmac
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import getaddresses, parsedate_to_datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.enums import (
@@ -26,6 +27,15 @@ from app.boundary.exceptions import BoundaryNormalizationError
 from app.boundary.models.normalization import BoundaryNormalizationResult
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelWebhookSecurityContext:
+    """Timestamp + nonce extracted from a signed channel webhook."""
+
+    timestamp: datetime
+    nonce: str
+
 
 _CANONICAL_CHANNEL_PAYLOAD_KEYS = frozenset(
     {
@@ -444,24 +454,126 @@ def extract_routing_address(
 ) -> str:
     if not isinstance(body, Mapping):
         raise ValueError("channel webhook body must be a mapping")
+    typed_body = cast(Mapping[str, Any], body)
     channel = channel_type.strip().lower()
     if channel == "email":
         return normalize_routing_address(
-            channel, extract_email_routing_address(body, headers)
+            channel, extract_email_routing_address(typed_body, headers)
         )
     if channel == "whatsapp":
         return normalize_routing_address(
-            channel, extract_whatsapp_routing_address(body, headers)
+            channel, extract_whatsapp_routing_address(typed_body, headers)
         )
     if channel == "shulex":
         return normalize_routing_address(
-            channel, extract_shulex_routing_address(body, headers)
+            channel, extract_shulex_routing_address(typed_body, headers)
         )
     if channel == "lark":
         return normalize_routing_address(
-            channel, extract_lark_routing_address(body, headers)
+            channel, extract_lark_routing_address(typed_body, headers)
         )
     raise ValueError(f"unsupported channel type: {channel_type!r}")
+
+
+def extract_webhook_security_context(
+    *,
+    channel_type: str,
+    body: Any,
+    headers: Mapping[str, str],
+) -> ChannelWebhookSecurityContext:
+    if not isinstance(body, Mapping):
+        raise ValueError("channel webhook body must be a mapping")
+    typed_body = cast(Mapping[str, Any], body)
+    channel = channel_type.strip().lower()
+    if channel == "email":
+        timestamp_value = _first_text(
+            _header(headers, "x-operious-webhook-timestamp"),
+            _header(headers, "x-email-timestamp"),
+            _header(headers, "x-amz-sns-message-timestamp"),
+            typed_body.get("timestamp"),
+            _nested(typed_body, "mail", "timestamp"),
+        )
+        nonce = _first_text(
+            _header(headers, "x-operious-webhook-nonce"),
+            _header(headers, "x-email-nonce"),
+            typed_body.get("nonce"),
+            typed_body.get("message_id"),
+            typed_body.get("messageId"),
+            typed_body.get("id"),
+            _nested(typed_body, "mail", "messageId"),
+        )
+    elif channel == "whatsapp":
+        value = _first_whatsapp_value(typed_body)
+        messages = value.get("messages") if value is not None else None
+        first: Mapping[str, Any] = {}
+        if (
+            isinstance(messages, list)
+            and messages
+            and isinstance(messages[0], Mapping)
+        ):
+            first = cast(Mapping[str, Any], messages[0])
+        timestamp_value = _first_text(
+            _header(headers, "x-operious-webhook-timestamp"),
+            _header(headers, "x-whatsapp-timestamp"),
+            typed_body.get("Timestamp"),
+            typed_body.get("timestamp"),
+            first.get("timestamp"),
+        )
+        nonce = _first_text(
+            _header(headers, "x-operious-webhook-nonce"),
+            _header(headers, "x-whatsapp-nonce"),
+            typed_body.get("nonce"),
+            typed_body.get("MessageSid"),
+            typed_body.get("SmsMessageSid"),
+            typed_body.get("SmsSid"),
+            first.get("id"),
+        )
+    elif channel == "shulex":
+        timestamp_value = _first_text(
+            _header(headers, "x-operious-webhook-timestamp"),
+            _header(headers, "x-shulex-timestamp"),
+            typed_body.get("created_at"),
+            typed_body.get("timestamp"),
+        )
+        nonce = _first_text(
+            _header(headers, "x-operious-webhook-nonce"),
+            _header(headers, "x-shulex-nonce"),
+            typed_body.get("nonce"),
+            typed_body.get("event_id"),
+            typed_body.get("message_id"),
+            typed_body.get("id"),
+        )
+    elif channel == "lark":
+        header = _mapping_or_empty(typed_body.get("header"))
+        event = _mapping_or_empty(typed_body.get("event"))
+        message = _mapping_or_empty(event.get("message"))
+        timestamp_value = _first_text(
+            _header(headers, "x-lark-request-timestamp"),
+            _header(headers, "x-operious-webhook-timestamp"),
+            header.get("create_time"),
+            typed_body.get("timestamp"),
+        )
+        nonce = _first_text(
+            _header(headers, "x-lark-request-nonce"),
+            _header(headers, "x-operious-webhook-nonce"),
+            typed_body.get("nonce"),
+            header.get("event_id"),
+            message.get("message_id"),
+            typed_body.get("event_id"),
+        )
+    else:
+        raise ValueError(f"unsupported channel type: {channel_type!r}")
+
+    timestamp = _parse_timestamp(timestamp_value)
+    if timestamp is None:
+        raise ValueError("webhook timestamp missing or invalid")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
+    if nonce is None:
+        raise ValueError("webhook nonce missing")
+    return ChannelWebhookSecurityContext(timestamp=timestamp, nonce=nonce)
 
 
 def extract_email_routing_address(
@@ -715,7 +827,7 @@ def _require_secret(value: str) -> str:
 
 
 def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
+    return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
 
 
 def _first_whatsapp_value(body: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -725,14 +837,16 @@ def _first_whatsapp_value(body: Mapping[str, Any]) -> Mapping[str, Any] | None:
     first_entry = entries[0]
     if not isinstance(first_entry, Mapping):
         return None
+    first_entry = cast(Mapping[str, Any], first_entry)
     changes = first_entry.get("changes")
     if not isinstance(changes, list) or not changes:
         return None
     first_change = changes[0]
     if not isinstance(first_change, Mapping):
         return None
+    first_change = cast(Mapping[str, Any], first_change)
     value = first_change.get("value")
-    return value if isinstance(value, Mapping) else None
+    return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else None
 
 
 def _is_twilio_whatsapp(body: Mapping[str, Any]) -> bool:
@@ -823,6 +937,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
 
 
 __all__ = [
+    "ChannelWebhookSecurityContext",
     "EmailWebhookAdapter",
     "LarkWebhookAdapter",
     "ShulexWebhookAdapter",
@@ -833,5 +948,6 @@ __all__ = [
     "extract_routing_address",
     "extract_shulex_routing_address",
     "extract_whatsapp_routing_address",
+    "extract_webhook_security_context",
     "normalize_routing_address",
 ]

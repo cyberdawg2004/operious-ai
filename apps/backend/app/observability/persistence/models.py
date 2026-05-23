@@ -87,6 +87,7 @@ class InboundNormalizationDeadLetterQuery:
 class DeadLetterExecutionPage:
     items: tuple[DeadLetterExecutionRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -94,6 +95,7 @@ class DeadLetterExecutionPage:
 class OperationalSLODefinitionPage:
     items: tuple[OperationalSLODefinitionRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -101,6 +103,7 @@ class OperationalSLODefinitionPage:
 class OperationalTraceSpanPage:
     items: tuple[OperationalTraceSpanRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -108,6 +111,7 @@ class OperationalTraceSpanPage:
 class OperationalAlertPage:
     items: tuple[OperationalAlertRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -115,6 +119,7 @@ class OperationalAlertPage:
 class StuckExecutionAlertPage:
     items: tuple[StuckExecutionAlertRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -122,6 +127,7 @@ class StuckExecutionAlertPage:
 class InboundNormalizationDeadLetterPage:
     items: tuple[InboundNormalizationDeadLetterRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 

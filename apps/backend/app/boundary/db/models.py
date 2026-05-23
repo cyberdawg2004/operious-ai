@@ -31,12 +31,15 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Float,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -229,4 +232,75 @@ class BoundaryEgressRow(Base):
     )
 
 
-__all__ = ["BoundaryEgressRow", "BoundaryIngressRow"]
+class WebhookNonceRecordRow(Base):
+    """Tenant-scoped nonce ledger for channel webhook replay defense."""
+
+    __tablename__ = "webhook_nonce_records"
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        primary_key=True,
+        nullable=False,
+    )
+    channel_type: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        primary_key=True,
+        nullable=False,
+    )
+    nonce: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH * 4),
+        primary_key=True,
+        nullable=False,
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(tenant_id) > 0",
+            name="tenant_id_nonempty",
+        ),
+        CheckConstraint(
+            "length(channel_type) > 0",
+            name="channel_type_nonempty",
+        ),
+        CheckConstraint(
+            "length(nonce) > 0",
+            name="nonce_nonempty",
+        ),
+        CheckConstraint(
+            "expires_at > received_at",
+            name="expires_after_received",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id"],
+            ["tenants.tenant_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "channel_type",
+            "nonce",
+            name="uq_webhook_nonce_records_tenant_channel_nonce",
+        ),
+        Index(
+            "ix_webhook_nonce_records_tenant_channel",
+            "tenant_id",
+            "channel_type",
+        ),
+    )
+
+
+__all__ = [
+    "BoundaryEgressRow",
+    "BoundaryIngressRow",
+    "WebhookNonceRecordRow",
+]

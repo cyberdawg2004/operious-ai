@@ -86,4 +86,19 @@ class BoundaryEgressRecord:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
-__all__ = ["BoundaryIngressRecord", "BoundaryEgressRecord"]
+@dataclass(frozen=True, slots=True)
+class WebhookNonceRecord:
+    """Replay-protection record for tenant-owned channel webhooks."""
+
+    tenant_id: str
+    channel_type: str
+    nonce: str
+    received_at: datetime
+    expires_at: datetime
+
+
+__all__ = [
+    "BoundaryIngressRecord",
+    "BoundaryEgressRecord",
+    "WebhookNonceRecord",
+]

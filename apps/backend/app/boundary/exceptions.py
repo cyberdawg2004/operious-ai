@@ -13,6 +13,9 @@
                                       failed at the adapter.
 * `BoundaryReplayError`            — replay detector / idempotency
                                       registry rejected an input.
+* `WebhookFreshnessError`          — signed webhook timestamp missing
+                                      or outside the freshness window.
+* `WebhookReplayError`             — signed webhook nonce already seen.
 * `BoundaryPersistenceError`       — persistence backend rejected
                                       a write or read (e.g.
                                       write-once violation).
@@ -49,6 +52,14 @@ class BoundaryReplayError(BoundaryError):
     """Replay detector / idempotency registry rejected an input."""
 
 
+class WebhookFreshnessError(BoundaryAuthenticationError):
+    """Webhook timestamp is missing or outside the freshness window."""
+
+
+class WebhookReplayError(BoundaryReplayError):
+    """Webhook nonce / message id has already been accepted."""
+
+
 class BoundaryPersistenceError(BoundaryError):
     """Persistence-layer failure (write-once violation, backend I/O)."""
 
@@ -59,5 +70,7 @@ __all__ = [
     "BoundaryNormalizationError",
     "BoundaryAuthenticationError",
     "BoundaryReplayError",
+    "WebhookFreshnessError",
+    "WebhookReplayError",
     "BoundaryPersistenceError",
 ]

@@ -64,6 +64,8 @@ class BoundaryRecordPage:
     ingress: tuple[BoundaryIngressRecord, ...] = ()
     egress: tuple[BoundaryEgressRecord, ...] = ()
     total: int = 0
+    limit: int = 0
+    offset: int = 0
 
 
 __all__ = [

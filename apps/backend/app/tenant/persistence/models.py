@@ -100,6 +100,7 @@ class TenantTopologyConfigurationQuery:
 class TenantChannelConfigurationPage:
     items: tuple[TenantChannelConfigurationRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 
@@ -107,6 +108,7 @@ class TenantChannelConfigurationPage:
 class TenantKnowledgeDocumentPage:
     items: tuple[TenantKnowledgeDocumentRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 
@@ -114,6 +116,7 @@ class TenantKnowledgeDocumentPage:
 class TenantKnowledgeDocumentVersionPage:
     items: tuple[TenantKnowledgeDocumentVersionRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 
@@ -121,6 +124,7 @@ class TenantKnowledgeDocumentVersionPage:
 class TenantGovernancePolicyPage:
     items: tuple[TenantGovernancePolicyRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 
@@ -128,6 +132,7 @@ class TenantGovernancePolicyPage:
 class TenantExecutionGovernanceConfigurationPage:
     items: tuple[TenantExecutionGovernanceConfigurationRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 
@@ -135,6 +140,7 @@ class TenantExecutionGovernanceConfigurationPage:
 class TenantExecutionCircuitBreakerPage:
     items: tuple[TenantExecutionCircuitBreakerRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 
@@ -142,6 +148,7 @@ class TenantExecutionCircuitBreakerPage:
 class TenantTopologyConfigurationPage:
     items: tuple[TenantTopologyConfigurationRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 

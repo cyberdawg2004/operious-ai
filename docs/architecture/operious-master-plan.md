@@ -1,29 +1,31 @@
 # Operious AI Consolidated Master Plan
 
-Updated baseline after Phase 6-D plus the Pre-6-E constitutional
-correctness wedge. This document is the canonical handoff plan for the
-next Codex session.
+Updated baseline after Phase 6-D plus Pre-6-E Enterprise Trust
+Hardening phases A-D and recovery verification. This document is the
+canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
-- Tests: 2,135 passed, 2 skipped, 0 xfailed.
-- Pre-6-E micro-wedge: Execution governance ordering and strict LLM
-  diagnostic output schema are closed. Focused backend checks passed;
-  local full-suite reconfirmation collected 2,150 tests but timed out at
-  the JWKS auth provider test before completion, so the canonical full
-  pass count remains the last confirmed Phase 6-D baseline until rerun.
+- Tests: 2,172 passed, 2 skipped, 0 xfailed after
+  Pre-6-E Enterprise Trust Hardening phases A-E.
+- Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
+  Phase D, and Phase E are closed. Phase F, Phase G, and Phase H remain
+  the next hardening wedges before Phase 6-E may begin.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors, 584 warnings across the backend surface.
-  Warnings should not grow phase over phase; the Phase 3 remediation
-  marker is 687 warnings.
+- Pyright: 0 errors, 686 warnings across the backend surface.
+  Warnings should not grow beyond this current hardening ceiling.
+- Alembic current: `0027_provider_circuit_states (head)` on the
+  `operious_test` database after Phase D verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
   Phase 3-D, Phase 3-E, Phase 4-A, Phase 4-B, Phase 4-C, and
   Phase 5-A, Phase 5-B, Phase 5-C, Phase 6-A, Phase 6-B,
   Phase 6-C, Phase 6-D, and the Pre-6-E constitutional correctness
-  wedge.
-- Next phase: Phase 6-E, Frontend Hydration - Items 7, PR_W15.
+  wedge, plus Pre-6-E Enterprise Trust Hardening Phase A,
+  Phase B, Phase C, Phase D, and Phase E.
+- Next phase: Pre-6-E Enterprise Trust Hardening Phase F, Webhook Surface
+  Hardening. Phase 6-E remains queued after phases F-H are closed.
 
 ## Completed Work Ledger
 
@@ -986,12 +988,153 @@ Maps to: PR_W9, PR_W10, PR_W11, PR_W14, PR_W15, PR_W16, Items 7 and 9.
 - [x] Verified focused cognition/network checks: 11 passed, 1 skipped.
 - [x] Verified backend Pyright on `apps/backend/app`: 0 errors.
 - [x] Verified invariant pack: 157 passed, 2 skipped.
-- [ ] Reconfirm full backend pass count in an environment where the
-  JWKS auth provider test completes; local run collected 2,150 tests and
-  timed out at `test_valid_token_yields_verified_identity`.
+- [x] Reconfirmed full backend pass count during the Enterprise Trust
+  recovery gate: 2,166 passed, 2 skipped.
 
-### 6-E: Frontend Hydration - Items 7, PR_W15
+### Pre-6-E Enterprise Trust Hardening Sprint
 
+This sprint was started after the third architectural audit and before
+Phase 6-E. It exists to close constitutional, chronological, replay,
+provider-resilience, and infrastructure-physics gaps before frontend
+hydration exposes the platform to enterprise operators.
+
+#### Recovery Ledger - Done
+
+- [x] Restored hardening surfaces after the recovery/restore event and
+  re-established a clean backend regression baseline.
+- [x] Restored observability read surfaces for stuck execution alerts
+  and inbound normalization dead letters.
+- [x] Restored `TenantProductionHardeningRuntime`, signed audit export,
+  incident replay matching, and tenant router execution-governance
+  endpoints.
+- [x] Restored execution recovery transport hook
+  `reconcile_stale_execution_outbox`.
+- [x] Restored tenant credential rotation with previous-secret grace
+  windows, including previous webhook secret acceptance in ticket
+  ingress during grace.
+- [x] Restored PgBouncer-safe asyncpg database URL behavior:
+  `prepared_statement_cache_size=0` and deterministic prepared statement
+  names.
+- [x] Preserved Alembic continuity after verifying the active pre-Phase-B
+  head was `0024_execution_governance`; chronology hardening continued
+  forward through `0026_chronology_append_only` and provider circuit
+  hardening through `0027_provider_circuit_states`.
+- [x] Restored execution event projection metadata compatibility and
+  arbitration chronology event-id scoping.
+- [x] Restored cognition compatibility for older scripted clients,
+  raw-completion SHA persistence, strict category/schema validation,
+  and rejected-vs-failed classification.
+- [x] Verified full backend recovery baseline: 2,166 passed,
+  2 skipped; backend Pyright 0 errors and 698 warnings.
+
+#### Phase A: Governance Non-Optional and Admission-Bound - Done
+
+- [x] Made `ExecutionGovernanceRuntime` required for `DispatchService`
+  construction so dispatch cannot be instantiated without execution
+  governance.
+- [x] Added required `GovernanceAdmissionToken` lineage for diagnostic
+  execution requests.
+- [x] Required `ExecutionRuntime.request_diagnostic_execution()` callers
+  to provide admission proof before execution and outbox creation.
+- [x] Added durable governance failure persistence for missing-chain and
+  handler-failure envelopes.
+- [x] Preserved deterministic governance decision IDs through explicit
+  `governance.decision_seed` metadata where replay needs stable
+  identities.
+- [x] Added hardening tests for required dispatch governance, required
+  admission tokens, and persisted governance handler failures.
+
+#### Phase B: Chronology Append-Only with Cryptographic Lineage - Done
+
+- [x] Added migration-backed append-only chronology fields and hash-chain
+  support for knowledge document versions.
+- [x] Required approval lineage for knowledge document, governance
+  policy, and execution governance configuration mutations at the
+  runtime boundary.
+- [x] Replaced mutable version overwrite behavior with immutability
+  checks that raise on historical drift.
+- [x] Added chronology verification that recomputes version content
+  hashes and predecessor links.
+- [x] Preserved API compatibility by having tenant service methods create
+  approved lineage records before calling strict runtime mutation paths.
+- [x] Added invariant and persistence tests for approval-required
+  mutations, append-only version history, duplicate-version blocking,
+  and cryptographic chain verification.
+
+#### Phase C: UUID5 Determinism in All Lineage Paths - Done
+
+- [x] Added canonical deterministic runtime identity derivation under
+  `app.core.deterministic_identity`.
+- [x] Replaced ambient UUID4 lineage generation across boundary,
+  coordination, governance, session, execution, arbitration,
+  supervisor, and runtime paths with UUID5-derived identities.
+- [x] Added a deterministic governance seed at the coordination boundary
+  when callers do not provide one, preserving byte replay behavior.
+- [x] Added AST invariants blocking direct `uuid4()` calls in lineage
+  paths.
+- [x] Added byte-replay determinism coverage proving identical ingress
+  produces identical downstream lineage and lineage-chain SHA.
+
+#### Phase D: Provider Circuit Breaker with Retry Budget - Done
+
+- [x] Added persisted per-tenant/provider circuit state via
+  `0027_provider_circuit_states`.
+- [x] Added `ProviderCircuitBreaker` with CLOSED, OPEN, and HALF_OPEN
+  state transitions, retry budget enforcement, and `Retry-After`
+  handling.
+- [x] Updated the Anthropic Messages client to check the breaker before
+  opening an external socket.
+- [x] Classified provider 429, 503, 504, timeout, and transient failures
+  into circuit state transitions.
+- [x] Added shared HTTP client lifecycle usage for provider calls to
+  reduce socket churn.
+- [x] Wired `ExecutionGovernanceRuntime` to deny provider-dependent
+  execution admission when the provider circuit is open.
+- [x] Verified Phase D focused tests, shared HTTP client tests, restored
+  failure slices, and full backend regression.
+
+#### Pre-6-E Enterprise Trust Phase E - Bounded Read Paths - Done
+
+- [x] Replaced Postgres load-all-then-slice list/query reads with
+  SQL-native `LIMIT`/`OFFSET` pagination and separate `COUNT(*)`
+  totals.
+- [x] Added repository pagination helpers with an internal 500-row hard
+  cap and explicit `items`, `total`, `limit`, and `offset` page
+  contracts.
+- [x] Tightened public API list endpoints to default page size 25 and
+  max page size 100, preserving FastAPI 422 validation on over-limit
+  requests.
+- [x] Moved knowledge retrieval candidate selection into Postgres text
+  ranking via `ts_rank`/`plainto_tsquery` with bounded `LIMIT :top_k`.
+- [x] Reworked execution-governance quota checks to use bounded,
+  filtered count queries instead of requesting 10,000-row pages.
+- [x] Added `test_no_load_all_in_persistence_paths.py` and
+  `test_persistence_pagination.py` invariants.
+- [x] Verified Phase E focused tests, affected persistence/router
+  clusters, Pyright, smoke recovery, and full backend regression.
+
+#### Next Pre-6-E Hardening Wedges
+
+- [x] Phase E: Bounded Read Paths. Replace load-all-then-slice
+  persistence reads with SQL-native pagination and add AST invariants
+  blocking unbounded production reads.
+- [ ] Phase F: Webhook Surface Hardening. Enforce request body limits,
+  signed webhook freshness windows, nonce persistence, replay rejection,
+  and nonce cleanup.
+- [ ] Phase G: Escalation Outbox and Full Cognition Forensics. Move
+  escalation publishing to outbox claim/publish/recover semantics and
+  persist encrypted full prompt/completion cognition audit records.
+- [ ] Phase H: Celery Backlog Physics. Add broker/result TTL controls,
+  queue depth admission, dead-letter task records, and Redis memory
+  policy health checks.
+- [ ] Final Pre-6-E Gate. Re-run full backend tests, Pyright, hardening
+  invariants, smoke tests, and the enterprise-trust audit before
+  starting frontend hydration.
+
+### 6-E: Frontend Hydration - Items 7, PR_W15 - Queued
+
+- Not started. Do not begin Phase 6-E until Pre-6-E Enterprise Trust
+  Hardening phases E-H and the final gate are closed.
 - Command Center connected to real APIs.
 - Trace Inspector renders `operational_events`.
 - Operations Queue renders escalation records.
@@ -1027,9 +1170,25 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Phase 6-E - Frontend Hydration - Items 7, PR_W15.
-Current test baseline: 2,135 passed, 2 skipped; smoke tests 4/4 green.
-Current Pyright baseline: 0 errors, 584 warnings; warnings must not grow.
+Current phase: Phase E closed; Pre-6-E Enterprise Trust Phase F - Webhook Surface Hardening is queued pending user confirmation.
+Current test baseline: 2,172 passed, 2 skipped; smoke tests 4/4 green.
+Current Pyright baseline: 0 errors, 686 warnings; warnings must not grow.
+Current Alembic head: 0027_provider_circuit_states.
+
+Completed before this phase:
+- Phase 6-A through Phase 6-D are closed.
+- Pre-6-E constitutional correctness wedge is closed.
+- Pre-6-E Enterprise Trust Phase A is closed: Governance non-optional and admission-bound.
+- Pre-6-E Enterprise Trust Phase B is closed: Chronology append-only with approval lineage and cryptographic chains.
+- Pre-6-E Enterprise Trust Phase C is closed: UUID5 determinism in lineage paths.
+- Pre-6-E Enterprise Trust Phase D is closed: Provider circuit breaker with retry budget.
+- Pre-6-E Enterprise Trust Phase E is closed: Bounded read paths.
+
+Remaining before Phase 6-E:
+- Phase F: Webhook Surface Hardening.
+- Phase G: Escalation Outbox and Full Cognition Forensics.
+- Phase H: Celery Backlog Physics.
+- Final Pre-6-E gate and enterprise-trust audit rerun.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -1053,7 +1212,7 @@ pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coor
 pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
-Continue with Phase 6-E. Do not implement post-6-E work before Phase 6-E is closed.
+Do not start Phase F, Phase G, Phase H, or Phase 6-E until the user confirms the next phase boundary.
 ```
 
 ## New Chat Hyperprompt
@@ -1063,7 +1222,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Phase 6-E - Frontend Hydration - Items 7, PR_W15.
+Current phase: Phase E closed; Pre-6-E Enterprise Trust Phase F - Webhook Surface Hardening is queued pending user confirmation.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -1089,13 +1248,22 @@ Current source of truth:
 - Phase 6-B is closed.
 - Phase 6-C is closed.
 - Phase 6-D is closed.
-- Do not implement post-6-E work before Phase 6-E is closed.
+- Pre-6-E constitutional correctness wedge is closed.
+- Pre-6-E Enterprise Trust Phase A is closed.
+- Pre-6-E Enterprise Trust Phase B is closed.
+- Pre-6-E Enterprise Trust Phase C is closed.
+- Pre-6-E Enterprise Trust Phase D is closed.
+- Pre-6-E Enterprise Trust Phase E is closed.
+- Pre-6-E Enterprise Trust Phase F is next after user confirmation.
+- Phase 6-E is queued and must not start until phases E-H and the final
+  Pre-6-E gate are closed.
 
 Current verified baseline:
-- Tests: 2,135 passed, 2 skipped, 0 xfailed.
+- Tests: 2,172 passed, 2 skipped, 0 xfailed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
-- Pyright warnings: 584; warnings must not grow phase over phase.
+- Pyright warnings: 686; warnings must not grow phase over phase.
+- Alembic current: 0027_provider_circuit_states (head).
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -1120,22 +1288,27 @@ Current verified baseline:
 - Phase 6-B complete: Execution Governance Hardening - PR_W10.
 - Phase 6-C complete: Distributed Runtime Resilience - PR_W11.
 - Phase 6-D complete: Multi-Tenant Production Hardening - PR_W14.
+- Pre-6-E Phase A complete: Governance Non-Optional and Admission-Bound.
+- Pre-6-E Phase B complete: Chronology Append-Only with Cryptographic Lineage.
+- Pre-6-E Phase C complete: UUID5 Determinism in All Lineage Paths.
+- Pre-6-E Phase D complete: Provider Circuit Breaker with Retry Budget.
+- Pre-6-E Phase E complete: Bounded Read Paths.
 - Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
   canonical event fabric before the demo trace-inspector milestone.
 
 Goal for this chat:
-Implement Phase 6-E only.
+Await user confirmation, then implement Phase F only.
 
-Phase 6-E scope:
-- Command Center connected to real APIs.
-- Trace Inspector renders `operational_events`.
-- Operations Queue renders escalation records.
-- Cognition Hub renders ApprovalRecord pipeline.
-- Channel configuration UI for tenant-owned credentials.
-- Knowledge base UI for SOP upload, indexing status, and versioning.
-- Policy editor UI for governance parameters.
-- Signed session auth hydration.
-- Do not implement post-6-E work before Phase 6-E is closed.
+Phase F scope:
+- Webhook Surface Hardening.
+- Do not start Phase F, Phase G, Phase H, or Phase 6-E until the user
+  confirms the phase boundary.
+
+Queued after Phase F:
+- Phase G: Escalation Outbox and Full Cognition Forensics.
+- Phase H: Celery Backlog Physics.
+- Final Pre-6-E gate.
+- Phase 6-E: Frontend Hydration - Items 7, PR_W15.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.
@@ -1155,39 +1328,24 @@ Constitutional rules:
 - Supervisor, QA, SOP Intelligence are observation substrates. They
   never mutate execution, session, or governance records.
 - Celery remains transport only.
-- Frontend remains hydration/observability only.
+- Frontend remains untouched until Phase 6-E starts.
 
 Before editing:
-- Inspect existing Command Center frontend structure, API client/auth
-  patterns, hydration boundaries, observability views, route conventions,
-  backend schemas, and frontend test/build tooling.
-- Preserve existing naming, design, router/service/API contracts,
-  hydration-only frontend constraints, and tenant credential redaction.
-- Identify existing trace inspector, operations queue, cognition,
-  channel configuration, knowledge, policy editor, and auth surfaces
-  before editing.
+- Inspect existing webhook/router/adapter contracts, persistence return
+  types, tests, and invariants before editing.
+- Preserve existing router/service/runtime/persistence layering.
+- Do not weaken tenant scoping, deterministic identity, RLS, governance,
+  or chronology constraints while hardening webhooks.
+- Modify only what is necessary to close Phase F.
 
-Implementation deliverables for 6-E:
-- Command Center API hydration against real backend routes.
-- Trace Inspector view backed by canonical `operational_events`.
-- Operations Queue backed by escalation records.
-- Cognition Hub backed by ApprovalRecord pipeline data.
-- Tenant channel configuration UI without plaintext credential exposure.
-- Knowledge base UI for SOP upload, indexing state, and version history.
-- Governance policy editor UI for tenant policy parameters.
-- Signed session auth hydration that preserves tenant isolation.
-- Tests/build verification for frontend hydration plus backend invariant
-  and smoke gates.
-
-After 6-E:
+After Phase F:
+- Run focused Phase F checks.
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
   pytest apps/backend/tests/test_system_smoke.py -v
 - Run the backend suite with asyncpg TEST_DATABASE_URL, never a plain
   postgresql:// URL.
-- Run relevant Command Center frontend typecheck/build/test commands
-  discovered from the repo.
 
 Final answer must include:
 - Files changed.
@@ -1195,5 +1353,5 @@ Final answer must include:
 - Runtime/service/router changes.
 - Replay, governance, frontend, and transport implications.
 - Tests run and results.
-- Whether Phase 6-E is closed or still open.
+- Whether Phase F is closed or still open.
 ```

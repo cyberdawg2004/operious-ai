@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 from app.tenant.db.models import (
     TenantChannelConfigurationRow,
     TenantExecutionCircuitBreakerRow,
@@ -127,15 +128,17 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantChannelConfigurationRow.channel_type,
             TenantChannelConfigurationRow.routing_address,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantChannelConfigurationPage(
-            items=tuple(_channel_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantChannelConfigurationPage(
+            items=tuple(_channel_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def resolve_channel_configuration(
@@ -152,7 +155,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             )
             .limit(2)
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
+        rows = tuple((await self.session.execute(stmt)).scalars())
         if len(rows) != 1:
             return None
         return _channel_row_to_record(rows[0])
@@ -213,15 +216,17 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantKnowledgeDocumentRow.document_type,
             TenantKnowledgeDocumentRow.title,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantKnowledgeDocumentPage(
-            items=tuple(_document_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantKnowledgeDocumentPage(
+            items=tuple(_document_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def save_knowledge_document_version(
@@ -292,15 +297,17 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantKnowledgeDocumentVersionRow.document_id,
             TenantKnowledgeDocumentVersionRow.version,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantKnowledgeDocumentVersionPage(
-            items=tuple(_document_version_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantKnowledgeDocumentVersionPage(
+            items=tuple(_document_version_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def save_governance_policy(
@@ -355,15 +362,17 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantGovernancePolicyRow.policy_type,
             TenantGovernancePolicyRow.policy_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantGovernancePolicyPage(
-            items=tuple(_policy_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantGovernancePolicyPage(
+            items=tuple(_policy_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def save_execution_governance_configuration(
@@ -421,15 +430,20 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantExecutionGovernanceConfigurationRow.version,
             TenantExecutionGovernanceConfigurationRow.config_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantExecutionGovernanceConfigurationPage(
-            items=tuple(_execution_governance_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantExecutionGovernanceConfigurationPage(
+            items=tuple(
+                _execution_governance_row_to_record(row)
+                for row in page.items
+            ),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def resolve_active_execution_governance_configuration(
@@ -511,15 +525,17 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantExecutionCircuitBreakerRow.state,
             TenantExecutionCircuitBreakerRow.breaker_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantExecutionCircuitBreakerPage(
-            items=tuple(_execution_circuit_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantExecutionCircuitBreakerPage(
+            items=tuple(_execution_circuit_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def save_topology_configuration(
@@ -578,15 +594,17 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             TenantTopologyConfigurationRow.topology_name,
             TenantTopologyConfigurationRow.config_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
-        return TenantTopologyConfigurationPage(
-            items=tuple(_topology_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return TenantTopologyConfigurationPage(
+            items=tuple(_topology_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def resolve_active_topology_configuration(
@@ -603,7 +621,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             )
             .limit(2)
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
+        rows = tuple((await self.session.execute(stmt)).scalars())
         if len(rows) != 1:
             return None
         return _topology_row_to_record(rows[0])

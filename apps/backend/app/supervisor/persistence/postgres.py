@@ -38,6 +38,7 @@ from app.supervisor.persistence.records import (
     RuntimeFindingRecord,
     SupervisorDecisionRecord,
 )
+from app.repositories.pagination import SERVER_PAGE_HARD_CAP, fetch_scalar_page
 
 
 class PostgresSupervisorRepository(BaseRepository):
@@ -123,8 +124,13 @@ class PostgresSupervisorRepository(BaseRepository):
             .where(SupervisorFindingRow.inspection_id == UUID(inspection_id))
             .order_by(SupervisorFindingRow.detected_at)
         )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return tuple(_finding_row_to_record(r) for r in rows)
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=SERVER_PAGE_HARD_CAP,
+            offset=0,
+        )
+        return tuple(_finding_row_to_record(r) for r in page.items)
 
     async def get_evaluations_for_inspection(
         self,
@@ -141,8 +147,13 @@ class PostgresSupervisorRepository(BaseRepository):
             )
             .order_by(SupervisorEvaluationRow.evaluator_name)
         )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return tuple(_evaluation_row_to_record(r) for r in rows)
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=SERVER_PAGE_HARD_CAP,
+            offset=0,
+        )
+        return tuple(_evaluation_row_to_record(r) for r in page.items)
 
     async def get_escalations_for_inspection(
         self,
@@ -159,8 +170,13 @@ class PostgresSupervisorRepository(BaseRepository):
             )
             .order_by(SupervisorEscalationRow.decided_at)
         )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return tuple(_escalation_row_to_record(r) for r in rows)
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=SERVER_PAGE_HARD_CAP,
+            offset=0,
+        )
+        return tuple(_escalation_row_to_record(r) for r in page.items)
 
     # ─── Queries ─────────────────────────────────────────────────────
 
@@ -177,15 +193,17 @@ class PostgresSupervisorRepository(BaseRepository):
             )
         stmt = _apply_inspection_filters(stmt, query)
         stmt = stmt.order_by(SupervisorInspectionRow.started_at)
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
-        )
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return RecordPage(
-            items=tuple(_inspection_row_to_record(r) for r in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return RecordPage(
+            items=tuple(_inspection_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     # ─── Helpers ─────────────────────────────────────────────────────

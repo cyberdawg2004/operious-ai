@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.knowledge.db.models import KnowledgeChunkRow, KnowledgeVectorRow
@@ -20,6 +20,7 @@ from app.knowledge.persistence.records import (
     KnowledgeVectorRecord,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_row_page
 from app.tenant.db.models import TenantKnowledgeDocumentRow, TenantRow
 from app.tenant.identity import TenantKnowledgeDocumentId
 
@@ -131,16 +132,28 @@ class PostgresKnowledgeRepository(BaseRepository):
             stmt = stmt.where(KnowledgeVectorRow.provider == query.provider)
         if query.model is not None:
             stmt = stmt.where(KnowledgeVectorRow.model == query.model)
-        stmt = stmt.order_by(
-            KnowledgeVectorRow.document_id,
-            KnowledgeChunkRow.ordinal,
-            KnowledgeVectorRow.vector_id,
+        if query.search_text is not None and query.search_text.strip():
+            ts_vector = func.to_tsvector("simple", KnowledgeChunkRow.content)
+            ts_query = func.plainto_tsquery("simple", query.search_text)
+            rank = func.ts_rank(ts_vector, ts_query)
+            stmt = stmt.where(ts_vector.op("@@")(ts_query)).order_by(
+                rank.desc(),
+                KnowledgeVectorRow.document_id,
+                KnowledgeChunkRow.ordinal,
+                KnowledgeVectorRow.vector_id,
+            )
+        else:
+            stmt = stmt.order_by(
+                KnowledgeVectorRow.document_id,
+                KnowledgeChunkRow.ordinal,
+                KnowledgeVectorRow.vector_id,
+            )
+        page = await fetch_row_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        rows = list((await self.session.execute(stmt)).all())
-        total = len(rows)
-        sliced = rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return KnowledgeVectorPage(
             items=tuple(
                 KnowledgeVectorEntry(
@@ -149,10 +162,11 @@ class PostgresKnowledgeRepository(BaseRepository):
                     title=str(title),
                     document_type=str(document_type),
                 )
-                for chunk_row, vector_row, title, document_type in sliced
+                for chunk_row, vector_row, title, document_type in page.items
             ),
-            total=total,
-            offset=query.offset,
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def _ensure_tenant(self, tenant_id: str) -> None:

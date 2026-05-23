@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 import pytest
@@ -139,6 +141,7 @@ async def test_channel_webhook_ingress_normalizes_to_common_envelope(
         tenant_id=TENANT_ID,
         webhook_secret=f"{channel_type.value}-secret",
     )
+    body = _with_fresh_timestamp(channel_type, body)
     raw_body = _raw(body)
 
     result = await service.process_channel_webhook(
@@ -299,6 +302,7 @@ async def test_channel_webhook_does_not_expose_plaintext_credentials() -> None:
         "to": "support@example.com",
         "text": "hello",
     }
+    body = _with_fresh_timestamp(TenantChannelType.EMAIL, body)
 
     result = await service.process_channel_webhook(
         channel_type="email",
@@ -345,6 +349,7 @@ async def test_channel_webhook_identity_is_deterministic() -> None:
         "to": "support@example.com",
         "text": "hello",
     }
+    body = _with_fresh_timestamp(TenantChannelType.EMAIL, body)
     headers = _signed_headers(
         channel_type=TenantChannelType.EMAIL,
         secret="email-secret",
@@ -358,7 +363,16 @@ async def test_channel_webhook_identity_is_deterministic() -> None:
         raw_body=_raw(body),
         content_type="application/json",
     )
-    second = await service.process_channel_webhook(
+    second_store = InMemoryBoundaryPersistence()
+    second_service = await _service_with_channel(
+        boundary_store=second_store,
+        session=_FakeSession(),
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="support@example.com",
+        tenant_id=TENANT_ID,
+        webhook_secret="email-secret",
+    )
+    second = await second_service.process_channel_webhook(
         channel_type="email",
         body=body,
         headers=headers,
@@ -422,7 +436,7 @@ def _signed_headers(
     if channel_type is TenantChannelType.SHULEX:
         return {"X-Shulex-Signature": f"sha256={digest}"}
     if channel_type is TenantChannelType.LARK:
-        timestamp = "1779458400"
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
         nonce = "phase-2-5-f"
         lark_digest = hmac.new(
             secret.encode("utf-8"),
@@ -435,6 +449,24 @@ def _signed_headers(
             "X-Lark-Signature": f"sha256={lark_digest}",
         }
     return {"X-Operious-Signature": f"sha256={digest}"}
+
+
+def _with_fresh_timestamp(
+    channel_type: TenantChannelType,
+    body: Mapping[str, Any],
+) -> dict[str, Any]:
+    updated = deepcopy(dict(body))
+    now = datetime.now(timezone.utc)
+    if channel_type is TenantChannelType.EMAIL:
+        updated["timestamp"] = now.isoformat()
+    elif channel_type is TenantChannelType.WHATSAPP:
+        value = updated["entry"][0]["changes"][0]["value"]
+        value["messages"][0]["timestamp"] = str(int(now.timestamp()))
+    elif channel_type is TenantChannelType.SHULEX:
+        updated["timestamp"] = now.isoformat()
+    elif channel_type is TenantChannelType.LARK:
+        updated["header"]["create_time"] = str(int(now.timestamp() * 1000))
+    return updated
 
 
 def _raw(body: Mapping[str, Any]) -> bytes:

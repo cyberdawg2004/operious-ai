@@ -19,6 +19,7 @@ celery_app = Celery(
         "app.workers.qa_tasks",
         "app.workers.sop_intelligence_tasks",
         "app.workers.supervisor_tasks",
+        "app.workers.webhook_nonce_tasks",
     ],
 )
 

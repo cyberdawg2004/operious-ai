@@ -35,6 +35,8 @@ class RecordPage:
 
     records: tuple[ArbitrationRecord, ...]
     total: int
+    limit: int = 0
+    offset: int = 0
 
 
 __all__ = ["ArbitrationQuery", "RecordPage"]

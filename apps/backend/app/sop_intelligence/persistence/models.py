@@ -28,6 +28,7 @@ class ApprovalQuery:
 class ApprovalPage:
     items: tuple[ApprovalRecord, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 

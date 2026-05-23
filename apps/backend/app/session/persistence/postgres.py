@@ -21,10 +21,11 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 from app.session.db.models import (
     SessionCorrelationRow,
     SessionEventRow,
@@ -120,27 +121,26 @@ class PostgresSessionPersistence(BaseRepository):
         head = (
             await self.session.execute(head_stmt)
         ).scalar_one_or_none()
-        bucket_count_stmt = select(SessionEventRow.event_id).where(
+        bucket_count_stmt = select(func.count()).select_from(
+            SessionEventRow
+        ).where(
             SessionEventRow.session_id == record.session_id
         )
-        existing_events = (
-            await self.session.execute(bucket_count_stmt)
-        ).scalars().all()
-        if not existing_events and record.sequence != 0:
+        existing_count = int(
+            (await self.session.execute(bucket_count_stmt)).scalar_one()
+        )
+        if existing_count == 0 and record.sequence != 0:
             raise SessionPersistenceError(
                 "first event of a session must have sequence 0"
             )
-        if existing_events:
+        if existing_count > 0:
             # Look up the actual highest persisted sequence (not the
             # session's sequence_head, which may lag the persisted
             # events when callers save events before save_session).
-            max_stmt = select(SessionEventRow.sequence).where(
+            max_stmt = select(func.max(SessionEventRow.sequence)).where(
                 SessionEventRow.session_id == record.session_id
             )
-            seqs = list(
-                (await self.session.execute(max_stmt)).scalars().all()
-            )
-            max_seq = max(seqs)
+            max_seq = (await self.session.execute(max_stmt)).scalar_one()
             if max_seq + 1 != record.sequence:
                 raise SessionPersistenceError(
                     "non-monotonic event sequence: "
@@ -304,16 +304,17 @@ class PostgresSessionPersistence(BaseRepository):
         # Deterministic ordering — mirror in-memory: sort by stringified
         # session_id. Postgres UUID comparison sorts the same.
         stmt = stmt.order_by(SessionRow.session_id)
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        total = len(all_rows)
-        sliced = all_rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return SessionRecordPage(
-            sessions=tuple(_session_row_to_record(r) for r in sliced),
-            total=total,
+            sessions=tuple(_session_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_events(
@@ -355,16 +356,17 @@ class PostgresSessionPersistence(BaseRepository):
                 SessionEventRow.occurred_at >= query.occurred_after_or_at
             )
         stmt = stmt.order_by(SessionEventRow.sequence)
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        total = len(all_rows)
-        sliced = all_rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return SessionRecordPage(
-            events=tuple(_event_row_to_record(r) for r in sliced),
-            total=total,
+            events=tuple(_event_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_correlations(
@@ -407,18 +409,19 @@ class PostgresSessionPersistence(BaseRepository):
             SessionCorrelationRow.recorded_at,
             SessionCorrelationRow.correlation_id,
         )
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        total = len(all_rows)
-        sliced = all_rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return SessionRecordPage(
             correlations=tuple(
-                _correlation_row_to_record(r) for r in sliced
+                _correlation_row_to_record(r) for r in page.items
             ),
-            total=total,
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 

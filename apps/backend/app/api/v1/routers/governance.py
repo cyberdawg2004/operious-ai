@@ -53,8 +53,8 @@ router = APIRouter(tags=["governance"])
 # so a malicious/buggy caller cannot exhaust DB resources by
 # requesting an arbitrarily large page.
 _MIN_LIMIT = 1
-_MAX_LIMIT = 200
-_DEFAULT_LIMIT = 50
+_MAX_LIMIT = 100
+_DEFAULT_LIMIT = 25
 
 
 @router.get(

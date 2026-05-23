@@ -46,9 +46,10 @@ merge:
    router file is forbidden.
 
 6. **Middleware pinning** — ``app.main.create_app`` registers
-   exactly the four classes ``AuthorityContextMiddleware``,
+   exactly the five classes ``AuthorityContextMiddleware``,
    ``TrustedIngressMiddleware`` (conditional), ``RequestContextMiddleware``,
-   and ``CORSMiddleware`` (conditional). The class catalogue
+   ``RequestBodyLimitMiddleware``, and ``CORSMiddleware`` (conditional).
+   The class catalogue
    is pinned here; adding a new middleware requires explicit
    doctrine review.
 
@@ -146,6 +147,7 @@ _EXPECTED_MIDDLEWARE_CLASSES: Final[frozenset[str]] = frozenset({
     "AuthorityContextMiddleware",
     "TrustedIngressMiddleware",
     "RequestContextMiddleware",
+    "RequestBodyLimitMiddleware",
     "CORSMiddleware",
 })
 
@@ -458,7 +460,7 @@ def test_router_does_not_construct_concrete_repository(
 
 
 def test_main_create_app_middleware_stack_is_pinned() -> None:
-    """:func:`app.main.create_app` may register only the four
+    """:func:`app.main.create_app` may register only the five
     constitutional middleware classes. Adding / removing one
     requires explicit doctrine review and an update to
     :data:`_EXPECTED_MIDDLEWARE_CLASSES` AND a corresponding

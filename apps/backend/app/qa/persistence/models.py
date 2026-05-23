@@ -28,6 +28,7 @@ class QAScoreQuery:
 class QAScorePage:
     items: tuple[QAScoreRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 

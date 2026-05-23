@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime
 
 from app.boundary.exceptions import (
     BoundaryPersistenceError,
+    WebhookReplayError,
 )
 from app.boundary.identity import (
     BoundaryEgressId,
@@ -20,6 +22,7 @@ from app.boundary.persistence.models import (
 from app.boundary.persistence.records import (
     BoundaryEgressRecord,
     BoundaryIngressRecord,
+    WebhookNonceRecord,
 )
 
 
@@ -31,6 +34,7 @@ class InMemoryBoundaryPersistence:
         "_ingress_by_event_id",
         "_ingress_by_replay_key",
         "_egress",
+        "_webhook_nonces",
         "_lock",
     )
 
@@ -46,6 +50,9 @@ class InMemoryBoundaryPersistence:
         ] = {}
         self._egress: dict[
             BoundaryEgressId, BoundaryEgressRecord
+        ] = {}
+        self._webhook_nonces: dict[
+            tuple[str, str, str], WebhookNonceRecord
         ] = {}
         self._lock = asyncio.Lock()
 
@@ -220,6 +227,34 @@ class InMemoryBoundaryPersistence:
             egress=tuple(rows), total=total
         )
 
+    async def record_webhook_nonce(
+        self,
+        record: WebhookNonceRecord,
+    ) -> None:
+        key = _webhook_nonce_key(record)
+        async with self._lock:
+            self._delete_expired_webhook_nonces_locked(now=record.received_at)
+            existing = self._webhook_nonces.get(key)
+            if existing is not None:
+                raise WebhookReplayError(
+                    "webhook nonce has already been accepted"
+                )
+            self._webhook_nonces[key] = record
+
+    async def delete_expired_webhook_nonces(
+        self,
+        *,
+        now: datetime,
+        limit: int = 1000,
+    ) -> int:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        async with self._lock:
+            return self._delete_expired_webhook_nonces_locked(
+                now=now,
+                limit=limit,
+            )
+
     def _resolve_duplicate_ingress(
         self, record: BoundaryIngressRecord
     ) -> BoundaryIngressRecord | None:
@@ -239,6 +274,36 @@ class InMemoryBoundaryPersistence:
             if existing_id is not None:
                 return self._ingress[existing_id]
         return None
+
+    def _delete_expired_webhook_nonces_locked(
+        self,
+        *,
+        now: datetime,
+        limit: int | None = None,
+    ) -> int:
+        expired = [
+            key
+            for key, row in sorted(
+                self._webhook_nonces.items(),
+                key=lambda item: item[1].expires_at,
+            )
+            if row.expires_at <= now
+        ]
+        if limit is not None:
+            expired = expired[:limit]
+        for key in expired:
+            del self._webhook_nonces[key]
+        return len(expired)
+
+
+def _webhook_nonce_key(
+    record: WebhookNonceRecord,
+) -> tuple[str, str, str]:
+    return (
+        record.tenant_id,
+        record.channel_type.strip().lower(),
+        record.nonce,
+    )
 
 
 __all__ = ["InMemoryBoundaryPersistence"]

@@ -27,6 +27,8 @@ class ExecutionQuery:
     session_id: str | None = None
     tenant_id: str | None = None
     state: ExecutionState | None = None
+    requested_after_or_at: datetime | None = None
+    failed_after_or_at: datetime | None = None
     claimed_before_or_at: datetime | None = None
     limit: int = 100
     offset: int = 0
@@ -54,6 +56,7 @@ class ExecutionAttemptQuery:
 class ExecutionPage:
     executions: tuple[ExecutionRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -61,6 +64,7 @@ class ExecutionPage:
 class OutboxPage:
     records: tuple[ExecutionOutboxRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
@@ -68,6 +72,7 @@ class OutboxPage:
 class ExecutionAttemptPage:
     attempts: tuple[ExecutionAttemptRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 

@@ -9,14 +9,16 @@ Reads remain tenant-scoped, and list ordering remains canonical
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 
 from app.boundary.db.models import (
     BoundaryEgressRow,
     BoundaryIngressRow,
+    WebhookNonceRecordRow,
 )
 from app.boundary.enums import (
     BoundaryDirection,
@@ -25,7 +27,7 @@ from app.boundary.enums import (
     BoundaryReplayDisposition,
     BoundarySourceType,
 )
-from app.boundary.exceptions import BoundaryPersistenceError
+from app.boundary.exceptions import BoundaryPersistenceError, WebhookReplayError
 from app.boundary.identity import (
     BoundaryEgressId,
     BoundaryEventId,
@@ -39,8 +41,10 @@ from app.boundary.persistence.models import (
 from app.boundary.persistence.records import (
     BoundaryEgressRecord,
     BoundaryIngressRecord,
+    WebhookNonceRecord,
 )
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 
 
 class PostgresBoundaryPersistence(BaseRepository):
@@ -192,16 +196,17 @@ class PostgresBoundaryPersistence(BaseRepository):
             BoundaryIngressRow.runtime_instance_id,
             BoundaryIngressRow.sequence,
         )
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        total = len(all_rows)
-        sliced = all_rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return BoundaryRecordPage(
-            ingress=tuple(_ingress_row_to_record(r) for r in sliced),
-            total=total,
+            ingress=tuple(_ingress_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_egress(
@@ -239,17 +244,86 @@ class PostgresBoundaryPersistence(BaseRepository):
             BoundaryEgressRow.runtime_instance_id,
             BoundaryEgressRow.sequence,
         )
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
         )
-        total = len(all_rows)
-        sliced = all_rows[query.offset :]
-        if query.limit is not None:
-            sliced = sliced[: query.limit]
         return BoundaryRecordPage(
-            egress=tuple(_egress_row_to_record(r) for r in sliced),
-            total=total,
+            egress=tuple(_egress_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
+
+    # ─── Webhook replay protection ───────────────────────────────────
+
+    async def record_webhook_nonce(
+        self,
+        record: WebhookNonceRecord,
+    ) -> None:
+        await self.session.execute(
+            delete(WebhookNonceRecordRow).where(
+                WebhookNonceRecordRow.tenant_id == record.tenant_id,
+                WebhookNonceRecordRow.channel_type == record.channel_type,
+                WebhookNonceRecordRow.nonce == record.nonce,
+                WebhookNonceRecordRow.expires_at <= record.received_at,
+            )
+        )
+        row = WebhookNonceRecordRow(
+            tenant_id=record.tenant_id,
+            channel_type=record.channel_type,
+            nonce=record.nonce,
+            received_at=record.received_at,
+            expires_at=record.expires_at,
+        )
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+        except IntegrityError as exc:
+            raise WebhookReplayError(
+                "webhook nonce has already been accepted"
+            ) from exc
+
+    async def delete_expired_webhook_nonces(
+        self,
+        *,
+        now: datetime,
+        limit: int = 1000,
+    ) -> int:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        expired = (
+            select(
+                WebhookNonceRecordRow.tenant_id.label("tenant_id"),
+                WebhookNonceRecordRow.channel_type.label("channel_type"),
+                WebhookNonceRecordRow.nonce.label("nonce"),
+            )
+            .where(WebhookNonceRecordRow.expires_at <= now)
+            .order_by(WebhookNonceRecordRow.expires_at)
+            .limit(limit)
+            .cte("expired_webhook_nonces")
+        )
+        stmt = (
+            delete(WebhookNonceRecordRow)
+            .where(
+                tuple_(
+                    WebhookNonceRecordRow.tenant_id,
+                    WebhookNonceRecordRow.channel_type,
+                    WebhookNonceRecordRow.nonce,
+                ).in_(
+                    select(
+                        expired.c.tenant_id,
+                        expired.c.channel_type,
+                        expired.c.nonce,
+                    )
+                )
+            )
+            .returning(WebhookNonceRecordRow.nonce)
+        )
+        result = await self.session.execute(stmt)
+        return sum(1 for _ in result.scalars())
 
 
 # ─── Record ↔ Row converters ────────────────────────────────────────────

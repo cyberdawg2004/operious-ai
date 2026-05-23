@@ -24,8 +24,8 @@ from app.dependencies.services import get_arbitration_repository
 router = APIRouter(tags=["arbitration"])
 
 _MIN_LIMIT = 1
-_MAX_LIMIT = 200
-_DEFAULT_LIMIT = 50
+_MAX_LIMIT = 100
+_DEFAULT_LIMIT = 25
 
 
 def _parse_uuid_or_404(raw: str, *, kind: str) -> UUID:

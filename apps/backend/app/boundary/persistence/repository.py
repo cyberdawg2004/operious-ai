@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from app.boundary.identity import (
@@ -16,6 +17,7 @@ from app.boundary.persistence.models import (
 from app.boundary.persistence.records import (
     BoundaryEgressRecord,
     BoundaryIngressRecord,
+    WebhookNonceRecord,
 )
 
 
@@ -74,6 +76,18 @@ class BoundaryPersistenceProtocol(Protocol):
         *,
         expected_tenant_id: str | None = None,
     ) -> BoundaryRecordPage: ...
+
+    async def record_webhook_nonce(
+        self,
+        record: WebhookNonceRecord,
+    ) -> None: ...
+
+    async def delete_expired_webhook_nonces(
+        self,
+        *,
+        now: datetime,
+        limit: int = 1000,
+    ) -> int: ...
 
 
 __all__ = ["BoundaryPersistenceProtocol"]

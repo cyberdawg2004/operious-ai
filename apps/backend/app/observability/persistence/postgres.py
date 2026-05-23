@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.boundary.db.models import BoundaryIngressRow
@@ -30,10 +31,6 @@ from app.observability.identity import (
     OperationalSLODefinitionId,
     OperationalTraceSpanId,
 )
-from app.observability.persistence.calculations import (
-    ExecutionLatencySample,
-    build_metrics_snapshot,
-)
 from app.observability.persistence.models import (
     DeadLetterExecutionPage,
     DeadLetterExecutionQuery,
@@ -53,11 +50,13 @@ from app.observability.persistence.records import (
     OperationalMetricsSnapshotRecord,
     OperationalSLODefinitionRecord,
     OperationalTraceSpanRecord,
+    QAScoreBucketRecord,
     StuckExecutionAlertRecord,
 )
 from app.governance.db.models import GovernanceDecisionRow
 from app.qa.db.models import QAScoreRow
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import count_matching_rows, fetch_scalar_page
 from app.tenant.db.models import TenantRow
 
 
@@ -70,96 +69,174 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
         *,
         expected_tenant_id: str,
     ) -> OperationalMetricsSnapshotRecord:
-        ticket_rows = list(
-            (
-                await self.session.execute(
-                    select(BoundaryIngressRow.ingress_id).where(
-                        BoundaryIngressRow.tenant_id == expected_tenant_id,
-                        BoundaryIngressRow.received_at >= query.window_start,
-                        BoundaryIngressRow.received_at < query.window_end,
-                        BoundaryIngressRow.normalization_status
-                        == BoundaryNormalizationStatus.OK.value,
-                        BoundaryIngressRow.replay_disposition
-                        == BoundaryReplayDisposition.NEW.value,
-                    )
-                )
-            ).all()
+        ticket_stmt = select(BoundaryIngressRow.ingress_id).where(
+            BoundaryIngressRow.tenant_id == expected_tenant_id,
+            BoundaryIngressRow.received_at >= query.window_start,
+            BoundaryIngressRow.received_at < query.window_end,
+            BoundaryIngressRow.normalization_status
+            == BoundaryNormalizationStatus.OK.value,
+            BoundaryIngressRow.replay_disposition
+            == BoundaryReplayDisposition.NEW.value,
         )
-        governance_rows = list(
-            (
-                await self.session.execute(
-                    select(GovernanceDecisionRow.decision).where(
-                        GovernanceDecisionRow.tenant_id == expected_tenant_id,
-                        GovernanceDecisionRow.decided_at >= query.window_start,
-                        GovernanceDecisionRow.decided_at < query.window_end,
-                    )
-                )
-            ).scalars().all()
+        ticket_throughput = await count_matching_rows(
+            self.session,
+            ticket_stmt,
         )
-        execution_rows = list(
-            (
-                await self.session.execute(
-                    select(ExecutionRow).where(
-                        ExecutionRow.tenant_id == expected_tenant_id,
-                        ExecutionRow.requested_at >= query.window_start,
-                        ExecutionRow.requested_at < query.window_end,
-                    )
+        governance_count, governance_deny_count = (
+            await self.session.execute(
+                select(
+                    func.count(GovernanceDecisionRow.decision_id),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (
+                                    GovernanceDecisionRow.decision == "deny",
+                                    1,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                ).where(
+                    GovernanceDecisionRow.tenant_id == expected_tenant_id,
+                    GovernanceDecisionRow.decided_at >= query.window_start,
+                    GovernanceDecisionRow.decided_at < query.window_end,
                 )
-            ).scalars().all()
-        )
-        qa_rows = list(
-            (
-                await self.session.execute(
-                    select(QAScoreRow.overall_score).where(
-                        QAScoreRow.tenant_id == expected_tenant_id,
-                        QAScoreRow.scored_at >= query.window_start,
-                        QAScoreRow.scored_at < query.window_end,
-                    )
+            )
+        ).one()
+        execution_count, completed_execution_count = (
+            await self.session.execute(
+                select(
+                    func.count(ExecutionRow.execution_id),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (ExecutionRow.completed_at.is_not(None), 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                ).where(
+                    ExecutionRow.tenant_id == expected_tenant_id,
+                    ExecutionRow.requested_at >= query.window_start,
+                    ExecutionRow.requested_at < query.window_end,
                 )
-            ).scalars().all()
+            )
+        ).one()
+        ended_at = func.coalesce(
+            ExecutionRow.completed_at,
+            ExecutionRow.failed_at,
         )
-        escalation_rows = list(
-            (
-                await self.session.execute(
-                    select(EscalationRecordRow.escalation_id).where(
-                        EscalationRecordRow.tenant_id == expected_tenant_id,
-                        EscalationRecordRow.created_at >= query.window_start,
-                        EscalationRecordRow.created_at < query.window_end,
-                    )
+        latency_ms = func.extract(
+            "epoch",
+            ended_at - ExecutionRow.requested_at,
+        ) * 1000.0
+        latency_avg, latency_p50, latency_p95 = (
+            await self.session.execute(
+                select(
+                    func.avg(latency_ms),
+                    func.percentile_disc(0.50).within_group(latency_ms),
+                    func.percentile_disc(0.95).within_group(latency_ms),
+                ).where(
+                    ExecutionRow.tenant_id == expected_tenant_id,
+                    ExecutionRow.requested_at >= query.window_start,
+                    ExecutionRow.requested_at < query.window_end,
+                    ended_at.is_not(None),
                 )
-            ).all()
-        )
-        dlq_rows = list(
-            (
-                await self.session.execute(
-                    select(ExecutionRow.execution_id).where(
-                        ExecutionRow.tenant_id == expected_tenant_id,
-                        ExecutionRow.state == ExecutionState.DEAD_LETTERED.value,
-                        ExecutionRow.failed_at.is_not(None),
-                        ExecutionRow.failed_at >= query.window_start,
-                        ExecutionRow.failed_at < query.window_end,
-                    )
+            )
+        ).one()
+        score = func.least(func.greatest(QAScoreRow.overall_score, 0.0), 1.0)
+        qa_row = (
+            await self.session.execute(
+                select(
+                    func.count(QAScoreRow.score_id),
+                    func.avg(QAScoreRow.overall_score),
+                    func.coalesce(
+                        func.sum(
+                            case(((score >= 0.0) & (score < 0.2), 1), else_=0)
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(((score >= 0.2) & (score < 0.4), 1), else_=0)
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(((score >= 0.4) & (score < 0.6), 1), else_=0)
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(((score >= 0.6) & (score < 0.8), 1), else_=0)
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(case((score >= 0.8, 1), else_=0)),
+                        0,
+                    ),
+                ).where(
+                    QAScoreRow.tenant_id == expected_tenant_id,
+                    QAScoreRow.scored_at >= query.window_start,
+                    QAScoreRow.scored_at < query.window_end,
                 )
-            ).all()
+            )
+        ).one()
+        escalation_count = await count_matching_rows(
+            self.session,
+            select(EscalationRecordRow.escalation_id).where(
+                EscalationRecordRow.tenant_id == expected_tenant_id,
+                EscalationRecordRow.created_at >= query.window_start,
+                EscalationRecordRow.created_at < query.window_end,
+            ),
         )
-        return build_metrics_snapshot(
+        dlq_count = await count_matching_rows(
+            self.session,
+            select(ExecutionRow.execution_id).where(
+                ExecutionRow.tenant_id == expected_tenant_id,
+                ExecutionRow.state == ExecutionState.DEAD_LETTERED.value,
+                ExecutionRow.failed_at.is_not(None),
+                ExecutionRow.failed_at >= query.window_start,
+                ExecutionRow.failed_at < query.window_end,
+            ),
+        )
+        qa_count = int(qa_row[0] or 0)
+        qa_average = _optional_float(qa_row[1])
+        qa_distribution = (
+            QAScoreBucketRecord(0.0, 0.2, int(qa_row[2] or 0)),
+            QAScoreBucketRecord(0.2, 0.4, int(qa_row[3] or 0)),
+            QAScoreBucketRecord(0.4, 0.6, int(qa_row[4] or 0)),
+            QAScoreBucketRecord(0.6, 0.8, int(qa_row[5] or 0)),
+            QAScoreBucketRecord(0.8, 1.0, int(qa_row[6] or 0)),
+        )
+        return OperationalMetricsSnapshotRecord(
             tenant_id=expected_tenant_id,
             window_start=query.window_start,
             window_end=query.window_end,
-            ticket_throughput=len(ticket_rows),
-            governance_decisions=tuple(governance_rows),
-            executions=tuple(
-                ExecutionLatencySample(
-                    requested_at=row.requested_at,
-                    completed_at=row.completed_at,
-                    failed_at=row.failed_at,
-                    state=row.state,
-                )
-                for row in execution_rows
+            ticket_throughput=ticket_throughput,
+            governance_decision_count=int(governance_count or 0),
+            governance_deny_count=int(governance_deny_count or 0),
+            governance_deny_rate=_rate(
+                int(governance_deny_count or 0),
+                int(governance_count or 0),
             ),
-            qa_scores=tuple(float(score) for score in qa_rows),
-            escalation_count=len(escalation_rows),
-            dlq_count=len(dlq_rows),
+            execution_count=int(execution_count or 0),
+            completed_execution_count=int(completed_execution_count or 0),
+            execution_latency_ms_avg=_optional_float(latency_avg),
+            execution_latency_ms_p50=_optional_float(latency_p50),
+            execution_latency_ms_p95=_optional_float(latency_p95),
+            qa_score_count=qa_count,
+            qa_score_average=qa_average,
+            qa_score_distribution=qa_distribution,
+            escalation_count=escalation_count,
+            escalation_rate=_rate(escalation_count, ticket_throughput),
+            dlq_count=dlq_count,
         )
 
     async def list_dead_letter_executions(
@@ -179,13 +256,17 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             ExecutionRow.requested_at.desc(),
             ExecutionRow.execution_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset : query.offset + query.limit]
-        return DeadLetterExecutionPage(
-            items=tuple(_dead_letter_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return DeadLetterExecutionPage(
+            items=tuple(_dead_letter_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_stuck_execution_alerts(
@@ -204,19 +285,23 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             )
             .order_by(ExecutionRow.claimed_at, ExecutionRow.execution_id)
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset : query.offset + query.limit]
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
+        )
         return StuckExecutionAlertPage(
             items=tuple(
                 _stuck_alert_row_to_record(
                     row,
                     claimed_before_or_at=query.claimed_before_or_at,
                 )
-                for row in sliced
+                for row in page.items
             ),
-            total=total,
-            offset=query.offset,
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def list_inbound_normalization_dead_letters(
@@ -240,13 +325,19 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             BoundaryIngressRow.received_at.desc(),
             BoundaryIngressRow.ingress_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset : query.offset + query.limit]
-        return InboundNormalizationDeadLetterPage(
-            items=tuple(_inbound_dead_letter_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return InboundNormalizationDeadLetterPage(
+            items=tuple(
+                _inbound_dead_letter_row_to_record(row) for row in page.items
+            ),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def save_slo_definition(
@@ -317,13 +408,17 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             OperationalSLODefinitionRow.window_minutes,
             OperationalSLODefinitionRow.severity,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset : query.offset + query.limit]
-        return OperationalSLODefinitionPage(
-            items=tuple(_slo_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return OperationalSLODefinitionPage(
+            items=tuple(_slo_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def save_trace_span(
@@ -373,13 +468,17 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             OperationalTraceSpanRow.started_at,
             OperationalTraceSpanRow.span_id,
         )
-        rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(rows)
-        sliced = rows[query.offset : query.offset + query.limit]
-        return OperationalTraceSpanPage(
-            items=tuple(_trace_span_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return OperationalTraceSpanPage(
+            items=tuple(_trace_span_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def _ensure_tenant(self, tenant_id: str) -> None:
@@ -406,6 +505,18 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             OperationalTraceSpanRow.tenant_id == expected_tenant_id,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 6)
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(numerator / denominator, 6)
 
 
 def _dead_letter_row_to_record(row: ExecutionRow) -> DeadLetterExecutionRecord:

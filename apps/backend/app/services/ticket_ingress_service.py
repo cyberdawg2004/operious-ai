@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +18,9 @@ from app.boundary.adapters import (
     ShulexWebhookAdapter,
     TenantWhatsAppWebhookAdapter,
     extract_routing_address,
+    extract_webhook_security_context,
 )
+from app.boundary.exceptions import WebhookFreshnessError, WebhookReplayError
 from app.boundary.adapters.builtin import (
     TwilioVoiceAdapter,
     WhatsAppWebhookAdapter,
@@ -34,6 +36,7 @@ from app.boundary.ingress import BoundaryIngressRuntime
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
 from app.boundary.persistence import BoundaryPersistenceProtocol
+from app.boundary.persistence.records import WebhookNonceRecord
 from app.boundary.registry import BoundaryAdapterRegistry
 from app.identity import AuthorityContext
 from app.tenant.enums import TenantChannelType
@@ -42,6 +45,8 @@ from app.tenant.runtime import TenantConfigurationRuntime
 
 TicketChannel = Literal["email", "whatsapp", "voice"]
 WebhookTicketChannel = Literal["email", "whatsapp", "shulex", "lark"]
+WEBHOOK_FRESHNESS_WINDOW_SECONDS = 300
+WEBHOOK_NONCE_TTL_SECONDS = 3600
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +150,20 @@ class TicketIngressService:
             headers=headers,
             raw_body=raw_body,
         )
+        signature_verified = _webhook_signature_matches_secret(
+            channel_type=tenant_channel_type,
+            secret=webhook_secret,
+            body=body,
+            headers=headers,
+            raw_body=raw_body,
+        )
+        if signature_verified:
+            await self._record_webhook_freshness_nonce(
+                tenant_id=channel_config.tenant_id,
+                channel_type=tenant_channel_type.value,
+                body=body,
+                headers=headers,
+            )
         adapter = _webhook_adapter_for_channel(
             channel_type=tenant_channel_type,
             webhook_secret=webhook_secret,
@@ -235,6 +254,51 @@ class TicketIngressService:
             ingress_id=str(result.ingress_id),
             canonical_envelope_id=str(result.event_id),
         )
+
+    async def _record_webhook_freshness_nonce(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: str,
+        body: Any,
+        headers: Mapping[str, str],
+    ) -> None:
+        try:
+            context = extract_webhook_security_context(
+                channel_type=channel_type,
+                body=body,
+                headers=headers,
+            )
+            received_at = datetime.now(timezone.utc)
+            _enforce_webhook_freshness(
+                timestamp=context.timestamp,
+                received_at=received_at,
+            )
+            await self._persistence.record_webhook_nonce(
+                WebhookNonceRecord(
+                    tenant_id=tenant_id,
+                    channel_type=channel_type,
+                    nonce=context.nonce,
+                    received_at=received_at,
+                    expires_at=received_at
+                    + timedelta(seconds=WEBHOOK_NONCE_TTL_SECONDS),
+                )
+            )
+        except ValueError as exc:
+            raise TicketIngressRejected(
+                code="channel_webhook_stale",
+                reason=str(exc),
+            ) from exc
+        except WebhookFreshnessError as exc:
+            raise TicketIngressRejected(
+                code="channel_webhook_stale",
+                reason=str(exc),
+            ) from exc
+        except WebhookReplayError as exc:
+            raise TicketIngressRejected(
+                code="channel_webhook_replayed",
+                reason=str(exc),
+            ) from exc
 
 
 class TicketIngressServiceError(RuntimeError):
@@ -447,6 +511,26 @@ def _source_type_for_tenant_channel(
     if channel_type is TenantChannelType.LARK:
         return BoundarySourceType.LARK
     return BoundarySourceType.GENERIC
+
+
+def _enforce_webhook_freshness(
+    *,
+    timestamp: datetime,
+    received_at: datetime,
+) -> None:
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
+    if received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=timezone.utc)
+    else:
+        received_at = received_at.astimezone(timezone.utc)
+    drift_seconds = abs((received_at - timestamp).total_seconds())
+    if drift_seconds > WEBHOOK_FRESHNESS_WINDOW_SECONDS:
+        raise WebhookFreshnessError(
+            "webhook timestamp is outside the freshness window"
+        )
 
 
 def _select_webhook_secret(

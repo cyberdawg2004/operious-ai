@@ -28,6 +28,7 @@ class EscalationQuery:
 class EscalationPage:
     items: tuple[EscalationRecord, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 

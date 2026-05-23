@@ -188,6 +188,16 @@ class KnowledgeRuntime:
             raise ValueError("query must be non-empty")
         if top_k < 0:
             raise ValueError("top_k must be >= 0")
+        if top_k == 0:
+            return KnowledgeRetrievalResult(
+                tenant_id=tenant_id,
+                query=query,
+                items=(),
+                citations=(),
+                budget_decisions=(),
+                total_tokens=0,
+                vector_index_name=self._vector_index_name,
+            )
         token_budget = (
             self._default_context_token_budget
             if max_tokens is None
@@ -204,9 +214,11 @@ class KnowledgeRuntime:
         page = await self._repository.list_vector_entries(
             KnowledgeVectorQuery(
                 vector_index_name=self._vector_index_name,
+                search_text=query,
                 provider=self._embedding_provider.provider_name,
                 model=self._embedding_provider.model_name,
                 current_only=True,
+                limit=top_k,
             ),
             expected_tenant_id=tenant_id,
         )
@@ -215,15 +227,7 @@ class KnowledgeRuntime:
             for entry in page.items
             if entry.vector.dimensions == len(query_vector)
         ]
-        scored.sort(
-            key=lambda pair: (
-                -pair[0],
-                str(pair[1].vector.document_id),
-                pair[1].chunk.ordinal,
-                str(pair[1].chunk.chunk_id),
-            )
-        )
-        candidates = scored[:top_k] if top_k else []
+        candidates = scored
         decisions, included = _apply_budget(
             candidates,
             max_tokens=token_budget,

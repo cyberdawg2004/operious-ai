@@ -27,6 +27,7 @@ from app.coordination.persistence.models import (
 )
 from app.coordination.persistence.records import CoordinationRecord
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 
 
 class PostgresCoordinationPersistence(BaseRepository):
@@ -84,19 +85,17 @@ class PostgresCoordinationPersistence(BaseRepository):
             CoordinationEnvelopeRow.runtime_instance_id,
             CoordinationEnvelopeRow.sequence,
         )
-        # Mirror the in-memory count semantics: materialise full
-        # result set, then slice. Postgres-native COUNT(*) over the
-        # same predicate would be cheaper; we keep parity for now
-        # (per-PR-B1 doctrine: behaviour parity > optimisation).
-        all_rows = list(
-            (await self.session.execute(stmt)).scalars().all()
-        )
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return RecordPage(
-            items=tuple(_row_to_record(r) for r in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return RecordPage(
+            items=tuple(_row_to_record(r) for r in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
 

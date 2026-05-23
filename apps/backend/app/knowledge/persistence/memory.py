@@ -146,6 +146,7 @@ class InMemoryKnowledgeRepository:
         return KnowledgeVectorPage(
             items=tuple(sliced),
             total=total,
+            limit=query.limit or total,
             offset=query.offset,
         )
 

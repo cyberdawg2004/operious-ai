@@ -146,7 +146,7 @@ class ExecutionGovernanceRuntime:
             )
 
         execution_page = await self._execution_persistence.list_executions(
-            ExecutionQuery(tenant_id=tenant_id, limit=10_000),
+            ExecutionQuery(tenant_id=tenant_id, limit=1),
             expected_tenant_id=tenant_id,
         )
         if execution_page.total >= config.execution_quota:
@@ -162,11 +162,15 @@ class ExecutionGovernanceRuntime:
         throughput_start = evaluated_at - timedelta(
             minutes=config.throughput_window_minutes
         )
-        throughput_count = sum(
-            1
-            for execution in execution_page.executions
-            if execution.requested_at >= throughput_start
+        throughput_page = await self._execution_persistence.list_executions(
+            ExecutionQuery(
+                tenant_id=tenant_id,
+                requested_after_or_at=throughput_start,
+                limit=1,
+            ),
+            expected_tenant_id=tenant_id,
         )
+        throughput_count = throughput_page.total
         if throughput_count >= config.throughput_limit:
             return _deny(
                 evaluation_id=evaluation_id,
@@ -181,13 +185,13 @@ class ExecutionGovernanceRuntime:
             minutes=config.governance_budget_window_minutes
         )
         budget_page = await self._governance_repository.query_decisions(
-            DecisionQuery(tenant_id=tenant_id, limit=10_000)
+            DecisionQuery(
+                tenant_id=tenant_id,
+                decided_after_or_at=budget_start,
+                limit=1,
+            )
         )
-        governance_budget_used = sum(
-            1
-            for decision in budget_page.items
-            if _parse_dt(decision.decided_at) >= budget_start
-        )
+        governance_budget_used = budget_page.total
         if governance_budget_used > config.governance_budget_limit:
             return _deny(
                 evaluation_id=evaluation_id,
@@ -199,13 +203,16 @@ class ExecutionGovernanceRuntime:
             )
 
         failure_start = evaluated_at - timedelta(minutes=config.circuit_window_minutes)
-        failure_count = sum(
-            1
-            for execution in execution_page.executions
-            if execution.state is ExecutionState.FAILED
-            and execution.failed_at is not None
-            and execution.failed_at >= failure_start
+        failure_page = await self._execution_persistence.list_executions(
+            ExecutionQuery(
+                tenant_id=tenant_id,
+                state=ExecutionState.FAILED,
+                failed_after_or_at=failure_start,
+                limit=1,
+            ),
+            expected_tenant_id=tenant_id,
         )
+        failure_count = failure_page.total
         if failure_count >= config.circuit_failure_threshold:
             opened = await self._save_breaker(
                 breaker=TenantExecutionCircuitBreakerRecord(
@@ -319,13 +326,6 @@ def _evaluation_id(
         _EVALUATION_NAMESPACE,
         f"{tenant_id}|{evaluated_at.isoformat()}|{provider_name or ''}",
     )
-
-
-def _parse_dt(raw: str) -> datetime:
-    parsed = datetime.fromisoformat(raw)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
 
 
 __all__ = ["ExecutionGovernanceEvaluation", "ExecutionGovernanceRuntime"]

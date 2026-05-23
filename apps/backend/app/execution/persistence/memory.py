@@ -484,6 +484,19 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             rows = [r for r in rows if r.tenant_id == query.tenant_id]
         if query.state is not None:
             rows = [r for r in rows if r.state is query.state]
+        if query.requested_after_or_at is not None:
+            rows = [
+                r
+                for r in rows
+                if r.requested_at >= query.requested_after_or_at
+            ]
+        if query.failed_after_or_at is not None:
+            rows = [
+                r
+                for r in rows
+                if r.failed_at is not None
+                and r.failed_at >= query.failed_after_or_at
+            ]
         if query.claimed_before_or_at is not None:
             rows = [
                 r
@@ -495,7 +508,10 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         total = len(rows)
         sliced = rows[query.offset : query.offset + query.limit]
         return ExecutionPage(
-            executions=tuple(sliced), total=total, offset=query.offset
+            executions=tuple(sliced),
+            total=total,
+            limit=query.limit,
+            offset=query.offset,
         )
 
     async def list_attempts(

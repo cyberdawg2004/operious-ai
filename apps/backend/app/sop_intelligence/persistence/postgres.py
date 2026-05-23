@@ -10,6 +10,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
 from app.sop_intelligence.db.models import ApprovalRecordRow
 from app.sop_intelligence.exceptions import (
     SOPIntelligencePersistenceError,
@@ -104,13 +105,17 @@ class PostgresSOPApprovalPersistence(BaseRepository):
             ApprovalRecordRow.created_at,
             ApprovalRecordRow.approval_id,
         )
-        all_rows = list((await self.session.execute(stmt)).scalars().all())
-        total = len(all_rows)
-        sliced = all_rows[query.offset : query.offset + query.limit]
-        return ApprovalPage(
-            items=tuple(_row_to_record(row) for row in sliced),
-            total=total,
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
             offset=query.offset,
+        )
+        return ApprovalPage(
+            items=tuple(_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
         )
 
     async def _document_visible(

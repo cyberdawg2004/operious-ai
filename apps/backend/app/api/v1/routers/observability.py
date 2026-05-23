@@ -36,6 +36,9 @@ from app.services.operational_observability_service import (
 
 router = APIRouter(tags=["observability"])
 
+_DEFAULT_LIMIT = 25
+_MAX_LIMIT = 100
+
 
 @router.get("/metrics", response_model=OperationalMetricsResponse)
 async def read_operational_metrics(
@@ -63,7 +66,7 @@ async def read_operational_metrics(
 @router.get("/dlq", response_model=DeadLetterExecutionPageResponse)
 async def list_dead_letter_executions(
     execution_id: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: OperationalObservabilityService = Depends(
@@ -82,7 +85,7 @@ async def list_dead_letter_executions(
 @router.get("/stuck-executions", response_model=StuckExecutionAlertPageResponse)
 async def list_stuck_execution_alerts(
     claimed_before_or_at: datetime = Query(...),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: OperationalObservabilityService = Depends(
@@ -104,7 +107,7 @@ async def list_stuck_execution_alerts(
 )
 async def list_inbound_normalization_dead_letters(
     normalization_status: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: OperationalObservabilityService = Depends(
@@ -159,7 +162,7 @@ async def define_slo(
 async def list_slo_definitions(
     metric_name: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: OperationalObservabilityService = Depends(
@@ -276,7 +279,7 @@ async def record_trace_span(
 @router.get("/traces", response_model=OperationalTraceSpanPageResponse)
 async def list_trace_spans(
     trace_id: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: OperationalObservabilityService = Depends(

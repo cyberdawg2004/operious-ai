@@ -9,6 +9,7 @@ anticipates.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Generic, TypeVar
 
 
@@ -29,6 +30,7 @@ class DecisionQuery:
     policy_chain_id: str | None = None
     subject_kind: str | None = None
     final_decision: str | None = None
+    decided_after_or_at: datetime | None = None
     limit: int = 100
     offset: int = 0
 
@@ -47,6 +49,7 @@ class RecordPage(Generic[T]):
 
     items: tuple[T, ...] = field(default_factory=tuple)
     total: int = -1
+    limit: int = 0
     offset: int = 0
 
 

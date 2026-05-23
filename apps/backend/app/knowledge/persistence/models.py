@@ -11,6 +11,7 @@ from app.tenant.identity import TenantKnowledgeDocumentId
 @dataclass(frozen=True, slots=True)
 class KnowledgeVectorQuery:
     vector_index_name: str
+    search_text: str | None = None
     document_id: TenantKnowledgeDocumentId | None = None
     provider: str | None = None
     model: str | None = None
@@ -23,6 +24,7 @@ class KnowledgeVectorQuery:
 class KnowledgeVectorPage:
     items: tuple[KnowledgeVectorEntry, ...] = ()
     total: int = 0
+    limit: int = 0
     offset: int = 0
 
 

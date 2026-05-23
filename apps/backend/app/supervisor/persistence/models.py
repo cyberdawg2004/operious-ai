@@ -46,6 +46,7 @@ class RecordPage(Generic[T]):
 
     items: tuple[T, ...] = field(default_factory=tuple)
     total: int = -1
+    limit: int = 0
     offset: int = 0
 
 

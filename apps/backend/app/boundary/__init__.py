@@ -73,6 +73,8 @@ from app.boundary.exceptions import (
     BoundaryNormalizationError,
     BoundaryPersistenceError,
     BoundaryReplayError,
+    WebhookFreshnessError,
+    WebhookReplayError,
 )
 from app.boundary.identity import (
     BoundaryEgressId,
@@ -144,6 +146,8 @@ __all__ = [
     "BoundaryNormalizationError",
     "BoundaryPersistenceError",
     "BoundaryReplayError",
+    "WebhookFreshnessError",
+    "WebhookReplayError",
     # Identity
     "BoundaryEgressId",
     "BoundaryEventId",

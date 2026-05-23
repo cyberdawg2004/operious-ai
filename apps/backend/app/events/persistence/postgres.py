@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.events.causality import EventCausality
@@ -24,6 +24,8 @@ from app.events.substrates import OperationalSubstrate
 from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
 from app.repositories.base import BaseRepository
+
+_SERVER_PAGE_HARD_CAP = 500
 
 
 class PostgresOperationalEventPersistence(
@@ -95,19 +97,27 @@ class PostgresOperationalEventPersistence(
             OperationalEventRow.sequence,
             OperationalEventRow.event_id,
         )
-        rows = list(
+        limit = _bounded_limit(query.limit)
+        total = int(
             (
                 await self.session.execute(
-                    stmt.offset(query.offset).limit(query.limit)
+                    select(func.count()).select_from(
+                        stmt.order_by(None).subquery()
+                    )
                 )
-            )
-            .scalars()
-            .all()
+            ).scalar_one()
         )
-        count_rows = list((await self.session.execute(stmt)).scalars().all())
+        rows = tuple(
+            (
+                await self.session.execute(
+                    stmt.offset(query.offset).limit(limit)
+                )
+            ).scalars()
+        )
         return OperationalEventPage(
             events=tuple(_row_to_event(row) for row in rows),
-            total=len(count_rows),
+            total=total,
+            limit=limit,
             offset=query.offset,
         )
 
@@ -172,6 +182,12 @@ def _apply_filters(
             OperationalEventRow.occurred_at <= query.occurred_before_or_at
         )
     return stmt
+
+
+def _bounded_limit(limit: int) -> int:
+    if limit > _SERVER_PAGE_HARD_CAP:
+        raise ValueError(f"limit must be <= {_SERVER_PAGE_HARD_CAP}")
+    return limit
 
 
 def _event_to_row(event: OperationalEvent) -> OperationalEventRow:

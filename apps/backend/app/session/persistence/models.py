@@ -76,6 +76,8 @@ class SessionRecordPage:
     events: tuple[SessionEventRecord, ...] = ()
     correlations: tuple[SessionCorrelationRecord, ...] = ()
     total: int = 0
+    limit: int = 0
+    offset: int = 0
 
 
 __all__ = [

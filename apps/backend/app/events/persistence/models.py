@@ -47,6 +47,7 @@ class OperationalEventQuery:
 class OperationalEventPage:
     events: tuple[OperationalEvent, ...]
     total: int
+    limit: int = 0
     offset: int = 0
 
 
