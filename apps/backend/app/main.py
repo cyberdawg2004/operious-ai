@@ -29,10 +29,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine
-from app.middleware.authority_context import (
-    AUTHORITY_HEADERS,
-    AuthorityContextMiddleware,
-)
+from app.middleware.authority_context import AuthorityContextMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.request_body_limit import RequestBodyLimitMiddleware
 from app.middleware.trusted_ingress import (
@@ -47,6 +44,14 @@ from app.survivability import (
 )
 
 _unhandled_logger = logging.getLogger("app.main.unhandled")
+
+ALLOWED_ORIGINS = [
+    "https://app.operious.com",
+    "https://www.operious.com",
+    "https://operious.com",
+    "http://localhost:3000",
+    "https://operious-ai-command-center.vercel.app",
+]
 
 
 def _problem_for_status(
@@ -70,21 +75,6 @@ def _problem_for_status(
         detail=detail,
         instance=f"urn:operious:request:{request_id}" if request_id else None,
     )
-
-
-def _build_cors_origins(raw: str) -> list[str]:
-    """Parse the comma-separated CORS allowlist.
-
-    Doctrine: wildcard ``"*"`` is rejected at composition time. An
-    empty string disables CORS entirely (no middleware mounted).
-    """
-    items = [v.strip() for v in raw.split(",") if v.strip()]
-    if any(v == "*" for v in items):
-        raise ValueError(
-            "CORS_ALLOW_ORIGINS must be a concrete allowlist; "
-            "wildcard '*' is forbidden by transport doctrine."
-        )
-    return items
 
 
 def _init_sentry(settings: Settings) -> None:
@@ -256,8 +246,8 @@ def create_app(
     2.5-I additionally registers:
       * uniform RFC 9457 ``application/problem+json`` exception
         handlers (HTTPException, validation, unhandled),
-      * a fail-closed ``CORSMiddleware`` configured from the
-        ``CORS_ALLOW_ORIGINS`` allowlist (no wildcard).
+      * a fail-closed ``CORSMiddleware`` configured from the production
+        domain allowlist (no wildcard).
     """
 
     settings = get_settings()
@@ -331,35 +321,21 @@ def create_app(
     app.add_middleware(RequestContextMiddleware)
     logger.info("middleware_request_context_register_complete")
 
-    cors_origins = _build_cors_origins(settings.CORS_ALLOW_ORIGINS)
-    if cors_origins:
-        # Authority headers are sourced from the single canonical
-        # owner (``AUTHORITY_HEADERS`` in
-        # ``app.middleware.authority_context``) so config / main never
-        # repeat their literals. See
-        # ``test_no_other_source_reads_authority_headers``.
-        cors_headers = [
-            h.strip() for h in settings.CORS_ALLOW_HEADERS.split(",") if h.strip()
-        ] + list(AUTHORITY_HEADERS)
-        logger.info(
-            "middleware_cors_register_begin",
-            extra={
-                "origin_count": len(cors_origins),
-                "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
-            },
-        )
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
-            allow_methods=[
-                m.strip() for m in settings.CORS_ALLOW_METHODS.split(",") if m.strip()
-            ],
-            allow_headers=cors_headers,
-        )
-        logger.info("middleware_cors_register_complete")
-    else:
-        logger.info("middleware_cors_register_skipped")
+    logger.info(
+        "middleware_cors_register_begin",
+        extra={
+            "origin_count": len(ALLOWED_ORIGINS),
+            "allow_credentials": True,
+        },
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Tenant-ID", "X-Request-ID"],
+    )
+    logger.info("middleware_cors_register_complete")
     logger.info("middleware_request_body_limit_register_begin")
     app.add_middleware(
         RequestBodyLimitMiddleware,
