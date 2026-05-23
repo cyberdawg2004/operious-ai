@@ -99,7 +99,7 @@ export function CookieConsent() {
               </div>
               <button
                 onClick={handleAcceptEssential}
-                className="p-1 rounded-[4px] transition-colors duration-150 hover:bg-[var(--cc-bg-raised)]"
+                className="flex h-11 w-11 items-center justify-center rounded-[4px] transition-colors duration-150 hover:bg-[var(--cc-bg-raised)]"
                 aria-label="Close cookie banner"
               >
                 <X size={18} style={{ color: "var(--cc-text-muted)" }} />
@@ -170,7 +170,7 @@ export function CookieConsent() {
               {/* Manage Preferences Toggle */}
               <button
                 onClick={() => setShowPreferences(!showPreferences)}
-                className="h-10 px-4 rounded-[4px] text-[13px] font-medium transition-colors duration-150"
+                className="h-11 px-4 rounded-[4px] text-[13px] font-medium transition-colors duration-150 sm:h-10"
                 style={{
                   fontFamily: "var(--font-geist-sans)",
                   backgroundColor: "transparent",
@@ -194,7 +194,7 @@ export function CookieConsent() {
               {/* Accept Essential */}
               <button
                 onClick={showPreferences ? handleSavePreferences : handleAcceptEssential}
-                className="h-10 px-4 rounded-[4px] text-[13px] font-medium transition-colors duration-150"
+                className="h-11 px-4 rounded-[4px] text-[13px] font-medium transition-colors duration-150 sm:h-10"
                 style={{
                   fontFamily: "var(--font-geist-sans)",
                   backgroundColor: "transparent",
@@ -216,7 +216,7 @@ export function CookieConsent() {
               {/* Accept All */}
               <button
                 onClick={handleAcceptAll}
-                className="h-10 px-6 rounded-[4px] text-[13px] font-semibold transition-colors duration-150"
+                className="h-11 px-6 rounded-[4px] text-[13px] font-semibold transition-colors duration-150 sm:h-10"
                 style={{
                   fontFamily: "var(--font-cormorant-sc)",
                   backgroundColor: "var(--cc-gold-primary)",
@@ -289,7 +289,7 @@ function CookieToggle({
       <button
         onClick={onChange}
         disabled={disabled}
-        className="relative w-10 h-5 rounded-full transition-colors duration-150 flex-shrink-0"
+        className="relative flex h-11 w-12 flex-shrink-0 items-center rounded-full transition-colors duration-150"
         style={{
           backgroundColor: checked ? "var(--cc-gold-primary)" : "var(--cc-border-subtle)",
           opacity: disabled ? 0.5 : 1,
@@ -299,10 +299,10 @@ function CookieToggle({
         role="switch"
       >
         <span
-          className="absolute top-0.5 w-4 h-4 rounded-full transition-transform duration-150"
+          className="absolute top-1/2 h-5 w-5 rounded-full transition-transform duration-150"
           style={{
             backgroundColor: "var(--cc-text-primary)",
-            transform: checked ? "translateX(22px)" : "translateX(2px)",
+            transform: checked ? "translate(22px, -50%)" : "translate(4px, -50%)",
           }}
         />
       </button>

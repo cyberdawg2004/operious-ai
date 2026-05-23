@@ -31,7 +31,7 @@ export function Footer() {
                   <li key={link.href}>
                     <Link
                       href={link.href}
-                      className="text-[14px] leading-[2] text-[#D8E4F4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
+                      className="inline-flex min-h-11 items-center text-[14px] text-[#D8E4F4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
                     >
                       {link.label}
                     </Link>
@@ -45,14 +45,14 @@ export function Footer() {
         <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
           <a
             href="mailto:enterprise@operious.ai"
-            className="flex items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
+            className="flex min-h-11 items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
           >
             <Mail className="h-3 w-3" />
             enterprise@operious.ai
           </a>
           <a
             href="mailto:security@operious.ai"
-            className="flex items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
+            className="flex min-h-11 items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
           >
             <Mail className="h-3 w-3" />
             security@operious.ai
@@ -69,7 +69,7 @@ export function Footer() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="text-[12px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C] sm:text-[13px]"
+                  className="inline-flex min-h-11 items-center text-[12px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C] sm:text-[13px]"
                 >
                   {link.label}
                 </Link>

@@ -121,6 +121,23 @@ html {
   outline-offset: 2px;
 }
 
+@media (max-width: 640px) {
+  button,
+  [role="button"],
+  a[href],
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+
+  button,
+  [role="button"] {
+    min-width: 44px;
+    touch-action: manipulation;
+  }
+}
+
 /* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

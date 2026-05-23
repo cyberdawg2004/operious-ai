@@ -200,7 +200,7 @@ export function SettingsView() {
         <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
           <div className="overflow-x-auto">
             <div className="min-w-[640px]">
-              <div className="grid h-9 grid-cols-[220px_minmax(0,1fr)] items-center border-b border-border-subtle bg-surface-raised px-4">
+              <div className="grid h-11 grid-cols-[220px_minmax(0,1fr)] items-center border-b border-border-subtle bg-surface-raised px-4 sm:h-9">
                 <DenseHeader>Tenant Runtime Field</DenseHeader>
                 <DenseHeader>Resolved Value</DenseHeader>
               </div>
@@ -239,7 +239,7 @@ function RecordListView<T>({
         </h1>
         <button
           onClick={reload}
-          className="h-10 rounded border border-border-subtle bg-surface px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+          className="h-11 rounded border border-border-subtle bg-surface px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary sm:h-10"
         >
           Refresh
         </button>
@@ -316,7 +316,7 @@ function SettingRow({
   isOdd: boolean;
 }) {
   return (
-    <div className={`grid min-h-10 grid-cols-[220px_minmax(0,1fr)] items-center border-b border-border-subtle px-4 last:border-b-0 ${isOdd ? "bg-canvas/50" : "bg-surface"}`}>
+    <div className={`grid min-h-11 grid-cols-[220px_minmax(0,1fr)] items-center border-b border-border-subtle px-4 last:border-b-0 sm:min-h-10 ${isOdd ? "bg-canvas/50" : "bg-surface"}`}>
       <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
         {label}
       </div>

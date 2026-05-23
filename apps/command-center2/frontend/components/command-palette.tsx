@@ -221,7 +221,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
 
       {/* Modal */}
       <div
-        className="fixed left-1/2 top-[20vh] z-[100] w-[640px] max-w-[90vw] -translate-x-1/2 overflow-hidden rounded-[12px] border border-[var(--border-subtle)] bg-[var(--surface)] shadow-[0_24px_64px_rgba(10,15,28,0.16)]"
+        className="fixed left-1/2 top-[8vh] z-[100] max-h-[86dvh] w-[calc(100vw-32px)] max-w-[640px] -translate-x-1/2 overflow-hidden rounded-[12px] border border-[var(--border-subtle)] bg-[var(--surface)] shadow-[0_24px_64px_rgba(10,15,28,0.16)] sm:top-[20vh]"
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}
@@ -247,7 +247,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         <div className="h-px bg-[var(--border-subtle)]" />
 
         {/* Results list */}
-        <div ref={listRef} className="max-h-[480px] overflow-y-auto">
+        <div ref={listRef} className="max-h-[calc(86dvh-150px)] overflow-y-auto sm:max-h-[480px]">
           {filteredCategories.length === 0 ? (
             <div className="px-5 py-8 text-center font-sans text-[13px] text-[var(--ink-tertiary)]">
               No results found for &quot;{query}&quot;
@@ -322,8 +322,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
         </div>
 
         {/* Footer hint */}
-        <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-5 py-3">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-3 border-t border-[var(--border-subtle)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1.5">
               <kbd className="rounded border border-[var(--border-subtle)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--ink-tertiary)]">
                 ↑

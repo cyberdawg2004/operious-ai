@@ -106,8 +106,10 @@ export default function Home() {
 
   useEffect(() => {
     document.body.style.overflow = mobileSidebarOpen ? "hidden" : "";
+    document.documentElement.style.overflow = mobileSidebarOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
     };
   }, [mobileSidebarOpen]);
 

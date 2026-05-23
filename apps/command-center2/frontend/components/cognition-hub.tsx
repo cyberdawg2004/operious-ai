@@ -121,25 +121,25 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
   };
 
   return (
-    <div className="flex-1 bg-[var(--canvas)] py-8 px-12 overflow-auto">
+    <div className="flex-1 overflow-auto bg-[var(--canvas)] px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
       <div className="mb-6">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)]">
           COGNITION · APPROVAL QUEUE
         </span>
       </div>
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <h1 className="font-serif font-bold text-[32px] text-[var(--ink-primary)]">
           Cognition Hub
         </h1>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1 p-1 bg-[var(--surface)] rounded-lg border border-[var(--border-subtle)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:gap-4">
+          <div className="flex w-full flex-wrap items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-1 sm:w-auto">
             {filterOptions.map((option) => (
               <button
                 key={option.id}
                 onClick={() => setActiveFilter(option.id)}
                 className={cn(
-                  "px-3 py-1.5 rounded font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-160",
+                  "min-h-11 rounded px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-160 sm:min-h-0",
                   activeFilter === option.id
                     ? "bg-[var(--gold-primary)] text-white"
                     : "text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
@@ -153,7 +153,7 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
           <div className="relative">
             <button
               onClick={() => setShowSortDropdown(!showSortDropdown)}
-              className="flex items-center gap-2 px-3 py-2 bg-[var(--surface)] border border-[var(--border-subtle)] rounded font-mono text-[11px] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] transition-colors duration-160"
+              className="flex min-h-11 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2 font-mono text-[11px] text-[var(--ink-secondary)] transition-colors duration-160 hover:bg-[var(--surface-hover)]"
             >
               Sort: {sortOptions.find((option) => option.id === sortBy)?.label}
               <ChevronDown className="w-3 h-3" />
@@ -168,7 +168,7 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
                       setShowSortDropdown(false);
                     }}
                     className={cn(
-                      "w-full px-3 py-2 text-left font-mono text-[11px] hover:bg-[var(--surface-hover)] transition-colors duration-160",
+                      "min-h-11 w-full px-3 py-2 text-left font-mono text-[11px] transition-colors duration-160 hover:bg-[var(--surface-hover)]",
                       sortBy === option.id
                         ? "text-[var(--gold-primary)]"
                         : "text-[var(--ink-secondary)]"
@@ -217,7 +217,7 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
 
       {data && !isLoading && !error && (
         <>
-          <div className="grid grid-cols-4 gap-4 mb-8">
+          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="PENDING REVIEW" value={String(stats.pending)} />
             <StatCard label="APPROVED" value={String(stats.approved)} />
             <StatCard label="APPLIED" value={String(stats.applied)} />
@@ -232,7 +232,7 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
               onAction={reload}
             />
           ) : (
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
               {sortedRecords.map((record) => (
                 <ApprovalCard
                   key={record.approval_id}
@@ -278,7 +278,7 @@ function ApprovalCard({
   const statusConfig = getStatusConfig(record.status);
 
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border-subtle)] rounded-lg p-6 flex flex-col gap-4">
+    <div className="flex flex-col gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-4 sm:p-6">
       <div className="flex items-center justify-between">
         <span
           className={cn(
@@ -303,7 +303,7 @@ function ApprovalCard({
         </span>
         <button
           onClick={onOpenKnowledge}
-          className="font-mono text-[13px] text-[var(--gold-primary)] hover:underline"
+          className="inline-flex min-h-11 items-center font-mono text-[13px] text-[var(--gold-primary)] hover:underline"
         >
           {record.document_id}
         </button>
@@ -339,7 +339,7 @@ function ApprovalCard({
                 >
                   <button
                     onClick={() => setExpandedEvidence(isExpanded ? null : sessionId)}
-                    className="w-full flex items-center gap-3 p-3 text-left hover:bg-[var(--surface-hover)] transition-colors duration-160"
+                    className="flex min-h-11 w-full items-center gap-3 p-3 text-left transition-colors duration-160 hover:bg-[var(--surface-hover)]"
                   >
                     {isExpanded ? (
                       <ChevronDown className="w-4 h-4 text-[var(--ink-tertiary)] flex-shrink-0" />
@@ -355,7 +355,7 @@ function ApprovalCard({
                     <div className="px-3 pb-3 pt-0">
                       <button
                         onClick={() => onOpenTrace?.(sessionId)}
-                        className="ml-7 inline-flex items-center gap-2 rounded border border-[var(--border-subtle)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--ink-secondary)] hover:border-[var(--gold-primary)] hover:text-[var(--gold-primary)]"
+                        className="ml-7 inline-flex min-h-11 items-center gap-2 rounded border border-[var(--border-subtle)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--ink-secondary)] hover:border-[var(--gold-primary)] hover:text-[var(--gold-primary)]"
                       >
                         <Play className="h-3 w-3" strokeWidth={1.5} />
                         Open trace
@@ -370,11 +370,11 @@ function ApprovalCard({
       </div>
 
       {record.status === "pending_review" && (
-        <div className="flex items-center gap-3 pt-2 border-t border-[var(--border-subtle)]">
+        <div className="flex flex-col gap-3 border-t border-[var(--border-subtle)] pt-2 sm:flex-row sm:items-center">
           <button
             onClick={onApprove}
             disabled={isBusy}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--green-success)] text-white rounded font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-[var(--green-success)]/90 disabled:opacity-50 transition-colors duration-160"
+            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded bg-[var(--green-success)] px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.08em] text-white transition-colors duration-160 hover:bg-[var(--green-success)]/90 disabled:opacity-50"
           >
             <Check className="w-4 h-4" strokeWidth={1.5} />
             Approve
@@ -382,7 +382,7 @@ function ApprovalCard({
           <button
             onClick={onReject}
             disabled={isBusy}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-transparent border border-[var(--red-alert)] text-[var(--red-alert)] rounded font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-[var(--red-alert)]/10 disabled:opacity-50 transition-colors duration-160"
+            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded border border-[var(--red-alert)] bg-transparent px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--red-alert)] transition-colors duration-160 hover:bg-[var(--red-alert)]/10 disabled:opacity-50"
           >
             <X className="w-4 h-4" strokeWidth={1.5} />
             Reject
@@ -394,7 +394,7 @@ function ApprovalCard({
         <button
           onClick={onApply}
           disabled={isBusy}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--gold-primary)] text-white rounded font-mono text-[12px] uppercase tracking-[0.08em] hover:bg-[var(--gold-primary)]/90 disabled:opacity-50 transition-colors duration-160"
+          className="flex min-h-11 items-center justify-center gap-2 rounded bg-[var(--gold-primary)] px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.08em] text-white transition-colors duration-160 hover:bg-[var(--gold-primary)]/90 disabled:opacity-50"
         >
           <ShieldAlert className="w-4 h-4" strokeWidth={1.5} />
           Apply to knowledge

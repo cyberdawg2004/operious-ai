@@ -130,7 +130,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                 placeholder="Trace ID or Session ID..."
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
-                className="h-10 w-full rounded pl-9 pr-4 font-sans text-[13px] outline-none transition-all duration-160 sm:w-[360px]"
+                className="h-11 w-full rounded pl-9 pr-4 font-sans text-[13px] outline-none transition-all duration-160 sm:h-10 sm:w-[360px]"
                 style={{
                   backgroundColor: "var(--surface-raised)",
                   border: "1px solid var(--border-subtle)",
@@ -147,7 +147,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
             </div>
             <button
               onClick={handleOpenTrace}
-              className="h-10 rounded px-4 font-sans text-[13px] font-medium text-white transition-opacity duration-160 hover:opacity-90"
+              className="h-11 rounded px-4 font-sans text-[13px] font-medium text-white transition-opacity duration-160 hover:opacity-90 sm:h-10"
               style={{ backgroundColor: "var(--ink-primary)" }}
             >
               Open Trace
@@ -257,7 +257,7 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                         setCopyStatus(null);
                       }}
                       className={cn(
-                        "flex h-10 w-full items-center gap-4 rounded px-3 text-left transition-all duration-160",
+                        "flex h-11 w-full items-center gap-4 rounded px-3 text-left transition-all duration-160 sm:h-10",
                         currentSpan?.span_id === span.span_id
                           ? "ring-2"
                           : "hover:bg-[var(--surface-sunken)]"
@@ -332,14 +332,14 @@ export function TraceInspector({ initialTraceId }: TraceInspectorProps) {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleCopySpan}
-                      className="flex h-9 w-9 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
+                      className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)] sm:h-9 sm:w-9"
                       title="Copy event data"
                     >
                       <Copy className="w-4 h-4" style={{ color: "var(--ink-tertiary)" }} />
                     </button>
                     <button
                       onClick={handleOpenRawEndpoint}
-                      className="flex h-9 w-9 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
+                      className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--surface-sunken)] sm:h-9 sm:w-9"
                       title="Open trace endpoint"
                     >
                       <ExternalLink className="w-4 h-4" style={{ color: "var(--ink-tertiary)" }} />

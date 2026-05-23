@@ -169,7 +169,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
                 key={pill}
                 onClick={() => setActiveFilter(pill)}
                 className={cn(
-                  "px-3 py-1.5 rounded-full text-[12px] font-medium",
+                  "min-h-11 px-3 py-1.5 rounded-full text-[12px] font-medium sm:min-h-0",
                   "border transition-all duration-160",
                   activeFilter === pill
                     ? "bg-ink-primary text-white border-ink-primary"
@@ -193,7 +193,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Session ID, principal, classification..."
               className={cn(
-                "h-10 w-full min-w-0 rounded pl-9 pr-3 md:w-[320px]",
+                "h-11 w-full min-w-0 rounded pl-9 pr-3 sm:h-10 md:w-[320px]",
                 "bg-surface border border-border-subtle",
                 "text-[13px] text-ink-primary placeholder:text-ink-tertiary",
                 "focus:outline-none focus:border-border-defined",
@@ -205,7 +205,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
           <button
             onClick={reload}
             className={cn(
-              "flex h-10 w-10 items-center justify-center rounded",
+              "flex h-11 w-11 items-center justify-center rounded sm:h-10 sm:w-10",
               "border border-border-subtle bg-surface",
               "hover:border-border-defined transition-all duration-160"
             )}
@@ -264,7 +264,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
             ) : (
               <div className="overflow-x-auto">
                 <div className="min-w-[1080px]">
-                  <div className="flex h-9 items-center border-b border-border-subtle bg-surface-raised px-3">
+                  <div className="flex h-11 items-center border-b border-border-subtle bg-surface-raised px-3 sm:h-9">
                     <div className="flex w-10 items-center justify-center">
                       <input
                         type="checkbox"
@@ -306,7 +306,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
                   onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                   disabled={currentPage === 1}
                   className={cn(
-                    "w-8 h-8 flex items-center justify-center rounded",
+                    "flex h-11 w-11 items-center justify-center rounded sm:h-8 sm:w-8",
                     "border border-border-subtle",
                     "disabled:opacity-50 disabled:cursor-not-allowed",
                     "hover:border-border-defined transition-colors"
@@ -322,7 +322,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
                   onClick={() => setCurrentPage((page) => page + 1)}
                   disabled={currentPage * PAGE_SIZE >= data.total}
                   className={cn(
-                    "w-8 h-8 flex items-center justify-center rounded",
+                    "flex h-11 w-11 items-center justify-center rounded sm:h-8 sm:w-8",
                     "border border-border-subtle",
                     "disabled:opacity-50 disabled:cursor-not-allowed",
                     "hover:border-border-defined transition-colors"
@@ -393,7 +393,7 @@ function TableRow({
   return (
     <div
       className={cn(
-        "flex h-10 items-center px-3",
+        "flex h-12 items-center px-3 sm:h-10",
         "border-b border-border-subtle last:border-b-0",
         "transition-colors duration-160",
         isOdd ? "bg-canvas/50" : "bg-surface",
@@ -465,7 +465,7 @@ function TableRow({
         <button
           onClick={onOpenTrace}
           className={cn(
-            "flex h-8 w-8 items-center justify-center rounded",
+            "flex h-11 w-11 items-center justify-center rounded sm:h-8 sm:w-8",
             "border border-border-subtle",
             "hover:border-border-defined hover:bg-surface-raised",
             "transition-all duration-160"

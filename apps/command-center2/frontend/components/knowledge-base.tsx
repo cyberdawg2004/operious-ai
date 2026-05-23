@@ -188,19 +188,19 @@ export function KnowledgeBase() {
   };
 
   return (
-    <div className="flex-1 bg-canvas py-8 px-12 overflow-auto">
+    <div className="flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
       <div className="mb-8">
         <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary mb-2">
           Knowledge · Document Management
         </p>
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <h1 className="font-serif text-[32px] font-bold text-ink-primary">
             Knowledge Base
           </h1>
 
-          <div className="flex items-center gap-3">
-            <div className="relative w-[280px]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative w-full sm:w-[280px]">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-tertiary"
                 strokeWidth={1.5}
@@ -210,13 +210,13 @@ export function KnowledgeBase() {
                 placeholder="Search documents..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-9 pl-9 pr-3 bg-surface border border-border-subtle rounded-lg text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none focus:border-gold-accent transition-colors"
+                className="h-11 w-full rounded-lg border border-border-subtle bg-surface pl-9 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary transition-colors focus:outline-none focus:border-gold-accent sm:h-9"
               />
             </div>
 
             <button
               onClick={() => setModal({ type: "upload" })}
-              className="flex items-center gap-2 h-9 px-4 bg-gold-accent text-ink-primary rounded font-sans text-[13px] font-medium hover:bg-[#9A7A28] transition-colors duration-160"
+              className="flex h-11 items-center justify-center gap-2 rounded bg-gold-accent px-4 font-sans text-[13px] font-medium text-ink-primary transition-colors duration-160 hover:bg-[#9A7A28] sm:h-9"
             >
               <Upload className="w-3.5 h-3.5" strokeWidth={1.5} />
               Upload Document
@@ -236,8 +236,8 @@ export function KnowledgeBase() {
       )}
 
       {data && !isLoading && !error && (
-        <div className="flex gap-6">
-          <div className="w-60 flex-shrink-0">
+        <div className="flex flex-col gap-4 xl:flex-row xl:gap-6">
+          <div className="w-full flex-shrink-0 xl:w-60">
             <div className="bg-surface border border-border-subtle rounded-lg p-4">
               <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary mb-4">
                 Categories
@@ -253,7 +253,7 @@ export function KnowledgeBase() {
                       setSelectedDocs([]);
                     }}
                     className={cn(
-                      "w-full h-9 px-3 flex items-center gap-2 rounded transition-colors duration-160",
+                      "flex h-11 w-full items-center gap-2 rounded px-3 transition-colors duration-160 sm:h-9",
                       activeCategory === category.id
                         ? "bg-[var(--gold-bg)] border-l-4 border-l-[var(--gold-primary)] -ml-px"
                         : "hover:bg-[var(--surface-sunken)]"
@@ -284,9 +284,9 @@ export function KnowledgeBase() {
             </div>
           </div>
 
-          <div className="flex-1 bg-surface border border-border-subtle rounded-lg overflow-hidden">
-            <div className="h-10 px-4 flex items-center bg-surface-raised border-b border-border-subtle">
-              <div className="w-10 flex items-center justify-center">
+          <div className="flex-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface">
+            <div className="flex h-11 min-w-[920px] items-center border-b border-border-subtle bg-surface-raised px-4 sm:h-10">
+              <div className="flex w-12 items-center justify-center sm:w-10">
                 <input
                   type="checkbox"
                   checked={
@@ -303,7 +303,7 @@ export function KnowledgeBase() {
               <HeaderCell className="w-[120px]">Status</HeaderCell>
               <HeaderCell className="w-[80px] text-center">Indexed</HeaderCell>
               <HeaderCell className="w-[120px]">Created</HeaderCell>
-              <div className="w-10" />
+              <div className="w-12 sm:w-10" />
             </div>
 
             {filteredDocs.length === 0 ? (
@@ -321,12 +321,12 @@ export function KnowledgeBase() {
                   <div
                     key={doc.document_id}
                     className={cn(
-                      "h-12 px-4 flex items-center border-b border-border-subtle transition-colors duration-160",
+                      "flex h-12 min-w-[920px] items-center border-b border-border-subtle px-4 transition-colors duration-160",
                       index % 2 === 1 && "bg-[var(--surface-sunken)]/30",
                       "hover:bg-[var(--surface-sunken)]"
                     )}
                   >
-                    <div className="w-10 flex items-center justify-center">
+                    <div className="flex w-12 items-center justify-center sm:w-10">
                       <input
                         type="checkbox"
                         checked={selectedDocs.includes(doc.document_id)}
@@ -355,7 +355,7 @@ export function KnowledgeBase() {
                     </div>
                     <DataCell className="w-[120px]">{formatDate(doc.created_at)}</DataCell>
 
-                    <div className="w-10 flex justify-center">
+                    <div className="flex w-12 justify-center sm:w-10">
                       <ActionMenu
                         onView={() => setModal({ type: "view", document: doc })}
                         onEdit={() => setModal({ type: "edit", document: doc })}
@@ -374,7 +374,7 @@ export function KnowledgeBase() {
               </div>
             )}
 
-            <div className="h-12 px-4 flex items-center justify-between bg-surface-raised border-t border-border-subtle">
+            <div className="flex min-h-12 min-w-[920px] flex-col gap-3 border-t border-border-subtle bg-surface-raised px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-[13px] text-ink-secondary">
                 Showing {filteredDocs.length} of {data.total} documents
               </span>
@@ -383,7 +383,7 @@ export function KnowledgeBase() {
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="w-8 h-8 flex items-center justify-center rounded border border-border-subtle text-ink-secondary hover:bg-[var(--surface-sunken)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-secondary transition-colors hover:bg-[var(--surface-sunken)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
                   aria-label="Previous page"
                 >
                   <ChevronLeft className="w-4 h-4" strokeWidth={1.5} />
@@ -398,7 +398,7 @@ export function KnowledgeBase() {
                     setCurrentPage((p) => Math.min(totalPages, p + 1))
                   }
                   disabled={currentPage === totalPages}
-                  className="w-8 h-8 flex items-center justify-center rounded border border-border-subtle text-ink-secondary hover:bg-[var(--surface-sunken)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-secondary transition-colors hover:bg-[var(--surface-sunken)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
                   aria-label="Next page"
                 >
                   <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
@@ -467,7 +467,7 @@ function ActionMenu({
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-1 rounded hover:bg-[var(--gold-bg)] transition-colors duration-160"
+        className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--gold-bg)] sm:h-8 sm:w-8"
         aria-label="Document actions"
       >
         <MoreHorizontal className="w-4 h-4 text-ink-tertiary" strokeWidth={1.5} />
@@ -507,7 +507,7 @@ function MenuAction({
         close();
       }}
       className={cn(
-        "w-full flex items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-[var(--gold-bg)] transition-colors",
+        "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--gold-bg)]",
         danger ? "text-red-alert hover:bg-[rgba(220,38,38,0.06)]" : "text-ink-secondary"
       )}
     >
@@ -599,12 +599,12 @@ function IndexedIndicator({ indexed }: { indexed: boolean }) {
 
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6">
-      <div className="w-full max-w-3xl rounded-lg border border-border-subtle bg-surface p-6 shadow-elevated">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
+      <div className="max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border-subtle bg-surface p-4 shadow-elevated sm:p-6">
         <div className="mb-4 flex justify-end">
           <button
             onClick={onClose}
-            className="rounded border border-border-subtle p-1 text-ink-tertiary hover:text-ink-primary"
+            className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-tertiary hover:text-ink-primary"
             aria-label="Close modal"
           >
             <X className="h-4 w-4" strokeWidth={1.5} />
@@ -648,7 +648,7 @@ function DocumentForm({
           defaultValue={document?.title ?? ""}
           disabled={Boolean(document)}
           required
-          className="h-10 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60"
+          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
         />
       </label>
       <label className="block">
@@ -659,7 +659,7 @@ function DocumentForm({
           name="document_type"
           defaultValue={document?.document_type ?? "sop"}
           disabled={Boolean(document)}
-          className="h-10 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60"
+          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
         >
           {documentTypes.filter((type) => type.id !== "all").map((type) => (
             <option key={type.id} value={type.id}>
@@ -676,7 +676,7 @@ function DocumentForm({
           <select
             name="status"
             defaultValue={document.status}
-            className="h-10 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary"
+            className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
           >
             <option value="active">Active</option>
             <option value="pending_index">Pending index</option>
@@ -700,7 +700,7 @@ function DocumentForm({
       <button
         type="submit"
         disabled={isSubmitting}
-        className="rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
+        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
       >
         {isSubmitting ? "Submitting..." : submitLabel}
       </button>
@@ -712,7 +712,7 @@ function DocumentDetail({ document }: { document: TenantKnowledgeDocument }) {
   return (
     <div className="space-y-4">
       <h2 className="font-serif text-[28px] font-semibold text-ink-primary">{document.title}</h2>
-      <div className="grid grid-cols-2 gap-3 text-[13px]">
+      <div className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
         <Detail label="Document ID" value={document.document_id} />
         <Detail label="Type" value={formatDocumentType(document.document_type)} />
         <Detail label="Version" value={`v${document.version}`} />

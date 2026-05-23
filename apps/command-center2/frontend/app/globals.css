@@ -153,6 +153,23 @@ body {
   background: var(--surface-sunken);
 }
 
+@media (max-width: 640px) {
+  button,
+  [role="button"],
+  a[href],
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+
+  button,
+  [role="button"] {
+    min-width: 44px;
+    touch-action: manipulation;
+  }
+}
+
 /* ═══════════════════════════════════════════
    SHADOWS AND DEPTH
    Mode-aware institutional depth

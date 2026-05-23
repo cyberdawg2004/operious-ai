@@ -93,8 +93,8 @@ function MobileNav({
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed bottom-0 right-0 top-0 z-50 w-full max-w-[400px] overflow-y-auto bg-surface lg:hidden"
+            transition={{ type: "spring", damping: 32, stiffness: 360 }}
+            className="fixed bottom-0 right-0 top-0 z-50 w-full max-w-[400px] overflow-y-auto overscroll-contain bg-surface will-change-transform lg:hidden"
           >
             <div className="p-6">
               <div className="mb-8 flex items-center justify-between">
@@ -103,7 +103,7 @@ function MobileNav({
                 </Link>
                 <button
                   onClick={onClose}
-                  className="-m-2 p-2 text-ink-tertiary transition-colors hover:text-ink-primary"
+                  className="flex h-11 w-11 items-center justify-center rounded text-ink-tertiary transition-colors hover:bg-surface-raised hover:text-ink-primary"
                   aria-label="Close menu"
                 >
                   <X className="h-6 w-6" />
@@ -205,8 +205,10 @@ export function Navigation() {
 
   useEffect(() => {
     document.body.style.overflow = mobileMenuOpen ? "hidden" : "";
+    document.documentElement.style.overflow = mobileMenuOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
     };
   }, [mobileMenuOpen]);
 
@@ -255,7 +257,7 @@ export function Navigation() {
 
           <button
             onClick={() => setMobileMenuOpen(true)}
-            className="-m-2 p-2 text-ink-primary transition-colors hover:text-gold lg:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded text-ink-primary transition-colors hover:bg-surface-raised hover:text-gold lg:hidden"
             aria-label="Open menu"
             aria-expanded={mobileMenuOpen}
           >

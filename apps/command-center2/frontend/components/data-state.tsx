@@ -80,7 +80,7 @@ function DataStateFrame({
         {actionLabel && onAction && (
           <button
             onClick={onAction}
-            className="mt-5 rounded border border-border-subtle bg-surface-raised px-4 py-2 text-[13px] font-medium text-ink-primary transition-colors hover:border-border-defined hover:bg-surface-sunken"
+            className="mt-5 inline-flex min-h-11 items-center justify-center rounded border border-border-subtle bg-surface-raised px-4 py-2 text-[13px] font-medium text-ink-primary transition-colors hover:border-border-defined hover:bg-surface-sunken"
           >
             {actionLabel}
           </button>

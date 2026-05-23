@@ -80,7 +80,7 @@ export function Sidebar({
       className={cn(
         "fixed inset-y-0 left-0 z-50 flex h-dvh w-[280px] shrink-0 flex-col",
         "bg-[var(--surface-raised)] border-r border-[var(--border-subtle)]",
-        "transition-[transform,width] duration-200 ease-out",
+        "overscroll-contain transition-[transform,width] duration-200 ease-out will-change-transform",
         mobileOpen ? "translate-x-0" : "-translate-x-full",
         collapsed ? "lg:w-[76px]" : "lg:w-[248px]",
         "lg:sticky lg:top-0 lg:z-30 lg:h-screen lg:translate-x-0",
@@ -106,7 +106,7 @@ export function Sidebar({
           />
           <button
             type="button"
-            className="flex h-10 w-10 items-center justify-center rounded border border-border-subtle text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary lg:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary lg:hidden"
             onClick={onMobileClose}
             aria-label="Close navigation"
           >
@@ -118,7 +118,7 @@ export function Sidebar({
         <button
           onClick={onTenantClick}
           className={cn(
-            "mt-5 flex h-10 w-full items-center gap-2 rounded px-3",
+            "mt-5 flex h-11 w-full items-center gap-2 rounded px-3 lg:h-10",
             "border border-[var(--border-subtle)] rounded",
             "transition-all duration-160",
             "hover:bg-[var(--surface)] hover:border-[var(--border-defined)]",
@@ -162,7 +162,7 @@ export function Sidebar({
                   onMouseEnter={() => setHoveredItem(item.id)}
                   onMouseLeave={() => setHoveredItem(null)}
                   className={cn(
-                    "flex h-10 w-full items-center gap-3 rounded",
+                    "flex h-11 w-full items-center gap-3 rounded lg:h-10",
                     "transition-all duration-160",
                     isActive
                       ? "bg-[var(--gold-bg)] border-l-4 border-l-[var(--gold-primary)] pl-2 pr-3"
@@ -245,7 +245,7 @@ export function Sidebar({
         <button
           onClick={toggleTheme}
           className={cn(
-            "mt-2 flex h-10 w-full items-center justify-between gap-2 rounded px-3",
+            "mt-2 flex h-11 w-full items-center justify-between gap-2 rounded px-3 lg:h-10",
             "text-[12px] text-ink-tertiary",
             "transition-all duration-160",
             "hover:bg-[var(--surface-sunken)] hover:text-ink-secondary",
