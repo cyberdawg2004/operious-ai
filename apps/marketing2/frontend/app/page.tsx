@@ -12,6 +12,7 @@ import {
   Truck,
 } from "lucide-react";
 import { KernelSeal } from "@/components/kernel-seal";
+import { Reveal, RevealGroup } from "@/components/reveal";
 
 const pillars = [
   {
@@ -132,132 +133,160 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export default function Home() {
   return (
-    <main className="flex-1">
-      <section className="relative bg-[#05080F] px-4 pb-20 pt-32 text-[#D8E4F4] sm:px-8 sm:pb-24 sm:pt-36 lg:px-16">
+    <main className="flex-1 overflow-x-hidden">
+      <section className="relative overflow-hidden bg-[#05080F] px-4 pb-16 pt-32 text-[#D8E4F4] sm:px-8 sm:pb-20 sm:pt-40 lg:px-16 lg:pb-24">
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          className="pointer-events-none absolute inset-0 opacity-[0.07]"
           style={{
             backgroundImage:
               "linear-gradient(#D8E4F4 1px, transparent 1px), linear-gradient(90deg, #D8E4F4 1px, transparent 1px)",
-            backgroundSize: "56px 56px",
+            backgroundSize: "64px 64px",
           }}
         />
-        <div className="relative mx-auto grid max-w-[1280px] gap-12 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
-          <div className="flex justify-center lg:justify-start">
-            <KernelSeal size={260} phase={3} />
-          </div>
+        <RevealGroup
+          className="relative mx-auto grid max-w-[1320px] gap-14 lg:min-h-[calc(100vh-160px)] lg:grid-cols-[1.12fr_0.88fr] lg:items-center"
+          mode="load"
+        >
           <div>
-            <SectionLabel>Operious AI</SectionLabel>
-            <h1
-              className="mt-6 max-w-[860px] text-[44px] font-bold leading-[1.04] sm:text-[62px] lg:text-[82px]"
-              style={{ fontFamily: "var(--font-cormorant-sc)" }}
-            >
-              Governed execution infrastructure for regulated enterprise operations.
-            </h1>
-            <p className="mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#9FB0CA] sm:text-[21px]">
-              Operious is a deterministic multi-agent system that runs Tier 1 and Tier 2
-              operational workflows with forensic auditability. Every decision is governed.
-              Every action is reconstructible. Every byte of state is tenant-isolated.
-            </p>
-            <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/company/contact"
-                className="inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] transition-colors hover:bg-[#D4B85A]"
+            <Reveal>
+              <SectionLabel>Operious AI</SectionLabel>
+            </Reveal>
+            <Reveal>
+              <h1
+                className="mt-6 max-w-[930px] text-[44px] font-bold leading-[0.98] sm:text-[68px] lg:text-[86px]"
+                style={{ fontFamily: "var(--font-cormorant-sc)" }}
               >
-                Request enterprise access
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-              <Link
-                href="/platform"
-                className="inline-flex h-12 items-center justify-center rounded-md border border-[#1A2744] px-6 text-[14px] font-semibold text-[#D8E4F4] transition-colors hover:border-[#C9A84C] hover:text-[#C9A84C]"
-              >
-                Read the architecture
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-canvas px-4 py-16 sm:px-8 sm:py-20 lg:px-16">
-        <div className="mx-auto grid max-w-[1280px] gap-6 lg:grid-cols-3">
-          {pillars.map((pillar) => {
-            const Icon = pillar.icon;
-            return (
-              <Link
-                key={pillar.href}
-                href={pillar.href}
-                className="group rounded-md border border-border-subtle bg-white p-7 transition-shadow hover:shadow-[var(--shadow-card-hover)]"
-              >
-                <Icon className="h-8 w-8 text-gold" />
-                <h2
-                  className="mt-6 text-[26px] font-semibold text-ink-primary"
-                  style={{ fontFamily: "var(--font-cormorant-sc)" }}
-                >
-                  {pillar.title}
-                </h2>
-                <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{pillar.body}</p>
-                <span className="mt-6 inline-flex items-center text-[13px] font-medium text-gold">
-                  Open pillar
-                  <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                </span>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="bg-surface-raised px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
-        <div className="mx-auto max-w-[1280px]">
-          <SectionLabel>Industries</SectionLabel>
-          <div className="mt-5 grid gap-6 lg:grid-cols-[0.72fr_1.28fr] lg:items-end">
-            <h2
-              className="text-[38px] font-bold leading-tight text-ink-primary sm:text-[54px]"
-              style={{ fontFamily: "var(--font-cormorant-sc)" }}
-            >
-              Built for operationally regulated environments.
-            </h2>
-            <p className="text-[16px] leading-relaxed text-ink-body">
-              Operious deploys where operational work must be fast, multilingual, governed,
-              and reconstructible. Each card below links to a domain-specific use case.
-            </p>
-          </div>
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {industries.map((industry) => {
-              const Icon = industry.icon;
-              return (
+                Governed execution infrastructure for regulated enterprise operations.
+              </h1>
+            </Reveal>
+            <Reveal>
+              <p className="mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#A9B8CE] sm:text-[21px]">
+                Operious is a deterministic multi-agent system that runs Tier 1 and Tier 2
+                operational workflows with forensic auditability. Every decision is governed.
+                Every action is reconstructible. Every byte of state is tenant-isolated.
+              </p>
+            </Reveal>
+            <Reveal>
+              <div className="mt-10 flex flex-col gap-3 sm:flex-row">
                 <Link
-                  key={industry.href}
-                  href={industry.href}
-                  className="group rounded-md border border-border-subtle bg-white p-6 transition-shadow hover:shadow-[var(--shadow-card-hover)]"
+                  href="/company/contact"
+                  className="inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.22)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.3)]"
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border-subtle bg-surface-raised">
-                    <Icon className="h-6 w-6 text-gold" />
-                  </div>
-                  <h3
-                    className="mt-5 text-[24px] font-semibold text-ink-primary"
-                    style={{ fontFamily: "var(--font-cormorant-sc)" }}
-                  >
-                    {industry.title}
-                  </h3>
-                  <p className="mt-2 text-[14px] leading-relaxed text-ink-body">
-                    {industry.body}
-                  </p>
-                  <span className="mt-5 inline-flex items-center text-[13px] font-medium text-gold">
-                    View use case
-                    <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                  </span>
+                  Request enterprise access
+                  <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
-              );
-            })}
+                <Link
+                  href="/platform"
+                  className="inline-flex h-12 items-center justify-center rounded-md border border-[#1A2744] bg-[#0B1120]/60 px-6 text-[14px] font-semibold text-[#D8E4F4] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C] hover:text-[#C9A84C] hover:shadow-[0_16px_36px_rgba(42,107,204,0.18)]"
+                >
+                  Read the architecture
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </Reveal>
           </div>
+          <Reveal>
+            <div className="relative mx-auto flex w-full max-w-[480px] items-center justify-center py-6 lg:justify-end">
+              <div className="absolute inset-8 rounded-full border border-[#1A2744]" />
+              <div className="absolute inset-0 rounded-full bg-[#2A6BCC]/10 blur-3xl" />
+              <KernelSeal size={250} phase={3} />
+              <div className="absolute bottom-0 left-0 right-0 mx-auto grid max-w-[360px] grid-cols-3 gap-2 text-center">
+                {["Govern", "Replay", "Execute"].map((label) => (
+                  <div key={label} className="rounded border border-[#1A2744] bg-[#05080F]/88 px-3 py-2 backdrop-blur">
+                    <span
+                      className="text-[10px] uppercase tracking-[0.16em] text-[#C9A84C]"
+                      style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+        </RevealGroup>
+      </section>
+
+      <section className="border-y border-border-subtle bg-canvas px-4 py-8 sm:px-8 lg:px-16">
+        <RevealGroup className="mx-auto max-w-[1320px]">
+          <Reveal>
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <SectionLabel>Enterprise operating domains</SectionLabel>
+                <p className="mt-2 max-w-[640px] text-[15px] leading-relaxed text-ink-body">
+                  Designed for regulated teams where operational decisions must remain governed,
+                  replayable, and tenant-contained.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                {industries.map((industry) => {
+                  const Icon = industry.icon;
+                  return (
+                    <Link
+                      key={industry.href}
+                      href={industry.href}
+                      className="group flex h-16 items-center gap-3 rounded border border-border-subtle bg-white px-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-gold hover:shadow-[var(--shadow-card-hover)]"
+                    >
+                      <Icon className="h-4 w-4 shrink-0 text-gold" />
+                      <span className="text-[12px] font-semibold text-ink-primary">
+                        {industry.title}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </Reveal>
+        </RevealGroup>
+      </section>
+
+      <section className="bg-canvas px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
+        <div className="mx-auto max-w-[1280px]">
+          <RevealGroup>
+            <Reveal>
+              <SectionLabel>Core features</SectionLabel>
+              <h2
+                className="mt-5 max-w-[760px] text-[38px] font-bold leading-tight text-ink-primary sm:text-[54px]"
+                style={{ fontFamily: "var(--font-cormorant-sc)" }}
+              >
+                The control plane enterprise AI operations usually lacks.
+              </h2>
+            </Reveal>
+            <div className="mt-10 grid gap-5 lg:grid-cols-3">
+              {pillars.map((pillar) => {
+                const Icon = pillar.icon;
+                return (
+                  <Reveal key={pillar.href}>
+                    <Link
+                      href={pillar.href}
+                      className="group block h-full rounded-md border border-border-subtle bg-white p-7 transition-all duration-300 hover:-translate-y-1 hover:border-gold hover:shadow-[var(--shadow-card-hover)]"
+                    >
+                      <Icon className="h-8 w-8 text-gold" />
+                      <h2
+                        className="mt-6 text-[26px] font-semibold text-ink-primary"
+                        style={{ fontFamily: "var(--font-cormorant-sc)" }}
+                      >
+                        {pillar.title}
+                      </h2>
+                      <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{pillar.body}</p>
+                      <span className="mt-6 inline-flex items-center text-[13px] font-medium text-gold">
+                        Open pillar
+                        <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                      </span>
+                    </Link>
+                  </Reveal>
+                );
+              })}
+            </div>
+          </RevealGroup>
         </div>
       </section>
 
       <section className="bg-[#05080F] px-4 py-20 text-[#D8E4F4] sm:px-8 sm:py-24 lg:px-16">
-        <div className="mx-auto grid max-w-[1280px] gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+        <RevealGroup className="mx-auto grid max-w-[1280px] gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <Reveal>
           <div>
-            <SectionLabel>Architecture</SectionLabel>
+            <SectionLabel>Value proposition</SectionLabel>
             <h2
               className="mt-5 text-[38px] font-bold leading-tight sm:text-[54px]"
               style={{ fontFamily: "var(--font-cormorant-sc)" }}
@@ -272,18 +301,20 @@ export default function Home() {
             </p>
             <Link
               href="/platform"
-              className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-5 text-[14px] font-semibold text-[#05080F] transition-colors hover:bg-[#D4B85A]"
+              className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-5 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.26)]"
             >
               Explore platform architecture
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
           </div>
-          <div className="rounded-md border border-[#1A2744] bg-[#0B1120] p-5">
+          </Reveal>
+          <Reveal>
+          <div className="rounded-md border border-[#1A2744] bg-[#0B1120] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.24)]">
             <div className="grid gap-3">
               {architectureLayers.map((layer, index) => (
                 <div
                   key={layer}
-                  className="flex items-center justify-between rounded-md border border-[#1A2744] bg-[#05080F] px-5 py-4"
+                  className="flex items-center justify-between rounded-md border border-[#1A2744] bg-[#05080F] px-5 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C]"
                 >
                   <span
                     className="text-[12px] uppercase tracking-[0.16em] text-[#C9A84C]"
@@ -303,11 +334,13 @@ export default function Home() {
               Supervisor -&gt; Arbitration
             </p>
           </div>
-        </div>
+          </Reveal>
+        </RevealGroup>
       </section>
 
       <section className="bg-canvas px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
-        <div className="mx-auto max-w-[1280px]">
+        <RevealGroup className="mx-auto max-w-[1280px]">
+          <Reveal>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <SectionLabel>Trust</SectionLabel>
@@ -323,9 +356,11 @@ export default function Home() {
               <ArrowRight className="ml-1.5 h-4 w-4" />
             </Link>
           </div>
+          </Reveal>
           <div className="mt-10 grid gap-5 lg:grid-cols-3">
             {trustCards.map((card) => (
-              <article key={card.title} className="rounded-md border border-border-subtle bg-white p-6">
+              <Reveal key={card.title}>
+              <article className="h-full rounded-md border border-border-subtle bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:border-gold hover:shadow-[var(--shadow-card-hover)]">
                 <p
                   className="text-[10px] uppercase tracking-[0.18em] text-gold"
                   style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
@@ -340,13 +375,15 @@ export default function Home() {
                 </h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{card.body}</p>
               </article>
+              </Reveal>
             ))}
           </div>
-        </div>
+        </RevealGroup>
       </section>
 
       <section className="bg-surface-raised px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
-        <div className="mx-auto max-w-[1280px]">
+        <RevealGroup className="mx-auto max-w-[1280px]">
+          <Reveal>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <SectionLabel>Insights</SectionLabel>
@@ -362,12 +399,13 @@ export default function Home() {
               <ArrowRight className="ml-1.5 h-4 w-4" />
             </Link>
           </div>
+          </Reveal>
           <div className="mt-10 grid gap-5 lg:grid-cols-3">
             {featuredArticles.map((article) => (
+              <Reveal key={article.href}>
               <Link
-                key={article.href}
                 href={article.href}
-                className="group rounded-md border border-border-subtle bg-white p-6 transition-shadow hover:shadow-[var(--shadow-card-hover)]"
+                className="group block h-full rounded-md border border-border-subtle bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:border-gold hover:shadow-[var(--shadow-card-hover)]"
               >
                 <h3
                   className="text-[24px] font-semibold leading-tight text-ink-primary"
@@ -381,13 +419,15 @@ export default function Home() {
                   <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
                 </span>
               </Link>
+              </Reveal>
             ))}
           </div>
-        </div>
+        </RevealGroup>
       </section>
 
       <section className="bg-[#05080F] px-4 py-16 text-center text-[#D8E4F4] sm:px-8 sm:py-20 lg:px-16">
-        <div className="mx-auto max-w-[860px]">
+        <RevealGroup className="mx-auto max-w-[860px]">
+          <Reveal>
           <h2
             className="text-[36px] font-bold leading-tight sm:text-[50px]"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}
@@ -396,12 +436,13 @@ export default function Home() {
           </h2>
           <Link
             href="/company/contact"
-            className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] transition-colors hover:bg-[#D4B85A]"
+            className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.2)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.28)]"
           >
             Request enterprise access
             <ArrowRight className="ml-2 h-4 w-4" />
           </Link>
-        </div>
+          </Reveal>
+        </RevealGroup>
       </section>
     </main>
   );
