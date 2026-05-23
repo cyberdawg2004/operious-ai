@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { IBM_Plex_Mono } from "next/font/google";
+import { Auth0Provider } from "@/components/auth0-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -40,7 +41,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary font-sans">
-        <ThemeProvider>{children}</ThemeProvider>
+        <Auth0Provider>
+          <ThemeProvider>{children}</ThemeProvider>
+        </Auth0Provider>
       </body>
     </html>
   );

@@ -1,0 +1,38 @@
+"use client";
+
+import { ShieldCheck } from "lucide-react";
+import { Logo } from "@/components/logo";
+
+export default function SignInPage() {
+  const handleLogin = () => {
+    window.location.href = "/api/auth/login?returnTo=/dashboard";
+  };
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
+      <section className="w-full max-w-md rounded-lg border border-border-subtle bg-surface-raised p-6 shadow-2xl sm:p-8">
+        <Logo className="h-10 w-auto text-ink-primary" height={40} width={164} />
+        <div className="mt-8 flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded border border-gold-primary/30 bg-gold-primary/10 text-gold-primary">
+            <ShieldCheck className="h-5 w-5" strokeWidth={1.7} />
+          </span>
+          <div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
+              Secure Operator Access
+            </div>
+            <h1 className="mt-1 text-[24px] font-semibold text-ink-primary">
+              Sign in to Command Center
+            </h1>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogin}
+          className="mt-8 flex h-11 w-full items-center justify-center rounded bg-ink-primary px-4 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+        >
+          Sign in with SSO
+        </button>
+      </section>
+    </main>
+  );
+}

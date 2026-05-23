@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useUser } from "@auth0/nextjs-auth0/client";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
 import { useTheme } from "./theme-provider";
@@ -69,11 +71,19 @@ export function Sidebar({
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const { theme, toggleTheme } = useTheme();
-
-  const handleSignOut = () => {
-    localStorage.removeItem("operious_access_token");
-    window.location.reload();
-  };
+  const { user, isLoading } = useUser();
+  const resolvedUserName =
+    !isLoading && user
+      ? user.name || user.email || user.nickname || "Authenticated operator"
+      : userName;
+  const resolvedUserRole =
+    !isLoading && user ? user.email || "Authenticated session" : userRole;
+  const initials = resolvedUserName
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <aside
@@ -202,32 +212,29 @@ export function Sidebar({
 
       {/* Bottom section - User profile */}
       <div className={cn("p-4", collapsed && "lg:px-3")}>
-        <button
-          onClick={handleSignOut}
+        <Link
+          href="/api/auth/logout"
           className={cn(
             "flex h-12 w-full items-center gap-3 rounded px-3",
             "transition-all duration-160",
             "hover:bg-[var(--surface-sunken)] cursor-pointer text-left",
             collapsed && "lg:justify-center lg:px-0"
           )}
-          title="Clear local access token and reload"
+          title="Sign out"
         >
           {/* Avatar */}
           <div className="w-8 h-8 rounded-full bg-ink-tertiary/20 flex items-center justify-center shrink-0">
             <span className="text-[11px] font-medium text-ink-secondary">
-              {userName
-                .split(" ")
-                .map((n) => n[0])
-                .join("")}
+              {initials}
             </span>
           </div>
 
           {/* User info */}
           <div className={cn("flex-1 min-w-0", collapsed && "lg:hidden")}>
             <p className="text-[13px] font-medium text-ink-primary truncate">
-              {userName}
+              {resolvedUserName}
             </p>
-            <p className="eyebrow text-ink-tertiary">{userRole}</p>
+            <p className="eyebrow text-ink-tertiary">{resolvedUserRole}</p>
           </div>
 
           {/* Logout icon */}
@@ -239,7 +246,7 @@ export function Sidebar({
               collapsed && "lg:hidden"
             )}
           />
-        </button>
+        </Link>
 
         {/* Theme toggle */}
         <button

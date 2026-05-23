@@ -1,5 +1,7 @@
 "use client";
 
+import { getAuth0AccessToken } from "@/lib/api-client";
+
 export type ApiPage<T> = {
   items: T[];
   total: number;
@@ -207,26 +209,44 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 
 export function getApiBaseUrl(): string {
   return (
+    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
     process.env.NEXT_PUBLIC_OPERIOUS_API_BASE_URL?.replace(/\/$/, "") ||
     DEFAULT_API_BASE_URL
   );
 }
 
 export function getConfiguredTenantId(): string | null {
-  return process.env.NEXT_PUBLIC_OPERIOUS_TENANT_ID || null;
+  return (
+    process.env.NEXT_PUBLIC_DEFAULT_TENANT_ID ||
+    process.env.NEXT_PUBLIC_OPERIOUS_TENANT_ID ||
+    readBrowserValue("operious_tenant_id") ||
+    null
+  );
 }
 
 export function getConfiguredPrincipalId(): string | null {
-  return process.env.NEXT_PUBLIC_OPERIOUS_PRINCIPAL_ID || null;
+  return (
+    process.env.NEXT_PUBLIC_OPERIOUS_PRINCIPAL_ID ||
+    readBrowserValue("operious_principal_id") ||
+    null
+  );
 }
 
 export function getConfiguredOperatorLabel(): string {
-  return process.env.NEXT_PUBLIC_OPERIOUS_OPERATOR_LABEL || "Unverified operator";
+  return (
+    process.env.NEXT_PUBLIC_OPERIOUS_OPERATOR_LABEL ||
+    readBrowserValue("operious_operator_label") ||
+    "Unverified operator"
+  );
 }
 
-function readBrowserToken(): string | null {
+function readBrowserValue(key: string): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("operious_access_token");
+  return window.localStorage.getItem(key);
+}
+
+async function readAuth0Token(): Promise<string> {
+  return getAuth0AccessToken();
 }
 
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
@@ -241,16 +261,19 @@ function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   return url.toString();
 }
 
-function buildHeaders(extra?: HeadersInit): Headers {
+async function buildHeaders(extra?: HeadersInit): Promise<Headers> {
   const headers = new Headers(extra);
   headers.set("Accept", "application/json");
   const tenantId = getConfiguredTenantId();
   const principalId = getConfiguredPrincipalId();
-  const token = readBrowserToken();
+
+  if (!tenantId) {
+    throw new Error("Tenant context is not configured");
+  }
 
   if (tenantId) headers.set("X-Tenant-ID", tenantId);
   if (principalId) headers.set("X-Principal-ID", principalId);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Authorization", `Bearer ${await readAuth0Token()}`);
 
   return headers;
 }
@@ -279,7 +302,7 @@ export async function apiRequest<T>(
   options: RequestInit & { query?: Record<string, QueryValue> } = {}
 ): Promise<T> {
   const { query, headers, body, ...init } = options;
-  const requestHeaders = buildHeaders(headers);
+  const requestHeaders = await buildHeaders(headers);
   if (body && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
   }
