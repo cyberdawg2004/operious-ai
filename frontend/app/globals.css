@@ -28,6 +28,19 @@
   --status-warning: #B8860B;
   --status-error: #8B2A2A;
   
+  /* Command Center (app) dark theme tokens */
+  --cc-bg-deep: #0A0A0C;
+  --cc-bg-surface: #111114;
+  --cc-bg-raised: #1A1A1E;
+  --cc-border-subtle: #2A2A2E;
+  --cc-gold-primary: #C9A84C;
+  --cc-gold-hover: #E8C76A;
+  --cc-text-primary: #F2F2EA;
+  --cc-text-secondary: #9A9A8A;
+  --cc-text-muted: #5A5A52;
+  --cc-destructive: #C44B4B;
+  --cc-success: #4B8C5A;
+  
   /* Legacy tokens mapped */
   --background: var(--canvas);
   --foreground: var(--ink-primary);

@@ -4,6 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import { Cormorant_SC, Cormorant, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Navigation } from "@/components/navigation";
+import { CookieConsent } from "@/components/cookie-consent";
 
 const cormorantSC = Cormorant_SC({
   variable: "--font-cormorant-sc",
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary">
         <Navigation />
         {children}
+        <CookieConsent />
       </body>
     </html>
   );
