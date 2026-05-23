@@ -96,6 +96,7 @@ from app.session.identity import derive_session_id
 from app.session.persistence import InMemorySessionPersistence
 from app.session.runtime import SessionRuntime
 from app.governance.capability.acts import OperationalAct
+from tests.conftest import execution_admission_token
 
 
 TENANT_ID = "tenant-acme"
@@ -380,6 +381,10 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
         session_id=str(session.identity.session_id),
         tenant_id=TENANT_ID,
         requested_at=NOW + timedelta(seconds=4),
+        admission_token=execution_admission_token(
+            tenant_id=TENANT_ID,
+            admitted_at=NOW + timedelta(seconds=4),
+        ),
         metadata={
             "boundary.ingress_id": str(ingress.ingress_id),
             "coordination.dispatch_id": str(coordination_result.coordination_id),

@@ -31,6 +31,9 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # It is a LEAF — no sibling-substrate imports — so consuming
     # it does not couple translation to any other substrate.
     "app.identity",
+    # `app.core.deterministic_identity` is a substrate-neutral identity
+    # primitive used to avoid ambient runtime UUID generation.
+    "app.core.deterministic_identity",
     # `app.governance.capability` is the institutional legality
     # gate (P2-B). Wedge 2.75-\u03b1 adopts it at every P2-A entry,
     # including translation ingress/egress. The capability gate is

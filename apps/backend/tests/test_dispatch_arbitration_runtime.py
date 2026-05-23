@@ -73,6 +73,8 @@ from app.runtime import (
     ArbitrationOperationalEventProjector,
     DispatchArbitrationProposal,
     DispatchArbitrationRuntime,
+    ExecutionGovernanceEvaluation,
+    ExecutionGovernanceRuntime,
 )
 from app.services.dispatch_service import DispatchService
 from app.session.persistence import InMemorySessionPersistence
@@ -316,6 +318,10 @@ async def test_dispatch_service_halts_deadlock_without_execution_loop() -> None:
         session_repository=session_repo,
         execution_runtime=execution_runtime,
         execution_publisher=publisher,
+        execution_governance_runtime=cast(
+            ExecutionGovernanceRuntime,
+            _AllowingExecutionGovernanceRuntime(),
+        ),
         dispatch_arbitration_runtime=_dispatch_arbitration_runtime(
             arbitration_repo=arbitration_repo,
             event_store=event_store,
@@ -390,6 +396,22 @@ class _RecordingExecutionPublisher:
 
     async def publish_execution(self, execution_id: str) -> None:
         self._published.append(execution_id)
+
+
+class _AllowingExecutionGovernanceRuntime:
+    async def evaluate(self, *, tenant_id: str) -> ExecutionGovernanceEvaluation:
+        return ExecutionGovernanceEvaluation(
+            evaluation_id=uuid.uuid5(
+                uuid.UUID("00000000-0000-4000-8000-000000000099"),
+                f"{tenant_id}:allowed",
+            ),
+            evaluated_at=NOW,
+            allowed=True,
+            reason=None,
+            config=None,
+            circuit_breaker=None,
+            metadata={"origin": "test"},
+        )
 
 
 def _boundary_ingress_record() -> BoundaryIngressRecord:

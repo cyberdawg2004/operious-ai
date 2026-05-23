@@ -64,7 +64,10 @@ from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
 from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.policies.chain import PolicyChain
-from app.runtime import TenantCoordinationTopologyRuntimeProvider
+from app.runtime import (
+    ExecutionGovernanceEvaluation,
+    TenantCoordinationTopologyRuntimeProvider,
+)
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
@@ -263,6 +266,7 @@ def _dispatch_service(
             persistence=InMemoryExecutionPersistence(),
         ),
         execution_publisher=publisher,
+        execution_governance_runtime=_AllowingExecutionGovernanceRuntime(),
         tenant_topology_runtime_provider=provider.for_tenant,
     )
 
@@ -334,6 +338,22 @@ def _governance_runtime() -> GovernanceRuntime:
             )
         },
     )
+
+
+class _AllowingExecutionGovernanceRuntime:
+    async def evaluate(self, *, tenant_id: str) -> ExecutionGovernanceEvaluation:
+        return ExecutionGovernanceEvaluation(
+            evaluation_id=uuid.uuid5(
+                uuid.UUID("00000000-0000-4000-8000-000000000099"),
+                f"{tenant_id}:allowed",
+            ),
+            evaluated_at=NOW,
+            allowed=True,
+            reason=None,
+            config=None,
+            circuit_breaker=None,
+            metadata={"origin": "test"},
+        )
 
 
 def _dispatch_topology(*, include_edge: bool) -> CoordinationTopology:

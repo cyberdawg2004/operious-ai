@@ -68,6 +68,8 @@ async def test_channel_endpoint_redacts_credentials(
         "routing_address",
         "status",
         "verified_at",
+        "credential_rotated_at",
+        "credential_rotation_expires_at",
     }
     assert "secret-api-key" not in response.text
     assert "webhook-secret" not in response.text
@@ -200,3 +202,51 @@ async def test_tenant_lists_do_not_cross_tenant_boundary(
 
     assert own.json()["total"] == 1
     assert other.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_execution_governance_configuration_endpoint(
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    created = await tenant_client.post(
+        "/api/v1/tenant/execution-governance",
+        headers=_headers("tenant-acme"),
+        json={
+            "execution_quota": 10,
+            "throughput_limit": 20,
+            "throughput_window_minutes": 5,
+            "governance_budget_limit": 30,
+            "governance_budget_window_minutes": 15,
+            "circuit_failure_threshold": 3,
+            "circuit_window_minutes": 10,
+            "circuit_cooldown_minutes": 2,
+            "status": "active",
+            "metadata": {"tier": "enterprise"},
+        },
+    )
+    assert created.status_code == 200
+    body = created.json()
+    assert body["status"] == "active"
+    assert body["execution_quota"] == 10
+    assert body["metadata"] == {"tier": "enterprise"}
+
+    listed = await tenant_client.get(
+        "/api/v1/tenant/execution-governance",
+        headers=_headers("tenant-acme"),
+    )
+    other = await tenant_client.get(
+        "/api/v1/tenant/execution-governance",
+        headers=_headers("tenant-other"),
+    )
+    breakers = await tenant_client.get(
+        "/api/v1/tenant/execution-governance/circuit-breakers",
+        headers=_headers("tenant-acme"),
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert other.status_code == 200
+    assert other.json()["total"] == 0
+    assert breakers.status_code == 200
+    assert breakers.json()["total"] == 1
+    assert breakers.json()["items"][0]["state"] == "closed"

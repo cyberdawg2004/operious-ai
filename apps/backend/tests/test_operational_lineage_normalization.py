@@ -32,6 +32,7 @@ from app.runtime.execution_event_projection import project_execution_records
 from app.runtime.governance_event_projection import (
     project_governance_decision_record,
 )
+from tests.conftest import execution_admission_token
 
 
 _NOW = datetime(2026, 5, 22, 3, tzinfo=timezone.utc)
@@ -99,6 +100,10 @@ async def _projected_execution_events(
         session_id=session_id,
         tenant_id="tenant-acme",
         requested_at=_NOW,
+        admission_token=execution_admission_token(
+            tenant_id="tenant-acme",
+            admitted_at=_NOW,
+        ),
         metadata={"governance.decision_id": governance_decision_id},
     )
     outbox_page = await store.list_outbox(

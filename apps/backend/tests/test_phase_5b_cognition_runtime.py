@@ -37,7 +37,7 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionQuery,
 )
-from tests.conftest import requires_postgres
+from tests.conftest import approved_record, requires_postgres
 
 _TENANT_ID = "tenant-acme"
 _OTHER_TENANT_ID = "tenant-other"
@@ -142,7 +142,7 @@ async def test_approval_lifecycle_approve_then_apply_versions_document() -> None
     assert "Approved SOP update" in applied.document.content
     assert applied.previous_version is not None
     assert applied.previous_version.version == 1
-    assert applied.previous_version.status is TenantKnowledgeDocumentStatus.ARCHIVED
+    assert applied.previous_version.status is TenantKnowledgeDocumentStatus.ACTIVE
     assert applied.version.version == 2
     assert applied.version.status is TenantKnowledgeDocumentStatus.ACTIVE
     assert applied.version.source_approval_id == approval.approval_id
@@ -216,18 +216,26 @@ async def test_rollback_restores_historical_content_without_deleting_versions() 
         approval_id=approval.approval_id,
         applied_by="principal-manager",
     )
+    rollback_approval = approved_record(
+        tenant_id=_TENANT_ID,
+        target_id=document.document_id,
+        seed="rollback",
+        proposed_by="principal-manager",
+    )
 
     rolled_back = await runtime.rollback_document(
         tenant_id=_TENANT_ID,
         document_id=document.document_id,
         target_version=1,
         rolled_back_by="principal-manager",
+        approval=rollback_approval,
     )
     repeated = await runtime.rollback_document(
         tenant_id=_TENANT_ID,
         document_id=document.document_id,
         target_version=1,
         rolled_back_by="principal-manager",
+        approval=rollback_approval,
     )
     versions = await tenant_repo.list_knowledge_document_versions(
         TenantKnowledgeDocumentVersionQuery(document_id=document.document_id),
@@ -243,8 +251,8 @@ async def test_rollback_restores_historical_content_without_deleting_versions() 
     assert repeated.version == rolled_back.version
     assert versions.total == 3
     assert [version.status.value for version in versions.items] == [
-        "archived",
-        "archived",
+        "active",
+        "active",
         "active",
     ]
 

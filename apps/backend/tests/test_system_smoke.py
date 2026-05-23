@@ -10,10 +10,17 @@ test_full_chain             → PASSES now
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient, ASGITransport
+
+from tests.conftest import (
+    TEST_DATABASE_URL_ENV,
+    database_url_skip_reason,
+    requires_postgres,
+)
 
 
 pytestmark = pytest.mark.smoke
@@ -37,36 +44,21 @@ def _load_dotenv_key(key: str) -> None:
         return
 
 
-for _env_key in ("DATABASE_URL", "TEST_DATABASE_URL"):
+for _env_key in (TEST_DATABASE_URL_ENV,):
     _load_dotenv_key(_env_key)
-
-test_database_url = os.environ.get("TEST_DATABASE_URL", "")
-if test_database_url.startswith("postgresql+asyncpg://"):
-    os.environ["DATABASE_URL"] = test_database_url
-elif not test_database_url:
-    database_url = os.environ.get("DATABASE_URL", "")
-    if database_url.startswith("postgresql+asyncpg://"):
-        os.environ["TEST_DATABASE_URL"] = database_url
-
-
-def _has_asyncpg_test_database_url() -> bool:
-    return os.environ.get("TEST_DATABASE_URL", "").startswith(
-        "postgresql+asyncpg://"
-    )
-
-
-requires_postgres = pytest.mark.skipif(
-    not _has_asyncpg_test_database_url(),
-    reason=(
-        "requires TEST_DATABASE_URL with an asyncpg DSN, for example "
-        "postgresql+asyncpg://test:test@localhost:5433/operious_test"
-    ),
-)
 
 
 def _create_app():
+    os.environ.setdefault(
+        "TENANT_CREDENTIAL_MASTER_KEY",
+        "system-smoke-master-key-material-32-bytes",
+    )
+    if database_url_skip_reason() is None:
+        os.environ["DATABASE_URL"] = os.environ[TEST_DATABASE_URL_ENV]
+    from app.core.config import get_settings
     from app.main import create_app
 
+    get_settings.cache_clear()
     return create_app()
 
 
@@ -74,6 +66,35 @@ def _create_app():
 # AUTH_ENABLED=False so no JWT needed.
 # X-Tenant-ID alone satisfies the XOR authority rule.
 SMOKE_HEADERS = {"X-Tenant-ID": "anker-pilot"}
+SMOKE_ADMIN_HEADERS = {
+    **SMOKE_HEADERS,
+    "X-Principal-ID": "smoke-operator",
+}
+
+
+def _smoke_external_id(label: str) -> str:
+    """Unique ticket id so repeated smoke runs do not replay old DB rows."""
+    return f"{label}-{uuid.uuid4().hex}"
+
+
+async def _ensure_execution_governance(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/tenant/execution-governance",
+        json={
+            "execution_quota": 100_000,
+            "throughput_limit": 100_000,
+            "throughput_window_minutes": 60,
+            "governance_budget_limit": 100_000,
+            "governance_budget_window_minutes": 60,
+            "circuit_failure_threshold": 100_000,
+            "circuit_window_minutes": 60,
+            "circuit_cooldown_minutes": 1,
+            "status": "active",
+            "metadata": {"origin": "system_smoke"},
+        },
+        headers=SMOKE_ADMIN_HEADERS,
+    )
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -107,10 +128,11 @@ async def test_ticket_ingress_chain():
         transport=transport,
         base_url="http://test"
     ) as client:
+        external_id = _smoke_external_id("smoke-ingress")
         response = await client.post(
             "/api/v1/boundary/translation/ingress",
             json={
-                "external_id": "smoke-001",
+                "external_id": external_id,
                 "channel": "email",
                 "raw_content": "My Anker cable stopped working",
                 "language_code": "en"
@@ -135,15 +157,32 @@ async def test_dispatch_governance_chain():
         transport=transport,
         base_url="http://test"
     ) as client:
+        await _ensure_execution_governance(client)
+        external_id = _smoke_external_id("smoke-dispatch")
+        ingress = await client.post(
+            "/api/v1/boundary/translation/ingress",
+            json={
+                "external_id": external_id,
+                "channel": "email",
+                "raw_content": "My Anker cable stopped working",
+                "language_code": "en"
+            },
+            headers=SMOKE_HEADERS
+        )
+        assert ingress.status_code == 200
+        ingress_id = ingress.json()["ingress_id"]
+
         response = await client.post(
             "/api/v1/coordination/dispatch",
-            json={"ingress_id": "smoke-001"},
+            json={"ingress_id": ingress_id},
             headers=SMOKE_HEADERS
         )
         assert response.status_code == 200
         data = response.json()
         assert "dispatch_id" in data
         assert "governance_decision_id" in data
+        assert data["session_id"] is not None
+        assert data["halted"] is False
 
 
 @pytest.mark.asyncio
@@ -158,12 +197,14 @@ async def test_full_ticket_to_timeline_chain():
         transport=transport,
         base_url="http://test"
     ) as client:
+        await _ensure_execution_governance(client)
+        external_id = _smoke_external_id("smoke-e2e")
 
         # Step 1 — ingest ticket
         ingress = await client.post(
             "/api/v1/boundary/translation/ingress",
             json={
-                "external_id": "smoke-e2e-001",
+                "external_id": external_id,
                 "channel": "email",
                 "raw_content": "My Anker PowerCore stopped charging",
                 "language_code": "en"

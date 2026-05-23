@@ -13,6 +13,7 @@ from app.execution import (
     InMemoryExecutionPersistence,
 )
 from app.execution.persistence.models import OutboxQuery
+from tests.conftest import execution_admission_token
 
 
 _NOW = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
@@ -43,6 +44,10 @@ async def test_deferred_publisher_claims_outbox_before_transport() -> None:
         session_id="session-outbox-1",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(
+            tenant_id="tenant-a",
+            admitted_at=_NOW,
+        ),
     )
     publisher = _RecordingPublisher()
     commits = _CommitRecorder()

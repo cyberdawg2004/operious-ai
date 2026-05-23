@@ -84,6 +84,39 @@ services:
     networks:
       - operious
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: operious-worker
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-operious}:${POSTGRES_PASSWORD:-operious}@postgres:5432/${POSTGRES_DB:-operious}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app
+      - worker
+      - --loglevel=info
+    networks:
+      - operious
+
 volumes:
   postgres_data:
   redis_data:

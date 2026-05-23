@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cognition import (
     CognitionGovernanceRejectionError,
+    CognitionLLMProviderError,
     CognitionSemanticValidationError,
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
@@ -167,7 +169,9 @@ async def test_diagnostic_cognition_uses_rag_citations_and_records_cost() -> Non
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Refund fraud credit approval escalate legal preserved.",'
-            '"category":"refund_issue","confidence":0.91}'
+            '"category":"refund_issue","confidence":0.91,'
+            '"reasoning":"Refund fraud credit approval legal and escalate terms '
+            'are grounded in the ticket and SOP."}'
         ),
         prompt_tokens=120,
         completion_tokens=30,
@@ -196,6 +200,12 @@ async def test_diagnostic_cognition_uses_rag_citations_and_records_cost() -> Non
     assert usage.tenant_id == _TENANT_ID
     assert usage.estimated_cost_micro_usd == result.estimated_cost_micro_usd
     assert usage.metadata["citation_count"] == len(result.citations)
+    assert usage.metadata["raw_completion_sha256"] == hashlib.sha256(
+        client.text.encode("utf-8")
+    ).hexdigest()
+    assert result.metadata["raw_completion_sha256"] == usage.metadata[
+        "raw_completion_sha256"
+    ]
 
 
 @pytest.mark.asyncio
@@ -203,7 +213,8 @@ async def test_semantic_validator_rejects_governance_keyword_drift() -> None:
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Offer a refund and legal escalation.",'
-            '"category":"refund_issue","confidence":0.74}'
+            '"category":"refund_issue","confidence":0.74,'
+            '"reasoning":"Introduces refund legal escalation."}'
         )
     )
     runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
@@ -236,7 +247,8 @@ async def test_governance_rejects_uncited_output_when_required() -> None:
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Charging diagnosis with no cited SOP.",'
-            '"category":"charging_issue","confidence":0.81}'
+            '"category":"charging_issue","confidence":0.81,'
+            '"reasoning":"Charging issue inferred from ticket text."}'
         )
     )
     tenant_repo = InMemoryTenantConfigurationRepository()
@@ -269,7 +281,9 @@ async def test_cognition_usage_persistence_is_tenant_scoped() -> None:
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Refund fraud credit approval escalate legal preserved.",'
-            '"category":"refund_issue","confidence":0.88}'
+            '"category":"refund_issue","confidence":0.88,'
+            '"reasoning":"Refund credit approval fraud legal and escalate terms '
+            'are preserved from grounded inputs."}'
         )
     )
     runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
@@ -289,6 +303,79 @@ async def test_cognition_usage_persistence_is_tenant_scoped() -> None:
         )
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_llm_output_with_unknown_key_is_rejected() -> None:
+    client = _ScriptedLLMClient(
+        text=(
+            '{"summary":"Charging diagnosis.",'
+            '"category":"charging_issue","confidence":0.81,'
+            '"reasoning":"Charging issue inferred from ticket text.",'
+            '"untrusted":"must not pass"}'
+        )
+    )
+    runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
+
+    with pytest.raises(CognitionLLMProviderError):
+        await runtime.reason_about_ticket(
+            tenant_id=_TENANT_ID,
+            execution_id="execution-5c-extra-key",
+            dispatch_id="dispatch-5c-extra-key",
+            session_id="session-5c-extra-key",
+            content="Customer says charging failed.",
+        )
+
+    usage_id = derive_llm_usage_id(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-5c-extra-key",
+        model=client.model_name,
+    )
+    usage = await usage_repo.get_llm_usage(
+        usage_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert usage is not None
+    assert usage.status is CognitionLLMUsageStatus.REJECTED
+    assert usage.metadata["raw_completion_sha256"] == hashlib.sha256(
+        client.text.encode("utf-8")
+    ).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_llm_output_with_invalid_category_is_rejected() -> None:
+    client = _ScriptedLLMClient(
+        text=(
+            '{"summary":"Charging diagnosis.",'
+            '"category":"invented_issue","confidence":0.81,'
+            '"reasoning":"Charging issue inferred from ticket text."}'
+        )
+    )
+    runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
+
+    with pytest.raises(CognitionLLMProviderError):
+        await runtime.reason_about_ticket(
+            tenant_id=_TENANT_ID,
+            execution_id="execution-5c-invalid-category",
+            dispatch_id="dispatch-5c-invalid-category",
+            session_id="session-5c-invalid-category",
+            content="Customer says charging failed.",
+        )
+
+    usage_id = derive_llm_usage_id(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-5c-invalid-category",
+        model=client.model_name,
+    )
+    usage = await usage_repo.get_llm_usage(
+        usage_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert usage is not None
+    assert usage.status is CognitionLLMUsageStatus.REJECTED
+    assert usage.metadata["raw_completion_sha256"] == hashlib.sha256(
+        client.text.encode("utf-8")
+    ).hexdigest()
 
 
 def test_anthropic_settings_are_typed_without_exposing_secret() -> None:

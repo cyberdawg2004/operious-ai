@@ -32,12 +32,15 @@ live under `tests/_deprecated/` and are excluded from collection by
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -48,8 +51,12 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import NullPool
 
+from app.db.url import build_database_engine_config
+
 if TYPE_CHECKING:
     from app.core.config import Settings
+    from app.execution import GovernanceAdmissionToken
+    from app.sop_intelligence import ApprovalRecord
 
 
 # Pytest must not emit local failures into staging Sentry just because
@@ -75,14 +82,117 @@ deployment with test rows is a class of bug the substrate forbids
 at the fixture layer.
 """
 
+_TEST_EXECUTION_ADMISSION_NAMESPACE = uuid.UUID(
+    "f64a9df2-76aa-5a1a-81a8-45c21f448be0"
+)
+_TEST_APPROVAL_NAMESPACE = uuid.UUID("0f851d2d-a5f3-5ebd-981d-f1108f7f9ebc")
+
+
+def execution_admission_token(
+    *,
+    tenant_id: str,
+    admitted_at: datetime | None = None,
+    seed: str = "test",
+) -> "GovernanceAdmissionToken":
+    """Build a deterministic governance admission token for execution tests."""
+
+    from app.execution import GovernanceAdmissionToken
+
+    timestamp = admitted_at or datetime(2026, 5, 22, tzinfo=timezone.utc)
+    return GovernanceAdmissionToken(
+        governance_decision_id=uuid.uuid5(
+            _TEST_EXECUTION_ADMISSION_NAMESPACE,
+            f"{tenant_id}|{seed}|governance",
+        ),
+        execution_governance_evaluation_id=uuid.uuid5(
+            _TEST_EXECUTION_ADMISSION_NAMESPACE,
+            f"{tenant_id}|{seed}|execution-governance",
+        ),
+        admitted_at=timestamp,
+        tenant_id=tenant_id,
+    )
+
+
+def approved_record(
+    *,
+    tenant_id: str,
+    target_id: object,
+    seed: str = "test",
+    proposed_by: str = "principal-test",
+) -> "ApprovalRecord":
+    """Build a deterministic approved record for chronology tests."""
+
+    from app.sop_intelligence import ApprovalRecord, ApprovalStatus
+
+    approval_id = uuid.uuid5(
+        _TEST_APPROVAL_NAMESPACE,
+        f"{tenant_id}|{target_id}|{seed}",
+    )
+    return ApprovalRecord(
+        approval_id=str(approval_id),
+        tenant_id=tenant_id,
+        document_id=str(target_id),
+        proposed_change=f"approved:{seed}",
+        evidence_sessions=(f"evidence:{seed}",),
+        confidence=1.0,
+        status=ApprovalStatus.APPROVED.value,
+        proposed_by=proposed_by,
+        reviewed_by=proposed_by,
+        created_at=datetime(2026, 5, 22, tzinfo=timezone.utc).isoformat(),
+        metadata={"seed": seed},
+    )
+
+_MISSING_TEST_DATABASE_URL_REASON = (
+    f"requires {TEST_DATABASE_URL_ENV}; set it to a test Postgres "
+    "DSN (e.g. postgresql+asyncpg://test:test@localhost:5433/"
+    "operious_test) to enable the Postgres-backed integration "
+    "tests."
+)
+
+
+def database_url_skip_reason() -> str | None:
+    raw = os.environ.get(TEST_DATABASE_URL_ENV)
+    if raw is None:
+        return _MISSING_TEST_DATABASE_URL_REASON
+    try:
+        engine_config = build_database_engine_config(
+            raw,
+            connect_timeout=30.0,
+        )
+        url = make_url(engine_config.async_url)
+    except Exception as exc:
+        return (
+            f"{TEST_DATABASE_URL_ENV} is not a valid SQLAlchemy "
+            f"database URL ({exc.__class__.__name__})."
+        )
+    if url.drivername != "postgresql+asyncpg":
+        return (
+            f"{TEST_DATABASE_URL_ENV} must use the postgresql+asyncpg "
+            f"driver, got {url.drivername!r}."
+        )
+    if not url.host:
+        return f"{TEST_DATABASE_URL_ENV} must include a database host."
+    try:
+        _validate_dns_host(url.host)
+    except UnicodeError:
+        return (
+            f"{TEST_DATABASE_URL_ENV} has an invalid database host. "
+            "Check that the Neon URL was copied exactly and that any "
+            "special characters in the password are percent-encoded."
+        )
+    return None
+
+
+def _validate_dns_host(host: str) -> None:
+    for label in host.split("."):
+        encoded = label.encode("idna")
+        if not encoded or len(encoded) > 63:
+            raise UnicodeError("invalid DNS label")
+
+
 requires_postgres = pytest.mark.skipif(
-    os.environ.get(TEST_DATABASE_URL_ENV) is None,
-    reason=(
-        f"requires {TEST_DATABASE_URL_ENV}; set it to a test Postgres "
-        "DSN (e.g. postgresql+asyncpg://test:test@localhost:5433/"
-        "operious_test) to enable the Postgres-backed integration "
-        "tests."
-    ),
+    database_url_skip_reason() is not None,
+    reason=database_url_skip_reason() or "",
 )
 
 # ─── SQLite type-compatibility shims ──────────────────────────────────────
@@ -210,16 +320,19 @@ async def pg_engine() -> AsyncIterator[AsyncEngine]:
     before invoking pytest.
     """
     dsn = os.environ.get(TEST_DATABASE_URL_ENV)
-    if dsn is None:
-        pytest.skip(
-            f"requires {TEST_DATABASE_URL_ENV} to be set "
-            "(pg_engine fixture cannot operate without a test DSN)"
-        )
-    engine = create_async_engine(
+    skip_reason = database_url_skip_reason()
+    if dsn is None or skip_reason is not None:
+        pytest.skip(skip_reason or _MISSING_TEST_DATABASE_URL_REASON)
+    engine_config = build_database_engine_config(
         dsn,
+        connect_timeout=30.0,
+    )
+    engine = create_async_engine(
+        engine_config.async_url,
         future=True,
         pool_pre_ping=True,
         poolclass=NullPool,
+        connect_args=engine_config.connect_args,
     )
     try:
         yield engine
@@ -275,4 +388,5 @@ __all__ = [
     "session_factory",
     "settings_for_test",
     "sqlite_engine",
+    "database_url_skip_reason",
 ]

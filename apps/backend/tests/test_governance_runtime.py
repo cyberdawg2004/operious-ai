@@ -47,6 +47,10 @@ from app.governance.exceptions import (
 )
 from app.governance.policies.base import BaseGovernancePolicy
 from app.governance.policies.chain import PolicyChain
+from app.governance.persistence import (
+    BaseGovernanceRepository,
+    InMemoryGovernanceRepository,
+)
 
 
 class _FixedPolicy(BaseGovernancePolicy):
@@ -95,6 +99,7 @@ def _runtime_with(
     *,
     handler_registry: EnforcementHandlerRegistry | None = None,
     stage: EnforcementStage = EnforcementStage.PRE_RETRIEVAL,
+    persistence: BaseGovernanceRepository | None = None,
 ) -> GovernanceRuntime:
     chain = PolicyChain(
         chain_id="t.chain",
@@ -105,6 +110,7 @@ def _runtime_with(
         engine=PolicyEvaluationEngine(),
         handler_registry=handler_registry or _registry(),
         chains={stage: chain},
+        persistence=persistence,
     )
 
 
@@ -246,6 +252,44 @@ async def test_handler_failure_produces_failed_envelope_with_lineage() -> None:
     assert env.trace.status == "failed"
     assert env.trace.final_decision is Decision.ALLOW
     assert env.trace.enforcement_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_governance_handler_failure_is_persisted() -> None:
+    reg = EnforcementHandlerRegistry()
+    reg.register(_RaisingHandler())
+    for h in (
+        DenyHandler(),
+        RedactHandler(),
+        DegradeHandler(),
+        EscalateHandler(),
+        RequireApprovalHandler(),
+    ):
+        reg.register(h)
+
+    repo = InMemoryGovernanceRepository()
+    runtime = _runtime_with(
+        [_FixedPolicy("p", Decision.ALLOW)],
+        handler_registry=reg,
+        persistence=repo,
+    )
+
+    env = await runtime.evaluate(_ctx())
+
+    stored_decision = await repo.get_decision(
+        str(env.trace.decision_id),
+        expected_tenant_id="t",
+    )
+    stored_trace = await repo.get_trace(
+        str(env.trace.decision_id),
+        expected_tenant_id="t",
+    )
+
+    assert stored_decision is not None
+    assert stored_decision.decision == Decision.ALLOW.value
+    assert stored_trace is not None
+    assert stored_trace.status == "failed"
+    assert stored_trace.enforcement_status == "failed"
 
 
 # ─── Trace fidelity ───────────────────────────────────────────────────

@@ -18,10 +18,24 @@ from app.execution import (
     derive_execution_id,
 )
 from app.execution.enums import ExecutionKind, ExecutionOutboxState
-from app.execution.exceptions import ExecutionStateError
+from app.execution.exceptions import ExecutionAdmissionError, ExecutionStateError
+from tests.conftest import execution_admission_token
 
 
 _NOW = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_request_diagnostic_execution_requires_admission_token() -> None:
+    runtime = ExecutionRuntime(persistence=InMemoryExecutionPersistence())
+
+    with pytest.raises(ExecutionAdmissionError):
+        await runtime.request_diagnostic_execution(
+            dispatch_id="dispatch-without-admission",
+            session_id="session-without-admission",
+            tenant_id="tenant-a",
+            requested_at=_NOW,
+        )
 
 
 @pytest.mark.asyncio
@@ -34,12 +48,14 @@ async def test_request_diagnostic_execution_is_idempotent_by_dispatch() -> None:
         session_id="session-1",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     second = await runtime.request_diagnostic_execution(
         dispatch_id="dispatch-1",
         session_id="session-1",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
 
     expected_id = derive_execution_id(
@@ -68,6 +84,7 @@ async def test_runtime_read_surface_exposes_execution_lineage() -> None:
         session_id="session-inspect-1",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -145,6 +162,7 @@ async def test_runtime_read_surface_preserves_tenant_scope() -> None:
         session_id="session-inspect-2",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -218,6 +236,7 @@ async def test_claim_before_execute_is_single_owner() -> None:
         session_id="session-2",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
 
     claimed = await runtime.claim_execution(
@@ -252,6 +271,7 @@ async def test_completed_execution_cannot_be_reclaimed() -> None:
         session_id="session-3",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -285,6 +305,7 @@ async def test_complete_requires_claimed_state() -> None:
         session_id="session-4",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
 
     with pytest.raises(ExecutionStateError):
@@ -304,6 +325,7 @@ async def test_outbox_claim_is_single_publisher() -> None:
         session_id="session-5",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
 
     claimed = await runtime.claim_outbox_for_execution(
@@ -335,6 +357,7 @@ async def test_published_outbox_cannot_be_reclaimed() -> None:
         session_id="session-6",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_outbox_for_execution(
         execution_id=request.execution.execution_id,
@@ -367,6 +390,7 @@ async def test_failed_outbox_records_transport_error() -> None:
         session_id="session-7",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_outbox_for_execution(
         execution_id=request.execution.execution_id,
@@ -395,6 +419,7 @@ async def test_attempt_id_is_deterministic_and_attempt_is_completed() -> None:
         session_id="session-8",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -433,6 +458,7 @@ async def test_retryable_failure_reopens_execution_with_attempt_lineage() -> Non
         session_id="session-9",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     first = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -476,6 +502,7 @@ async def test_dead_lettered_execution_cannot_be_reclaimed() -> None:
         session_id="session-10",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -514,6 +541,7 @@ async def test_stale_claim_recovery_reopens_with_attempt_lineage() -> None:
         session_id="session-11",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     first = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -561,6 +589,7 @@ async def test_non_stale_claim_recovery_is_refused() -> None:
         session_id="session-12",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -589,6 +618,7 @@ async def test_worker_legitimacy_rejects_wrong_worker_completion() -> None:
         session_id="session-13",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     claimed = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -624,6 +654,7 @@ async def test_worker_legitimacy_rejects_recovered_stale_attempt() -> None:
         session_id="session-14",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     first = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -656,6 +687,7 @@ async def test_stale_attempt_cannot_complete_after_recovery() -> None:
         session_id="session-15",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     first = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
@@ -688,18 +720,21 @@ async def test_stale_recovery_sweep_recovers_only_expired_claims() -> None:
         session_id="session-16a",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     fresh = await runtime.request_diagnostic_execution(
         dispatch_id="dispatch-16b",
         session_id="session-16b",
         tenant_id="tenant-a",
         requested_at=_NOW + timedelta(seconds=1),
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     completed = await runtime.request_diagnostic_execution(
         dispatch_id="dispatch-16c",
         session_id="session-16c",
         tenant_id="tenant-a",
         requested_at=_NOW + timedelta(seconds=2),
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     await runtime.claim_execution(
         execution_id=stale.execution.execution_id,
@@ -756,12 +791,14 @@ async def test_stale_recovery_sweep_is_bounded_by_limit() -> None:
         session_id="session-17a",
         tenant_id="tenant-a",
         requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     second = await runtime.request_diagnostic_execution(
         dispatch_id="dispatch-17b",
         session_id="session-17b",
         tenant_id="tenant-a",
         requested_at=_NOW + timedelta(seconds=1),
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
     await runtime.claim_execution(
         execution_id=first.execution.execution_id,

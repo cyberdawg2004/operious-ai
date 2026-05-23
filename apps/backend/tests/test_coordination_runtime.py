@@ -34,7 +34,10 @@ import pytest
 
 from app.coordination.contracts.messages import CoordinationMessage
 from app.coordination.contracts.requests import CoordinationDispatchRequest
-from app.coordination.contracts.results import CoordinationDispatchOutcome
+from app.coordination.contracts.results import (
+    CoordinationDispatchOutcome,
+    CoordinationDispatchResult,
+)
 from app.coordination.enums import (
     CoordinationDirection,
     CoordinationMessageType,
@@ -42,6 +45,8 @@ from app.coordination.enums import (
     CoordinationStatus,
 )
 from app.coordination.identity import (
+    CoordinationCorrelationId,
+    CoordinationMessageId,
     derive_coordination_id,
     derive_correlation_id,
     derive_message_id,
@@ -69,6 +74,8 @@ from app.governance.enforcement.handlers import (
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
 from app.governance.evaluators.engine import PolicyEvaluationEngine
+from app.governance.identity.decision_ids import derive_decision_id
+from app.governance.persistence import InMemoryGovernanceRepository
 from app.governance.policies.base import BaseGovernancePolicy
 from app.governance.policies.chain import PolicyChain
 
@@ -119,7 +126,11 @@ def _handler_registry() -> EnforcementHandlerRegistry:
     return reg
 
 
-def _governance_runtime_with(verdict: Decision) -> GovernanceRuntime:
+def _governance_runtime_with(
+    verdict: Decision,
+    *,
+    repository: InMemoryGovernanceRepository | None = None,
+) -> GovernanceRuntime:
     chain = PolicyChain(
         chain_id="coord.test.chain",
         stage=EnforcementStage.PRE_EXECUTION,
@@ -129,6 +140,7 @@ def _governance_runtime_with(verdict: Decision) -> GovernanceRuntime:
         engine=PolicyEvaluationEngine(),
         handler_registry=_handler_registry(),
         chains={EnforcementStage.PRE_EXECUTION: chain},
+        persistence=repository,
     )
 
 
@@ -149,10 +161,15 @@ def _coordination_registry() -> CoordinationRegistry:
 
 
 def _build_runtime(
-    *, verdict: Decision = Decision.ALLOW
+    *,
+    verdict: Decision = Decision.ALLOW,
+    governance_repository: InMemoryGovernanceRepository | None = None,
 ) -> CoordinationRuntime:
     return CoordinationRuntime(
-        governance_runtime=_governance_runtime_with(verdict),
+        governance_runtime=_governance_runtime_with(
+            verdict,
+            repository=governance_repository,
+        ),
         persistence=InMemoryCoordinationPersistence(),
         registry=_coordination_registry(),
     )
@@ -163,7 +180,7 @@ def _make_message(
     sender: str = "agent:retriever",
     recipient: str = "agent:planner",
     msg_type: CoordinationMessageType = CoordinationMessageType.HANDOFF,
-    in_reply_to=None,
+    in_reply_to: CoordinationMessageId | None = None,
     msg_id_seed: str | None = "msg:default",
 ) -> CoordinationMessage:
     payload = CoordinationPayload(
@@ -195,6 +212,7 @@ def _make_request(
     coord_seed: str | None = None,
     msg_id_seed: str | None = "msg:default",
     msg_type: CoordinationMessageType = CoordinationMessageType.HANDOFF,
+    governance_metadata: dict[str, object] | None = None,
 ) -> CoordinationDispatchRequest:
     msg = _make_message(
         sender=sender,
@@ -210,6 +228,7 @@ def _make_request(
         coordination_id_override=(
             derive_coordination_id(seed=coord_seed) if coord_seed else None
         ),
+        governance_metadata=governance_metadata or {},
     )
 
 
@@ -406,6 +425,49 @@ async def test_governance_decision_id_links_back_to_governance_trace() -> None:
 
 
 @pytest.mark.asyncio
+async def test_governance_seed_derives_decision_and_action_ids() -> None:
+    seed = "dispatch|tenant:tenant:t1|event:event-1|governance|coordination"
+    expected_decision_id = derive_decision_id(seed=seed)
+    repo_a = InMemoryGovernanceRepository()
+    repo_b = InMemoryGovernanceRepository()
+    runtime_a = _build_runtime(
+        verdict=Decision.ALLOW,
+        governance_repository=repo_a,
+    )
+    runtime_b = _build_runtime(
+        verdict=Decision.ALLOW,
+        governance_repository=repo_b,
+    )
+    request = _make_request(
+        coord_seed="governance-seeded:coordination",
+        msg_id_seed="governance-seeded:message",
+        governance_metadata={
+            "governance.decision_seed": seed,
+            "governance.enforcement_seed": seed,
+        },
+    )
+
+    first = await runtime_a.dispatch(request)
+    second = await runtime_b.dispatch(request)
+
+    assert first.envelope is not None
+    assert second.envelope is not None
+    assert first.envelope.governance_decision_id == expected_decision_id
+    assert second.envelope.governance_decision_id == expected_decision_id
+    actions_a = await repo_a.get_enforcement_actions(
+        str(expected_decision_id),
+        expected_tenant_id="tenant:t1",
+    )
+    actions_b = await repo_b.get_enforcement_actions(
+        str(expected_decision_id),
+        expected_tenant_id="tenant:t1",
+    )
+    assert len(actions_a) == 1
+    assert len(actions_b) == 1
+    assert actions_a[0].action_id == actions_b[0].action_id
+
+
+@pytest.mark.asyncio
 async def test_governance_chain_id_is_recorded() -> None:
     runtime = _build_runtime(verdict=Decision.ALLOW)
     result = await runtime.dispatch(_make_request())
@@ -437,7 +499,10 @@ async def test_list_messages_filters_by_correlation_id() -> None:
     corr_a = derive_correlation_id(seed="corr:a")
     corr_b = derive_correlation_id(seed="corr:b")
 
-    async def _dispatch(coord_seed: str, corr_id):
+    async def _dispatch(
+        coord_seed: str,
+        corr_id: CoordinationCorrelationId,
+    ) -> CoordinationDispatchResult:
         msg = _make_message(msg_id_seed=f"m:{coord_seed}")
         req = CoordinationDispatchRequest(
             message=msg,

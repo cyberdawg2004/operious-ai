@@ -29,6 +29,7 @@ from app.runtime.execution_event_projection import (
     ExecutionOperationalEventProjector,
     project_execution_records,
 )
+from tests.conftest import execution_admission_token
 
 
 _NOW = datetime(2026, 5, 22, 2, tzinfo=timezone.utc)
@@ -43,6 +44,10 @@ async def _requested_execution(
         session_id="session-projection",
         tenant_id="tenant-acme",
         requested_at=_NOW,
+        admission_token=execution_admission_token(
+            tenant_id="tenant-acme",
+            admitted_at=_NOW,
+        ),
         metadata={
             "governance.decision_id": "decision-allow-1",
             "principal_id": "principal-1",

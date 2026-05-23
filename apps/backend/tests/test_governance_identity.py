@@ -42,14 +42,14 @@ def test_generate_trace_id_is_unique_across_calls() -> None:
     assert len(ids) == 50
 
 
-def test_generate_decision_id_returns_uuid4() -> None:
+def test_generate_decision_id_returns_uuid5() -> None:
     uid = generate_decision_id()
-    assert uid.version == 4
+    assert uid.version == 5
 
 
-def test_generate_trace_id_returns_uuid4() -> None:
+def test_generate_trace_id_returns_uuid5() -> None:
     uid = generate_trace_id()
-    assert uid.version == 4
+    assert uid.version == 5
 
 
 # ─── derive_* determinism ─────────────────────────────────────────────

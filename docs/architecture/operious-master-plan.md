@@ -1,21 +1,29 @@
 # Operious AI Consolidated Master Plan
 
-Updated baseline after Phase 5-C. This document is the canonical
-handoff plan for the next Codex session.
+Updated baseline after Phase 6-D plus the Pre-6-E constitutional
+correctness wedge. This document is the canonical handoff plan for the
+next Codex session.
 
 ## Current State Baseline
 
-- Tests: 2,095 passed, 2 skipped, 0 xfailed.
+- Tests: 2,135 passed, 2 skipped, 0 xfailed.
+- Pre-6-E micro-wedge: Execution governance ordering and strict LLM
+  diagnostic output schema are closed. Focused backend checks passed;
+  local full-suite reconfirmation collected 2,150 tests but timed out at
+  the JWKS auth provider test before completion, so the canonical full
+  pass count remains the last confirmed Phase 6-D baseline until rerun.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors, 680 warnings across the backend surface.
+- Pyright: 0 errors, 584 warnings across the backend surface.
   Warnings should not grow phase over phase; the Phase 3 remediation
   marker is 687 warnings.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
   Phase 3-D, Phase 3-E, Phase 4-A, Phase 4-B, Phase 4-C, and
-  Phase 5-A, Phase 5-B, Phase 5-C.
-- Next phase: Phase 6-A, Operational Observability - PR_W9.
+  Phase 5-A, Phase 5-B, Phase 5-C, Phase 6-A, Phase 6-B,
+  Phase 6-C, Phase 6-D, and the Pre-6-E constitutional correctness
+  wedge.
+- Next phase: Phase 6-E, Frontend Hydration - Items 7, PR_W15.
 
 ## Completed Work Ledger
 
@@ -826,7 +834,7 @@ by phrasing output differently.
 
 Maps to: PR_W9, PR_W10, PR_W11, PR_W14, PR_W15, PR_W16, Items 7 and 9.
 
-### 6-A: Operational Observability - PR_W9
+### 6-A: Operational Observability - PR_W9 - Done
 
 - Per-tenant metrics: ticket throughput, governance deny rate, execution
   latency, QA score distribution, escalation rate.
@@ -834,27 +842,153 @@ Maps to: PR_W9, PR_W10, PR_W11, PR_W14, PR_W15, PR_W16, Items 7 and 9.
 - SLO definitions and alert thresholds.
 - DLQ operating surface for dead-lettered executions.
 
-### 6-B: Execution Governance Hardening - PR_W10
+#### Phase 6-A Closure Ledger - Done
+
+- [x] Added tenant-scoped operational observability runtime,
+  persistence, service, and API surfaces under `/api/v1/observability`.
+- [x] Added deterministic per-tenant metrics snapshots for ticket
+  throughput, governance deny rate, execution latency, QA score
+  distribution, escalation rate, and DLQ count.
+- [x] Added durable tenant-owned SLO definitions and alert-threshold
+  evaluation with UUID5 identities.
+- [x] Added durable structured trace spans independent of Sentry, with
+  tenant scope, deterministic span identity, latency, status, error, and
+  attributes.
+- [x] Added DLQ/dead-letter execution read surfaces backed by durable
+  execution records without giving observability replay authority.
+- [x] Preserved router -> service -> runtime -> persistence layering and
+  kept Celery as transport only.
+- [x] Added tests for tenant isolation, metric determinism, alert
+  thresholds, DLQ read behavior, router/service layering, Postgres
+  persistence, and transport isolation.
+- [x] Verified baseline after closure: 2,110 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 680 warnings; Alembic
+  current `0023_operational_observability (head)`.
+
+### 6-B: Execution Governance Hardening - PR_W10 - Done
 
 - Tenant execution quotas.
 - Governance budget limits.
 - Tenant throughput controls per time window.
 - Circuit breaker with graceful degradation.
 
-### 6-C: Distributed Runtime Resilience - PR_W11
+#### Phase 6-B Closure Ledger - Done
+
+- [x] Added tenant-scoped execution governance configuration with
+  deterministic UUID5 configuration and circuit-breaker identities.
+- [x] Added durable governance budget, throughput-window, execution
+  quota, and circuit-breaker state records under tenant configuration.
+- [x] Added enforcement bridge that evaluates tenant limits against
+  execution and governance persistence before execution admission.
+- [x] Wired dispatch to gracefully degrade before execution/outbox
+  creation when quotas, budgets, throughput, or circuit state block
+  admission.
+- [x] Preserved router -> service -> runtime -> persistence layering;
+  tenant routers only call the tenant configuration service.
+- [x] Kept replay authority unchanged: boundary replay remains owned by
+  the boundary substrate and 6-B adds no replay path.
+- [x] Kept Celery as transport only; workers and publishers do not
+  import the execution governance runtime.
+- [x] Added tests for tenant isolation, deterministic configuration
+  identities, quota/budget/throughput enforcement, circuit-breaker
+  behavior, router/service layering, and transport isolation.
+- [x] Verified baseline after closure: 2,120 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 584 warnings; Alembic
+  current `0024_execution_governance (head)`.
+
+### 6-C: Distributed Runtime Resilience - PR_W11 - Done
 
 - Outbox reconciler for unpublished rows stuck in publishing state.
 - Stuck execution detection and alerting.
 - Worker deployment topology in docker-compose.
 - Per-tenant DLQ for failed inbound normalization.
 
-### 6-D: Multi-Tenant Production Hardening - PR_W14
+#### Phase 6-C Closure Ledger - Done
+
+- [x] Added tenant-aware stale execution outbox reconciliation with
+  lease-age filters and guarded requeue of publishing rows back to
+  pending publication.
+- [x] Added execution recovery worker task wiring and config defaults
+  for outbox publish lease age and reconcile batch size.
+- [x] Added tenant-scoped stuck execution alert read models with
+  deterministic UUID5 alert identities derived from execution lineage.
+- [x] Added per-tenant inbound normalization DLQ observability backed by
+  boundary ingress normalization status.
+- [x] Wired stuck execution alerts and inbound DLQ reads through
+  observability router -> service -> runtime -> persistence boundaries.
+- [x] Added local docker-compose worker topology beside the API service.
+- [x] Kept boundary replay authority unchanged: 6-C reads boundary
+  normalization failures but does not add boundary replay controls.
+- [x] Kept governance behavior unchanged and Celery as transport only;
+  recovery workers call execution runtime surfaces instead of mutating
+  persistence directly.
+- [x] No schema migration was required; 6-C uses the existing execution
+  outbox, execution record, and boundary ingress tables.
+- [x] Added tests for tenant isolation, deterministic alert identities,
+  outbox reconciliation, stuck execution alerting, inbound DLQ behavior,
+  router/service layering, worker topology, and transport isolation.
+- [x] Verified baseline after closure: 2,128 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 584 warnings; Alembic
+  current `0024_execution_governance (head)`.
+
+### 6-D: Multi-Tenant Production Hardening - PR_W14 - Done
 
 - Row-level security on all substrate tables.
 - Tenant partitioning strategy.
 - Signed tenant audit export endpoints.
 - Incident replay tooling: `replay_ticket(ticket_id)`.
 - Credential rotation without downtime.
+
+#### Phase 6-D Closure Ledger - Done
+
+- [x] Added migration-backed row-level security policies for tenant
+  substrate tables and parent-scoped child tables using the
+  `app.current_tenant_id` request context.
+- [x] Documented tenant partitioning strategy in migration comments for
+  LIST partitioning by `tenant_id` with default partitions and promoted
+  tenant partitions.
+- [x] Added tenant channel credential rotation with current and previous
+  encrypted credentials plus webhook secret grace windows; API responses
+  expose rotation timestamps only, never plaintext credentials.
+- [x] Added signed tenant audit export runtime and router/service
+  endpoints backed by tenant-scoped operational event persistence reads.
+- [x] Added incident replay tooling for `replay_ticket(ticket_id)` that
+  reads tenant boundary ingress, derives projected event ids, and loads
+  operational replay traces without claiming boundary replay authority.
+- [x] Bound request-scoped database sessions to tenant RLS context when
+  authority middleware resolves a tenant.
+- [x] Preserved router -> service -> runtime -> persistence layering;
+  tenant routers only call the tenant configuration service.
+- [x] Kept governance behavior unchanged, frontend untouched, and Celery
+  as transport only; workers do not own hardening, audit export, or
+  incident replay.
+- [x] Added tests for RLS coverage, partition strategy, credential
+  rotation, audit export signing, incident replay scoping, router/service
+  layering, and transport isolation.
+- [x] Verified baseline after closure: 2,135 passed, 2 skipped; smoke
+  tests 4/4 green; backend Pyright 0 errors and 584 warnings; Alembic
+  current `0025_multi_tenant_hardening (head)`.
+
+### Pre-6-E Constitutional Correctness Wedge - Done
+
+- [x] Moved execution governance evaluation ahead of session creation
+  in dispatch so a denied or degraded execution leaves no session,
+  execution record, outbox record, or Celery publish behind.
+- [x] Added regression coverage for execution governance denial creating
+  no session-side or transport-side state.
+- [x] Centralized diagnostic LLM output categories in a strict enum and
+  replaced hand-rolled output parsing with a Pydantic schema that
+  forbids unknown keys, bounds confidence, caps reasoning length, and
+  rejects invalid categories.
+- [x] Added raw LLM completion SHA-256 metadata to diagnostic usage and
+  result records for forensic replay anchoring.
+- [x] Verified focused execution governance checks: 17 passed.
+- [x] Verified focused cognition/network checks: 11 passed, 1 skipped.
+- [x] Verified backend Pyright on `apps/backend/app`: 0 errors.
+- [x] Verified invariant pack: 157 passed, 2 skipped.
+- [ ] Reconfirm full backend pass count in an environment where the
+  JWKS auth provider test completes; local run collected 2,150 tests and
+  timed out at `test_valid_token_yields_verified_identity`.
 
 ### 6-E: Frontend Hydration - Items 7, PR_W15
 
@@ -893,9 +1027,9 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Phase 6-A - Operational Observability - PR_W9.
-Current test baseline: 2,095 passed, 2 skipped; smoke tests 4/4 green.
-Current Pyright baseline: 0 errors, 680 warnings; warnings must not grow.
+Current phase: Phase 6-E - Frontend Hydration - Items 7, PR_W15.
+Current test baseline: 2,135 passed, 2 skipped; smoke tests 4/4 green.
+Current Pyright baseline: 0 errors, 584 warnings; warnings must not grow.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -919,7 +1053,7 @@ pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coor
 pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
-Continue with Phase 6-A. Do not implement Phase 6-B before Phase 6-A is closed.
+Continue with Phase 6-E. Do not implement post-6-E work before Phase 6-E is closed.
 ```
 
 ## New Chat Hyperprompt
@@ -929,7 +1063,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Phase 6-A - Operational Observability - PR_W9.
+Current phase: Phase 6-E - Frontend Hydration - Items 7, PR_W15.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -951,13 +1085,17 @@ Current source of truth:
 - Phase 5-A is closed.
 - Phase 5-B is closed.
 - Phase 5-C is closed.
-- Do not implement Phase 6-B before Phase 6-A is closed.
+- Phase 6-A is closed.
+- Phase 6-B is closed.
+- Phase 6-C is closed.
+- Phase 6-D is closed.
+- Do not implement post-6-E work before Phase 6-E is closed.
 
 Current verified baseline:
-- Tests: 2,095 passed, 2 skipped, 0 xfailed.
+- Tests: 2,135 passed, 2 skipped, 0 xfailed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
-- Pyright warnings: 680; warnings must not grow phase over phase.
+- Pyright warnings: 584; warnings must not grow phase over phase.
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -978,19 +1116,26 @@ Current verified baseline:
 - Phase 5-A complete: Memory + Knowledge Runtime - PR_W12.
 - Phase 5-B complete: Organizational Cognition Engine.
 - Phase 5-C complete: Real AI Cognition Runtime - PR_W13.
+- Phase 6-A complete: Operational Observability - PR_W9.
+- Phase 6-B complete: Execution Governance Hardening - PR_W10.
+- Phase 6-C complete: Distributed Runtime Resilience - PR_W11.
+- Phase 6-D complete: Multi-Tenant Production Hardening - PR_W14.
 - Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
   canonical event fabric before the demo trace-inspector milestone.
 
 Goal for this chat:
-Implement Phase 6-A only.
+Implement Phase 6-E only.
 
-Phase 6-A scope:
-- Per-tenant metrics: ticket throughput, governance deny rate,
-  execution latency, QA score distribution, escalation rate.
-- Structured tracing beyond Sentry.
-- SLO definitions and alert thresholds.
-- DLQ operating surface for dead-lettered executions.
-- Do not implement Phase 6-B before Phase 6-A is closed.
+Phase 6-E scope:
+- Command Center connected to real APIs.
+- Trace Inspector renders `operational_events`.
+- Operations Queue renders escalation records.
+- Cognition Hub renders ApprovalRecord pipeline.
+- Channel configuration UI for tenant-owned credentials.
+- Knowledge base UI for SOP upload, indexing status, and versioning.
+- Policy editor UI for governance parameters.
+- Signed session auth hydration.
+- Do not implement post-6-E work before Phase 6-E is closed.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.
@@ -1013,30 +1158,36 @@ Constitutional rules:
 - Frontend remains hydration/observability only.
 
 Before editing:
-- Inspect existing observability, metrics, Sentry/logging, execution
-  recovery, dead-letter, governance, escalation, QA, dispatch, service,
-  router, dependency, worker, and persistence patterns.
-- Preserve existing naming, migration, repository, runtime, and test
-  conventions.
-- Identify existing metric counters, trace context, execution
-  dead-letter records, and tenant-scoped read surfaces before editing.
+- Inspect existing Command Center frontend structure, API client/auth
+  patterns, hydration boundaries, observability views, route conventions,
+  backend schemas, and frontend test/build tooling.
+- Preserve existing naming, design, router/service/API contracts,
+  hydration-only frontend constraints, and tenant credential redaction.
+- Identify existing trace inspector, operations queue, cognition,
+  channel configuration, knowledge, policy editor, and auth surfaces
+  before editing.
 
-Implementation deliverables for 6-A:
-- Tenant-scoped operational metrics read model/API surfaces.
-- Structured tracing primitives beyond Sentry without making Sentry a
-  source of truth.
-- SLO definition and alert-threshold records or configuration surface.
-- DLQ/dead-letter operating read surface for failed executions.
-- Tests for tenant isolation, metric determinism, alert thresholds,
-  DLQ read behavior, router/service layering, and transport isolation.
+Implementation deliverables for 6-E:
+- Command Center API hydration against real backend routes.
+- Trace Inspector view backed by canonical `operational_events`.
+- Operations Queue backed by escalation records.
+- Cognition Hub backed by ApprovalRecord pipeline data.
+- Tenant channel configuration UI without plaintext credential exposure.
+- Knowledge base UI for SOP upload, indexing state, and version history.
+- Governance policy editor UI for tenant policy parameters.
+- Signed session auth hydration that preserves tenant isolation.
+- Tests/build verification for frontend hydration plus backend invariant
+  and smoke gates.
 
-After 6-A:
+After 6-E:
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
   pytest apps/backend/tests/test_system_smoke.py -v
 - Run the backend suite with asyncpg TEST_DATABASE_URL, never a plain
   postgresql:// URL.
+- Run relevant Command Center frontend typecheck/build/test commands
+  discovered from the repo.
 
 Final answer must include:
 - Files changed.
@@ -1044,5 +1195,5 @@ Final answer must include:
 - Runtime/service/router changes.
 - Replay, governance, frontend, and transport implications.
 - Tests run and results.
-- Whether Phase 6-A is closed or still open.
+- Whether Phase 6-E is closed or still open.
 ```

@@ -325,7 +325,10 @@ def test_database_engine_config_canonicalizes_asyncpg_url_once() -> None:
     assert config.sync_url == (
         "postgresql+psycopg2://u:p@db.example/operious"
     )
-    assert config.connect_args == {"timeout": 10.0, "ssl": True}
+    assert config.connect_args["timeout"] == 10.0
+    assert config.connect_args["ssl"] is True
+    assert config.connect_args["prepared_statement_cache_size"] == 0
+    assert callable(config.connect_args["prepared_statement_name_func"])
 
 
 def test_database_engine_config_uses_default_timeout_without_url_override() -> None:
@@ -334,4 +337,6 @@ def test_database_engine_config_uses_default_timeout_without_url_override() -> N
         connect_timeout=2.5,
     )
 
-    assert config.connect_args == {"timeout": 2.5}
+    assert config.connect_args["timeout"] == 2.5
+    assert config.connect_args["prepared_statement_cache_size"] == 0
+    assert callable(config.connect_args["prepared_statement_name_func"])

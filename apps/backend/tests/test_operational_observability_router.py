@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +11,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
+from app.dependencies.authority import require_tenant_scope
 from app.dependencies.services import get_operational_observability_service
 from app.main import create_app
 from app.observability.persistence import (
@@ -26,8 +27,9 @@ async def observability_client() -> AsyncIterator[tuple[httpx.AsyncClient, "_Fak
     app = create_app()
     service = _FakeService()
     app.dependency_overrides[get_operational_observability_service] = (
-        lambda: service
+        _service_override(service)
     )
+    app.dependency_overrides[require_tenant_scope] = _tenant_scope_override
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
@@ -119,3 +121,16 @@ class _FakeService:
 
 def _headers(tenant: str) -> dict[str, str]:
     return {"X-Tenant-ID": tenant, "X-Principal-ID": "principal-ops"}
+
+
+def _service_override(
+    service: "_FakeService",
+) -> Callable[[], Awaitable["_FakeService"]]:
+    async def override() -> "_FakeService":
+        return service
+
+    return override
+
+
+async def _tenant_scope_override() -> str:
+    return "tenant-acme"
