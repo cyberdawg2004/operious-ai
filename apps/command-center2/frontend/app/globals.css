@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+:root {
+  /* ═══════════════════════════════════════════
+     LIGHT MODE — ELEVATED BACKGROUND SURFACES
+     Institutional governance infrastructure
+  ═══════════════════════════════════════════ */
+  --canvas: #F4F1E8;
+  --surface: #FCFAF4;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #EBE7DC;
+  --border-subtle: #DDD8CC;
+  --border-defined: #C4BFB2;
+
+  /* INK SYSTEM (LIGHT MODE) */
+  --ink-primary: #0A0F1C;
+  --ink-body: #1A2334;
+  --ink-secondary: #3A4458;
+  --ink-tertiary: #6A7488;
+
+  /* ═══════════════════════════════════════════
+     GOLD SYSTEM (WORKS ON BOTH SURFACES)
+     Governance hierarchy accent
+  ═══════════════════════════════════════════ */
+  --gold-primary: #A8882C;
+  --gold-bright: #C9A84C;
+  --gold-muted: #8A7024;
+  --gold-bg: rgba(168,136,44,0.08);
+
+  /* Accents (same for both modes) */
+  --gold: #A8882C;
+  --blue-system: #3B82F6;
+  --blue-system-muted: #2563EB;
+  --red-alert: #DC2626;
+  --green-success: #16A34A;
+  --warning-amber: #B8821C;
+
+  /* Semantic tokens */
+  --background: var(--canvas);
+  --foreground: var(--ink-primary);
+}
+
+/* ═══════════════════════════════════════════
+   DARK MODE — BLOOMBERG/LINEAR OPERATIONAL STYLE
+   Default for Command Center operators
+═══════════════════════════════════════════ */
+:root.dark,
+.dark {
+  --canvas: #0A0A0C;
+  --surface: #131316;
+  --surface-raised: #1A1A1E;
+  --surface-sunken: #08080A;
+  --border-subtle: #2A2A2E;
+  --border-defined: #3A3A3F;
+
+  /* INK SYSTEM (DARK MODE) */
+  --ink-primary: #F2F0EA;
+  --ink-body: #C8C5BC;
+  --ink-secondary: #8A8782;
+  --ink-tertiary: #5C5953;
+
+  /* Gold adjustments for dark mode */
+  --gold-bg: rgba(168,136,44,0.12);
+
+  /* Semantic tokens */
+  --background: var(--canvas);
+  --foreground: var(--ink-primary);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-defined: var(--border-defined);
+  --color-ink-primary: var(--ink-primary);
+  --color-ink-body: var(--ink-body);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-tertiary: var(--ink-tertiary);
+  --color-gold-primary: var(--gold-primary);
+  --color-gold-bright: var(--gold-bright);
+  --color-gold-muted: var(--gold-muted);
+  --color-gold-bg: var(--gold-bg);
+  --color-gold: var(--gold);
+  --color-blue-system: var(--blue-system);
+  --color-blue-system-muted: var(--blue-system-muted);
+  --color-red-alert: var(--red-alert);
+  --color-green-success: var(--green-success);
+  --color-warning-amber: var(--warning-amber);
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-mono-technical), 'IBM Plex Mono', monospace;
+  --font-serif: var(--font-serif), 'Cormorant SC', Georgia, serif;
+  --font-technical: var(--font-mono-technical), 'IBM Plex Mono', monospace;
+}
+
+html {
+  background: var(--canvas);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* ═══════════════════════════════════════════
+   TYPOGRAPHY SYSTEM
+   Command presence with proper hierarchy
+═══════════════════════════════════════════ */
+
+.font-display {
+  font-family: var(--font-serif);
+}
+
+.font-technical {
+  font-family: var(--font-technical);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.eyebrow {
+  font-family: var(--font-technical);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════
+   INTERACTION STATES
+   Authoritative gold system
+═══════════════════════════════════════════ */
+
+.nav-active {
+  background: var(--gold-bg);
+  border-left: 4px solid var(--gold-primary);
+}
+
+.focus-gold:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--gold-primary);
+}
+
+.hover-elevated:hover {
+  background: var(--surface-sunken);
+}
+
+/* ═══════════════════════════════════════════
+   SHADOWS AND DEPTH
+   Mode-aware institutional depth
+═══════════════════════════════════════════ */
+
+.shadow-panel {
+  box-shadow: 0 1px 3px rgba(10, 15, 28, 0.06);
+}
+
+.shadow-card {
+  box-shadow: 0 2px 8px rgba(10, 15, 28, 0.08);
+}
+
+.shadow-elevated {
+  box-shadow: 0 4px 16px rgba(10, 15, 28, 0.12);
+}
+
+.dark .shadow-panel {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.dark .shadow-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.dark .shadow-elevated {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
