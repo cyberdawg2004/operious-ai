@@ -11,7 +11,7 @@ from typing import Any, TypeVar, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.diagnostic_agent import DiagnosticAgent
+from app.agents.diagnostic_agent import DiagnosticAgent, DiagnosticResult
 from app.cognition import (
     AnthropicMessagesClient,
     DeterministicDiagnosticLLMClient,
@@ -35,6 +35,7 @@ from app.knowledge import (
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.runtime.timeline_runtime import TimelineRuntime
+from app.runtime.provider_circuit_breaker import ProviderCircuitBreaker
 from app.session.identity import as_session_id
 from app.session.lifecycle.classifier import is_terminal as is_terminal_session
 from app.session.persistence import (
@@ -334,6 +335,26 @@ def _extract_text(payload: Mapping[str, Any]) -> str:
     return " ".join(text_values)
 
 
+async def _generate_diagnostic_reasoning_draft(
+    *,
+    cognition_runtime: DiagnosticCognitionRuntime,
+    dispatch_id: str,
+    session_id: str,
+    tenant_id: str,
+    content: str,
+    execution_id: str,
+) -> DiagnosticResult:
+    return await DiagnosticAgent(
+        cognition_runtime=cognition_runtime
+    ).execute(
+        dispatch_id=dispatch_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        content=content,
+        execution_id=execution_id,
+    )
+
+
 async def _queue_supervisor_if_closed(
     *,
     session_repo: SessionPersistenceProtocol,
@@ -512,6 +533,10 @@ def _diagnostic_cognition_runtime(
             base_url=settings.ANTHROPIC_BASE_URL,
             anthropic_version=settings.ANTHROPIC_VERSION,
             timeout_seconds=settings.AI_TIMEOUT_SECONDS,
+            provider_circuit_breaker=ProviderCircuitBreaker(
+                session=session,
+                auto_commit=True,
+            ),
         )
     return DiagnosticCognitionRuntime(
         knowledge_runtime=knowledge_runtime,
@@ -579,4 +604,5 @@ class DiagnosticExecutionRetry(RuntimeError):
 __all__ = [
     "execute_diagnostic_agent",
     "execute_diagnostic_agent_runtime",
+    "_generate_diagnostic_reasoning_draft",
 ]

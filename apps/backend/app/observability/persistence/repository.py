@@ -11,11 +11,15 @@ from app.observability.identity import (
 from app.observability.persistence.models import (
     DeadLetterExecutionPage,
     DeadLetterExecutionQuery,
+    InboundNormalizationDeadLetterPage,
+    InboundNormalizationDeadLetterQuery,
     OperationalMetricsQuery,
     OperationalSLODefinitionPage,
     OperationalSLODefinitionQuery,
     OperationalTraceSpanPage,
     OperationalTraceSpanQuery,
+    StuckExecutionAlertPage,
+    StuckExecutionAlertQuery,
 )
 from app.observability.persistence.records import (
     OperationalMetricsSnapshotRecord,
@@ -41,6 +45,20 @@ class OperationalObservabilityPersistence(Protocol):
         *,
         expected_tenant_id: str,
     ) -> DeadLetterExecutionPage: ...
+
+    async def list_stuck_execution_alerts(
+        self,
+        query: StuckExecutionAlertQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> StuckExecutionAlertPage: ...
+
+    async def list_inbound_normalization_dead_letters(
+        self,
+        query: InboundNormalizationDeadLetterQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> InboundNormalizationDeadLetterPage: ...
 
     async def save_slo_definition(
         self,

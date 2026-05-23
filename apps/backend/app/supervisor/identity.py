@@ -6,9 +6,9 @@ against. For replay-grade determinism we derive these via UUID5 from
 stable namespace UUIDs + stable seed strings, so a replay of the same
 inputs produces byte-identical identifiers.
 
-`inspection_id` and `decision_id` are *also* derivable but the
-runtime defaults to `uuid4()` for them, allowing replay tests to pass
-a fixed override while production gets unique-per-call ids by default.
+`inspection_id` and `decision_id` are also derivable; runtime paths
+use deterministic seeds and replay tests may still pass fixed
+overrides when asserting byte-identical envelopes.
 """
 
 from __future__ import annotations
@@ -75,8 +75,7 @@ def derive_inspection_id(
 ) -> uuid.UUID:
     """Derive an inspection id (replay-aid).
 
-    Production callers normally let `SupervisorRuntime` mint a fresh
-    `uuid.uuid4()` per inspection; replay tests can override
+    Runtime callers may override
     `ExecutionInspectionRequest.inspection_id_override` with the value
     returned here so the persisted inspection record uses a stable id.
     """

@@ -23,6 +23,7 @@ from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
 )
+from app.core.deterministic_identity import derive_runtime_id
 from app.boundary.adapters.base import BaseEgressAdapter
 from app.boundary.contracts.requests import (
     BoundaryEgressRequest,
@@ -52,6 +53,7 @@ from app.boundary.taxonomy import BoundaryMetadataKey
 from app.boundary.tracing import BoundaryTrace
 
 _logger = logging.getLogger(__name__)
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506002")
 
 
 class BoundaryEgressRuntime:
@@ -72,7 +74,14 @@ class BoundaryEgressRuntime:
     ) -> None:
         self._adapters = adapters
         self._persistence = persistence
-        self._runtime_instance_id: uuid.UUID = uuid.uuid4()
+        self._runtime_instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=(
+                "boundary_egress_runtime",
+                adapters.names(direction=BoundaryDirection.EGRESS),
+            ),
+        )
         self._sequence: int = 0
 
     @property

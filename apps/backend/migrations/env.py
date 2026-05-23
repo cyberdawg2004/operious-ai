@@ -53,6 +53,7 @@ from app.escalation.db import models as _escalation_models  # noqa: F401  # pyri
 from app.sop_intelligence.db import models as _sop_intelligence_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.cognition.db import models as _cognition_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.observability.db import models as _observability_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.runtime.db import models as _runtime_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

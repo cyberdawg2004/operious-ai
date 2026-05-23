@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -51,6 +52,18 @@ Use canonical English. Preserve any governance-significant terms present in
 the input or citations, and do not invent refunds, approvals, denials,
 chargebacks, RMA, legal, fraud, compliance, replacement, credit, or escalation
 terms that are not grounded in the input or citations."""
+_ALLOWED_OUTPUT_KEYS = frozenset(
+    {"summary", "category", "confidence", "reasoning"}
+)
+_ALLOWED_CATEGORIES = frozenset(
+    {
+        "account_issue",
+        "charging_issue",
+        "connectivity_issue",
+        "refund_issue",
+        "unknown_issue",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +129,10 @@ class DiagnosticCognitionRuntime:
         )
         completion: DiagnosticLLMCompletion | None = None
         try:
-            completion = await self._llm_client.complete(
+            completion = await self._complete_llm(
                 system_prompt=_SYSTEM_PROMPT,
                 messages=(DiagnosticLLMMessage(role="user", content=prompt),),
-                max_output_tokens=self._config.max_output_tokens,
-                temperature=self._config.temperature,
+                tenant_id=tenant_id,
             )
             parsed = _parse_output(completion.text)
             semantic = validate_governance_terms(
@@ -158,6 +170,7 @@ class DiagnosticCognitionRuntime:
                     "governance_decision_id": governance_decision_id,
                     "citation_count": len(retrieval.citations),
                     "semantic_terms": list(semantic.output_terms),
+                    "raw_completion_sha256": _raw_completion_sha256(completion),
                 },
             )
             await self._save_usage(record, tenant_id=tenant_id)
@@ -176,7 +189,10 @@ class DiagnosticCognitionRuntime:
                 citations=tuple(citation.index for citation in retrieval.citations),
                 semantic_terms=semantic.output_terms,
                 retrieval=retrieval,
-                metadata={"raw": dict(completion.raw_metadata)},
+                metadata={
+                    "raw": dict(completion.raw_metadata),
+                    "raw_completion_sha256": _raw_completion_sha256(completion),
+                },
             )
         except CognitionSemanticValidationError as exc:
             await self._save_rejected_usage(
@@ -204,6 +220,19 @@ class DiagnosticCognitionRuntime:
                 completion=completion,
             )
             raise
+        except CognitionLLMProviderError as exc:
+            await self._save_rejected_usage(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                error=exc,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+                completion=completion,
+            )
+            raise
         except Exception as exc:
             await self._save_rejected_usage(
                 usage_id=usage_id,
@@ -217,11 +246,34 @@ class DiagnosticCognitionRuntime:
                 completion=completion,
                 failed=True,
             )
-            if isinstance(exc, CognitionLLMProviderError):
-                raise
             raise CognitionLLMProviderError(
                 f"diagnostic cognition failed: {exc.__class__.__name__}"
             ) from exc
+
+    async def _complete_llm(
+        self,
+        *,
+        system_prompt: str,
+        messages: tuple[DiagnosticLLMMessage, ...],
+        tenant_id: str,
+    ) -> DiagnosticLLMCompletion:
+        try:
+            return await self._llm_client.complete(
+                system_prompt=system_prompt,
+                messages=messages,
+                max_output_tokens=self._config.max_output_tokens,
+                temperature=self._config.temperature,
+                tenant_id=tenant_id,
+            )
+        except TypeError as exc:
+            if "tenant_id" not in str(exc):
+                raise
+            return await self._llm_client.complete(
+                system_prompt=system_prompt,
+                messages=messages,
+                max_output_tokens=self._config.max_output_tokens,
+                temperature=self._config.temperature,
+            )
 
     async def _govern_output(
         self,
@@ -349,6 +401,11 @@ class DiagnosticCognitionRuntime:
             metadata={
                 "error_type": error.__class__.__name__,
                 "message": _bounded_message(error),
+                **(
+                    {"raw_completion_sha256": _raw_completion_sha256(completion)}
+                    if completion is not None
+                    else {}
+                ),
             },
         )
         await self._save_usage(record, tenant_id=tenant_id)
@@ -400,6 +457,11 @@ def _parse_output(text: str) -> _ParsedDiagnosticOutput:
     if not isinstance(raw, Mapping):
         raise CognitionLLMProviderError("diagnostic model returned non-object JSON")
     data = cast(Mapping[str, Any], raw)
+    extra_keys = set(data) - _ALLOWED_OUTPUT_KEYS
+    if extra_keys:
+        raise CognitionLLMProviderError(
+            "diagnostic model returned unsupported keys"
+        )
     summary = data.get("summary")
     category = data.get("category")
     confidence = data.get("confidence")
@@ -407,6 +469,9 @@ def _parse_output(text: str) -> _ParsedDiagnosticOutput:
         raise CognitionLLMProviderError("diagnostic model summary is missing")
     if not isinstance(category, str) or not category.strip():
         raise CognitionLLMProviderError("diagnostic model category is missing")
+    category_text = category.strip()
+    if category_text not in _ALLOWED_CATEGORIES:
+        raise CognitionLLMProviderError("diagnostic model category is unsupported")
     if not isinstance(confidence, (int, float)):
         raise CognitionLLMProviderError("diagnostic model confidence is missing")
     confidence_float = float(confidence)
@@ -414,7 +479,7 @@ def _parse_output(text: str) -> _ParsedDiagnosticOutput:
         raise CognitionLLMProviderError("diagnostic model confidence must be in [0, 1]")
     return _ParsedDiagnosticOutput(
         summary=summary.strip(),
-        category=category.strip(),
+        category=category_text,
         confidence=confidence_float,
     )
 
@@ -494,6 +559,10 @@ def _usage_record(
         created_at=_utcnow(),
         metadata=metadata,
     )
+
+
+def _raw_completion_sha256(completion: DiagnosticLLMCompletion) -> str:
+    return hashlib.sha256(completion.text.encode("utf-8")).hexdigest()
 
 
 def _estimate_cost(

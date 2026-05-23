@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 
@@ -46,30 +47,35 @@ _REPLAY_NAMESPACE = uuid.UUID(
 _LOCALIZATION_NAMESPACE = uuid.UUID(
     "020ec1a0-0007-4007-8007-100000000007"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 def generate_translation_id() -> TranslationId:
-    return TranslationId(uuid.uuid4())
+    return TranslationId(uuid.uuid5(_TRANSLATION_NAMESPACE, _runtime_seed("translation")))
 
 
 def generate_lineage_id() -> TranslationLineageId:
-    return TranslationLineageId(uuid.uuid4())
+    return TranslationLineageId(uuid.uuid5(_LINEAGE_NAMESPACE, _runtime_seed("lineage")))
 
 
 def generate_trace_id() -> TranslationTraceId:
-    return TranslationTraceId(uuid.uuid4())
+    return TranslationTraceId(uuid.uuid5(_TRACE_NAMESPACE, _runtime_seed("trace")))
 
 
 def generate_correlation_id() -> TranslationCorrelationId:
-    return TranslationCorrelationId(uuid.uuid4())
+    return TranslationCorrelationId(uuid.uuid5(_CORRELATION_NAMESPACE, _runtime_seed("correlation")))
 
 
 def generate_replay_id() -> TranslationReplayId:
-    return TranslationReplayId(uuid.uuid4())
+    return TranslationReplayId(uuid.uuid5(_REPLAY_NAMESPACE, _runtime_seed("replay")))
 
 
 def generate_localization_id() -> LocalizationId:
-    return LocalizationId(uuid.uuid4())
+    return LocalizationId(uuid.uuid5(_LOCALIZATION_NAMESPACE, _runtime_seed("localization")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 def derive_translation_id(*, seed: str) -> TranslationId:

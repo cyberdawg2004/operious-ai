@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import uuid
 from datetime import datetime, timezone
 from typing import Mapping
 
@@ -47,7 +48,10 @@ from app.governance.exceptions import (
     EnforcementExecutionError,
     GovernanceConfigurationError,
 )
-from app.governance.identity.decision_ids import generate_decision_id
+from app.governance.identity.decision_ids import (
+    derive_decision_id,
+    generate_decision_id,
+)
 from app.governance.persistence import (
     BaseGovernanceRepository,
 )
@@ -136,12 +140,15 @@ class GovernanceRuntime:
         for policy_trace in engine_result.policy_traces:
             log_policy_evaluation(policy_trace)
 
+        decision_id = _decision_id_from_context_seed(context)
+
         # 2. Build the apex decision (pure-function aggregation).
         decision = build_decision(
             stage=context.stage,
             policy_chain_id=chain.chain_id,
             evaluation_results=engine_result.evaluation_results,
             metadata={
+                **dict(context.metadata),
                 "action": context.action,
                 "resource": context.resource,
                 "tenant_id": context.tenant_id,
@@ -165,6 +172,7 @@ class GovernanceRuntime:
                 # decision record carries the version pin.
                 "governance_version": chain.governance_version,
             },
+            decision_id=decision_id,
         )
 
         # 3. Enforcement.
@@ -229,6 +237,7 @@ class GovernanceRuntime:
                 latency_ms=latency_ms,
                 status="failed",
             )
+            await self._persist_failure(decision=decision, trace=trace)
             return GovernanceEnvelope(trace=trace, error=err)
 
         # 4. Successful enforcement.
@@ -326,7 +335,10 @@ class GovernanceRuntime:
         from app.governance.enums import Decision as _D
 
         trace = GovernanceTrace(
-            decision_id=generate_decision_id(),
+            decision_id=(
+                _decision_id_from_context_seed(context)
+                or generate_decision_id()
+            ),
             request_id=context.request_id,
             stage=context.stage,
             action=context.action,
@@ -380,6 +392,28 @@ class GovernanceRuntime:
         await self._persistence.record_enforcement_action(
             enforcement_action_to_record(action)
         )
+
+    async def _persist_failure(
+        self,
+        *,
+        decision: GovernanceDecision,
+        trace: GovernanceTrace,
+    ) -> None:
+        if self._persistence is None:
+            return
+        await self._persistence.record_decision(
+            decision_to_record(decision)
+        )
+        await self._persistence.record_trace(trace_to_record(trace))
+
+
+def _decision_id_from_context_seed(
+    context: GovernanceContext,
+) -> uuid.UUID | None:
+    seed = context.metadata.get("governance.decision_seed")
+    if not isinstance(seed, str) or not seed:
+        return None
+    return derive_decision_id(seed=seed)
 
 
 __all__ = ["GovernanceRuntime"]

@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
+from app.core.deterministic_identity import derive_runtime_id
 from app.supervisor.enums import (
     EscalationLevel,
     EvaluationStatus,
@@ -35,6 +36,8 @@ from app.supervisor.enums import (
 )
 from app.supervisor.identity import derive_escalation_id
 from app.supervisor.models.findings import RuntimeFinding
+
+_DECISION_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe50600f")
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +156,16 @@ def build_supervisor_decision(
 
     typed_evaluations: tuple[QAEvaluation, ...] = tuple(evaluations)  # type: ignore[assignment]
     decided_at = decided_at or datetime.now(timezone.utc)
-    decision_id = decision_id or uuid.uuid4()
+    decision_id = decision_id or derive_runtime_id(
+        namespace=_DECISION_NAMESPACE,
+        tenant_id=None,
+        seed_components=(
+            "supervisor_decision",
+            _evaluation_seed(typed_evaluations),
+            metadata,
+            scoring_weights,
+        ),
+    )
     weights = dict(scoring_weights or {})
 
     # 1. Findings concatenated in sorted-evaluator-name order.
@@ -227,6 +239,36 @@ def build_supervisor_decision(
         reason=reason,
         decided_at=decided_at,
         metadata=dict(metadata or {}),
+    )
+
+
+def _evaluation_seed(
+    evaluations: Sequence["object"],
+) -> tuple[tuple[object, ...], ...]:
+    from app.supervisor.contracts.evaluations import QAEvaluation
+
+    typed: tuple[QAEvaluation, ...] = tuple(evaluations)  # type: ignore[assignment]
+    return tuple(
+        (
+            evaluation.evaluator_name,
+            evaluation.status.value,
+            round(evaluation.score, 8),
+            tuple(
+                (
+                    str(finding.finding_id),
+                    finding.evaluator_name,
+                    finding.category.value,
+                    finding.severity.value,
+                    finding.code,
+                    finding.message,
+                    finding.metadata,
+                )
+                for finding in evaluation.findings
+            ),
+            evaluation.error,
+            evaluation.metadata,
+        )
+        for evaluation in typed
     )
 
 

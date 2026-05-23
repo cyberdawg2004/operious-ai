@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +37,7 @@ from app.boundary.persistence import BoundaryPersistenceProtocol
 from app.boundary.registry import BoundaryAdapterRegistry
 from app.identity import AuthorityContext
 from app.tenant.enums import TenantChannelType
+from app.tenant.persistence import TenantChannelConfigurationRecord
 from app.tenant.runtime import TenantConfigurationRuntime
 
 TicketChannel = Literal["email", "whatsapp", "voice"]
@@ -135,9 +138,16 @@ class TicketIngressService:
                 reason="channel route does not belong to tenant scope",
             )
 
+        webhook_secret = _select_webhook_secret(
+            channel_type=tenant_channel_type,
+            channel_config=channel_config,
+            body=body,
+            headers=headers,
+            raw_body=raw_body,
+        )
         adapter = _webhook_adapter_for_channel(
             channel_type=tenant_channel_type,
-            webhook_secret=channel_config.webhook_secret,
+            webhook_secret=webhook_secret,
             routing_address=channel_config.routing_address,
         )
         payload = IngressPayload(
@@ -437,6 +447,146 @@ def _source_type_for_tenant_channel(
     if channel_type is TenantChannelType.LARK:
         return BoundarySourceType.LARK
     return BoundarySourceType.GENERIC
+
+
+def _select_webhook_secret(
+    *,
+    channel_type: TenantChannelType,
+    channel_config: TenantChannelConfigurationRecord,
+    body: Any,
+    headers: Mapping[str, str],
+    raw_body: bytes | None,
+) -> str:
+    previous_secret = channel_config.previous_webhook_secret
+    expires_at = channel_config.credential_rotation_expires_at
+    if previous_secret is None or expires_at is None:
+        return channel_config.webhook_secret
+    if expires_at <= datetime.now(timezone.utc):
+        return channel_config.webhook_secret
+    if _webhook_signature_matches_secret(
+        channel_type=channel_type,
+        secret=previous_secret,
+        body=body,
+        headers=headers,
+        raw_body=raw_body,
+    ):
+        return previous_secret
+    return channel_config.webhook_secret
+
+
+def _webhook_signature_matches_secret(
+    *,
+    channel_type: TenantChannelType,
+    secret: str,
+    body: Any,
+    headers: Mapping[str, str],
+    raw_body: bytes | None,
+) -> bool:
+    if channel_type is TenantChannelType.EMAIL:
+        return _sha256_signature_matches(
+            secret=secret,
+            body=body,
+            headers=headers,
+            raw_body=raw_body,
+            header_names=(
+                "x-operious-signature",
+                "x-email-signature",
+                "x-amz-sns-message-signature",
+            ),
+        )
+    if channel_type is TenantChannelType.WHATSAPP:
+        return _sha256_signature_matches(
+            secret=secret,
+            body=body,
+            headers=headers,
+            raw_body=raw_body,
+            header_names=("x-hub-signature-256", "x-operious-signature"),
+        )
+    if channel_type is TenantChannelType.SHULEX:
+        return _sha256_signature_matches(
+            secret=secret,
+            body=body,
+            headers=headers,
+            raw_body=raw_body,
+            header_names=("x-shulex-signature", "x-operious-signature"),
+        )
+    if channel_type is TenantChannelType.LARK:
+        return _lark_signature_matches(
+            secret=secret,
+            body=body,
+            headers=headers,
+            raw_body=raw_body,
+        )
+    return False
+
+
+def _sha256_signature_matches(
+    *,
+    secret: str,
+    body: Any,
+    headers: Mapping[str, str],
+    raw_body: bytes | None,
+    header_names: tuple[str, ...],
+) -> bool:
+    signature = None
+    for name in header_names:
+        signature = _header(headers, name)
+        if signature:
+            break
+    if not signature:
+        return False
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        _signature_bytes(body=body, raw_body=raw_body),
+        hashlib.sha256,
+    ).hexdigest()
+    supplied = signature.strip()
+    if supplied.startswith("sha256="):
+        supplied = supplied.removeprefix("sha256=")
+    return hmac.compare_digest(supplied.lower(), expected.lower())
+
+
+def _lark_signature_matches(
+    *,
+    secret: str,
+    body: Any,
+    headers: Mapping[str, str],
+    raw_body: bytes | None,
+) -> bool:
+    signature = _header(headers, "x-lark-signature")
+    timestamp = _header(headers, "x-lark-request-timestamp")
+    nonce = _header(headers, "x-lark-request-nonce")
+    if not signature or timestamp is None or nonce is None:
+        return False
+    signed = timestamp.encode("utf-8") + nonce.encode("utf-8")
+    signed += _signature_bytes(body=body, raw_body=raw_body)
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        signed,
+        hashlib.sha256,
+    ).hexdigest()
+    supplied = signature.strip()
+    if supplied.startswith("sha256="):
+        supplied = supplied.removeprefix("sha256=")
+    return hmac.compare_digest(supplied.lower(), expected.lower())
+
+
+def _signature_bytes(*, body: Any, raw_body: bytes | None) -> bytes:
+    if raw_body is not None:
+        return raw_body
+    return json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None
 
 
 def _webhook_ingress_seed(

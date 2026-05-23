@@ -32,6 +32,16 @@ from app.runtime.escalation_event_projection import (
     EscalationOperationalEventProjector,
     project_escalation_record,
 )
+from app.runtime.execution_governance import (
+    ExecutionGovernanceEvaluation,
+    ExecutionGovernanceRuntime,
+)
+from app.runtime.provider_circuit_breaker import (
+    ProviderCircuitBreaker,
+    ProviderCircuitOpenError,
+    ProviderCircuitSnapshot,
+    ProviderCircuitState,
+)
 from app.runtime.governance_event_projection import (
     GovernanceDecisionEventLineage,
     GovernanceEventProjectionError,
@@ -84,6 +94,8 @@ __all__ = [
     "DispatchArbitrationProposal",
     "DispatchArbitrationRuntime",
     "ExecutionEventProjectionError",
+    "ExecutionGovernanceEvaluation",
+    "ExecutionGovernanceRuntime",
     "ExecutionOperationalEventProjection",
     "ExecutionOperationalEventProjector",
     "EscalationEventProjectionError",
@@ -96,6 +108,10 @@ __all__ = [
     "QAEventProjectionError",
     "QAOperationalEventProjection",
     "QAOperationalEventProjector",
+    "ProviderCircuitBreaker",
+    "ProviderCircuitOpenError",
+    "ProviderCircuitSnapshot",
+    "ProviderCircuitState",
     "SessionEventProjectionError",
     "SessionOperationalEventProjection",
     "SessionOperationalEventProjector",

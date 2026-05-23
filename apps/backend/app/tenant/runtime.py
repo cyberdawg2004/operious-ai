@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 from app.coordination.enums import (
@@ -33,26 +33,34 @@ from app.coordination.topology.models.node import CoordinationNode
 from app.coordination.topology.models.path import CoordinationPath
 from app.coordination.topology.models.topology import CoordinationTopology
 from app.tenant.credentials import TenantCredentialEncryptor
+from app.sop_intelligence import ApprovalRecord
+from app.tenant.chronology import ChronologyVerificationResult, canonical_sha256
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
+    TenantExecutionCircuitState,
+    TenantExecutionGovernanceStatus,
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantTopologyStatus,
 )
 from app.tenant.exceptions import (
+    ApprovalRequiredError,
     TenantConfigurationError,
     TenantConfigurationNotFoundError,
     TenantTopologyCycleError,
 )
 from app.tenant.identity import (
     TenantChannelConfigurationId,
+    TenantExecutionCircuitBreakerId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantTopologyConfigurationId,
     derive_channel_configuration_id,
-    derive_governance_policy_id,
+    derive_execution_circuit_breaker_id,
+    derive_execution_governance_configuration_id,
+    derive_governance_policy_version_id,
     derive_knowledge_document_id,
     derive_knowledge_document_version_id,
     derive_topology_configuration_id,
@@ -61,6 +69,12 @@ from app.tenant.persistence import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerPage,
+    TenantExecutionCircuitBreakerQuery,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationPage,
+    TenantExecutionGovernanceConfigurationRecord,
+    TenantExecutionGovernanceConfigurationQuery,
     TenantConfigurationRepository,
     TenantGovernancePolicyPage,
     TenantGovernancePolicyQuery,
@@ -69,6 +83,7 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentQuery,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
+    TenantKnowledgeDocumentVersionQuery,
     TenantTopologyConfigurationPage,
     TenantTopologyConfigurationQuery,
     TenantTopologyConfigurationRecord,
@@ -171,6 +186,44 @@ class TenantConfigurationRuntime:
         )
         return record
 
+    async def rotate_channel_credentials(
+        self,
+        *,
+        tenant_id: str,
+        config_id: TenantChannelConfigurationId,
+        credentials: Mapping[str, Any],
+        webhook_secret: str,
+        grace_period_minutes: int,
+    ) -> TenantChannelConfigurationRecord:
+        if grace_period_minutes < 1:
+            raise TenantConfigurationError(
+                "credential rotation grace period must be positive"
+            )
+        existing = await self._require_channel(
+            tenant_id=tenant_id,
+            config_id=config_id,
+        )
+        now = _utcnow()
+        record = replace(
+            existing,
+            credentials_enc=self._require_credential_encryptor().encrypt(
+                tenant_id=tenant_id,
+                credentials=credentials,
+            ),
+            webhook_secret=webhook_secret,
+            previous_credentials_enc=existing.credentials_enc,
+            previous_webhook_secret=existing.webhook_secret,
+            credential_rotated_at=now,
+            credential_rotation_expires_at=now
+            + timedelta(minutes=grace_period_minutes),
+            updated_at=now,
+        )
+        await self._repository.save_channel_configuration(
+            record,
+            expected_tenant_id=tenant_id,
+        )
+        return record
+
     async def verify_channel(
         self,
         *,
@@ -249,7 +302,9 @@ class TenantConfigurationRuntime:
         status: TenantKnowledgeDocumentStatus = (
             TenantKnowledgeDocumentStatus.PENDING_INDEX
         ),
+        approval: ApprovalRecord | None = None,
     ) -> TenantKnowledgeDocumentRecord:
+        approval_record = _require_approval(approval, tenant_id=tenant_id)
         document_id = derive_knowledge_document_id(
             tenant_id=tenant_id,
             title=title,
@@ -278,15 +333,21 @@ class TenantConfigurationRuntime:
             record,
             expected_tenant_id=tenant_id,
         )
-        if existing is not None:
-            await self._record_knowledge_document_version(
-                replace(existing, status=TenantKnowledgeDocumentStatus.ARCHIVED),
-                source_approval_id=None,
-                metadata={"archived_by_document_version": record.version},
+        previous = (
+            None
+            if existing is None
+            else await self._repository.get_knowledge_document_version(
+                existing.document_id,
+                existing.version,
+                expected_tenant_id=tenant_id,
             )
+        )
         await self._record_knowledge_document_version(
             record,
-            source_approval_id=None,
+            source_approval_id=approval_record.approval_id,
+            previous_version_sha256=(
+                previous.content_sha256 if previous is not None else None
+            ),
             metadata={"origin": "tenant_configuration"},
         )
         return record
@@ -299,10 +360,17 @@ class TenantConfigurationRuntime:
         uploaded_by: str,
         content: str | None = None,
         status: TenantKnowledgeDocumentStatus | None = None,
+        approval: ApprovalRecord | None = None,
     ) -> TenantKnowledgeDocumentRecord:
+        approval_record = _require_approval(approval, tenant_id=tenant_id)
         existing = await self._require_document(
             tenant_id=tenant_id,
             document_id=document_id,
+        )
+        previous = await self._repository.get_knowledge_document_version(
+            existing.document_id,
+            existing.version,
+            expected_tenant_id=tenant_id,
         )
         record = replace(
             existing,
@@ -316,13 +384,11 @@ class TenantConfigurationRuntime:
             expected_tenant_id=tenant_id,
         )
         await self._record_knowledge_document_version(
-            replace(existing, status=TenantKnowledgeDocumentStatus.ARCHIVED),
-            source_approval_id=None,
-            metadata={"archived_by_document_version": record.version},
-        )
-        await self._record_knowledge_document_version(
             record,
-            source_approval_id=None,
+            source_approval_id=approval_record.approval_id,
+            previous_version_sha256=(
+                previous.content_sha256 if previous is not None else None
+            ),
             metadata={"origin": "tenant_configuration"},
         )
         return record
@@ -338,13 +404,45 @@ class TenantConfigurationRuntime:
             expected_tenant_id=tenant_id,
         )
 
+    async def verify_chronology_chain(
+        self,
+        *,
+        tenant_id: str,
+        document_id: TenantKnowledgeDocumentId,
+    ) -> ChronologyVerificationResult:
+        versions = await self._repository.list_knowledge_document_versions(
+            TenantKnowledgeDocumentVersionQuery(document_id=document_id),
+            expected_tenant_id=tenant_id,
+        )
+        previous_sha256: str | None = None
+        for version in sorted(versions.items, key=lambda item: item.version):
+            expected = _knowledge_version_content_sha256(version)
+            if (
+                version.content_sha256 != expected
+                or version.previous_version_sha256 != previous_sha256
+            ):
+                return ChronologyVerificationResult(
+                    valid=False,
+                    broken_at_version=version.version,
+                )
+            previous_sha256 = version.content_sha256
+        return ChronologyVerificationResult(valid=True)
+
     async def _record_knowledge_document_version(
         self,
         record: TenantKnowledgeDocumentRecord,
         *,
         source_approval_id: str | None,
+        previous_version_sha256: str | None,
         metadata: Mapping[str, Any],
     ) -> None:
+        if source_approval_id is None:
+            raise ApprovalRequiredError("knowledge document version requires approval")
+        content_sha256 = _knowledge_document_content_sha256(
+            record=record,
+            source_approval_id=source_approval_id,
+            metadata=metadata,
+        )
         await self._repository.save_knowledge_document_version(
             TenantKnowledgeDocumentVersionRecord(
                 version_id=derive_knowledge_document_version_id(
@@ -361,6 +459,8 @@ class TenantConfigurationRuntime:
                 status=record.status,
                 uploaded_by=record.uploaded_by,
                 source_approval_id=source_approval_id,
+                content_sha256=content_sha256,
+                previous_version_sha256=previous_version_sha256,
                 created_at=_utcnow(),
                 metadata=dict(metadata),
             ),
@@ -376,26 +476,49 @@ class TenantConfigurationRuntime:
         approved_by: str,
         effective_from: datetime,
         status: TenantGovernancePolicyStatus = (TenantGovernancePolicyStatus.DRAFT),
+        approval: ApprovalRecord | None = None,
     ) -> TenantGovernancePolicyRecord:
-        policy_id = derive_governance_policy_id(
-            tenant_id=tenant_id,
-            policy_type=policy_type,
-        )
-        existing = await self._repository.get_governance_policy(
-            policy_id,
+        approval_record = _require_approval(approval, tenant_id=tenant_id)
+        existing_page = await self._repository.list_governance_policies(
+            TenantGovernancePolicyQuery(policy_type=policy_type),
             expected_tenant_id=tenant_id,
         )
+        existing = (
+            max(existing_page.items, key=lambda item: item.version)
+            if existing_page.items
+            else None
+        )
+        version = 1 if existing is None else existing.version + 1
+        policy_id = derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=policy_type,
+            version=version,
+        )
         now = _utcnow()
+        previous_sha256 = existing.content_sha256 if existing is not None else None
+        content_sha256 = _governance_policy_content_sha256(
+            tenant_id=tenant_id,
+            policy_type=policy_type,
+            parameters=parameters,
+            status=status,
+            version=version,
+            approved_by=approved_by,
+            effective_from=effective_from,
+            source_approval_id=approval_record.approval_id,
+        )
         record = TenantGovernancePolicyRecord(
             policy_id=policy_id,
             tenant_id=tenant_id,
             policy_type=policy_type,
             parameters=dict(parameters),
             status=status,
-            version=1 if existing is None else existing.version + 1,
+            version=version,
             approved_by=approved_by,
             effective_from=effective_from,
             created_at=existing.created_at if existing is not None else now,
+            source_approval_id=approval_record.approval_id,
+            content_sha256=content_sha256,
+            previous_version_sha256=previous_sha256,
         )
         await self._repository.save_governance_policy(
             record,
@@ -412,24 +535,47 @@ class TenantConfigurationRuntime:
         parameters: Mapping[str, Any] | None = None,
         status: TenantGovernancePolicyStatus | None = None,
         effective_from: datetime | None = None,
+        approval: ApprovalRecord | None = None,
     ) -> TenantGovernancePolicyRecord:
+        approval_record = _require_approval(approval, tenant_id=tenant_id)
         existing = await self._require_policy(
             tenant_id=tenant_id,
             policy_id=policy_id,
         )
+        next_parameters = (
+            dict(parameters) if parameters is not None else dict(existing.parameters)
+        )
+        next_status = status if status is not None else existing.status
+        next_effective_from = (
+            effective_from if effective_from is not None else existing.effective_from
+        )
+        next_version = existing.version + 1
+        next_policy_id = derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=existing.policy_type,
+            version=next_version,
+        )
+        content_sha256 = _governance_policy_content_sha256(
+            tenant_id=tenant_id,
+            policy_type=existing.policy_type,
+            parameters=next_parameters,
+            status=next_status,
+            version=next_version,
+            approved_by=approved_by,
+            effective_from=next_effective_from,
+            source_approval_id=approval_record.approval_id,
+        )
         record = replace(
             existing,
-            parameters=(
-                dict(parameters) if parameters is not None else existing.parameters
-            ),
-            status=status if status is not None else existing.status,
-            version=existing.version + 1,
+            policy_id=next_policy_id,
+            parameters=next_parameters,
+            status=next_status,
+            version=next_version,
             approved_by=approved_by,
-            effective_from=(
-                effective_from
-                if effective_from is not None
-                else existing.effective_from
-            ),
+            effective_from=next_effective_from,
+            source_approval_id=approval_record.approval_id,
+            content_sha256=content_sha256,
+            previous_version_sha256=existing.content_sha256,
         )
         await self._repository.save_governance_policy(
             record,
@@ -445,6 +591,147 @@ class TenantConfigurationRuntime:
     ) -> TenantGovernancePolicyPage:
         return await self._repository.list_governance_policies(
             query,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def configure_execution_governance(
+        self,
+        *,
+        tenant_id: str,
+        execution_quota: int,
+        throughput_limit: int,
+        throughput_window_minutes: int,
+        governance_budget_limit: int,
+        governance_budget_window_minutes: int,
+        circuit_failure_threshold: int,
+        circuit_window_minutes: int,
+        circuit_cooldown_minutes: int,
+        configured_by: str,
+        status: TenantExecutionGovernanceStatus = TenantExecutionGovernanceStatus.DRAFT,
+        approval: ApprovalRecord | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> TenantExecutionGovernanceConfigurationRecord:
+        approval_record = _require_approval(approval, tenant_id=tenant_id)
+        page = await self._repository.list_execution_governance_configurations(
+            TenantExecutionGovernanceConfigurationQuery(),
+            expected_tenant_id=tenant_id,
+        )
+        existing = (
+            max(page.items, key=lambda item: item.version)
+            if page.items
+            else None
+        )
+        version = 1 if existing is None else existing.version + 1
+        config_id = derive_execution_governance_configuration_id(
+            tenant_id=tenant_id,
+            version=version,
+        )
+        now = _utcnow()
+        record_metadata = dict(metadata or {})
+        content_sha256 = _execution_governance_content_sha256(
+            tenant_id=tenant_id,
+            status=status,
+            execution_quota=execution_quota,
+            throughput_limit=throughput_limit,
+            throughput_window_minutes=throughput_window_minutes,
+            governance_budget_limit=governance_budget_limit,
+            governance_budget_window_minutes=governance_budget_window_minutes,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_window_minutes=circuit_window_minutes,
+            circuit_cooldown_minutes=circuit_cooldown_minutes,
+            version=version,
+            configured_by=configured_by,
+            source_approval_id=approval_record.approval_id,
+            metadata=record_metadata,
+        )
+        record = TenantExecutionGovernanceConfigurationRecord(
+            config_id=config_id,
+            tenant_id=tenant_id,
+            status=status,
+            execution_quota=execution_quota,
+            throughput_limit=throughput_limit,
+            throughput_window_minutes=throughput_window_minutes,
+            governance_budget_limit=governance_budget_limit,
+            governance_budget_window_minutes=governance_budget_window_minutes,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_window_minutes=circuit_window_minutes,
+            circuit_cooldown_minutes=circuit_cooldown_minutes,
+            version=version,
+            configured_by=configured_by,
+            created_at=existing.created_at if existing is not None else now,
+            updated_at=now,
+            metadata=record_metadata,
+            source_approval_id=approval_record.approval_id,
+            content_sha256=content_sha256,
+            previous_version_sha256=(
+                existing.content_sha256 if existing is not None else None
+            ),
+        )
+        await self._repository.save_execution_governance_configuration(
+            record,
+            expected_tenant_id=tenant_id,
+        )
+        breaker = TenantExecutionCircuitBreakerRecord(
+            breaker_id=derive_execution_circuit_breaker_id(
+                tenant_id=tenant_id,
+                config_id=config_id,
+            ),
+            tenant_id=tenant_id,
+            config_id=config_id,
+            state=TenantExecutionCircuitState.CLOSED,
+            failure_count=0,
+            opened_at=None,
+            open_until=None,
+            last_transition_at=now,
+            reason=None,
+            updated_at=now,
+            metadata={"origin": "execution_governance_configuration"},
+        )
+        await self._repository.save_execution_circuit_breaker(
+            breaker,
+            expected_tenant_id=tenant_id,
+        )
+        return record
+
+    async def get_execution_circuit_breaker(
+        self,
+        *,
+        tenant_id: str,
+        breaker_id: TenantExecutionCircuitBreakerId,
+    ) -> TenantExecutionCircuitBreakerRecord | None:
+        return await self._repository.get_execution_circuit_breaker(
+            breaker_id,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def list_execution_governance_configurations(
+        self,
+        *,
+        tenant_id: str,
+        query: TenantExecutionGovernanceConfigurationQuery,
+    ) -> TenantExecutionGovernanceConfigurationPage:
+        return await self._repository.list_execution_governance_configurations(
+            query,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def list_execution_circuit_breakers(
+        self,
+        *,
+        tenant_id: str,
+        query: TenantExecutionCircuitBreakerQuery,
+    ) -> TenantExecutionCircuitBreakerPage:
+        return await self._repository.list_execution_circuit_breakers(
+            query,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def resolve_active_execution_governance_configuration(
+        self,
+        *,
+        tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None:
+        return await self._repository.resolve_active_execution_governance_configuration(
             expected_tenant_id=tenant_id,
         )
 
@@ -587,6 +874,123 @@ class TenantConfigurationRuntime:
         if record is None:
             raise TenantConfigurationNotFoundError("governance policy not found")
         return record
+
+
+def _require_approval(
+    approval: ApprovalRecord | None,
+    *,
+    tenant_id: str,
+) -> ApprovalRecord:
+    if approval is None:
+        raise ApprovalRequiredError("tenant chronology mutation requires approval")
+    if approval.tenant_id != tenant_id:
+        raise ApprovalRequiredError("approval tenant does not match mutation tenant")
+    if approval.status != "approved":
+        raise ApprovalRequiredError("approval must be approved before mutation")
+    return approval
+
+
+def _knowledge_document_content_sha256(
+    *,
+    record: TenantKnowledgeDocumentRecord,
+    source_approval_id: str,
+    metadata: Mapping[str, Any],
+) -> str:
+    return canonical_sha256(
+        {
+            "tenant_id": record.tenant_id,
+            "document_id": str(record.document_id),
+            "version": record.version,
+            "title": record.title,
+            "content": record.content,
+            "document_type": record.document_type.value,
+            "status": record.status.value,
+            "uploaded_by": record.uploaded_by,
+            "source_approval_id": source_approval_id,
+            "metadata": dict(metadata),
+        }
+    )
+
+
+def _knowledge_version_content_sha256(
+    record: TenantKnowledgeDocumentVersionRecord,
+) -> str:
+    return canonical_sha256(
+        {
+            "tenant_id": record.tenant_id,
+            "document_id": str(record.document_id),
+            "version": record.version,
+            "title": record.title,
+            "content": record.content,
+            "document_type": record.document_type.value,
+            "status": record.status.value,
+            "uploaded_by": record.uploaded_by,
+            "source_approval_id": record.source_approval_id,
+            "metadata": dict(record.metadata),
+        }
+    )
+
+
+def _governance_policy_content_sha256(
+    *,
+    tenant_id: str,
+    policy_type: str,
+    parameters: Mapping[str, Any],
+    status: TenantGovernancePolicyStatus,
+    version: int,
+    approved_by: str,
+    effective_from: datetime,
+    source_approval_id: str,
+) -> str:
+    return canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": policy_type,
+            "parameters": dict(parameters),
+            "status": status.value,
+            "version": version,
+            "approved_by": approved_by,
+            "effective_from": effective_from.isoformat(),
+            "source_approval_id": source_approval_id,
+        }
+    )
+
+
+def _execution_governance_content_sha256(
+    *,
+    tenant_id: str,
+    status: TenantExecutionGovernanceStatus,
+    execution_quota: int,
+    throughput_limit: int,
+    throughput_window_minutes: int,
+    governance_budget_limit: int,
+    governance_budget_window_minutes: int,
+    circuit_failure_threshold: int,
+    circuit_window_minutes: int,
+    circuit_cooldown_minutes: int,
+    version: int,
+    configured_by: str,
+    source_approval_id: str,
+    metadata: Mapping[str, Any],
+) -> str:
+    return canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "status": status.value,
+            "execution_quota": execution_quota,
+            "throughput_limit": throughput_limit,
+            "throughput_window_minutes": throughput_window_minutes,
+            "governance_budget_limit": governance_budget_limit,
+            "governance_budget_window_minutes": governance_budget_window_minutes,
+            "circuit_failure_threshold": circuit_failure_threshold,
+            "circuit_window_minutes": circuit_window_minutes,
+            "circuit_cooldown_minutes": circuit_cooldown_minutes,
+            "version": version,
+            "configured_by": configured_by,
+            "source_approval_id": source_approval_id,
+            "metadata": dict(metadata),
+        }
+    )
 
 
 def _utcnow() -> datetime:

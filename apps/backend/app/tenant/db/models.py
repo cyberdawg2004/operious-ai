@@ -68,6 +68,16 @@ class TenantChannelConfigurationRow(Base):
     routing_address: Mapped[str] = mapped_column(String(_ROUTING_WIDTH), nullable=False)
     credentials_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     webhook_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_credentials_enc: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True
+    )
+    previous_webhook_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credential_rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    credential_rotation_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -163,8 +173,12 @@ class TenantKnowledgeDocumentVersionRow(Base):
     )
     status: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False, index=True)
     uploaded_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
-    source_approval_id: Mapped[str | None] = mapped_column(
-        String(_HANDLE_WIDTH), nullable=True, index=True
+    source_approval_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_version_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -230,6 +244,13 @@ class TenantGovernancePolicyRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    source_approval_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_version_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
@@ -237,12 +258,128 @@ class TenantGovernancePolicyRow(Base):
         UniqueConstraint(
             "tenant_id",
             "policy_type",
-            name="uq_tenant_governance_policies_tenant_type",
+            "version",
+            name="uq_tenant_governance_policies_tenant_type_version",
         ),
         Index(
             "ix_tenant_governance_policies_tenant_status",
             "tenant_id",
             "status",
+        ),
+    )
+
+
+class TenantExecutionGovernanceConfigurationRow(Base):
+    """ORM row for execution governance configuration versions."""
+
+    __tablename__ = "tenant_execution_governance_configurations"
+
+    config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False, index=True)
+    execution_quota: Mapped[int] = mapped_column(Integer, nullable=False)
+    throughput_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    throughput_window_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    governance_budget_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    governance_budget_window_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    circuit_failure_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
+    circuit_window_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    circuit_cooldown_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    configured_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    source_approval_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_version_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="exec_gov_tenant_id_nonempty"),
+        CheckConstraint("version >= 1", name="exec_gov_version_positive"),
+        UniqueConstraint(
+            "tenant_id",
+            "version",
+            name="uq_tenant_execution_governance_configurations_tenant_version",
+        ),
+        Index(
+            "ix_tenant_execution_governance_configurations_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+
+class TenantExecutionCircuitBreakerRow(Base):
+    """ORM row for tenant execution circuit breaker state."""
+
+    __tablename__ = "tenant_execution_circuit_breakers"
+
+    breaker_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    config_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "tenant_execution_governance_configurations.config_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+    state: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False, index=True)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    open_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_transition_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "config_id",
+            name="uq_tenant_execution_circuit_breakers_tenant_config",
         ),
     )
 
@@ -293,6 +430,8 @@ class TenantTopologyConfigurationRow(Base):
 
 __all__ = [
     "TenantChannelConfigurationRow",
+    "TenantExecutionCircuitBreakerRow",
+    "TenantExecutionGovernanceConfigurationRow",
     "TenantGovernancePolicyRow",
     "TenantKnowledgeDocumentRow",
     "TenantKnowledgeDocumentVersionRow",

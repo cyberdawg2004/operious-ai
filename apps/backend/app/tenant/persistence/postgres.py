@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from app.repositories.base import BaseRepository
 from app.tenant.db.models import (
     TenantChannelConfigurationRow,
+    TenantExecutionCircuitBreakerRow,
+    TenantExecutionGovernanceConfigurationRow,
     TenantGovernancePolicyRow,
     TenantKnowledgeDocumentRow,
     TenantKnowledgeDocumentVersionRow,
@@ -19,14 +21,21 @@ from app.tenant.db.models import (
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
+    TenantExecutionCircuitState,
+    TenantExecutionGovernanceStatus,
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantTopologyStatus,
 )
-from app.tenant.exceptions import TenantConfigurationPersistenceError
+from app.tenant.exceptions import (
+    ChronologyImmutabilityError,
+    TenantConfigurationPersistenceError,
+)
 from app.tenant.identity import (
     TenantChannelConfigurationId,
+    TenantExecutionCircuitBreakerId,
+    TenantExecutionGovernanceConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantKnowledgeDocumentVersionId,
@@ -35,6 +44,10 @@ from app.tenant.identity import (
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantExecutionCircuitBreakerPage,
+    TenantExecutionCircuitBreakerQuery,
+    TenantExecutionGovernanceConfigurationPage,
+    TenantExecutionGovernanceConfigurationQuery,
     TenantGovernancePolicyPage,
     TenantGovernancePolicyQuery,
     TenantKnowledgeDocumentPage,
@@ -46,6 +59,8 @@ from app.tenant.persistence.models import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
@@ -227,7 +242,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
                 if existing is None:
                     self.session.add(_document_version_record_to_row(record))
                 else:
-                    _update_document_version_row(existing, record)
+                    assert_version_row_unchanged_or_raise(existing, record)
         except IntegrityError as exc:
             raise TenantConfigurationPersistenceError(
                 "knowledge document version could not be persisted"
@@ -347,6 +362,162 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             sliced = sliced[: query.limit]
         return TenantGovernancePolicyPage(
             items=tuple(_policy_row_to_record(row) for row in sliced),
+            total=total,
+            offset=query.offset,
+        )
+
+    async def save_execution_governance_configuration(
+        self,
+        record: TenantExecutionGovernanceConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        await self._ensure_tenant(expected_tenant_id)
+        existing = await self._execution_governance_row(
+            record.config_id, expected_tenant_id=expected_tenant_id
+        )
+        try:
+            async with self.session.begin_nested():
+                if existing is None:
+                    self.session.add(_execution_governance_record_to_row(record))
+                else:
+                    _update_execution_governance_row(existing, record)
+        except IntegrityError as exc:
+            raise TenantConfigurationPersistenceError(
+                "execution governance configuration could not be persisted"
+            ) from exc
+
+    async def get_execution_governance_configuration(
+        self,
+        config_id: TenantExecutionGovernanceConfigurationId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None:
+        row = await self._execution_governance_row(
+            config_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        return None if row is None else _execution_governance_row_to_record(row)
+
+    async def list_execution_governance_configurations(
+        self,
+        query: TenantExecutionGovernanceConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationPage:
+        stmt = select(TenantExecutionGovernanceConfigurationRow).where(
+            TenantExecutionGovernanceConfigurationRow.tenant_id == expected_tenant_id
+        )
+        if query.config_id is not None:
+            stmt = stmt.where(
+                TenantExecutionGovernanceConfigurationRow.config_id == query.config_id
+            )
+        if query.status is not None:
+            stmt = stmt.where(
+                TenantExecutionGovernanceConfigurationRow.status == query.status.value
+            )
+        stmt = stmt.order_by(
+            TenantExecutionGovernanceConfigurationRow.version,
+            TenantExecutionGovernanceConfigurationRow.config_id,
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        total = len(rows)
+        sliced = rows[query.offset :]
+        if query.limit is not None:
+            sliced = sliced[: query.limit]
+        return TenantExecutionGovernanceConfigurationPage(
+            items=tuple(_execution_governance_row_to_record(row) for row in sliced),
+            total=total,
+            offset=query.offset,
+        )
+
+    async def resolve_active_execution_governance_configuration(
+        self,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None:
+        stmt = (
+            select(TenantExecutionGovernanceConfigurationRow)
+            .where(
+                TenantExecutionGovernanceConfigurationRow.tenant_id
+                == expected_tenant_id,
+                TenantExecutionGovernanceConfigurationRow.status
+                == TenantExecutionGovernanceStatus.ACTIVE.value,
+            )
+            .order_by(
+                TenantExecutionGovernanceConfigurationRow.version.desc(),
+                TenantExecutionGovernanceConfigurationRow.config_id.desc(),
+            )
+            .limit(1)
+        )
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        return None if row is None else _execution_governance_row_to_record(row)
+
+    async def save_execution_circuit_breaker(
+        self,
+        record: TenantExecutionCircuitBreakerRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        await self._ensure_tenant(expected_tenant_id)
+        existing = await self._execution_circuit_row(
+            record.breaker_id, expected_tenant_id=expected_tenant_id
+        )
+        try:
+            async with self.session.begin_nested():
+                if existing is None:
+                    self.session.add(_execution_circuit_record_to_row(record))
+                else:
+                    _update_execution_circuit_row(existing, record)
+        except IntegrityError as exc:
+            raise TenantConfigurationPersistenceError(
+                "execution circuit breaker could not be persisted"
+            ) from exc
+
+    async def get_execution_circuit_breaker(
+        self,
+        breaker_id: TenantExecutionCircuitBreakerId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerRecord | None:
+        row = await self._execution_circuit_row(
+            breaker_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        return None if row is None else _execution_circuit_row_to_record(row)
+
+    async def list_execution_circuit_breakers(
+        self,
+        query: TenantExecutionCircuitBreakerQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerPage:
+        stmt = select(TenantExecutionCircuitBreakerRow).where(
+            TenantExecutionCircuitBreakerRow.tenant_id == expected_tenant_id
+        )
+        if query.breaker_id is not None:
+            stmt = stmt.where(
+                TenantExecutionCircuitBreakerRow.breaker_id == query.breaker_id
+            )
+        if query.config_id is not None:
+            stmt = stmt.where(
+                TenantExecutionCircuitBreakerRow.config_id == query.config_id
+            )
+        if query.state is not None:
+            stmt = stmt.where(TenantExecutionCircuitBreakerRow.state == query.state.value)
+        stmt = stmt.order_by(
+            TenantExecutionCircuitBreakerRow.state,
+            TenantExecutionCircuitBreakerRow.breaker_id,
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        total = len(rows)
+        sliced = rows[query.offset :]
+        if query.limit is not None:
+            sliced = sliced[: query.limit]
+        return TenantExecutionCircuitBreakerPage(
+            items=tuple(_execution_circuit_row_to_record(row) for row in sliced),
             total=total,
             offset=query.offset,
         )
@@ -490,6 +661,30 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def _execution_governance_row(
+        self,
+        config_id: TenantExecutionGovernanceConfigurationId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRow | None:
+        stmt = select(TenantExecutionGovernanceConfigurationRow).where(
+            TenantExecutionGovernanceConfigurationRow.config_id == config_id,
+            TenantExecutionGovernanceConfigurationRow.tenant_id == expected_tenant_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def _execution_circuit_row(
+        self,
+        breaker_id: TenantExecutionCircuitBreakerId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerRow | None:
+        stmt = select(TenantExecutionCircuitBreakerRow).where(
+            TenantExecutionCircuitBreakerRow.breaker_id == breaker_id,
+            TenantExecutionCircuitBreakerRow.tenant_id == expected_tenant_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def _topology_row(
         self,
         config_id: TenantTopologyConfigurationId,
@@ -521,6 +716,10 @@ def _channel_record_to_row(
         routing_address=record.routing_address,
         credentials_enc=record.credentials_enc,
         webhook_secret=record.webhook_secret,
+        previous_credentials_enc=record.previous_credentials_enc,
+        previous_webhook_secret=record.previous_webhook_secret,
+        credential_rotated_at=record.credential_rotated_at,
+        credential_rotation_expires_at=record.credential_rotation_expires_at,
         verified_at=record.verified_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -536,6 +735,10 @@ def _update_channel_row(
     row.routing_address = record.routing_address
     row.credentials_enc = record.credentials_enc
     row.webhook_secret = record.webhook_secret
+    row.previous_credentials_enc = record.previous_credentials_enc
+    row.previous_webhook_secret = record.previous_webhook_secret
+    row.credential_rotated_at = record.credential_rotated_at
+    row.credential_rotation_expires_at = record.credential_rotation_expires_at
     row.verified_at = record.verified_at
     row.created_at = record.created_at
     row.updated_at = record.updated_at
@@ -552,6 +755,14 @@ def _channel_row_to_record(
         routing_address=row.routing_address,
         credentials_enc=bytes(row.credentials_enc),
         webhook_secret=row.webhook_secret,
+        previous_credentials_enc=(
+            bytes(row.previous_credentials_enc)
+            if row.previous_credentials_enc is not None
+            else None
+        ),
+        previous_webhook_secret=row.previous_webhook_secret,
+        credential_rotated_at=row.credential_rotated_at,
+        credential_rotation_expires_at=row.credential_rotation_expires_at,
         verified_at=row.verified_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -620,23 +831,21 @@ def _document_version_record_to_row(
         status=record.status.value,
         uploaded_by=record.uploaded_by,
         source_approval_id=record.source_approval_id,
+        content_sha256=record.content_sha256,
+        previous_version_sha256=record.previous_version_sha256,
         created_at=record.created_at,
         metadata_json=dict(record.metadata),
     )
 
 
-def _update_document_version_row(
+def assert_version_row_unchanged_or_raise(
     row: TenantKnowledgeDocumentVersionRow,
     record: TenantKnowledgeDocumentVersionRecord,
 ) -> None:
-    row.title = record.title
-    row.content = record.content
-    row.document_type = record.document_type.value
-    row.status = record.status.value
-    row.uploaded_by = record.uploaded_by
-    row.source_approval_id = record.source_approval_id
-    row.created_at = record.created_at
-    row.metadata_json = dict(record.metadata)
+    if row.content_sha256 != record.content_sha256:
+        raise ChronologyImmutabilityError(
+            "knowledge document version is append-only"
+        )
 
 
 def _document_version_row_to_record(
@@ -653,6 +862,8 @@ def _document_version_row_to_record(
         status=TenantKnowledgeDocumentStatus(row.status),
         uploaded_by=row.uploaded_by,
         source_approval_id=row.source_approval_id,
+        content_sha256=row.content_sha256,
+        previous_version_sha256=row.previous_version_sha256,
         created_at=row.created_at,
         metadata=_as_dict(row.metadata_json),
     )
@@ -671,6 +882,9 @@ def _policy_record_to_row(
         approved_by=record.approved_by,
         effective_from=record.effective_from,
         created_at=record.created_at,
+        source_approval_id=record.source_approval_id,
+        content_sha256=record.content_sha256,
+        previous_version_sha256=record.previous_version_sha256,
     )
 
 
@@ -685,6 +899,9 @@ def _update_policy_row(
     row.approved_by = record.approved_by
     row.effective_from = record.effective_from
     row.created_at = record.created_at
+    row.source_approval_id = record.source_approval_id
+    row.content_sha256 = record.content_sha256
+    row.previous_version_sha256 = record.previous_version_sha256
 
 
 def _policy_row_to_record(
@@ -700,6 +917,134 @@ def _policy_row_to_record(
         approved_by=row.approved_by,
         effective_from=row.effective_from,
         created_at=row.created_at,
+        source_approval_id=row.source_approval_id,
+        content_sha256=row.content_sha256,
+        previous_version_sha256=row.previous_version_sha256,
+    )
+
+
+def _execution_governance_record_to_row(
+    record: TenantExecutionGovernanceConfigurationRecord,
+) -> TenantExecutionGovernanceConfigurationRow:
+    return TenantExecutionGovernanceConfigurationRow(
+        config_id=record.config_id,
+        tenant_id=record.tenant_id,
+        status=record.status.value,
+        execution_quota=record.execution_quota,
+        throughput_limit=record.throughput_limit,
+        throughput_window_minutes=record.throughput_window_minutes,
+        governance_budget_limit=record.governance_budget_limit,
+        governance_budget_window_minutes=record.governance_budget_window_minutes,
+        circuit_failure_threshold=record.circuit_failure_threshold,
+        circuit_window_minutes=record.circuit_window_minutes,
+        circuit_cooldown_minutes=record.circuit_cooldown_minutes,
+        version=record.version,
+        configured_by=record.configured_by,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        metadata_json=dict(record.metadata),
+        source_approval_id=record.source_approval_id,
+        content_sha256=record.content_sha256,
+        previous_version_sha256=record.previous_version_sha256,
+    )
+
+
+def _update_execution_governance_row(
+    row: TenantExecutionGovernanceConfigurationRow,
+    record: TenantExecutionGovernanceConfigurationRecord,
+) -> None:
+    row.status = record.status.value
+    row.execution_quota = record.execution_quota
+    row.throughput_limit = record.throughput_limit
+    row.throughput_window_minutes = record.throughput_window_minutes
+    row.governance_budget_limit = record.governance_budget_limit
+    row.governance_budget_window_minutes = record.governance_budget_window_minutes
+    row.circuit_failure_threshold = record.circuit_failure_threshold
+    row.circuit_window_minutes = record.circuit_window_minutes
+    row.circuit_cooldown_minutes = record.circuit_cooldown_minutes
+    row.version = record.version
+    row.configured_by = record.configured_by
+    row.created_at = record.created_at
+    row.updated_at = record.updated_at
+    row.metadata_json = dict(record.metadata)
+    row.source_approval_id = record.source_approval_id
+    row.content_sha256 = record.content_sha256
+    row.previous_version_sha256 = record.previous_version_sha256
+
+
+def _execution_governance_row_to_record(
+    row: TenantExecutionGovernanceConfigurationRow,
+) -> TenantExecutionGovernanceConfigurationRecord:
+    return TenantExecutionGovernanceConfigurationRecord(
+        config_id=TenantExecutionGovernanceConfigurationId(row.config_id),
+        tenant_id=row.tenant_id,
+        status=TenantExecutionGovernanceStatus(row.status),
+        execution_quota=row.execution_quota,
+        throughput_limit=row.throughput_limit,
+        throughput_window_minutes=row.throughput_window_minutes,
+        governance_budget_limit=row.governance_budget_limit,
+        governance_budget_window_minutes=row.governance_budget_window_minutes,
+        circuit_failure_threshold=row.circuit_failure_threshold,
+        circuit_window_minutes=row.circuit_window_minutes,
+        circuit_cooldown_minutes=row.circuit_cooldown_minutes,
+        version=row.version,
+        configured_by=row.configured_by,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        metadata=_as_dict(row.metadata_json),
+        source_approval_id=row.source_approval_id,
+        content_sha256=row.content_sha256,
+        previous_version_sha256=row.previous_version_sha256,
+    )
+
+
+def _execution_circuit_record_to_row(
+    record: TenantExecutionCircuitBreakerRecord,
+) -> TenantExecutionCircuitBreakerRow:
+    return TenantExecutionCircuitBreakerRow(
+        breaker_id=record.breaker_id,
+        tenant_id=record.tenant_id,
+        config_id=record.config_id,
+        state=record.state.value,
+        failure_count=record.failure_count,
+        opened_at=record.opened_at,
+        open_until=record.open_until,
+        last_transition_at=record.last_transition_at,
+        reason=record.reason,
+        updated_at=record.updated_at,
+        metadata_json=dict(record.metadata),
+    )
+
+
+def _update_execution_circuit_row(
+    row: TenantExecutionCircuitBreakerRow,
+    record: TenantExecutionCircuitBreakerRecord,
+) -> None:
+    row.state = record.state.value
+    row.failure_count = record.failure_count
+    row.opened_at = record.opened_at
+    row.open_until = record.open_until
+    row.last_transition_at = record.last_transition_at
+    row.reason = record.reason
+    row.updated_at = record.updated_at
+    row.metadata_json = dict(record.metadata)
+
+
+def _execution_circuit_row_to_record(
+    row: TenantExecutionCircuitBreakerRow,
+) -> TenantExecutionCircuitBreakerRecord:
+    return TenantExecutionCircuitBreakerRecord(
+        breaker_id=TenantExecutionCircuitBreakerId(row.breaker_id),
+        tenant_id=row.tenant_id,
+        config_id=TenantExecutionGovernanceConfigurationId(row.config_id),
+        state=TenantExecutionCircuitState(row.state),
+        failure_count=row.failure_count,
+        opened_at=row.opened_at,
+        open_until=row.open_until,
+        last_transition_at=row.last_transition_at,
+        reason=row.reason,
+        updated_at=row.updated_at,
+        metadata=_as_dict(row.metadata_json),
     )
 
 

@@ -25,6 +25,7 @@ from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
 )
+from app.core.deterministic_identity import derive_runtime_id
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.contracts.requests import (
     BoundaryIngressRequest,
@@ -46,7 +47,6 @@ from app.boundary.identity import (
     BoundaryIngressId,
     derive_event_id,
     derive_replay_key,
-    generate_ingress_id,
 )
 from app.boundary.idempotency.detector import (
     BoundaryReplayDecision,
@@ -80,6 +80,8 @@ from app.boundary.taxonomy import BoundaryMetadataKey
 from app.boundary.tracing import BoundaryTrace
 
 _logger = logging.getLogger(__name__)
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506001")
+_INGRESS_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506010")
 
 
 class BoundaryIngressRuntime:
@@ -109,7 +111,14 @@ class BoundaryIngressRuntime:
         self._normalizer = normalizer or BoundaryNormalizer()
         self._detector = detector or BoundaryReplayDetector()
         self._persistence = persistence
-        self._runtime_instance_id: uuid.UUID = uuid.uuid4()
+        self._runtime_instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=(
+                "boundary_ingress_runtime",
+                adapters.names(direction=BoundaryDirection.INGRESS),
+            ),
+        )
         self._sequence: int = 0
 
     @property
@@ -136,11 +145,6 @@ class BoundaryIngressRuntime:
         """Translate one inbound delivery to a canonical event."""
         started_at = datetime.now(tz=timezone.utc)
         t0 = time.perf_counter()
-        ingress_id = (
-            request.ingress_id_override
-            if request.ingress_id_override is not None
-            else generate_ingress_id()
-        )
         # Wedge 2.75-β: singular authority resolution at the
         # boundary runtime. Replaces every ``request.source.tenant_id``
         # read below so the typed-ingress surface (Wedge B2) and the
@@ -156,6 +160,26 @@ class BoundaryIngressRuntime:
         resolution = request_authority_resolution(
             request,
             observed_tenant_id=request.source.tenant_id,
+        )
+        ingress_id = (
+            request.ingress_id_override
+            if request.ingress_id_override is not None
+            else BoundaryIngressId(
+                derive_runtime_id(
+                    namespace=_INGRESS_NAMESPACE,
+                    tenant_id=resolution.tenant_id,
+                    seed_components=(
+                        "boundary_ingress",
+                        request.source.source_type.value,
+                        request.source.source_id,
+                        request.adapter_name,
+                        request.payload.content_type,
+                        request.payload.body,
+                        request.correlation_id,
+                        request.request_id,
+                    ),
+                )
+            )
         )
 
         # Resolve the named adapter.

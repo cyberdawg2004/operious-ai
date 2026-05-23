@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from app.boundary.enums import (
@@ -24,17 +25,23 @@ from app.observability.persistence.calculations import (
 from app.observability.persistence.models import (
     DeadLetterExecutionPage,
     DeadLetterExecutionQuery,
+    InboundNormalizationDeadLetterPage,
+    InboundNormalizationDeadLetterQuery,
     OperationalMetricsQuery,
     OperationalSLODefinitionPage,
     OperationalSLODefinitionQuery,
     OperationalTraceSpanPage,
     OperationalTraceSpanQuery,
+    StuckExecutionAlertPage,
+    StuckExecutionAlertQuery,
 )
 from app.observability.persistence.records import (
     DeadLetterExecutionRecord,
+    InboundNormalizationDeadLetterRecord,
     OperationalMetricsSnapshotRecord,
     OperationalSLODefinitionRecord,
     OperationalTraceSpanRecord,
+    StuckExecutionAlertRecord,
 )
 from app.qa.persistence.records import QAScoreRecord
 
@@ -150,6 +157,60 @@ class InMemoryOperationalObservabilityPersistence:
         total = len(rows)
         sliced = rows[query.offset : query.offset + query.limit]
         return DeadLetterExecutionPage(
+            items=tuple(sliced),
+            total=total,
+            offset=query.offset,
+        )
+
+    async def list_stuck_execution_alerts(
+        self,
+        query: StuckExecutionAlertQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> StuckExecutionAlertPage:
+        rows = [
+            _stuck_alert_from_execution(
+                record,
+                claimed_before_or_at=query.claimed_before_or_at,
+            )
+            for record in self._execution_records
+            if record.tenant_id == expected_tenant_id
+            and _state_value(record.state) == ExecutionState.CLAIMED.value
+            and record.claimed_at is not None
+            and record.claimed_at <= query.claimed_before_or_at
+        ]
+        rows.sort(key=lambda row: (row.claimed_at or datetime.min, row.execution_id))
+        total = len(rows)
+        sliced = rows[query.offset : query.offset + query.limit]
+        return StuckExecutionAlertPage(
+            items=tuple(sliced),
+            total=total,
+            offset=query.offset,
+        )
+
+    async def list_inbound_normalization_dead_letters(
+        self,
+        query: InboundNormalizationDeadLetterQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> InboundNormalizationDeadLetterPage:
+        rows = [
+            _inbound_dead_letter_from_ingress(record)
+            for record in self._boundary_ingress_records
+            if record.tenant_id == expected_tenant_id
+            and record.error is not None
+            and record.normalization_status is not BoundaryNormalizationStatus.OK
+        ]
+        if query.normalization_status is not None:
+            rows = [
+                row
+                for row in rows
+                if row.normalization_status == query.normalization_status
+            ]
+        rows.sort(key=lambda row: (row.received_at, row.ingress_id), reverse=True)
+        total = len(rows)
+        sliced = rows[query.offset : query.offset + query.limit]
+        return InboundNormalizationDeadLetterPage(
             items=tuple(sliced),
             total=total,
             offset=query.offset,
@@ -282,6 +343,48 @@ def _dead_letter_from_execution(record: ExecutionRecord) -> DeadLetterExecutionR
         failed_at=record.failed_at,
         worker_id=record.worker_id,
         error=record.error,
+        metadata=dict(record.metadata),
+    )
+
+
+_STUCK_ALERT_NAMESPACE = uuid.UUID("4897a7e1-62ed-5ed7-a1c6-eaa1aee32c01")
+_INBOUND_DLQ_NAMESPACE = uuid.UUID("4897a7e1-62ed-5ed7-a1c6-eaa1aee32c02")
+
+
+def _stuck_alert_from_execution(
+    record: ExecutionRecord,
+    *,
+    claimed_before_or_at: datetime,
+) -> StuckExecutionAlertRecord:
+    alert_id = uuid.uuid5(
+        _STUCK_ALERT_NAMESPACE,
+        f"{record.tenant_id}|{record.execution_id}|{claimed_before_or_at.isoformat()}",
+    )
+    return StuckExecutionAlertRecord(
+        alert_id=str(alert_id),
+        tenant_id=record.tenant_id,
+        execution_id=str(record.execution_id),
+        reason="execution_claim_exceeded_lease",
+        claimed_at=record.claimed_at,
+        worker_id=record.worker_id,
+        metadata={"state": _state_value(record.state)},
+    )
+
+
+def _inbound_dead_letter_from_ingress(
+    record: BoundaryIngressRecord,
+) -> InboundNormalizationDeadLetterRecord:
+    dead_letter_id = uuid.uuid5(
+        _INBOUND_DLQ_NAMESPACE,
+        f"{record.tenant_id}|{record.ingress_id}|{record.normalization_status.value}",
+    )
+    return InboundNormalizationDeadLetterRecord(
+        dead_letter_id=str(dead_letter_id),
+        tenant_id=record.tenant_id or "",
+        ingress_id=str(record.ingress_id),
+        normalization_status=record.normalization_status.value,
+        error=record.error,
+        received_at=record.received_at,
         metadata=dict(record.metadata),
     )
 

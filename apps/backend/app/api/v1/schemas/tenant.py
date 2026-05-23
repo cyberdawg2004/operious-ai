@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
+    TenantExecutionCircuitState,
+    TenantExecutionGovernanceStatus,
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
@@ -17,6 +19,8 @@ from app.tenant.enums import (
 )
 from app.tenant.persistence import (
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantTopologyConfigurationRecord,
@@ -52,6 +56,8 @@ class TenantChannelConfigurationResponse(BaseModel):
     routing_address: str
     status: TenantChannelStatus
     verified_at: str | None = None
+    credential_rotated_at: str | None = None
+    credential_rotation_expires_at: str | None = None
 
     @classmethod
     def from_record(
@@ -66,6 +72,16 @@ class TenantChannelConfigurationResponse(BaseModel):
             verified_at=(
                 record.verified_at.isoformat()
                 if record.verified_at is not None
+                else None
+            ),
+            credential_rotated_at=(
+                record.credential_rotated_at.isoformat()
+                if record.credential_rotated_at is not None
+                else None
+            ),
+            credential_rotation_expires_at=(
+                record.credential_rotation_expires_at.isoformat()
+                if record.credential_rotation_expires_at is not None
                 else None
             ),
         )
@@ -192,6 +208,125 @@ class TenantGovernancePolicyPage(BaseModel):
     offset: int
 
 
+class TenantExecutionGovernanceCreateRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    execution_quota: int = Field(ge=1)
+    throughput_limit: int = Field(ge=1)
+    throughput_window_minutes: int = Field(ge=1)
+    governance_budget_limit: int = Field(ge=1)
+    governance_budget_window_minutes: int = Field(ge=1)
+    circuit_failure_threshold: int = Field(ge=1)
+    circuit_window_minutes: int = Field(ge=1)
+    circuit_cooldown_minutes: int = Field(ge=1)
+    status: TenantExecutionGovernanceStatus = (
+        TenantExecutionGovernanceStatus.DRAFT
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TenantExecutionGovernanceResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    config_id: str
+    status: TenantExecutionGovernanceStatus
+    execution_quota: int
+    throughput_limit: int
+    throughput_window_minutes: int
+    governance_budget_limit: int
+    governance_budget_window_minutes: int
+    circuit_failure_threshold: int
+    circuit_window_minutes: int
+    circuit_cooldown_minutes: int
+    version: int
+    configured_by: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantExecutionGovernanceConfigurationRecord,
+    ) -> "TenantExecutionGovernanceResponse":
+        return cls(
+            config_id=str(record.config_id),
+            status=record.status,
+            execution_quota=record.execution_quota,
+            throughput_limit=record.throughput_limit,
+            throughput_window_minutes=record.throughput_window_minutes,
+            governance_budget_limit=record.governance_budget_limit,
+            governance_budget_window_minutes=(
+                record.governance_budget_window_minutes
+            ),
+            circuit_failure_threshold=record.circuit_failure_threshold,
+            circuit_window_minutes=record.circuit_window_minutes,
+            circuit_cooldown_minutes=record.circuit_cooldown_minutes,
+            version=record.version,
+            configured_by=record.configured_by,
+            metadata=dict(record.metadata),
+            created_at=record.created_at.isoformat(),
+            updated_at=record.updated_at.isoformat(),
+        )
+
+
+class TenantExecutionGovernancePage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[TenantExecutionGovernanceResponse] = []
+    total: int
+    offset: int
+
+
+class TenantExecutionCircuitBreakerResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    breaker_id: str
+    config_id: str
+    state: TenantExecutionCircuitState
+    failure_count: int
+    opened_at: str | None = None
+    open_until: str | None = None
+    last_transition_at: str
+    reason: str | None = None
+    updated_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantExecutionCircuitBreakerRecord,
+    ) -> "TenantExecutionCircuitBreakerResponse":
+        return cls(
+            breaker_id=str(record.breaker_id),
+            config_id=str(record.config_id),
+            state=record.state,
+            failure_count=record.failure_count,
+            opened_at=(
+                record.opened_at.isoformat()
+                if record.opened_at is not None
+                else None
+            ),
+            open_until=(
+                record.open_until.isoformat()
+                if record.open_until is not None
+                else None
+            ),
+            last_transition_at=record.last_transition_at.isoformat(),
+            reason=record.reason,
+            updated_at=record.updated_at.isoformat(),
+            metadata=dict(record.metadata),
+        )
+
+
+class TenantExecutionCircuitBreakerPage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[TenantExecutionCircuitBreakerResponse] = []
+    total: int
+    offset: int
+
+
 class TenantTopologyConfigurationCreateRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -242,6 +377,11 @@ __all__ = [
     "TenantChannelConfigurationResponse",
     "TenantChannelCreateRequest",
     "TenantChannelUpdateRequest",
+    "TenantExecutionCircuitBreakerPage",
+    "TenantExecutionCircuitBreakerResponse",
+    "TenantExecutionGovernanceCreateRequest",
+    "TenantExecutionGovernancePage",
+    "TenantExecutionGovernanceResponse",
     "TenantGovernancePolicyCreateRequest",
     "TenantGovernancePolicyPage",
     "TenantGovernancePolicyResponse",

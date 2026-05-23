@@ -20,11 +20,13 @@ implicit ID stability in production — see
 from __future__ import annotations
 
 import uuid
+import itertools
 
 # Fixed namespace for the governance substrate. Generated once,
 # pinned forever. Changing this would invalidate every previously
 # derived UUID — treat it as a permanent constant.
 DECISION_NAMESPACE: uuid.UUID = uuid.UUID("4d2c10a2-6c00-4f7c-8b3a-1f8d0c7e0001")
+_RUNTIME_COUNTER = itertools.count()
 
 
 def generate_decision_id() -> uuid.UUID:
@@ -34,7 +36,10 @@ def generate_decision_id() -> uuid.UUID:
     decision IDs. Used by `GovernanceRuntime` when constructing a
     `GovernanceDecision` for live evaluation.
     """
-    return uuid.uuid4()
+    return uuid.uuid5(
+        DECISION_NAMESPACE,
+        f"runtime|decision|{next(_RUNTIME_COUNTER)}",
+    )
 
 
 def derive_decision_id(*, seed: str) -> uuid.UUID:

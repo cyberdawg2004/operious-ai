@@ -14,6 +14,8 @@ from app.cognition.exceptions import (
     CognitionLLMProviderError,
 )
 from app.cognition.models import DiagnosticLLMCompletion, DiagnosticLLMUsage
+from app.core.http import get_shared_http_client
+from app.runtime.provider_circuit_breaker import ProviderCircuitBreaker
 
 _GOVERNANCE_TERMS = (
     "approve",
@@ -52,6 +54,7 @@ class DiagnosticLLMClient(Protocol):
         messages: Sequence[DiagnosticLLMMessage],
         max_output_tokens: int,
         temperature: float,
+        tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion: ...
 
 
@@ -68,16 +71,24 @@ class AnthropicMessagesClient:
         base_url: str = "https://api.anthropic.com",
         anthropic_version: str = "2023-06-01",
         timeout_seconds: float = 30.0,
+        http_client: httpx.AsyncClient | None = None,
+        provider_circuit_breaker: ProviderCircuitBreaker | None = None,
+        default_tenant_id: str = "platform",
     ) -> None:
         if not api_key.strip():
             raise CognitionLLMConfigurationError("ANTHROPIC_API_KEY is not configured")
         if not model.strip():
             raise CognitionLLMConfigurationError("Anthropic model must be non-empty")
+        if not default_tenant_id.strip():
+            raise CognitionLLMConfigurationError("default_tenant_id must be non-empty")
         self._api_key = api_key
         self.model_name = model
         self._base_url = base_url.rstrip("/")
         self._anthropic_version = anthropic_version
         self._timeout_seconds = timeout_seconds
+        self._http_client = http_client
+        self._provider_circuit_breaker = provider_circuit_breaker
+        self._default_tenant_id = default_tenant_id
 
     async def complete(
         self,
@@ -86,7 +97,9 @@ class AnthropicMessagesClient:
         messages: Sequence[DiagnosticLLMMessage],
         max_output_tokens: int,
         temperature: float,
+        tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
+        effective_tenant_id = tenant_id or self._default_tenant_id
         payload = {
             "model": self.model_name,
             "max_tokens": max_output_tokens,
@@ -102,15 +115,55 @@ class AnthropicMessagesClient:
             "anthropic-version": self._anthropic_version,
             "content-type": "application/json",
         }
+        breaker = self._provider_circuit_breaker
         try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(
-                    f"{self._base_url}/v1/messages",
-                    headers=headers,
-                    json=payload,
+            if breaker is not None:
+                await breaker.before_request(
+                    tenant_id=effective_tenant_id,
+                    provider_name=self.provider_name,
                 )
+            client = self._http_client or get_shared_http_client()
+            response = await client.post(
+                f"{self._base_url}/v1/messages",
+                headers=headers,
+                json=payload,
+                timeout=self._timeout_seconds,
+            )
             response.raise_for_status()
+            if breaker is not None:
+                await breaker.record_success(
+                    tenant_id=effective_tenant_id,
+                    provider_name=self.provider_name,
+                )
+        except httpx.HTTPStatusError as exc:
+            if breaker is not None:
+                await breaker.record_http_status(
+                    tenant_id=effective_tenant_id,
+                    provider_name=self.provider_name,
+                    status_code=exc.response.status_code,
+                    retry_after=exc.response.headers.get("retry-after"),
+                )
+            raise CognitionLLMProviderError(
+                "Anthropic diagnostic request failed: "
+                f"HTTPStatusError:{exc.response.status_code}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            if breaker is not None:
+                await breaker.record_transient_failure(
+                    tenant_id=effective_tenant_id,
+                    provider_name=self.provider_name,
+                    reason="timeout",
+                )
+            raise CognitionLLMProviderError(
+                "Anthropic diagnostic request failed: TimeoutException"
+            ) from exc
         except httpx.HTTPError as exc:
+            if breaker is not None:
+                await breaker.record_transient_failure(
+                    tenant_id=effective_tenant_id,
+                    provider_name=self.provider_name,
+                    reason=exc.__class__.__name__,
+                )
             raise CognitionLLMProviderError(
                 f"Anthropic diagnostic request failed: {exc.__class__.__name__}"
             ) from exc
@@ -137,8 +190,9 @@ class DeterministicDiagnosticLLMClient:
         messages: Sequence[DiagnosticLLMMessage],
         max_output_tokens: int,
         temperature: float,
+        tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
-        del system_prompt, max_output_tokens, temperature
+        del system_prompt, max_output_tokens, temperature, tenant_id
         content = "\n".join(message.content for message in messages)
         lowered = content.casefold()
         category = _deterministic_category(lowered)

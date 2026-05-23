@@ -20,6 +20,8 @@ from app.observability.identity import (
 from app.observability.persistence import (
     DeadLetterExecutionPage,
     DeadLetterExecutionQuery,
+    InboundNormalizationDeadLetterPage,
+    InboundNormalizationDeadLetterQuery,
     OperationalAlertPage,
     OperationalMetricsQuery,
     OperationalMetricsSnapshotRecord,
@@ -29,6 +31,8 @@ from app.observability.persistence import (
     OperationalTraceSpanPage,
     OperationalTraceSpanQuery,
     OperationalTraceSpanRecord,
+    StuckExecutionAlertPage,
+    StuckExecutionAlertQuery,
 )
 from app.observability.runtime import OperationalObservabilityRuntime
 
@@ -71,6 +75,40 @@ class OperationalObservabilityService:
         return await self._runtime.list_dead_letters(
             query=DeadLetterExecutionQuery(
                 execution_id=execution_id,
+                limit=limit,
+                offset=offset,
+            ),
+            expected_tenant_id=tenant_id,
+        )
+
+    async def list_stuck_execution_alerts(
+        self,
+        *,
+        tenant_id: str,
+        claimed_before_or_at: datetime,
+        limit: int,
+        offset: int,
+    ) -> StuckExecutionAlertPage:
+        return await self._runtime.list_stuck_execution_alerts(
+            query=StuckExecutionAlertQuery(
+                claimed_before_or_at=claimed_before_or_at,
+                limit=limit,
+                offset=offset,
+            ),
+            expected_tenant_id=tenant_id,
+        )
+
+    async def list_inbound_normalization_dead_letters(
+        self,
+        *,
+        tenant_id: str,
+        normalization_status: str | None,
+        limit: int,
+        offset: int,
+    ) -> InboundNormalizationDeadLetterPage:
+        return await self._runtime.list_inbound_normalization_dead_letters(
+            query=InboundNormalizationDeadLetterQuery(
+                normalization_status=normalization_status,
                 limit=limit,
                 offset=offset,
             ),

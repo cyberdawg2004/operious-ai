@@ -11,6 +11,10 @@ class ExecutionPersistenceError(ExecutionError):
     """Persistence backend rejected or failed an execution operation."""
 
 
+class ExecutionAdmissionError(ExecutionError):
+    """Execution was requested without a governance admission token."""
+
+
 class ExecutionStateError(ExecutionError):
     """Execution state transition was not constitutionally valid."""
 
@@ -20,6 +24,7 @@ class ExecutionNotClaimableError(ExecutionStateError):
 
 
 __all__ = [
+    "ExecutionAdmissionError",
     "ExecutionError",
     "ExecutionNotClaimableError",
     "ExecutionPersistenceError",

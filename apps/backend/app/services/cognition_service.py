@@ -66,12 +66,18 @@ class CognitionService:
         document_id: str,
         target_version: int,
         rolled_back_by: str,
+        approval_id: str,
     ) -> KnowledgeRollbackResult:
+        approval = await self._runtime.get_approval_record(
+            tenant_id=tenant_id,
+            approval_id=approval_id,
+        )
         result = await self._runtime.rollback_document(
             tenant_id=tenant_id,
             document_id=as_knowledge_document_id(document_id),
             target_version=target_version,
             rolled_back_by=rolled_back_by,
+            approval=approval,
         )
         await self._session.commit()
         return result

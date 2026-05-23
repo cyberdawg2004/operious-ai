@@ -7,9 +7,12 @@ the canonical engine inputs both runtime and migration engines must use.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 
 from sqlalchemy.engine import make_url
+
+_PREPARED_STATEMENT_COUNTER = itertools.count()
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +38,10 @@ def build_database_engine_config(
         connect_args["timeout"] = _connect_timeout_for_asyncpg(
             raw_query_value=url.query.get("connect_timeout"),
             default=connect_timeout,
+        )
+        connect_args["prepared_statement_cache_size"] = 0
+        connect_args["prepared_statement_name_func"] = (
+            _prepared_statement_name
         )
 
         sslmode = url.query.get("sslmode")
@@ -68,6 +75,10 @@ def _connect_timeout_for_asyncpg(
     else:
         raw = raw_query_value
     return float(raw)
+
+
+def _prepared_statement_name() -> str:
+    return f"__operious_asyncpg_stmt_{next(_PREPARED_STATEMENT_COUNTER)}__"
 
 
 __all__ = ["DatabaseEngineConfig", "build_database_engine_config"]

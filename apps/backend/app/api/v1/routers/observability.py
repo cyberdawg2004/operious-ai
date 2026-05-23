@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.observability import (
     DeadLetterExecutionPageResponse,
+    InboundNormalizationDeadLetterPageResponse,
     OperationalAlertPageResponse,
     OperationalMetricsResponse,
     OperationalSLODefinitionPageResponse,
@@ -16,6 +17,7 @@ from app.api.v1.schemas.observability import (
     OperationalTraceSpanPageResponse,
     OperationalTraceSpanRequest,
     OperationalTraceSpanResponse,
+    StuckExecutionAlertPageResponse,
 )
 from app.dependencies.authority import require_tenant_scope
 from app.dependencies.services import get_operational_observability_service
@@ -75,6 +77,47 @@ async def list_dead_letter_executions(
         offset=offset,
     )
     return DeadLetterExecutionPageResponse.from_page(page)
+
+
+@router.get("/stuck-executions", response_model=StuckExecutionAlertPageResponse)
+async def list_stuck_execution_alerts(
+    claimed_before_or_at: datetime = Query(...),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: OperationalObservabilityService = Depends(
+        get_operational_observability_service
+    ),
+) -> StuckExecutionAlertPageResponse:
+    page = await service.list_stuck_execution_alerts(
+        tenant_id=expected_tenant_id,
+        claimed_before_or_at=claimed_before_or_at,
+        limit=limit,
+        offset=offset,
+    )
+    return StuckExecutionAlertPageResponse.from_page(page)
+
+
+@router.get(
+    "/inbound-normalization-dead-letters",
+    response_model=InboundNormalizationDeadLetterPageResponse,
+)
+async def list_inbound_normalization_dead_letters(
+    normalization_status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: OperationalObservabilityService = Depends(
+        get_operational_observability_service
+    ),
+) -> InboundNormalizationDeadLetterPageResponse:
+    page = await service.list_inbound_normalization_dead_letters(
+        tenant_id=expected_tenant_id,
+        normalization_status=normalization_status,
+        limit=limit,
+        offset=offset,
+    )
+    return InboundNormalizationDeadLetterPageResponse.from_page(page)
 
 
 @router.post(

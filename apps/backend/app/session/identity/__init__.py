@@ -31,6 +31,7 @@ breaking change to every previously derived identifier.
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 from app.identity import project_optional_str
@@ -70,33 +71,38 @@ _TRACE_NAMESPACE: uuid.UUID = uuid.UUID(
 _RECONSTRUCTION_NAMESPACE: uuid.UUID = uuid.UUID(
     "5e551001-0006-4006-8006-000000000006"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 # ─── Runtime path: fresh UUID4 ───────────────────────────────────────
 
 
 def generate_session_id() -> SessionId:
-    return SessionId(uuid.uuid4())
+    return SessionId(uuid.uuid5(_SESSION_NAMESPACE, _runtime_seed("session")))
 
 
 def generate_event_id() -> SessionEventId:
-    return SessionEventId(uuid.uuid4())
+    return SessionEventId(uuid.uuid5(_EVENT_NAMESPACE, _runtime_seed("event")))
 
 
 def generate_lineage_id() -> SessionLineageId:
-    return SessionLineageId(uuid.uuid4())
+    return SessionLineageId(uuid.uuid5(_LINEAGE_NAMESPACE, _runtime_seed("lineage")))
 
 
 def generate_correlation_id() -> SessionCorrelationId:
-    return SessionCorrelationId(uuid.uuid4())
+    return SessionCorrelationId(uuid.uuid5(_CORRELATION_NAMESPACE, _runtime_seed("correlation")))
 
 
 def generate_trace_id() -> SessionTraceId:
-    return SessionTraceId(uuid.uuid4())
+    return SessionTraceId(uuid.uuid5(_TRACE_NAMESPACE, _runtime_seed("trace")))
 
 
 def generate_reconstruction_id() -> SessionReconstructionId:
-    return SessionReconstructionId(uuid.uuid4())
+    return SessionReconstructionId(uuid.uuid5(_RECONSTRUCTION_NAMESPACE, _runtime_seed("reconstruction")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay-safe deterministic UUID5 ─────────────────────────────────

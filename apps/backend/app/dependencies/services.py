@@ -99,6 +99,8 @@ from app.observability.persistence import (
 )
 from app.observability.runtime import OperationalObservabilityRuntime
 from app.runtime import (
+    ExecutionGovernanceRuntime,
+    ProviderCircuitBreaker,
     TenantCoordinationTopologyRuntimeProvider,
     make_postgres_dispatch_arbitration_runtime,
 )
@@ -246,6 +248,15 @@ async def get_dispatch_service(
         session_repository=PostgresSessionPersistence(session),
         execution_runtime=execution_runtime,
         execution_publisher=deferred_execution_publisher,
+        execution_governance_runtime=ExecutionGovernanceRuntime(
+            tenant_configuration_repository=PostgresTenantConfigurationRepository(
+                session
+            ),
+            execution_persistence=PostgresExecutionPersistence(session),
+            governance_repository=PostgresGovernanceRepository(session),
+            provider_circuit_breaker=ProviderCircuitBreaker(session=session),
+            default_provider_name="anthropic",
+        ),
         escalation_publisher=deferred_escalation_publisher,
         dispatch_arbitration_runtime=(
             make_postgres_dispatch_arbitration_runtime(session=session)

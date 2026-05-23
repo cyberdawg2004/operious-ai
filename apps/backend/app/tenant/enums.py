@@ -42,6 +42,18 @@ class TenantGovernancePolicyStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class TenantExecutionGovernanceStatus(StrEnum):
+    ACTIVE = "active"
+    DRAFT = "draft"
+    ARCHIVED = "archived"
+
+
+class TenantExecutionCircuitState(StrEnum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
 class TenantTopologyStatus(StrEnum):
     ACTIVE = "active"
     DRAFT = "draft"
@@ -51,6 +63,8 @@ class TenantTopologyStatus(StrEnum):
 __all__ = [
     "TenantChannelStatus",
     "TenantChannelType",
+    "TenantExecutionCircuitState",
+    "TenantExecutionGovernanceStatus",
     "TenantGovernancePolicyStatus",
     "TenantKnowledgeDocumentStatus",
     "TenantKnowledgeDocumentType",

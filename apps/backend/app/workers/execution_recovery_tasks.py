@@ -15,6 +15,9 @@ from typing import Any, TypeVar
 from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.execution import (
+    ExecutionOutboxReconcileResult,
+    ExecutionOutboxReconcileSweepResult,
+    ExecutionRecoveryResult,
     ExecutionRecoverySweepResult,
     ExecutionRuntime,
     PostgresExecutionPersistence,
@@ -67,6 +70,51 @@ def recover_stale_executions(
     )
 
 
+@celery_app.task(name="reconcile_stale_execution_outbox", bind=True)
+def reconcile_stale_execution_outbox(
+    _self: Any,
+    *,
+    stale_before: str | None = None,
+    lease_seconds: int | None = None,
+    limit: int | None = None,
+    tenant_id: str | None = None,
+    reason: str = "publisher lease expired",
+) -> dict[str, object]:
+    """Requeue a bounded page of stale execution outbox claims."""
+
+    settings = get_settings()
+    if lease_seconds is not None and lease_seconds < 1:
+        raise ValueError("lease_seconds must be positive")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    reconciled_at = datetime.now(tz=timezone.utc)
+    threshold = (
+        _parse_datetime(stale_before)
+        if stale_before is not None
+        else reconciled_at
+        - timedelta(
+            seconds=(
+                lease_seconds
+                if lease_seconds is not None
+                else settings.EXECUTION_CLAIM_LEASE_SECONDS
+            )
+        )
+    )
+    return _run_async(
+        reconcile_stale_execution_outbox_runtime(
+            stale_before=threshold,
+            requeued_at=reconciled_at,
+            limit=(
+                limit
+                if limit is not None
+                else settings.EXECUTION_RECOVERY_BATCH_SIZE
+            ),
+            tenant_id=tenant_id,
+            reason=reason,
+        )
+    )
+
+
 async def recover_stale_executions_runtime(
     *,
     stale_before: datetime,
@@ -89,6 +137,30 @@ async def recover_stale_executions_runtime(
         return _serialize_sweep(sweep)
 
 
+async def reconcile_stale_execution_outbox_runtime(
+    *,
+    stale_before: datetime,
+    requeued_at: datetime | None = None,
+    limit: int = 100,
+    tenant_id: str | None = None,
+    reason: str = "publisher lease expired",
+) -> dict[str, object]:
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        runtime = ExecutionRuntime(
+            persistence=PostgresExecutionPersistence(session)
+        )
+        sweep = await runtime.reconcile_stale_outbox_records(
+            stale_before=stale_before,
+            requeued_at=requeued_at,
+            limit=limit,
+            tenant_id=tenant_id,
+            reason=reason,
+        )
+        await session.commit()
+        return _serialize_outbox_sweep(sweep)
+
+
 def _serialize_sweep(
     sweep: ExecutionRecoverySweepResult,
 ) -> dict[str, object]:
@@ -108,7 +180,41 @@ def _serialize_sweep(
     }
 
 
-def _serialize_recovery_result(result) -> dict[str, object]:  # type: ignore[no-untyped-def]
+def _serialize_outbox_sweep(
+    sweep: ExecutionOutboxReconcileSweepResult,
+) -> dict[str, object]:
+    return {
+        "status": "completed",
+        "scanned": sweep.scanned,
+        "reconciled_count": sweep.reconciled_count,
+        "refused_count": sweep.refused_count,
+        "reconciled": [
+            _serialize_outbox_reconcile_result(result)
+            for result in sweep.reconciled
+        ],
+        "refused": [
+            _serialize_outbox_reconcile_result(result)
+            for result in sweep.refused
+        ],
+    }
+
+
+def _serialize_outbox_reconcile_result(
+    result: ExecutionOutboxReconcileResult,
+) -> dict[str, object]:
+    outbox = result.outbox
+    return {
+        "reconciled": result.reconciled,
+        "reason": result.reason,
+        "outbox_id": None if outbox is None else str(outbox.outbox_id),
+        "execution_id": None if outbox is None else str(outbox.execution_id),
+        "outbox_state": None if outbox is None else outbox.state.value,
+    }
+
+
+def _serialize_recovery_result(
+    result: ExecutionRecoveryResult,
+) -> dict[str, object]:
     execution = result.execution
     attempt = result.attempt
     return {
@@ -164,4 +270,6 @@ def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 __all__ = [
     "recover_stale_executions",
     "recover_stale_executions_runtime",
+    "reconcile_stale_execution_outbox",
+    "reconcile_stale_execution_outbox_runtime",
 ]

@@ -9,6 +9,11 @@ from app.api.v1.schemas.tenant import (
     TenantChannelConfigurationResponse,
     TenantChannelCreateRequest,
     TenantChannelUpdateRequest,
+    TenantExecutionCircuitBreakerPage,
+    TenantExecutionCircuitBreakerResponse,
+    TenantExecutionGovernanceCreateRequest,
+    TenantExecutionGovernancePage,
+    TenantExecutionGovernanceResponse,
     TenantGovernancePolicyCreateRequest,
     TenantGovernancePolicyPage,
     TenantGovernancePolicyResponse,
@@ -30,6 +35,8 @@ from app.services.tenant_configuration_service import (
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
+    TenantExecutionCircuitState,
+    TenantExecutionGovernanceStatus,
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
@@ -309,6 +316,90 @@ async def list_governance_policies(
     return TenantGovernancePolicyPage(
         items=[
             TenantGovernancePolicyResponse.from_record(record) for record in page.items
+        ],
+        total=page.total,
+        offset=page.offset,
+    )
+
+
+@router.post(
+    "/execution-governance",
+    response_model=TenantExecutionGovernanceResponse,
+)
+async def configure_execution_governance(
+    request: TenantExecutionGovernanceCreateRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_authority),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantExecutionGovernanceResponse:
+    record = await service.configure_execution_governance(
+        tenant_id=expected_tenant_id,
+        execution_quota=request.execution_quota,
+        throughput_limit=request.throughput_limit,
+        throughput_window_minutes=request.throughput_window_minutes,
+        governance_budget_limit=request.governance_budget_limit,
+        governance_budget_window_minutes=request.governance_budget_window_minutes,
+        circuit_failure_threshold=request.circuit_failure_threshold,
+        circuit_window_minutes=request.circuit_window_minutes,
+        circuit_cooldown_minutes=request.circuit_cooldown_minutes,
+        status=request.status,
+        configured_by=_principal_or_400(authority),
+        metadata=request.metadata,
+    )
+    return TenantExecutionGovernanceResponse.from_record(record)
+
+
+@router.get(
+    "/execution-governance",
+    response_model=TenantExecutionGovernancePage,
+)
+async def list_execution_governance_configurations(
+    status_filter: TenantExecutionGovernanceStatus | None = Query(
+        None,
+        alias="status",
+    ),
+    limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantExecutionGovernancePage:
+    page = await service.list_execution_governance_configurations(
+        tenant_id=expected_tenant_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return TenantExecutionGovernancePage(
+        items=[
+            TenantExecutionGovernanceResponse.from_record(record)
+            for record in page.items
+        ],
+        total=page.total,
+        offset=page.offset,
+    )
+
+
+@router.get(
+    "/execution-governance/circuit-breakers",
+    response_model=TenantExecutionCircuitBreakerPage,
+)
+async def list_execution_circuit_breakers(
+    state: TenantExecutionCircuitState | None = Query(None),
+    limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantExecutionCircuitBreakerPage:
+    page = await service.list_execution_circuit_breakers(
+        tenant_id=expected_tenant_id,
+        state=state,
+        limit=limit,
+        offset=offset,
+    )
+    return TenantExecutionCircuitBreakerPage(
+        items=[
+            TenantExecutionCircuitBreakerResponse.from_record(record)
+            for record in page.items
         ],
         total=page.total,
         offset=page.offset,

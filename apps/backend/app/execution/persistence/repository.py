@@ -144,6 +144,15 @@ class ExecutionPersistenceProtocol(Protocol):
         failed_at: datetime,
     ) -> ExecutionOutboxRecord: ...
 
+    async def requeue_stale_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId,
+        stale_before: datetime,
+        requeued_at: datetime,
+        reason: str,
+    ) -> ExecutionOutboxRecord | None: ...
+
     async def list_executions(
         self,
         query: ExecutionQuery,

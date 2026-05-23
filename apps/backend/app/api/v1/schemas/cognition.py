@@ -194,6 +194,7 @@ class KnowledgeRollbackRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     target_version: int = Field(ge=1)
+    approval_id: str = Field(min_length=1)
 
 
 class KnowledgeRollbackResponse(BaseModel):

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
+    TenantExecutionCircuitState,
+    TenantExecutionGovernanceStatus,
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
@@ -14,12 +16,16 @@ from app.tenant.enums import (
 )
 from app.tenant.identity import (
     TenantChannelConfigurationId,
+    TenantExecutionCircuitBreakerId,
+    TenantExecutionGovernanceConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantTopologyConfigurationId,
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
@@ -65,6 +71,23 @@ class TenantGovernancePolicyQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class TenantExecutionGovernanceConfigurationQuery:
+    config_id: TenantExecutionGovernanceConfigurationId | None = None
+    status: TenantExecutionGovernanceStatus | None = None
+    limit: int | None = None
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class TenantExecutionCircuitBreakerQuery:
+    breaker_id: TenantExecutionCircuitBreakerId | None = None
+    config_id: TenantExecutionGovernanceConfigurationId | None = None
+    state: TenantExecutionCircuitState | None = None
+    limit: int | None = None
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class TenantTopologyConfigurationQuery:
     config_id: TenantTopologyConfigurationId | None = None
     topology_name: str | None = None
@@ -102,6 +125,20 @@ class TenantGovernancePolicyPage:
 
 
 @dataclass(frozen=True, slots=True)
+class TenantExecutionGovernanceConfigurationPage:
+    items: tuple[TenantExecutionGovernanceConfigurationRecord, ...] = ()
+    total: int = 0
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class TenantExecutionCircuitBreakerPage:
+    items: tuple[TenantExecutionCircuitBreakerRecord, ...] = ()
+    total: int = 0
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class TenantTopologyConfigurationPage:
     items: tuple[TenantTopologyConfigurationRecord, ...] = ()
     total: int = 0
@@ -111,6 +148,10 @@ class TenantTopologyConfigurationPage:
 __all__ = [
     "TenantChannelConfigurationPage",
     "TenantChannelConfigurationQuery",
+    "TenantExecutionCircuitBreakerPage",
+    "TenantExecutionCircuitBreakerQuery",
+    "TenantExecutionGovernanceConfigurationPage",
+    "TenantExecutionGovernanceConfigurationQuery",
     "TenantGovernancePolicyPage",
     "TenantGovernancePolicyQuery",
     "TenantKnowledgeDocumentPage",

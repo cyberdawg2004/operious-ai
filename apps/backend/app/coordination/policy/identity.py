@@ -38,6 +38,7 @@ ordinal)` so replays produce byte-identical finding identifiers.
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 
@@ -73,6 +74,7 @@ _CHAIN_NAMESPACE: uuid.UUID = uuid.UUID(
 _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
     "c2d3e4f5-6071-8293-a4b5-c6d7e8f90102"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 # ─── Runtime path: fresh UUID4 per call ──────────────────────────────
@@ -80,12 +82,16 @@ _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
 
 def generate_policy_id() -> CoordinationPolicyId:
     """Return a fresh UUID4 wrapped as `CoordinationPolicyId`."""
-    return CoordinationPolicyId(uuid.uuid4())
+    return CoordinationPolicyId(uuid.uuid5(_POLICY_NAMESPACE, _runtime_seed("policy")))
 
 
 def generate_evaluation_id() -> CoordinationPolicyEvaluationId:
     """Return a fresh UUID4 wrapped as `CoordinationPolicyEvaluationId`."""
-    return CoordinationPolicyEvaluationId(uuid.uuid4())
+    return CoordinationPolicyEvaluationId(uuid.uuid5(_EVALUATION_NAMESPACE, _runtime_seed("evaluation")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

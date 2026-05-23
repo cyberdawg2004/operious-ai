@@ -22,12 +22,16 @@ from app.observability.persistence.calculations import metric_value
 from app.observability.persistence.models import (
     DeadLetterExecutionPage,
     DeadLetterExecutionQuery,
+    InboundNormalizationDeadLetterPage,
+    InboundNormalizationDeadLetterQuery,
     OperationalAlertPage,
     OperationalMetricsQuery,
     OperationalSLODefinitionPage,
     OperationalSLODefinitionQuery,
     OperationalTraceSpanPage,
     OperationalTraceSpanQuery,
+    StuckExecutionAlertPage,
+    StuckExecutionAlertQuery,
 )
 from app.observability.persistence.records import (
     OperationalAlertRecord,
@@ -68,6 +72,28 @@ class OperationalObservabilityRuntime:
         expected_tenant_id: str,
     ) -> DeadLetterExecutionPage:
         return await self._persistence.list_dead_letter_executions(
+            query,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def list_stuck_execution_alerts(
+        self,
+        *,
+        query: StuckExecutionAlertQuery,
+        expected_tenant_id: str,
+    ) -> StuckExecutionAlertPage:
+        return await self._persistence.list_stuck_execution_alerts(
+            query,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def list_inbound_normalization_dead_letters(
+        self,
+        *,
+        query: InboundNormalizationDeadLetterQuery,
+        expected_tenant_id: str,
+    ) -> InboundNormalizationDeadLetterPage:
+        return await self._persistence.list_inbound_normalization_dead_letters(
             query,
             expected_tenant_id=expected_tenant_id,
         )

@@ -14,6 +14,12 @@ TenantKnowledgeDocumentVersionId = NewType(
     "TenantKnowledgeDocumentVersionId", uuid.UUID
 )
 TenantGovernancePolicyId = NewType("TenantGovernancePolicyId", uuid.UUID)
+TenantExecutionGovernanceConfigurationId = NewType(
+    "TenantExecutionGovernanceConfigurationId", uuid.UUID
+)
+TenantExecutionCircuitBreakerId = NewType(
+    "TenantExecutionCircuitBreakerId", uuid.UUID
+)
 TenantTopologyConfigurationId = NewType("TenantTopologyConfigurationId", uuid.UUID)
 
 
@@ -28,6 +34,12 @@ _KNOWLEDGE_DOCUMENT_VERSION_NAMESPACE: uuid.UUID = uuid.UUID(
 )
 _GOVERNANCE_POLICY_NAMESPACE: uuid.UUID = uuid.UUID(
     "25a0c0f1-0003-4003-8003-000000000003"
+)
+_EXECUTION_GOVERNANCE_CONFIGURATION_NAMESPACE: uuid.UUID = uuid.UUID(
+    "25a0c0f1-0006-4006-8006-000000000006"
+)
+_EXECUTION_CIRCUIT_BREAKER_NAMESPACE: uuid.UUID = uuid.UUID(
+    "25a0c0f1-0007-4007-8007-000000000007"
 )
 _TOPOLOGY_CONFIGURATION_NAMESPACE: uuid.UUID = uuid.UUID(
     "25a0c0f1-0004-4004-8004-000000000004"
@@ -84,6 +96,46 @@ def derive_governance_policy_id(
     return TenantGovernancePolicyId(uuid.uuid5(_GOVERNANCE_POLICY_NAMESPACE, seed))
 
 
+def derive_governance_policy_version_id(
+    *,
+    tenant_id: str,
+    policy_type: str,
+    version: int,
+) -> TenantGovernancePolicyId:
+    tenant = coerce_tenant_id(tenant_id)
+    if version < 1:
+        raise ValueError("version must be >= 1")
+    normalized_policy_type = _normalize_identity_text(policy_type, "policy_type")
+    seed = f"{tenant}|{normalized_policy_type}|v{version}"
+    return TenantGovernancePolicyId(uuid.uuid5(_GOVERNANCE_POLICY_NAMESPACE, seed))
+
+
+def derive_execution_governance_configuration_id(
+    *,
+    tenant_id: str,
+    version: int = 1,
+) -> TenantExecutionGovernanceConfigurationId:
+    tenant = coerce_tenant_id(tenant_id)
+    if version < 1:
+        raise ValueError("version must be >= 1")
+    seed = f"{tenant}|execution_governance|v{version}"
+    return TenantExecutionGovernanceConfigurationId(
+        uuid.uuid5(_EXECUTION_GOVERNANCE_CONFIGURATION_NAMESPACE, seed)
+    )
+
+
+def derive_execution_circuit_breaker_id(
+    *,
+    tenant_id: str,
+    config_id: uuid.UUID,
+) -> TenantExecutionCircuitBreakerId:
+    tenant = coerce_tenant_id(tenant_id)
+    seed = f"{tenant}|{config_id}|execution_circuit"
+    return TenantExecutionCircuitBreakerId(
+        uuid.uuid5(_EXECUTION_CIRCUIT_BREAKER_NAMESPACE, seed)
+    )
+
+
 def derive_topology_configuration_id(
     *,
     tenant_id: str,
@@ -129,6 +181,22 @@ def as_governance_policy_id(
     )
 
 
+def as_execution_governance_configuration_id(
+    value: uuid.UUID | str,
+) -> TenantExecutionGovernanceConfigurationId:
+    return TenantExecutionGovernanceConfigurationId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
+def as_execution_circuit_breaker_id(
+    value: uuid.UUID | str,
+) -> TenantExecutionCircuitBreakerId:
+    return TenantExecutionCircuitBreakerId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
 def as_topology_configuration_id(
     value: uuid.UUID | str,
 ) -> TenantTopologyConfigurationId:
@@ -146,17 +214,24 @@ def _normalize_identity_text(raw: str, field_name: str) -> str:
 
 __all__ = [
     "TenantChannelConfigurationId",
+    "TenantExecutionCircuitBreakerId",
+    "TenantExecutionGovernanceConfigurationId",
     "TenantGovernancePolicyId",
     "TenantKnowledgeDocumentId",
     "TenantKnowledgeDocumentVersionId",
     "TenantTopologyConfigurationId",
     "as_channel_configuration_id",
+    "as_execution_circuit_breaker_id",
+    "as_execution_governance_configuration_id",
     "as_governance_policy_id",
     "as_knowledge_document_id",
     "as_knowledge_document_version_id",
     "as_topology_configuration_id",
     "derive_channel_configuration_id",
+    "derive_execution_circuit_breaker_id",
+    "derive_execution_governance_configuration_id",
     "derive_governance_policy_id",
+    "derive_governance_policy_version_id",
     "derive_knowledge_document_id",
     "derive_knowledge_document_version_id",
     "derive_topology_configuration_id",

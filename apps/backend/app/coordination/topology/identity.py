@@ -32,6 +32,7 @@ ordinal)` so replays produce byte-identical finding identifiers.
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 
@@ -83,25 +84,30 @@ _EDGE_NAMESPACE: uuid.UUID = uuid.UUID(
 _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
     "08192a3b-5c6d-4e7f-9001-203040506070"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 # ─── Runtime path: fresh UUID4 per call ──────────────────────────────
 
 
 def generate_topology_id() -> CoordinationTopologyId:
-    return CoordinationTopologyId(uuid.uuid4())
+    return CoordinationTopologyId(uuid.uuid5(_TOPOLOGY_NAMESPACE, _runtime_seed("topology")))
 
 
 def generate_evaluation_id() -> CoordinationTopologyEvaluationId:
-    return CoordinationTopologyEvaluationId(uuid.uuid4())
+    return CoordinationTopologyEvaluationId(uuid.uuid5(_EVALUATION_NAMESPACE, _runtime_seed("evaluation")))
 
 
 def generate_node_id() -> TopologyNodeId:
-    return TopologyNodeId(uuid.uuid4())
+    return TopologyNodeId(uuid.uuid5(_NODE_NAMESPACE, _runtime_seed("node")))
 
 
 def generate_edge_id() -> TopologyEdgeId:
-    return TopologyEdgeId(uuid.uuid4())
+    return TopologyEdgeId(uuid.uuid5(_EDGE_NAMESPACE, _runtime_seed("edge")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

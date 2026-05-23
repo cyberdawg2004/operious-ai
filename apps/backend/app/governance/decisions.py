@@ -183,8 +183,8 @@ def build_decision(
     * `evaluated_rules` preserves input order;
     * `violations` preserves input order over non-ALLOW results;
     * `restrictions` preserves input order over winning-class results;
-    * `decision_id` is supplied by the caller (default: `uuid4`); pass
-      a fixed UUID for replay reconstruction tests.
+    * `decision_id` is supplied by the caller or derived from stable
+      decision inputs for replay reconstruction tests.
     """
     results = tuple(evaluation_results)
     if not results:

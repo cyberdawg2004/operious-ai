@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -12,7 +12,9 @@ from app.execution.enums import (
     ExecutionOutboxState,
     ExecutionState,
 )
+from app.execution.admission import GovernanceAdmissionToken
 from app.execution.exceptions import ExecutionNotClaimableError
+from app.execution.exceptions import ExecutionAdmissionError
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
@@ -61,6 +63,32 @@ class ExecutionOutboxClaimResult:
     claimed: bool
     outbox: ExecutionOutboxRecord | None
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionOutboxReconcileResult:
+    """Result of one stale outbox reconciliation attempt."""
+
+    reconciled: bool
+    outbox: ExecutionOutboxRecord | None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionOutboxReconcileSweepResult:
+    """Inspectable result of one stale outbox reconciliation sweep."""
+
+    scanned: int
+    reconciled: tuple[ExecutionOutboxReconcileResult, ...]
+    refused: tuple[ExecutionOutboxReconcileResult, ...] = ()
+
+    @property
+    def reconciled_count(self) -> int:
+        return len(self.reconciled)
+
+    @property
+    def refused_count(self) -> int:
+        return len(self.refused)
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,16 +308,22 @@ class ExecutionRuntime:
         """List outbox transport intents through execution authority."""
 
         _validate_optional_tenant_id(expected_tenant_id)
-        if expected_tenant_id is None:
-            return await self._persistence.list_outbox(query)
-        if query.execution_id is None:
-            raise ValueError("tenant-scoped outbox reads require execution_id")
-        parent = await self._persistence.get_execution(
-            query.execution_id,
-            expected_tenant_id=expected_tenant_id,
-        )
-        if parent is None:
+        if (
+            expected_tenant_id is not None
+            and query.tenant_id is not None
+            and query.tenant_id != expected_tenant_id
+        ):
             return OutboxPage(records=(), total=0, offset=query.offset)
+        if (
+            expected_tenant_id is not None
+            and query.tenant_id is None
+            and query.execution_id is None
+        ):
+            raise ValueError(
+                "tenant-scoped outbox reads require execution_id or tenant_id"
+            )
+        if expected_tenant_id is not None and query.tenant_id is None:
+            query = replace(query, tenant_id=expected_tenant_id)
         return await self._persistence.list_outbox(query)
 
     async def request_diagnostic_execution(
@@ -298,6 +332,7 @@ class ExecutionRuntime:
         dispatch_id: str,
         session_id: str,
         tenant_id: str,
+        admission_token: GovernanceAdmissionToken | None = None,
         requested_at: datetime | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> ExecutionRequestResult:
@@ -305,7 +340,26 @@ class ExecutionRuntime:
 
         if not tenant_id:
             raise ValueError("execution request requires tenant_id")
+        if admission_token is None:
+            raise ExecutionAdmissionError(
+                "diagnostic execution requires governance admission"
+            )
+        if admission_token.tenant_id != tenant_id:
+            raise ExecutionAdmissionError(
+                "governance admission token tenant does not match execution tenant"
+            )
         ts = requested_at or datetime.now(tz=timezone.utc)
+        request_metadata = dict(metadata or {})
+        request_metadata.setdefault(
+            "governance.decision_id",
+            str(admission_token.governance_decision_id),
+        )
+        request_metadata["execution_governance.evaluation_id"] = str(
+            admission_token.execution_governance_evaluation_id
+        )
+        request_metadata["execution_governance.admitted_at"] = (
+            admission_token.admitted_at.isoformat()
+        )
         execution_id = derive_execution_id(
             kind=ExecutionKind.DIAGNOSTIC_AGENT.value,
             dispatch_id=dispatch_id,
@@ -321,7 +375,12 @@ class ExecutionRuntime:
             state=ExecutionState.REQUESTED,
             attempt_count=0,
             requested_at=ts,
-            metadata=dict(metadata or {}),
+            governance_decision_id=admission_token.governance_decision_id,
+            execution_governance_evaluation_id=(
+                admission_token.execution_governance_evaluation_id
+            ),
+            governance_admitted_at=admission_token.admitted_at,
+            metadata=request_metadata,
         )
         outbox = ExecutionOutboxRecord(
             outbox_id=derive_outbox_id(execution_id=execution_id),
@@ -330,7 +389,7 @@ class ExecutionRuntime:
             created_at=ts,
             metadata={
                 "execution.kind": ExecutionKind.DIAGNOSTIC_AGENT.value,
-                **dict(metadata or {}),
+                **request_metadata,
             },
         )
         persisted = await self._persistence.request_execution(
@@ -707,6 +766,114 @@ class ExecutionRuntime:
             failed_at=failed_at or datetime.now(tz=timezone.utc),
         )
 
+    async def reconcile_stale_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId | str,
+        stale_before: datetime,
+        requeued_at: datetime | None = None,
+        expected_tenant_id: str | None = None,
+        reason: str = "publisher lease expired",
+    ) -> ExecutionOutboxReconcileResult:
+        """Requeue one stale publishing outbox row through execution authority."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        if stale_before.tzinfo is None:
+            raise ValueError("stale_before must be timezone-aware")
+        if requeued_at is not None and requeued_at.tzinfo is None:
+            raise ValueError("requeued_at must be timezone-aware")
+        if not reason:
+            raise ValueError("requeue reason must be non-empty")
+        oid = (
+            outbox_id
+            if not isinstance(outbox_id, str)
+            else as_outbox_id(outbox_id)
+        )
+        current = await self.get_outbox(
+            oid,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if current is None:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=None,
+                reason="outbox_not_found",
+            )
+        if current.state is not ExecutionOutboxState.PUBLISHING:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason=f"outbox_not_publishable:{current.state.value}",
+            )
+        if current.claimed_at is None or current.claimed_at > stale_before:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason="outbox_not_stale",
+            )
+        updated = await self._persistence.requeue_stale_outbox(
+            outbox_id=oid,
+            stale_before=stale_before,
+            requeued_at=requeued_at or datetime.now(tz=timezone.utc),
+            reason=reason,
+        )
+        if updated is None:
+            refreshed = await self.get_outbox(
+                oid,
+                expected_tenant_id=expected_tenant_id,
+            )
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=refreshed,
+                reason="outbox_not_stale",
+            )
+        return ExecutionOutboxReconcileResult(reconciled=True, outbox=updated)
+
+    async def reconcile_stale_outbox_records(
+        self,
+        *,
+        stale_before: datetime,
+        requeued_at: datetime | None = None,
+        tenant_id: str | None = None,
+        reason: str = "publisher lease expired",
+        limit: int = 100,
+    ) -> ExecutionOutboxReconcileSweepResult:
+        """Requeue a bounded tenant-scoped page of stale outbox rows."""
+
+        if stale_before.tzinfo is None:
+            raise ValueError("stale_before must be timezone-aware")
+        if requeued_at is not None and requeued_at.tzinfo is None:
+            raise ValueError("requeued_at must be timezone-aware")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        page = await self._persistence.list_outbox(
+            OutboxQuery(
+                tenant_id=tenant_id,
+                state=ExecutionOutboxState.PUBLISHING,
+                limit=limit,
+            )
+        )
+        ts = requeued_at or datetime.now(tz=timezone.utc)
+        reconciled: list[ExecutionOutboxReconcileResult] = []
+        refused: list[ExecutionOutboxReconcileResult] = []
+        for outbox in page.records:
+            result = await self.reconcile_stale_outbox(
+                outbox_id=outbox.outbox_id,
+                stale_before=stale_before,
+                requeued_at=ts,
+                expected_tenant_id=tenant_id,
+                reason=reason,
+            )
+            if result.reconciled:
+                reconciled.append(result)
+            else:
+                refused.append(result)
+        return ExecutionOutboxReconcileSweepResult(
+            scanned=len(page.records),
+            reconciled=tuple(reconciled),
+            refused=tuple(refused),
+        )
+
     async def require_claim(
         self,
         *,
@@ -724,6 +891,8 @@ class ExecutionRuntime:
 __all__ = [
     "ExecutionClaimResult",
     "ExecutionOutboxClaimResult",
+    "ExecutionOutboxReconcileResult",
+    "ExecutionOutboxReconcileSweepResult",
     "ExecutionRecoveryResult",
     "ExecutionRecoverySweepResult",
     "ExecutionRequestResult",

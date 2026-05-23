@@ -24,6 +24,7 @@ from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import JWKSAuthProvider
 from app.core.config import Settings, get_settings
+from app.core.http import close_shared_http_client
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.db.session import dispose_engine
@@ -141,8 +142,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # removed when those substrates were quarantined into
         # `app/_deprecated/`. The constitutional substrates are pure
         # value-object layers and have no I/O resources to dispose of. The
-        # only live infra we still own is the SQLAlchemy engine and the
-        # Redis connection (both lazy / no-op when not configured).
+        # only live infra we still own is the SQLAlchemy engine, Redis
+        # connection, and shared outbound HTTP client (all lazy / no-op
+        # when not configured).
+        await close_shared_http_client()
         await dispose_engine()
         await close_redis()
         logger.info("lifespan_shutdown_complete", extra={"app": settings.APP_NAME})

@@ -5,10 +5,19 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
-from app.tenant.exceptions import TenantConfigurationPersistenceError
-from app.tenant.enums import TenantKnowledgeDocumentStatus, TenantTopologyStatus
+from app.tenant.exceptions import (
+    ChronologyImmutabilityError,
+    TenantConfigurationPersistenceError,
+)
+from app.tenant.enums import (
+    TenantExecutionGovernanceStatus,
+    TenantKnowledgeDocumentStatus,
+    TenantTopologyStatus,
+)
 from app.tenant.identity import (
     TenantChannelConfigurationId,
+    TenantExecutionCircuitBreakerId,
+    TenantExecutionGovernanceConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantTopologyConfigurationId,
@@ -16,6 +25,10 @@ from app.tenant.identity import (
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantExecutionCircuitBreakerPage,
+    TenantExecutionCircuitBreakerQuery,
+    TenantExecutionGovernanceConfigurationPage,
+    TenantExecutionGovernanceConfigurationQuery,
     TenantGovernancePolicyPage,
     TenantGovernancePolicyQuery,
     TenantKnowledgeDocumentPage,
@@ -27,6 +40,8 @@ from app.tenant.persistence.models import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
@@ -41,6 +56,8 @@ class InMemoryTenantConfigurationRepository:
         "_channels",
         "_documents",
         "_document_versions",
+        "_execution_circuit_breakers",
+        "_execution_governance_configurations",
         "_policies",
         "_topologies",
         "_lock",
@@ -62,6 +79,14 @@ class InMemoryTenantConfigurationRepository:
         self._policies: dict[
             TenantGovernancePolicyId,
             TenantGovernancePolicyRecord,
+        ] = {}
+        self._execution_governance_configurations: dict[
+            TenantExecutionGovernanceConfigurationId,
+            TenantExecutionGovernanceConfigurationRecord,
+        ] = {}
+        self._execution_circuit_breakers: dict[
+            TenantExecutionCircuitBreakerId,
+            TenantExecutionCircuitBreakerRecord,
         ] = {}
         self._topologies: dict[
             TenantTopologyConfigurationId,
@@ -169,7 +194,15 @@ class InMemoryTenantConfigurationRepository:
     ) -> None:
         _assert_write_tenant(record.tenant_id, expected_tenant_id)
         async with self._lock:
-            self._document_versions[(record.document_id, record.version)] = record
+            key = (record.document_id, record.version)
+            existing = self._document_versions.get(key)
+            if existing is not None:
+                if existing.content_sha256 != record.content_sha256:
+                    raise ChronologyImmutabilityError(
+                        "knowledge document version is append-only"
+                    )
+                return
+            self._document_versions[key] = record
 
     async def get_knowledge_document_version(
         self,
@@ -263,6 +296,102 @@ class InMemoryTenantConfigurationRepository:
             rows = [r for r in rows if r.status == query.status]
         rows.sort(key=lambda r: (r.policy_type, str(r.policy_id)))
         return _policy_page(rows, query.limit, query.offset)
+
+    async def save_execution_governance_configuration(
+        self,
+        record: TenantExecutionGovernanceConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        async with self._lock:
+            self._execution_governance_configurations[record.config_id] = record
+
+    async def get_execution_governance_configuration(
+        self,
+        config_id: TenantExecutionGovernanceConfigurationId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None:
+        record = self._execution_governance_configurations.get(config_id)
+        if record is None or record.tenant_id != expected_tenant_id:
+            return None
+        return record
+
+    async def list_execution_governance_configurations(
+        self,
+        query: TenantExecutionGovernanceConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationPage:
+        rows = [
+            r
+            for r in self._execution_governance_configurations.values()
+            if r.tenant_id == expected_tenant_id
+        ]
+        if query.config_id is not None:
+            rows = [r for r in rows if r.config_id == query.config_id]
+        if query.status is not None:
+            rows = [r for r in rows if r.status == query.status]
+        rows.sort(key=lambda r: (r.version, str(r.config_id)))
+        return _execution_governance_page(rows, query.limit, query.offset)
+
+    async def resolve_active_execution_governance_configuration(
+        self,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None:
+        rows = [
+            r
+            for r in self._execution_governance_configurations.values()
+            if r.tenant_id == expected_tenant_id
+            and r.status is TenantExecutionGovernanceStatus.ACTIVE
+        ]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: (r.version, str(r.config_id)), reverse=True)
+        return rows[0]
+
+    async def save_execution_circuit_breaker(
+        self,
+        record: TenantExecutionCircuitBreakerRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        async with self._lock:
+            self._execution_circuit_breakers[record.breaker_id] = record
+
+    async def get_execution_circuit_breaker(
+        self,
+        breaker_id: TenantExecutionCircuitBreakerId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerRecord | None:
+        record = self._execution_circuit_breakers.get(breaker_id)
+        if record is None or record.tenant_id != expected_tenant_id:
+            return None
+        return record
+
+    async def list_execution_circuit_breakers(
+        self,
+        query: TenantExecutionCircuitBreakerQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerPage:
+        rows = [
+            r
+            for r in self._execution_circuit_breakers.values()
+            if r.tenant_id == expected_tenant_id
+        ]
+        if query.breaker_id is not None:
+            rows = [r for r in rows if r.breaker_id == query.breaker_id]
+        if query.config_id is not None:
+            rows = [r for r in rows if r.config_id == query.config_id]
+        if query.state is not None:
+            rows = [r for r in rows if r.state == query.state]
+        rows.sort(key=lambda r: (r.state.value, str(r.breaker_id)))
+        return _execution_circuit_page(rows, query.limit, query.offset)
 
     async def save_topology_configuration(
         self,
@@ -388,6 +517,34 @@ def _policy_page(
     if limit is not None:
         sliced = sliced[:limit]
     return TenantGovernancePolicyPage(items=tuple(sliced), total=total, offset=offset)
+
+
+def _execution_governance_page(
+    rows: list[TenantExecutionGovernanceConfigurationRecord],
+    limit: int | None,
+    offset: int,
+) -> TenantExecutionGovernanceConfigurationPage:
+    total = len(rows)
+    sliced = rows[offset:]
+    if limit is not None:
+        sliced = sliced[:limit]
+    return TenantExecutionGovernanceConfigurationPage(
+        items=tuple(sliced), total=total, offset=offset
+    )
+
+
+def _execution_circuit_page(
+    rows: list[TenantExecutionCircuitBreakerRecord],
+    limit: int | None,
+    offset: int,
+) -> TenantExecutionCircuitBreakerPage:
+    total = len(rows)
+    sliced = rows[offset:]
+    if limit is not None:
+        sliced = sliced[:limit]
+    return TenantExecutionCircuitBreakerPage(
+        items=tuple(sliced), total=total, offset=offset
+    )
 
 
 def _topology_page(

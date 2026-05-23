@@ -132,6 +132,7 @@ async def rollback_knowledge_document(
             document_id=document_id,
             target_version=request.target_version,
             rolled_back_by=_principal_or_400(authority),
+            approval_id=request.approval_id,
         )
     except (ValueError, CognitionNotFoundError) as exc:
         raise HTTPException(

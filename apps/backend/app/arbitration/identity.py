@@ -33,6 +33,7 @@ change to every previously derived identifier in the substrate.
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 
@@ -76,29 +77,34 @@ _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
 _DEADLOCK_NAMESPACE: uuid.UUID = uuid.UUID(
     "a1b2c3d4-0008-4008-8008-000000000008"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 # ─── Runtime path: fresh UUID4 per call ──────────────────────────────
 
 
 def generate_case_id() -> ArbitrationCaseId:
-    return ArbitrationCaseId(uuid.uuid4())
+    return ArbitrationCaseId(uuid.uuid5(_CASE_NAMESPACE, _runtime_seed("case")))
 
 
 def generate_evaluation_id() -> ArbitrationEvaluationId:
-    return ArbitrationEvaluationId(uuid.uuid4())
+    return ArbitrationEvaluationId(uuid.uuid5(_EVALUATION_NAMESPACE, _runtime_seed("evaluation")))
 
 
 def generate_signal_id() -> ArbitrationSignalId:
-    return ArbitrationSignalId(uuid.uuid4())
+    return ArbitrationSignalId(uuid.uuid5(_SIGNAL_NAMESPACE, _runtime_seed("signal")))
 
 
 def generate_conflict_id() -> ArbitrationConflictId:
-    return ArbitrationConflictId(uuid.uuid4())
+    return ArbitrationConflictId(uuid.uuid5(_CONFLICT_NAMESPACE, _runtime_seed("conflict")))
 
 
 def generate_recommendation_id() -> ArbitrationRecommendationId:
-    return ArbitrationRecommendationId(uuid.uuid4())
+    return ArbitrationRecommendationId(uuid.uuid5(_RECOMMENDATION_NAMESPACE, _runtime_seed("recommendation")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

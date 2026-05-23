@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 from typing import Any, Mapping, cast
 
 from sqlalchemy import select, update
@@ -512,6 +513,42 @@ class PostgresExecutionPersistence(BaseRepository):
             )
         return updated
 
+    async def requeue_stale_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId,
+        stale_before: datetime,
+        requeued_at: datetime,
+        reason: str,
+    ) -> ExecutionOutboxRecord | None:
+        existing = await self.get_outbox(outbox_id)
+        if existing is None:
+            return None
+        stmt = (
+            update(ExecutionOutboxRow)
+            .where(
+                ExecutionOutboxRow.outbox_id == outbox_id,
+                ExecutionOutboxRow.state == ExecutionOutboxState.PUBLISHING.value,
+                ExecutionOutboxRow.claimed_at.is_not(None),
+                ExecutionOutboxRow.claimed_at <= stale_before,
+            )
+            .values(
+                state=ExecutionOutboxState.PENDING.value,
+                claimed_at=None,
+                publisher_id=None,
+                last_error=reason,
+                metadata_json={
+                    **dict(existing.metadata),
+                    "reconciler.reason": reason,
+                    "reconciler.requeued_at": requeued_at.isoformat(),
+                },
+            )
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
+        return await self.get_outbox(outbox_id)
+
     async def list_executions(
         self,
         query: ExecutionQuery,
@@ -587,6 +624,11 @@ class PostgresExecutionPersistence(BaseRepository):
             stmt = stmt.where(
                 ExecutionOutboxRow.execution_id == query.execution_id
             )
+        if query.tenant_id is not None:
+            stmt = stmt.join(
+                ExecutionRow,
+                ExecutionRow.execution_id == ExecutionOutboxRow.execution_id,
+            ).where(ExecutionRow.tenant_id == query.tenant_id)
         if query.state is not None:
             stmt = stmt.where(ExecutionOutboxRow.state == query.state.value)
         stmt = stmt.order_by(
@@ -658,6 +700,17 @@ class PostgresExecutionPersistence(BaseRepository):
 
 
 def _execution_to_row(record: ExecutionRecord) -> ExecutionRow:
+    metadata = dict(record.metadata)
+    if record.governance_decision_id is not None:
+        metadata["governance.decision_id"] = str(record.governance_decision_id)
+    if record.execution_governance_evaluation_id is not None:
+        metadata["execution_governance.evaluation_id"] = str(
+            record.execution_governance_evaluation_id
+        )
+    if record.governance_admitted_at is not None:
+        metadata["execution_governance.admitted_at"] = (
+            record.governance_admitted_at.isoformat()
+        )
     return ExecutionRow(
         execution_id=record.execution_id,
         kind=record.kind.value,
@@ -673,7 +726,7 @@ def _execution_to_row(record: ExecutionRecord) -> ExecutionRow:
         worker_id=record.worker_id,
         result=dict(record.result),
         error=record.error,
-        metadata_json=dict(record.metadata),
+        metadata_json=metadata,
     )
 
 
@@ -718,6 +771,7 @@ def _row_to_attempt(row: ExecutionAttemptRow) -> ExecutionAttemptRecord:
 
 
 def _row_to_execution(row: ExecutionRow) -> ExecutionRecord:
+    metadata = dict(row.metadata_json or {})
     return ExecutionRecord(
         execution_id=ExecutionId(row.execution_id),
         kind=ExecutionKind(row.kind),
@@ -727,13 +781,22 @@ def _row_to_execution(row: ExecutionRow) -> ExecutionRecord:
         state=ExecutionState(row.state),
         attempt_count=row.attempt_count,
         requested_at=row.requested_at,
+        governance_decision_id=_optional_uuid(
+            metadata.get("governance.decision_id")
+        ),
+        execution_governance_evaluation_id=_optional_uuid(
+            metadata.get("execution_governance.evaluation_id")
+        ),
+        governance_admitted_at=_optional_datetime(
+            metadata.get("execution_governance.admitted_at")
+        ),
         claimed_at=row.claimed_at,
         completed_at=row.completed_at,
         failed_at=row.failed_at,
         worker_id=row.worker_id,
         result=dict(row.result or {}),
         error=row.error,
-        metadata=dict(row.metadata_json or {}),
+        metadata=metadata,
     )
 
 
@@ -767,6 +830,24 @@ def _row_to_outbox(row: ExecutionOutboxRow) -> ExecutionOutboxRecord:
         last_error=row.last_error,
         metadata=dict(row.metadata_json or {}),
     )
+
+
+def _optional_uuid(value: object) -> UUID | None:
+    if value is None:
+        return None
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 __all__ = ["PostgresExecutionPersistence"]

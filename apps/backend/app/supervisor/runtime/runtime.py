@@ -39,6 +39,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
+from app.core.deterministic_identity import derive_runtime_id
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
@@ -91,6 +92,10 @@ from app.supervisor.runtime.view_builder import (
 )
 from app.supervisor.tracing import EvaluatorTrace, SupervisorTrace
 
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe50600c")
+_INSPECTION_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe50600d")
+_DECISION_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe50600e")
+
 
 class SupervisorRuntime:
     """Apex supervisor orchestrator. Produces one envelope per call."""
@@ -108,7 +113,15 @@ class SupervisorRuntime:
     ) -> None:
         self._registry = evaluator_registry
         self._scoring_weights: dict[str, float] = dict(scoring_weights or {})
-        self._instance_id = uuid.uuid4()
+        self._instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=(
+                "supervisor_runtime",
+                evaluator_registry.names(),
+                self._scoring_weights,
+            ),
+        )
         # 2.75-\u03b1: capability legality gate. Inert when None.
         self._capability_governance = governance
         self._supervisor_repository = supervisor_repository
@@ -135,7 +148,17 @@ class SupervisorRuntime:
         loop = asyncio.get_event_loop()
         started_at = datetime.now(timezone.utc)
         loop_start = loop.time()
-        inspection_id = request.inspection_id_override or uuid.uuid4()
+        inspection_id = request.inspection_id_override or derive_runtime_id(
+            namespace=_INSPECTION_NAMESPACE,
+            tenant_id=request.tenant_id,
+            seed_components=(
+                "supervisor_inspection",
+                request.execution_id,
+                request.correlation_id,
+                request.request_id,
+                request.metadata,
+            ),
+        )
         request_id = request.request_id or get_request_id()
 
         # Wedge B6: SINGULAR authority resolution.
@@ -551,7 +574,19 @@ class SupervisorRuntime:
         # downstream consumers see a well-shaped envelope even on
         # request-validation failure.
         synthetic_decision = SupervisorDecision(
-            decision_id=request.decision_id_override or uuid.uuid4(),
+            decision_id=request.decision_id_override
+            or derive_runtime_id(
+                namespace=_DECISION_NAMESPACE,
+                tenant_id=resolution.tenant_id,
+                seed_components=(
+                    "supervisor_fail_fast_decision",
+                    inspection_id,
+                    request.execution_id,
+                    type(error).__name__,
+                    str(error),
+                    request.metadata,
+                ),
+            ),
             kind=SupervisorDecisionKind.REJECT,
             aggregate_score=0.0,
             findings=(),

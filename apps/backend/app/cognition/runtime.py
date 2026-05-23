@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
+import uuid
 
 from app.cognition.exceptions import (
     CognitionLifecycleError,
@@ -30,6 +31,7 @@ from app.sop_intelligence.persistence import (
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
 )
+from app.tenant.chronology import canonical_sha256
 from app.tenant.identity import (
     TenantKnowledgeDocumentId,
     as_knowledge_document_id,
@@ -41,6 +43,13 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentVersionPage,
     TenantKnowledgeDocumentVersionQuery,
     TenantKnowledgeDocumentVersionRecord,
+)
+
+_BOOTSTRAP_APPROVAL_ID = str(
+    uuid.uuid5(
+        uuid.UUID("c7b7bfc2-5b44-5a25-9b10-4ab18c18e537"),
+        "operious:bootstrap:initial",
+    )
 )
 
 
@@ -132,6 +141,7 @@ class CognitionRuntime:
         version_record = _version_record_from_document(
             updated_document,
             source_approval_id=approval.approval_id,
+            previous_version_sha256=previous_version.content_sha256,
             created_at=now,
             metadata={
                 "origin": "approval_apply",
@@ -168,6 +178,17 @@ class CognitionRuntime:
             previous_version=previous_version,
         )
 
+    async def get_approval_record(
+        self,
+        *,
+        tenant_id: str,
+        approval_id: str,
+    ) -> ApprovalRecord:
+        return await self._require_approval(
+            tenant_id=tenant_id,
+            approval_id=approval_id,
+        )
+
     async def rollback_document(
         self,
         *,
@@ -175,7 +196,15 @@ class CognitionRuntime:
         document_id: TenantKnowledgeDocumentId,
         target_version: int,
         rolled_back_by: str,
+        approval: ApprovalRecord,
     ) -> KnowledgeRollbackResult:
+        if (
+            approval.tenant_id != tenant_id
+            or approval.status != ApprovalStatus.APPROVED.value
+        ):
+            raise CognitionLifecycleError(
+                "rollback requires approved approval lineage"
+            )
         document = await self._require_document(
             tenant_id=tenant_id,
             document_id=document_id,
@@ -216,7 +245,8 @@ class CognitionRuntime:
         )
         version_record = _version_record_from_document(
             rolled_back_document,
-            source_approval_id=None,
+            source_approval_id=approval.approval_id,
+            previous_version_sha256=archived.content_sha256,
             created_at=now,
             metadata={
                 "origin": "rollback",
@@ -289,26 +319,19 @@ class CognitionRuntime:
         archived_by: str,
         reason: str,
     ) -> TenantKnowledgeDocumentVersionRecord:
+        del archived_by, reason
         existing = await self._tenant_configuration_repository.get_knowledge_document_version(
             document.document_id,
             document.version,
             expected_tenant_id=tenant_id,
         )
-        archived = _version_record_from_document(
-            replace(document, status=TenantKnowledgeDocumentStatus.ARCHIVED),
-            source_approval_id=(existing.source_approval_id if existing else None),
-            created_at=(existing.created_at if existing else _utcnow()),
-            metadata={
-                **(dict(existing.metadata) if existing else {}),
-                "archived_by": archived_by,
-                "archived_reason": reason,
-            },
+        if existing is not None:
+            return existing
+        return await self._ensure_current_version(
+            tenant_id=tenant_id,
+            document=document,
+            metadata={"origin": "bootstrap_current_version"},
         )
-        await self._tenant_configuration_repository.save_knowledge_document_version(
-            archived,
-            expected_tenant_id=tenant_id,
-        )
-        return archived
 
     async def _ensure_current_version(
         self,
@@ -326,7 +349,7 @@ class CognitionRuntime:
             return existing
         record = _version_record_from_document(
             document,
-            source_approval_id=None,
+            source_approval_id=_BOOTSTRAP_APPROVAL_ID,
             created_at=_utcnow(),
             metadata=metadata,
         )
@@ -382,10 +405,25 @@ class CognitionRuntime:
 def _version_record_from_document(
     document: TenantKnowledgeDocumentRecord,
     *,
-    source_approval_id: str | None,
+    source_approval_id: str,
     created_at: datetime,
     metadata: dict[str, Any],
+    previous_version_sha256: str | None = None,
 ) -> TenantKnowledgeDocumentVersionRecord:
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": document.tenant_id,
+            "document_id": str(document.document_id),
+            "version": document.version,
+            "title": document.title,
+            "content": document.content,
+            "document_type": document.document_type.value,
+            "status": document.status.value,
+            "uploaded_by": document.uploaded_by,
+            "source_approval_id": source_approval_id,
+            "metadata": metadata,
+        }
+    )
     return TenantKnowledgeDocumentVersionRecord(
         version_id=derive_knowledge_document_version_id(
             tenant_id=document.tenant_id,
@@ -401,6 +439,8 @@ def _version_record_from_document(
         status=document.status,
         uploaded_by=document.uploaded_by,
         source_approval_id=source_approval_id,
+        content_sha256=content_sha256,
+        previous_version_sha256=previous_version_sha256,
         created_at=created_at,
         metadata=metadata,
     )

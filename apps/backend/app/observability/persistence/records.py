@@ -113,11 +113,35 @@ class OperationalAlertRecord:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class StuckExecutionAlertRecord:
+    alert_id: str
+    tenant_id: str
+    execution_id: str
+    reason: str
+    claimed_at: datetime | None
+    worker_id: str | None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class InboundNormalizationDeadLetterRecord:
+    dead_letter_id: str
+    tenant_id: str
+    ingress_id: str
+    normalization_status: str
+    error: str | None
+    received_at: datetime
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
 __all__ = [
     "DeadLetterExecutionRecord",
+    "InboundNormalizationDeadLetterRecord",
     "OperationalAlertRecord",
     "OperationalMetricsSnapshotRecord",
     "OperationalSLODefinitionRecord",
     "OperationalTraceSpanRecord",
     "QAScoreBucketRecord",
+    "StuckExecutionAlertRecord",
 ]

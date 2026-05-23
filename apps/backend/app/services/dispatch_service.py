@@ -24,13 +24,14 @@ from app.coordination.enums import (
     CoordinationPriority,
 )
 from app.coordination.identity import (
+    derive_coordination_id,
     derive_correlation_id,
-    generate_message_id,
+    derive_message_id,
 )
 from app.coordination.models.payload import CoordinationPayload
 from app.coordination.models.recipients import CoordinationRecipient
 from app.coordination.runtime import CoordinationRuntime
-from app.execution import ExecutionRuntime
+from app.execution import ExecutionRuntime, GovernanceAdmissionToken
 from app.execution.publisher import ExecutionPublisher
 from app.escalation.publisher import EscalationPublisher
 from app.governance.context import GovernanceContext
@@ -49,10 +50,12 @@ from app.identity import AuthorityContext
 from app.runtime import (
     DispatchArbitrationProposal,
     DispatchArbitrationRuntime,
+    ExecutionGovernanceRuntime,
 )
 from app.session.contracts.requests import OpenSessionRequest
 from app.session.contracts.results import OpenSessionResult
 from app.session.enums import SessionScope
+from app.session.identity import derive_session_id
 from app.session.persistence import SessionPersistenceProtocol
 from app.session.runtime import SessionRuntime
 
@@ -96,6 +99,7 @@ class DispatchService:
         session_repository: SessionRepository,
         execution_runtime: ExecutionRuntime,
         execution_publisher: ExecutionPublisher,
+        execution_governance_runtime: ExecutionGovernanceRuntime,
         escalation_publisher: EscalationPublisher | None = None,
         dispatch_arbitration_runtime: DispatchArbitrationRuntime | None = None,
         tenant_topology_runtime_provider: TenantTopologyRuntimeProvider | None = None,
@@ -105,6 +109,7 @@ class DispatchService:
         self._session_repository = session_repository
         self._execution_runtime = execution_runtime
         self._execution_publisher = execution_publisher
+        self._execution_governance = execution_governance_runtime
         self._escalation_publisher = escalation_publisher
         self._dispatch_arbitration = dispatch_arbitration_runtime
         self._tenant_topology_runtime_provider = tenant_topology_runtime_provider
@@ -131,6 +136,22 @@ class DispatchService:
             )
         )
         governance_decision_id = coordination_result.trace.governance_decision_id
+        if coordination_result.outcome is not CoordinationDispatchOutcome.ACCEPTED:
+            return DispatchResult(
+                dispatch_id=str(coordination_result.coordination_id),
+                session_id=None,
+                execution_id=None,
+                governance_decision_id=(
+                    str(governance_decision_id)
+                    if governance_decision_id is not None
+                    else None
+                ),
+                verdict=coordination_result.outcome.value,
+                halted=True,
+                halt_reason=(
+                    coordination_result.error or coordination_result.outcome.value
+                ),
+            )
         if governance_decision_id is None:
             if coordination_result.is_topology_blocked:
                 return DispatchResult(
@@ -146,6 +167,20 @@ class DispatchService:
                 )
             raise DispatchServiceError(
                 "coordination dispatch did not produce a governance decision"
+            )
+
+        execution_governance = await self._execution_governance.evaluate(
+            tenant_id=tenant_id,
+        )
+        if not execution_governance.allowed:
+            return DispatchResult(
+                dispatch_id=str(coordination_result.coordination_id),
+                session_id=None,
+                execution_id=None,
+                governance_decision_id=str(governance_decision_id),
+                verdict=CoordinationDispatchOutcome.DEGRADED.value,
+                halted=True,
+                halt_reason=execution_governance.reason,
             )
 
         arbitration = None
@@ -190,6 +225,12 @@ class DispatchService:
                 scope=SessionScope.TENANT,
                 external_handle=str(ingress.ingress_id),
                 tenant_id=tenant_id,
+                session_id_override=derive_session_id(
+                    scope=SessionScope.TENANT.value,
+                    tenant_id=tenant_id,
+                    principal_id=None,
+                    external_handle=str(ingress.ingress_id),
+                ),
                 correlation_id=_correlation_id_text(ingress),
                 request_id=ingress.request_id,
                 metadata={
@@ -216,20 +257,18 @@ class DispatchService:
         session = session_result.session
         if session is None:
             raise DispatchServiceError("session runtime returned an empty session")
-        if (
-            coordination_result.outcome is CoordinationDispatchOutcome.DENIED
-            and self._escalation_publisher is not None
-        ):
-            await self._escalation_publisher.publish_governance_denial(
-                governance_decision_id=str(governance_decision_id),
-                tenant_id=tenant_id,
-                session_id=str(session.identity.session_id),
-            )
-
         execution_request = await self._execution_runtime.request_diagnostic_execution(
             dispatch_id=str(coordination_result.coordination_id),
             session_id=str(session.identity.session_id),
             tenant_id=tenant_id,
+            admission_token=GovernanceAdmissionToken(
+                governance_decision_id=governance_decision_id,
+                execution_governance_evaluation_id=(
+                    execution_governance.evaluation_id
+                ),
+                admitted_at=execution_governance.evaluated_at,
+                tenant_id=tenant_id,
+            ),
             metadata={
                 "boundary.ingress_id": str(ingress.ingress_id),
                 "session.id": str(session.identity.session_id),
@@ -384,9 +423,13 @@ def _to_coordination_request(
     tenant_id: str,
     authority: AuthorityContext,
 ) -> CoordinationDispatchRequest:
+    lineage_seed = f"{tenant_id}|{ingress.ingress_id}|{ingress.event_id}|dispatch"
+    coordination_id = derive_coordination_id(seed=lineage_seed)
+    message_id = derive_message_id(seed=f"{lineage_seed}|message")
+    governance_seed = f"{lineage_seed}|governance"
     return CoordinationDispatchRequest(
         message=CoordinationMessage(
-            message_id=generate_message_id(),
+            message_id=message_id,
             message_type=CoordinationMessageType.REQUEST,
             sender_id=_DISPATCH_SENDER_ID,
             recipient=CoordinationRecipient(
@@ -423,9 +466,14 @@ def _to_coordination_request(
         ),
         direction=CoordinationDirection.RUNTIME_TO_AGENT,
         correlation_id=derive_correlation_id(seed=f"boundary:{ingress.ingress_id}"),
+        coordination_id_override=coordination_id,
         request_id=ingress.request_id,
         tenant_id=tenant_id,
         authority=authority,
+        governance_metadata={
+            "governance.decision_seed": governance_seed,
+            "governance.enforcement_seed": f"{governance_seed}|enforcement",
+        },
         metadata={
             "boundary.ingress_id": str(ingress.ingress_id),
             "boundary.event_id": (

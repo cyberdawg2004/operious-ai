@@ -46,6 +46,7 @@ treat them as permanent.
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 
@@ -76,6 +77,7 @@ _MESSAGE_NAMESPACE: uuid.UUID = uuid.UUID(
 _CORRELATION_NAMESPACE: uuid.UUID = uuid.UUID(
     "8c5f3e3d-4e70-4b2c-9d4e-3c4d5e6f7081"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 # ─── Runtime path: fresh UUID4 per call ──────────────────────────────
@@ -83,17 +85,21 @@ _CORRELATION_NAMESPACE: uuid.UUID = uuid.UUID(
 
 def generate_coordination_id() -> CoordinationId:
     """Return a fresh UUID4 wrapped as `CoordinationId`."""
-    return CoordinationId(uuid.uuid4())
+    return CoordinationId(uuid.uuid5(_COORDINATION_NAMESPACE, _runtime_seed("coordination")))
 
 
 def generate_message_id() -> CoordinationMessageId:
     """Return a fresh UUID4 wrapped as `CoordinationMessageId`."""
-    return CoordinationMessageId(uuid.uuid4())
+    return CoordinationMessageId(uuid.uuid5(_MESSAGE_NAMESPACE, _runtime_seed("message")))
 
 
 def generate_correlation_id() -> CoordinationCorrelationId:
     """Return a fresh UUID4 wrapped as `CoordinationCorrelationId`."""
-    return CoordinationCorrelationId(uuid.uuid4())
+    return CoordinationCorrelationId(uuid.uuid5(_CORRELATION_NAMESPACE, _runtime_seed("correlation")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

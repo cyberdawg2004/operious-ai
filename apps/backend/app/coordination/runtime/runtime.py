@@ -77,6 +77,7 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 
+from app.core.deterministic_identity import derive_runtime_id
 from app.coordination.contracts.requests import CoordinationDispatchRequest
 from app.coordination.contracts.results import (
     CoordinationDispatchOutcome,
@@ -98,7 +99,6 @@ from app.coordination.identity import (
     CoordinationCorrelationId,
     CoordinationId,
     CoordinationMessageId,
-    generate_coordination_id,
 )
 from app.coordination.models.payload import CoordinationPayload
 from app.coordination.persistence.models import (
@@ -163,6 +163,9 @@ from app.governance.subjects.communication import (
 from app.identity import AuthorityResolution, TenantId, resolve_authority
 from app.observability.context import get_request_id
 
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506008")
+_COORDINATION_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506011")
+
 
 class CoordinationRuntime:
     """Apex coordination dispatcher. Produces one result per call."""
@@ -201,7 +204,11 @@ class CoordinationRuntime:
         # dispatch is evaluated against
         # ``OperationalAct.COORDINATION_DISPATCH``.
         self._capability_governance = capability_governance
-        self._instance_id: uuid.UUID = uuid.uuid4()
+        self._instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=("coordination_runtime", registry.names()),
+        )
         self._sequence: int = 0
         # The sequence assignment + envelope construction happen under
         # a single lock so that concurrent dispatch() callers still
@@ -262,7 +269,6 @@ class CoordinationRuntime:
         loop = asyncio.get_event_loop()
         started_at = datetime.now(timezone.utc)
         loop_start = loop.time()
-        coordination_id = request.coordination_id_override or generate_coordination_id()
         request_id = request.request_id or get_request_id()
 
         # Wedge B7: SINGULAR authority resolution.
@@ -279,6 +285,28 @@ class CoordinationRuntime:
             typed=request.authority,
             legacy_tenant_id=request.tenant_id,
             observed_tenant_id=request.message.recipient.tenant_id,
+        )
+        coordination_id = request.coordination_id_override or CoordinationId(
+            derive_runtime_id(
+                namespace=_COORDINATION_NAMESPACE,
+                tenant_id=resolution.tenant_id,
+                seed_components=(
+                    "coordination_dispatch",
+                    request.direction.value,
+                    request.message.message_id,
+                    request.message.sender_id,
+                    request.message.recipient.recipient_id,
+                    request.message.recipient.kind,
+                    request.message.message_type.value,
+                    request.message.priority.value,
+                    request.message.payload.content_type,
+                    request.message.payload.schema_version,
+                    request.message.payload.body,
+                    request.correlation_id,
+                    request_id,
+                    request.parent_coordination_id,
+                ),
+            )
         )
 
         # 2.75-\u03b1: capability legality gate. Independent of the
@@ -848,6 +876,19 @@ class CoordinationRuntime:
         # shadowing of substrate lineage by callers).
         merged: dict[str, object] = dict(request.governance_metadata)
         merged.update(substrate_metadata)
+        merged.setdefault(
+            "governance.decision_seed",
+            "|".join(
+                (
+                    "coordination",
+                    f"tenant:{resolution.tenant_id}",
+                    f"stage:{request.enforcement_stage.value}",
+                    f"message:{msg.message_id}",
+                    f"correlation:{request.correlation_id}",
+                    f"request:{request_id}",
+                )
+            ),
+        )
 
         # Wedge 2.75-γ: full authority axis. When ``request.authority``
         # is supplied (the constitutional Wedge-B2 path) project every

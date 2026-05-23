@@ -16,6 +16,7 @@ from app.governance.capability import (
     OperationalAct,
     gate_or_deny,
 )
+from app.core.deterministic_identity import derive_runtime_id
 from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
@@ -95,6 +96,8 @@ from app.boundary.translation.traces.trace import (
     TranslationTrace,
 )
 
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506003")
+
 
 class TranslationIngressRuntime:
     """Customer-language → canonical-English ingress runtime."""
@@ -116,7 +119,15 @@ class TranslationIngressRuntime:
             validator or SemanticPreservationValidator()
         )
         self._runtime_instance_id = (
-            runtime_instance_id or uuid.uuid4()
+            runtime_instance_id
+            or derive_runtime_id(
+                namespace=_RUNTIME_NAMESPACE,
+                tenant_id=None,
+                seed_components=(
+                    "translation_ingress_runtime",
+                    provider.name,
+                ),
+            )
         )
         self._sequence = 0
         # 2.75-\u03b1: capability legality gate. Inert when None.

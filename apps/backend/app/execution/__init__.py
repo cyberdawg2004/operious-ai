@@ -6,6 +6,8 @@ from app.execution.enums import (
     ExecutionOutboxState,
     ExecutionState,
 )
+from app.execution.admission import GovernanceAdmissionToken
+from app.execution.exceptions import ExecutionAdmissionError
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
@@ -37,6 +39,8 @@ from app.execution.publisher import ExecutionPublisher
 from app.execution.runtime import (
     ExecutionClaimResult,
     ExecutionOutboxClaimResult,
+    ExecutionOutboxReconcileResult,
+    ExecutionOutboxReconcileSweepResult,
     ExecutionRecoveryResult,
     ExecutionRecoverySweepResult,
     ExecutionRequestResult,
@@ -50,12 +54,15 @@ __all__ = [
     "ExecutionAttemptQuery",
     "ExecutionAttemptRecord",
     "ExecutionAttemptState",
+    "ExecutionAdmissionError",
     "ExecutionClaimResult",
     "ExecutionClaimRecord",
     "ExecutionId",
     "ExecutionKind",
     "ExecutionOutboxId",
     "ExecutionOutboxClaimResult",
+    "ExecutionOutboxReconcileResult",
+    "ExecutionOutboxReconcileSweepResult",
     "ExecutionOutboxRecord",
     "ExecutionOutboxState",
     "ExecutionPage",
@@ -69,6 +76,7 @@ __all__ = [
     "ExecutionRuntime",
     "ExecutionState",
     "ExecutionWorkerLegitimacyResult",
+    "GovernanceAdmissionToken",
     "InMemoryExecutionPersistence",
     "OutboxPage",
     "OutboxQuery",

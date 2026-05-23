@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.observability.persistence import (
     DeadLetterExecutionPage,
     DeadLetterExecutionRecord,
+    InboundNormalizationDeadLetterPage,
+    InboundNormalizationDeadLetterRecord,
     OperationalAlertPage,
     OperationalAlertRecord,
     OperationalMetricsSnapshotRecord,
@@ -18,6 +20,8 @@ from app.observability.persistence import (
     OperationalTraceSpanPage,
     OperationalTraceSpanRecord,
     QAScoreBucketRecord,
+    StuckExecutionAlertPage,
+    StuckExecutionAlertRecord,
 )
 
 
@@ -141,6 +145,104 @@ class DeadLetterExecutionPageResponse(BaseModel):
         return cls(
             items=[
                 DeadLetterExecutionResponse.from_record(record)
+                for record in page.items
+            ],
+            total=page.total,
+            offset=page.offset,
+        )
+
+
+class StuckExecutionAlertResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    alert_id: str
+    tenant_id: str
+    execution_id: str
+    reason: str
+    claimed_at: datetime | None
+    worker_id: str | None
+    metadata: dict[str, Any]
+
+    @classmethod
+    def from_record(
+        cls,
+        record: StuckExecutionAlertRecord,
+    ) -> "StuckExecutionAlertResponse":
+        return cls(
+            alert_id=record.alert_id,
+            tenant_id=record.tenant_id,
+            execution_id=record.execution_id,
+            reason=record.reason,
+            claimed_at=record.claimed_at,
+            worker_id=record.worker_id,
+            metadata=dict(record.metadata),
+        )
+
+
+class StuckExecutionAlertPageResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[StuckExecutionAlertResponse]
+    total: int
+    offset: int
+
+    @classmethod
+    def from_page(
+        cls,
+        page: StuckExecutionAlertPage,
+    ) -> "StuckExecutionAlertPageResponse":
+        return cls(
+            items=[
+                StuckExecutionAlertResponse.from_record(record)
+                for record in page.items
+            ],
+            total=page.total,
+            offset=page.offset,
+        )
+
+
+class InboundNormalizationDeadLetterResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    dead_letter_id: str
+    tenant_id: str
+    ingress_id: str
+    normalization_status: str
+    error: str | None
+    received_at: datetime
+    metadata: dict[str, Any]
+
+    @classmethod
+    def from_record(
+        cls,
+        record: InboundNormalizationDeadLetterRecord,
+    ) -> "InboundNormalizationDeadLetterResponse":
+        return cls(
+            dead_letter_id=record.dead_letter_id,
+            tenant_id=record.tenant_id,
+            ingress_id=record.ingress_id,
+            normalization_status=record.normalization_status,
+            error=record.error,
+            received_at=record.received_at,
+            metadata=dict(record.metadata),
+        )
+
+
+class InboundNormalizationDeadLetterPageResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[InboundNormalizationDeadLetterResponse]
+    total: int
+    offset: int
+
+    @classmethod
+    def from_page(
+        cls,
+        page: InboundNormalizationDeadLetterPage,
+    ) -> "InboundNormalizationDeadLetterPageResponse":
+        return cls(
+            items=[
+                InboundNormalizationDeadLetterResponse.from_record(record)
                 for record in page.items
             ],
             total=page.total,
@@ -355,6 +457,8 @@ class OperationalTraceSpanPageResponse(BaseModel):
 __all__ = [
     "DeadLetterExecutionPageResponse",
     "DeadLetterExecutionResponse",
+    "InboundNormalizationDeadLetterPageResponse",
+    "InboundNormalizationDeadLetterResponse",
     "OperationalAlertPageResponse",
     "OperationalAlertResponse",
     "OperationalMetricsResponse",
@@ -365,4 +469,6 @@ __all__ = [
     "OperationalTraceSpanRequest",
     "OperationalTraceSpanResponse",
     "QAScoreBucketResponse",
+    "StuckExecutionAlertPageResponse",
+    "StuckExecutionAlertResponse",
 ]

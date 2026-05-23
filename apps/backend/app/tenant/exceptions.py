@@ -15,6 +15,14 @@ class TenantConfigurationPersistenceError(TenantConfigurationError):
     """Raised when a tenant configuration write cannot be persisted."""
 
 
+class ApprovalRequiredError(TenantConfigurationError):
+    """Raised when a chronological mutation lacks approved lineage."""
+
+
+class ChronologyImmutabilityError(TenantConfigurationError):
+    """Raised when append-only version history is mutated."""
+
+
 class TenantTopologyCycleError(TenantConfigurationError):
     """Raised when a tenant topology declaration contains a cycle."""
 
@@ -24,6 +32,8 @@ class TenantCredentialEncryptionError(TenantConfigurationError):
 
 
 __all__ = [
+    "ApprovalRequiredError",
+    "ChronologyImmutabilityError",
     "TenantConfigurationError",
     "TenantConfigurationNotFoundError",
     "TenantConfigurationPersistenceError",

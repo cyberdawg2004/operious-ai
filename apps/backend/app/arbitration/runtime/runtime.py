@@ -28,6 +28,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
 
+from app.core.deterministic_identity import derive_runtime_id
 from app.arbitration.contracts.requests import ArbitrationRequest
 from app.arbitration.contracts.results import ArbitrationResult
 from app.arbitration.envelopes import ArbitrationEnvelope
@@ -84,6 +85,7 @@ from app.governance.capability import (
 )
 
 _logger = logging.getLogger(__name__)
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe50600b")
 
 
 class OperationalArbitrationRuntime:
@@ -117,7 +119,14 @@ class OperationalArbitrationRuntime:
             )
         self._registry = registry
         self._persistence = persistence
-        self._runtime_instance_id: uuid.UUID = uuid.uuid4()
+        self._runtime_instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=(
+                "operational_arbitration_runtime",
+                registry.names(),
+            ),
+        )
         self._sequence: int = 0
         # 2.75-\u03b1: capability legality gate. Inert when
         # ``governance is None``. Production composition root pins
@@ -289,12 +298,13 @@ class OperationalArbitrationRuntime:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         sequence = await self._next_sequence()
+        runtime_instance_id = self._runtime_instance_id_for_request(request)
 
         result = ArbitrationResult(
             evaluation_id=evaluation_id,
             chain_id=chain_id,
             case_id=request.case.case_id,
-            runtime_instance_id=self._runtime_instance_id,
+            runtime_instance_id=runtime_instance_id,
             sequence=sequence,
             decision=decision,
             findings=tuple(all_findings),
@@ -333,7 +343,7 @@ class OperationalArbitrationRuntime:
             evaluation_id=evaluation_id,
             chain_id=chain_id,
             case_id=request.case.case_id,
-            runtime_instance_id=self._runtime_instance_id,
+            runtime_instance_id=runtime_instance_id,
             sequence=sequence,
             outcome=decision.outcome,
             evaluator_names=evaluator_names,
@@ -558,6 +568,20 @@ class OperationalArbitrationRuntime:
         )
         return meta
 
+    def _runtime_instance_id_for_request(
+        self,
+        request: ArbitrationRequest,
+    ) -> uuid.UUID:
+        return derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=request.tenant_id,
+            seed_components=(
+                "operational_arbitration_runtime",
+                self._registry.names(),
+                str(request.case.case_id),
+            ),
+        )
+
     async def _failed_envelope(
         self,
         *,
@@ -580,6 +604,7 @@ class OperationalArbitrationRuntime:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         sequence = await self._next_sequence()
+        runtime_instance_id = self._runtime_instance_id_for_request(request)
         evaluator_names = tuple(e.name for e in evaluators)
         chain_id = (
             derive_chain_id(evaluator_names=evaluator_names)
@@ -592,7 +617,7 @@ class OperationalArbitrationRuntime:
             evaluation_id=evaluation_id,
             chain_id=chain_id,
             case_id=request.case.case_id,
-            runtime_instance_id=self._runtime_instance_id,
+            runtime_instance_id=runtime_instance_id,
             sequence=sequence,
             outcome=error_outcome,
             evaluator_names=evaluator_names,

@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from app.core.deterministic_identity import derive_runtime_id
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
@@ -99,6 +100,8 @@ from app.coordination.topology.tracing import (
 )
 from app.observability.context import get_request_id
 
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe50600a")
+
 
 class CoordinationTopologyRuntime:
     """Apex coordination-topology evaluator. Produces one envelope per call."""
@@ -127,7 +130,15 @@ class CoordinationTopologyRuntime:
             if chain_id_override is not None
             else derive_chain_id(evaluator_names=registry.names())
         )
-        self._instance_id: uuid.UUID = uuid.uuid4()
+        self._instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=(
+                "coordination_topology_runtime",
+                registry.names(),
+                self._chain_id,
+            ),
+        )
         self._sequence: int = 0
         self._lock = asyncio.Lock()
         # 2.75-\u03b1: capability legality gate. Inert when None.

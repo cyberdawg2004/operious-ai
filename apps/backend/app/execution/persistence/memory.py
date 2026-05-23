@@ -432,6 +432,37 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             self._outbox[outbox_id] = updated
             return updated
 
+    async def requeue_stale_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId,
+        stale_before: datetime,
+        requeued_at: datetime,
+        reason: str,
+    ) -> ExecutionOutboxRecord | None:
+        del requeued_at
+        async with self._lock:
+            outbox = self._outbox.get(outbox_id)
+            if outbox is None:
+                return None
+            if outbox.state is not ExecutionOutboxState.PUBLISHING:
+                return None
+            if outbox.claimed_at is None or outbox.claimed_at > stale_before:
+                return None
+            updated = replace(
+                outbox,
+                state=ExecutionOutboxState.PENDING,
+                claimed_at=None,
+                publisher_id=None,
+                last_error=reason,
+                metadata={
+                    **dict(outbox.metadata),
+                    "reconciler.reason": reason,
+                },
+            )
+            self._outbox[outbox_id] = updated
+            return updated
+
     async def list_executions(
         self,
         query: ExecutionQuery,
@@ -492,6 +523,15 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         rows = list(self._outbox.values())
         if query.execution_id is not None:
             rows = [r for r in rows if r.execution_id == query.execution_id]
+        if query.tenant_id is not None:
+            rows = [
+                r
+                for r in rows
+                if (
+                    self._executions.get(r.execution_id) is not None
+                    and self._executions[r.execution_id].tenant_id == query.tenant_id
+                )
+            ]
         if query.state is not None:
             rows = [r for r in rows if r.state is query.state]
         rows.sort(key=lambda r: (r.created_at, str(r.outbox_id)))

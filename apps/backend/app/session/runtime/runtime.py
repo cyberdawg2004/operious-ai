@@ -40,6 +40,7 @@ from app.governance.capability import (
     OperationalAct,
     evaluate_capability_gate,
 )
+from app.core.deterministic_identity import derive_runtime_id
 from app.identity import (
     AuthorityResolution,
     request_authority_resolution,
@@ -127,6 +128,7 @@ from app.session.traces.trace import (
 )
 
 _logger = logging.getLogger(__name__)
+_RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506007")
 
 
 class SessionRuntime:
@@ -154,7 +156,11 @@ class SessionRuntime:
         self._reconstructor = (
             reconstructor or SessionReconstructor()
         )
-        self._runtime_instance_id: uuid.UUID = uuid.uuid4()
+        self._runtime_instance_id = derive_runtime_id(
+            namespace=_RUNTIME_NAMESPACE,
+            tenant_id=None,
+            seed_components=("session_runtime",),
+        )
         self._sequence: int = 0
         # 2.75-\u03b1: capability legality gate. ``None`` keeps the
         # gate inert (test / dev). Production composition root pins

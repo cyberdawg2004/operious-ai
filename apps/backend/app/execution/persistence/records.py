@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
+import uuid
 
 from app.execution.enums import (
     ExecutionAttemptState,
@@ -31,6 +32,9 @@ class ExecutionRecord:
     state: ExecutionState
     attempt_count: int
     requested_at: datetime
+    governance_decision_id: uuid.UUID | None = None
+    execution_governance_evaluation_id: uuid.UUID | None = None
+    governance_admitted_at: datetime | None = None
     claimed_at: datetime | None = None
     completed_at: datetime | None = None
     failed_at: datetime | None = None

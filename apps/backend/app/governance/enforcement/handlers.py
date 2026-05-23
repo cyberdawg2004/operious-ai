@@ -44,6 +44,8 @@ from app.governance.enforcement.models import (
 from app.governance.enums import Decision
 from app.governance.exceptions import GovernanceConfigurationError
 
+_ACTION_NAMESPACE = uuid.UUID("4d2c10a2-6c00-4f7c-8b3a-1f8d0c7e0003")
+
 
 class BaseEnforcementHandler(ABC):
     """Contract every enforcement handler honours."""
@@ -65,7 +67,7 @@ class AllowHandler(BaseEnforcementHandler):
 
     async def apply(self, decision: GovernanceDecision) -> EnforcementAction:
         return EnforcementAction(
-            action_id=uuid.uuid4(),
+            action_id=_action_id(decision, self.name),
             handler_name=self.name,
             decision_id=decision.decision_id,
             outcome=EnforcementOutcome.NO_OP,
@@ -79,7 +81,7 @@ class DenyHandler(BaseEnforcementHandler):
 
     async def apply(self, decision: GovernanceDecision) -> EnforcementAction:
         return EnforcementAction(
-            action_id=uuid.uuid4(),
+            action_id=_action_id(decision, self.name),
             handler_name=self.name,
             decision_id=decision.decision_id,
             outcome=EnforcementOutcome.APPLIED,
@@ -96,7 +98,7 @@ class RedactHandler(BaseEnforcementHandler):
 
     async def apply(self, decision: GovernanceDecision) -> EnforcementAction:
         return EnforcementAction(
-            action_id=uuid.uuid4(),
+            action_id=_action_id(decision, self.name),
             handler_name=self.name,
             decision_id=decision.decision_id,
             outcome=EnforcementOutcome.APPLIED,
@@ -113,7 +115,7 @@ class DegradeHandler(BaseEnforcementHandler):
 
     async def apply(self, decision: GovernanceDecision) -> EnforcementAction:
         return EnforcementAction(
-            action_id=uuid.uuid4(),
+            action_id=_action_id(decision, self.name),
             handler_name=self.name,
             decision_id=decision.decision_id,
             outcome=EnforcementOutcome.APPLIED,
@@ -134,7 +136,7 @@ class EscalateHandler(BaseEnforcementHandler):
         # action is recorded as DEFERRED so supervisor runtimes know
         # the decision is awaiting out-of-band resolution.
         return EnforcementAction(
-            action_id=uuid.uuid4(),
+            action_id=_action_id(decision, self.name),
             handler_name=self.name,
             decision_id=decision.decision_id,
             outcome=EnforcementOutcome.DEFERRED,
@@ -148,7 +150,7 @@ class RequireApprovalHandler(BaseEnforcementHandler):
 
     async def apply(self, decision: GovernanceDecision) -> EnforcementAction:
         return EnforcementAction(
-            action_id=uuid.uuid4(),
+            action_id=_action_id(decision, self.name),
             handler_name=self.name,
             decision_id=decision.decision_id,
             outcome=EnforcementOutcome.DEFERRED,
@@ -202,6 +204,11 @@ class EnforcementHandlerRegistry:
         # most-restrictive-wins; it just needs to be deterministic.
         for decision in sorted(self._handlers.keys(), key=lambda d: d.value):
             yield self._handlers[decision]
+
+
+def _action_id(decision: GovernanceDecision, handler_name: str) -> uuid.UUID:
+    seed = f"{decision.decision_id}|{handler_name}|{decision.decision.value}"
+    return uuid.uuid5(_ACTION_NAMESPACE, seed)
 
 
 __all__ = [

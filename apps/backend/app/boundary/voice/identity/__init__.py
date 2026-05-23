@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 
@@ -40,34 +41,39 @@ _PROVIDER_NAMESPACE = uuid.UUID(
 _REPLAY_NAMESPACE = uuid.UUID(
     "030fdc2a-0008-4008-8008-200000000008"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 def generate_event_id() -> VoiceEventId:
-    return VoiceEventId(uuid.uuid4())
+    return VoiceEventId(uuid.uuid5(_EVENT_NAMESPACE, _runtime_seed("event")))
 
 
 def generate_transcript_id() -> VoiceTranscriptId:
-    return VoiceTranscriptId(uuid.uuid4())
+    return VoiceTranscriptId(uuid.uuid5(_TRANSCRIPT_NAMESPACE, _runtime_seed("transcript")))
 
 
 def generate_synthesis_id() -> VoiceSynthesisId:
-    return VoiceSynthesisId(uuid.uuid4())
+    return VoiceSynthesisId(uuid.uuid5(_SYNTHESIS_NAMESPACE, _runtime_seed("synthesis")))
 
 
 def generate_lineage_id() -> VoiceLineageId:
-    return VoiceLineageId(uuid.uuid4())
+    return VoiceLineageId(uuid.uuid5(_LINEAGE_NAMESPACE, _runtime_seed("lineage")))
 
 
 def generate_correlation_id() -> VoiceCorrelationId:
-    return VoiceCorrelationId(uuid.uuid4())
+    return VoiceCorrelationId(uuid.uuid5(_CORRELATION_NAMESPACE, _runtime_seed("correlation")))
 
 
 def generate_trace_id() -> VoiceTraceId:
-    return VoiceTraceId(uuid.uuid4())
+    return VoiceTraceId(uuid.uuid5(_TRACE_NAMESPACE, _runtime_seed("trace")))
 
 
 def generate_replay_id() -> VoiceReplayId:
-    return VoiceReplayId(uuid.uuid4())
+    return VoiceReplayId(uuid.uuid5(_REPLAY_NAMESPACE, _runtime_seed("replay")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 def derive_event_id(*, seed: str) -> VoiceEventId:

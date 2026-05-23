@@ -4,6 +4,10 @@ from app.tenant.persistence.memory import InMemoryTenantConfigurationRepository
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantExecutionCircuitBreakerPage,
+    TenantExecutionCircuitBreakerQuery,
+    TenantExecutionGovernanceConfigurationPage,
+    TenantExecutionGovernanceConfigurationQuery,
     TenantGovernancePolicyPage,
     TenantGovernancePolicyQuery,
     TenantKnowledgeDocumentPage,
@@ -18,6 +22,8 @@ from app.tenant.persistence.postgres import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
@@ -32,6 +38,12 @@ __all__ = [
     "TenantChannelConfigurationQuery",
     "TenantChannelConfigurationRecord",
     "TenantConfigurationRepository",
+    "TenantExecutionCircuitBreakerPage",
+    "TenantExecutionCircuitBreakerQuery",
+    "TenantExecutionCircuitBreakerRecord",
+    "TenantExecutionGovernanceConfigurationPage",
+    "TenantExecutionGovernanceConfigurationQuery",
+    "TenantExecutionGovernanceConfigurationRecord",
     "TenantGovernancePolicyPage",
     "TenantGovernancePolicyQuery",
     "TenantGovernancePolicyRecord",

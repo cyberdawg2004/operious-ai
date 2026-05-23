@@ -33,6 +33,7 @@ change to every previously derived identifier in the substrate.
 from __future__ import annotations
 
 import uuid
+import itertools
 from typing import NewType
 
 from app.identity import project_optional_str
@@ -66,6 +67,7 @@ _REPLAY_KEY_NAMESPACE: uuid.UUID = uuid.UUID(
 _TRACE_NAMESPACE: uuid.UUID = uuid.UUID(
     "b0c1d2e3-0005-4005-8005-000000000005"
 )
+_RUNTIME_COUNTER = itertools.count()
 
 
 # ─── Runtime path: fresh UUID4 per call ──────────────────────────────
@@ -73,15 +75,19 @@ _TRACE_NAMESPACE: uuid.UUID = uuid.UUID(
 
 def generate_event_id() -> BoundaryEventId:
     """Random event id; only used when external_message_id is absent."""
-    return BoundaryEventId(uuid.uuid4())
+    return BoundaryEventId(uuid.uuid5(_EVENT_NAMESPACE, _runtime_seed("event")))
 
 
 def generate_ingress_id() -> BoundaryIngressId:
-    return BoundaryIngressId(uuid.uuid4())
+    return BoundaryIngressId(uuid.uuid5(_INGRESS_NAMESPACE, _runtime_seed("ingress")))
 
 
 def generate_egress_id() -> BoundaryEgressId:
-    return BoundaryEgressId(uuid.uuid4())
+    return BoundaryEgressId(uuid.uuid5(_EGRESS_NAMESPACE, _runtime_seed("egress")))
+
+
+def _runtime_seed(label: str) -> str:
+    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

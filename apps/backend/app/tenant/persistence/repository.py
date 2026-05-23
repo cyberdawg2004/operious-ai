@@ -6,6 +6,8 @@ from typing import Protocol, runtime_checkable
 
 from app.tenant.identity import (
     TenantChannelConfigurationId,
+    TenantExecutionCircuitBreakerId,
+    TenantExecutionGovernanceConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantTopologyConfigurationId,
@@ -13,6 +15,10 @@ from app.tenant.identity import (
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantExecutionCircuitBreakerPage,
+    TenantExecutionCircuitBreakerQuery,
+    TenantExecutionGovernanceConfigurationPage,
+    TenantExecutionGovernanceConfigurationQuery,
     TenantGovernancePolicyPage,
     TenantGovernancePolicyQuery,
     TenantKnowledgeDocumentPage,
@@ -24,6 +30,8 @@ from app.tenant.persistence.models import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantExecutionCircuitBreakerRecord,
+    TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
@@ -131,6 +139,54 @@ class TenantConfigurationRepository(Protocol):
         *,
         expected_tenant_id: str,
     ) -> TenantGovernancePolicyPage: ...
+
+    async def save_execution_governance_configuration(
+        self,
+        record: TenantExecutionGovernanceConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def get_execution_governance_configuration(
+        self,
+        config_id: TenantExecutionGovernanceConfigurationId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None: ...
+
+    async def list_execution_governance_configurations(
+        self,
+        query: TenantExecutionGovernanceConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationPage: ...
+
+    async def resolve_active_execution_governance_configuration(
+        self,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionGovernanceConfigurationRecord | None: ...
+
+    async def save_execution_circuit_breaker(
+        self,
+        record: TenantExecutionCircuitBreakerRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def get_execution_circuit_breaker(
+        self,
+        breaker_id: TenantExecutionCircuitBreakerId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerRecord | None: ...
+
+    async def list_execution_circuit_breakers(
+        self,
+        query: TenantExecutionCircuitBreakerQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantExecutionCircuitBreakerPage: ...
 
     async def save_topology_configuration(
         self,

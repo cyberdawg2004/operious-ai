@@ -35,6 +35,7 @@ class ExecutionQuery:
 @dataclass(frozen=True, slots=True)
 class OutboxQuery:
     execution_id: ExecutionId | None = None
+    tenant_id: str | None = None
     state: ExecutionOutboxState | None = None
     limit: int = 100
     offset: int = 0

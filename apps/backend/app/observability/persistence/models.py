@@ -12,9 +12,11 @@ from app.observability.identity import (
 )
 from app.observability.persistence.records import (
     DeadLetterExecutionRecord,
+    InboundNormalizationDeadLetterRecord,
     OperationalAlertRecord,
     OperationalSLODefinitionRecord,
     OperationalTraceSpanRecord,
+    StuckExecutionAlertRecord,
 )
 
 
@@ -62,6 +64,26 @@ class OperationalTraceSpanQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class StuckExecutionAlertQuery:
+    claimed_before_or_at: datetime
+    limit: int = 100
+    offset: int = 0
+
+    def __post_init__(self) -> None:
+        _validate_page(self.limit, self.offset)
+
+
+@dataclass(frozen=True, slots=True)
+class InboundNormalizationDeadLetterQuery:
+    normalization_status: str | None = None
+    limit: int = 100
+    offset: int = 0
+
+    def __post_init__(self) -> None:
+        _validate_page(self.limit, self.offset)
+
+
+@dataclass(frozen=True, slots=True)
 class DeadLetterExecutionPage:
     items: tuple[DeadLetterExecutionRecord, ...]
     total: int
@@ -89,6 +111,20 @@ class OperationalAlertPage:
     offset: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class StuckExecutionAlertPage:
+    items: tuple[StuckExecutionAlertRecord, ...]
+    total: int
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class InboundNormalizationDeadLetterPage:
+    items: tuple[InboundNormalizationDeadLetterRecord, ...]
+    total: int
+    offset: int = 0
+
+
 def _validate_page(limit: int, offset: int) -> None:
     if limit < 1:
         raise ValueError("limit must be >= 1")
@@ -99,10 +135,14 @@ def _validate_page(limit: int, offset: int) -> None:
 __all__ = [
     "DeadLetterExecutionPage",
     "DeadLetterExecutionQuery",
+    "InboundNormalizationDeadLetterPage",
+    "InboundNormalizationDeadLetterQuery",
     "OperationalAlertPage",
     "OperationalMetricsQuery",
     "OperationalSLODefinitionPage",
     "OperationalSLODefinitionQuery",
     "OperationalTraceSpanPage",
     "OperationalTraceSpanQuery",
+    "StuckExecutionAlertPage",
+    "StuckExecutionAlertQuery",
 ]
