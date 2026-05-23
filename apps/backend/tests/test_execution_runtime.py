@@ -34,6 +34,7 @@ async def test_request_diagnostic_execution_requires_admission_token() -> None:
             dispatch_id="dispatch-without-admission",
             session_id="session-without-admission",
             tenant_id="tenant-a",
+            admission_token=None,
             requested_at=_NOW,
         )
 

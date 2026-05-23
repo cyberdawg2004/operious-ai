@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from app.execution.enums import (
     ExecutionAttemptState,
@@ -332,7 +332,7 @@ class ExecutionRuntime:
         dispatch_id: str,
         session_id: str,
         tenant_id: str,
-        admission_token: GovernanceAdmissionToken | None = None,
+        admission_token: GovernanceAdmissionToken,
         requested_at: datetime | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> ExecutionRequestResult:
@@ -340,11 +340,12 @@ class ExecutionRuntime:
 
         if not tenant_id:
             raise ValueError("execution request requires tenant_id")
-        if admission_token is None:
+        admission = cast(GovernanceAdmissionToken | None, admission_token)
+        if admission is None:
             raise ExecutionAdmissionError(
                 "diagnostic execution requires governance admission"
             )
-        if admission_token.tenant_id != tenant_id:
+        if admission.tenant_id != tenant_id:
             raise ExecutionAdmissionError(
                 "governance admission token tenant does not match execution tenant"
             )
@@ -352,13 +353,13 @@ class ExecutionRuntime:
         request_metadata = dict(metadata or {})
         request_metadata.setdefault(
             "governance.decision_id",
-            str(admission_token.governance_decision_id),
+            str(admission.governance_decision_id),
         )
         request_metadata["execution_governance.evaluation_id"] = str(
-            admission_token.execution_governance_evaluation_id
+            admission.execution_governance_evaluation_id
         )
         request_metadata["execution_governance.admitted_at"] = (
-            admission_token.admitted_at.isoformat()
+            admission.admitted_at.isoformat()
         )
         execution_id = derive_execution_id(
             kind=ExecutionKind.DIAGNOSTIC_AGENT.value,
@@ -375,11 +376,11 @@ class ExecutionRuntime:
             state=ExecutionState.REQUESTED,
             attempt_count=0,
             requested_at=ts,
-            governance_decision_id=admission_token.governance_decision_id,
+            governance_decision_id=admission.governance_decision_id,
             execution_governance_evaluation_id=(
-                admission_token.execution_governance_evaluation_id
+                admission.execution_governance_evaluation_id
             ),
-            governance_admitted_at=admission_token.admitted_at,
+            governance_admitted_at=admission.admitted_at,
             metadata=request_metadata,
         )
         outbox = ExecutionOutboxRecord(

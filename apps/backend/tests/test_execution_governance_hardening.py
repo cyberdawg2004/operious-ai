@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import inspect
 from pathlib import Path
 from typing import cast
 import uuid
@@ -257,6 +258,10 @@ def test_dispatch_service_requires_execution_governance() -> None:
 
 @pytest.mark.asyncio
 async def test_request_diagnostic_execution_requires_admission_token() -> None:
+    signature = inspect.signature(ExecutionRuntime.request_diagnostic_execution)
+    admission_token = signature.parameters["admission_token"]
+    assert admission_token.default is inspect.Parameter.empty
+
     runtime = ExecutionRuntime(persistence=InMemoryExecutionPersistence())
 
     with pytest.raises(ExecutionAdmissionError):
@@ -264,6 +269,7 @@ async def test_request_diagnostic_execution_requires_admission_token() -> None:
             dispatch_id="dispatch-without-governance-admission",
             session_id="session-without-governance-admission",
             tenant_id=TENANT_ID,
+            admission_token=None,
             requested_at=NOW,
         )
 
