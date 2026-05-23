@@ -61,7 +61,7 @@ export default async function ContactPage({ searchParams }: ContactPageProps) {
               </p>
             )}
           </div>
-          <ContactForm initialDomain={normalizeDomain(params.industry)} />
+          <ContactForm initialDomain={normalizeDomain(params.industry)} context={context} />
         </div>
       </section>
     </main>

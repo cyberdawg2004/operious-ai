@@ -20,7 +20,13 @@ type SubmitState =
   | { status: "success"; message: string; requestId: string }
   | { status: "error"; message: string };
 
-export function ContactForm({ initialDomain }: { initialDomain?: string }) {
+export function ContactForm({
+  initialDomain,
+  context,
+}: {
+  initialDomain?: string;
+  context?: string;
+}) {
   const [submitState, setSubmitState] = useState<SubmitState>({ status: "idle" });
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -63,6 +69,7 @@ export function ContactForm({ initialDomain }: { initialDomain?: string }) {
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-5 rounded-md border border-border-subtle bg-white p-6 sm:p-8">
+      {context && <input type="hidden" name="context" value={context} />}
       <div className="grid gap-5 sm:grid-cols-2">
         <label className="grid gap-2 text-[13px] font-medium text-ink-body">
           Name
