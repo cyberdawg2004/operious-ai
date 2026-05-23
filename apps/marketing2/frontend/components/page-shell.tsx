@@ -46,6 +46,16 @@ function ContentCardLink({ card }: { card: ContentCard }) {
         {card.title}
       </h3>
       <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{card.body}</p>
+      {card.items && card.items.length > 0 && (
+        <ul className="mt-4 space-y-2 text-[14px] leading-relaxed text-ink-body">
+          {card.items.map((item) => (
+            <li key={item} className="flex gap-2">
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {card.href && (
         <span className="mt-5 inline-flex items-center text-[13px] font-medium text-gold">
           Open page
@@ -148,6 +158,21 @@ export function PageShell({ content }: { content: PageContent }) {
                   {section.body.map((paragraph) => (
                     <p key={paragraph}>{paragraph}</p>
                   ))}
+                  {section.bullets && section.bullets.length > 0 && (
+                    <ul className="space-y-2">
+                      {section.bullets.map((item) => (
+                        <li key={item} className="flex gap-3">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {section.code && (
+                    <pre className="overflow-x-auto rounded-md border border-border-subtle bg-[#05080F] p-5 text-[13px] leading-relaxed text-[#D8E4F4]">
+                      <code>{section.code}</code>
+                    </pre>
+                  )}
                 </div>
               </section>
             ))}
