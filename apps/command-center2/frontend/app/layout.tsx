@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Cormorant_SC, IBM_Plex_Mono } from "next/font/google";
+import { IBM_Plex_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -13,13 +13,6 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-  display: "swap",
-});
-
-const cormorantSC = Cormorant_SC({
-  variable: "--font-serif",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -43,7 +36,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${cormorantSC.variable} ${ibmPlexMono.variable} h-full antialiased bg-canvas dark`}
+      className={`${geistSans.variable} ${geistMono.variable} ${ibmPlexMono.variable} h-full antialiased bg-canvas dark`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary font-sans">

@@ -27,6 +27,10 @@
   --status-success: #2A7A4C;
   --status-warning: #B8860B;
   --status-error: #8B2A2A;
+  --type-geometric: var(--font-geist-sans), "Geist", "Inter", system-ui, sans-serif;
+  --type-technical: var(--font-ibm-plex-mono), var(--font-geist-mono), "IBM Plex Mono", ui-monospace, monospace;
+  --font-cormorant-sc: var(--type-geometric);
+  --font-cormorant: var(--type-geometric);
   
   /* Command Center (app) dark theme tokens */
   --cc-bg-deep: #0A0A0C;
@@ -70,9 +74,9 @@
   --color-status-success: var(--status-success);
   --color-status-warning: var(--status-warning);
   --color-status-error: var(--status-error);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-ibm-plex-mono);
-  --font-serif: var(--font-cormorant-sc);
+  --font-sans: var(--type-geometric);
+  --font-mono: var(--type-technical);
+  --font-serif: var(--type-geometric);
   
   /* Shadow tokens */
   --shadow-dropdown: 0 8px 32px rgba(10, 15, 28, 0.12), 0 2px 8px rgba(10, 15, 28, 0.08);
@@ -97,7 +101,7 @@
 body {
   background: var(--canvas);
   color: var(--ink-primary);
-  font-family: var(--font-sans), system-ui, sans-serif;
+  font-family: var(--type-geometric);
 }
 
 /* Smooth scrolling */

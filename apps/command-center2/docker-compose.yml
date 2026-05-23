@@ -1,0 +1,84 @@
+name: operious-ai
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: operious-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-operious}
+      POSTGRES_USER: ${POSTGRES_USER:-operious}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-operious}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-operious} -d ${POSTGRES_DB:-operious}
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - operious
+
+  redis:
+    image: redis:7-alpine
+    container_name: operious-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - operious
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: operious-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override host-oriented defaults so the container talks to the
+      # other services over the compose network.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    networks:
+      - operious
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  operious:
+    driver: bridge

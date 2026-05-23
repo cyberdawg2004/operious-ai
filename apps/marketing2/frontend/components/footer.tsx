@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Mail } from "lucide-react";
-import { KernelSeal } from "./kernel-seal";
+import { Logo } from "./logo";
 import { footerGroups } from "@/lib/site-links";
 
 export function Footer() {
@@ -9,15 +9,7 @@ export function Footer() {
   return (
     <footer className="bg-[#05080F] px-4 pb-6 pt-16 sm:px-8 sm:pb-8 sm:pt-20 lg:px-16 lg:pt-24">
       <div className="mx-auto max-w-[1440px]">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <KernelSeal size={40} phase={3} />
-          <span
-            className="text-[22px] font-semibold text-[#D8E4F4] sm:text-[26px] lg:text-[28px]"
-            style={{ fontFamily: "var(--font-cormorant-sc)" }}
-          >
-            Operious
-          </span>
-        </div>
+        <Logo className="h-12 w-auto text-[#D8E4F4]" height={48} tone="dark" width={180} />
         <p
           className="mt-4 text-[10px] uppercase tracking-[0.18em] text-[#C9A84C] sm:text-[11px]"
           style={{ fontFamily: "var(--font-ibm-plex-mono)" }}

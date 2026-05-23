@@ -34,6 +34,9 @@
   --red-alert: #DC2626;
   --green-success: #16A34A;
   --warning-amber: #B8821C;
+  --type-geometric: var(--font-geist-sans), "Geist", "Inter", system-ui, sans-serif;
+  --type-technical: var(--font-mono-technical), var(--font-geist-mono), "IBM Plex Mono", ui-monospace, monospace;
+  --font-cormorant-sc: var(--type-geometric);
 
   /* Semantic tokens */
   --background: var(--canvas);
@@ -90,10 +93,10 @@
   --color-red-alert: var(--red-alert);
   --color-green-success: var(--green-success);
   --color-warning-amber: var(--warning-amber);
-  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
-  --font-mono: var(--font-mono-technical), 'IBM Plex Mono', monospace;
-  --font-serif: var(--font-serif), 'Cormorant SC', Georgia, serif;
-  --font-technical: var(--font-mono-technical), 'IBM Plex Mono', monospace;
+  --font-sans: var(--type-geometric);
+  --font-mono: var(--type-technical);
+  --font-serif: var(--type-geometric);
+  --font-technical: var(--type-technical);
 }
 
 html {
@@ -103,7 +106,7 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: var(--type-geometric);
 }
 
 /* ═══════════════════════════════════════════

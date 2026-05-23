@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { KernelSeal } from "./kernel-seal";
+import { Logo } from "./logo";
 import { useTheme } from "./theme-provider";
 import {
   Building2,
@@ -78,13 +78,12 @@ export function Sidebar({
     >
       {/* Top section - Logo and tenant selector */}
       <div className="p-6">
-        {/* Logo */}
-        <div className="flex items-center gap-3">
-          <KernelSeal size={32} />
-          <span className="font-display text-[18px] font-semibold text-ink-primary tracking-tight">
-            Operious
-          </span>
-        </div>
+        <Logo
+          className="h-9 w-auto text-ink-primary"
+          height={36}
+          tone={theme === "dark" ? "dark" : "light"}
+          width={148}
+        />
 
         {/* Tenant selector */}
         <button

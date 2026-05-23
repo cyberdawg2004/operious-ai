@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, Menu, X } from "lucide-react";
 import Link from "next/link";
-import { KernelSeal } from "./kernel-seal";
+import { Logo } from "./logo";
 import { commandCenterUrl, headerGroups, type LinkGroup } from "@/lib/site-links";
 
 function NavDropdown({
@@ -99,13 +99,7 @@ function MobileNav({
             <div className="p-6">
               <div className="mb-8 flex items-center justify-between">
                 <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-                  <KernelSeal size={32} phase={3} />
-                  <span
-                    className="text-[20px] font-semibold text-ink-primary"
-                    style={{ fontFamily: "var(--font-cormorant-sc)" }}
-                  >
-                    Operious
-                  </span>
+                  <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={148} />
                 </Link>
                 <button
                   onClick={onClose}
@@ -226,13 +220,7 @@ export function Navigation() {
       >
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-3">
-            <KernelSeal size={32} phase={3} />
-            <span
-              className="text-[18px] font-semibold text-ink-primary sm:text-[20px]"
-              style={{ fontFamily: "var(--font-cormorant-sc)" }}
-            >
-              Operious
-            </span>
+            <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={148} />
           </Link>
 
           <div className="hidden items-center gap-8 lg:flex">
