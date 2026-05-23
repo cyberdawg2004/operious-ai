@@ -1,8 +1,8 @@
 # Operious AI Consolidated Master Plan
 
 Updated baseline after Phase 6-D plus Pre-6-E Enterprise Trust
-Hardening phases A-H and the final Pre-6-E gate. This document is the
-canonical handoff plan for the next Codex session.
+Hardening phases A-H and the re-run final Pre-6-E gate. This document
+is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
@@ -1210,6 +1210,9 @@ hydration exposes the platform to enterprise operators.
 
 #### Final Pre-6-E Gate - Done
 
+- [x] Re-ran the Final Pre-6-E gate on 2026-05-23 before Phase 6-E.
+  Phase 6-E remains untouched and queued pending explicit user
+  confirmation.
 - [x] Verified Alembic current at `0031_dead_letter_tasks (head)` on
   the `operious_test` database.
 - [x] Ran the expanded final invariant bundle, including router,
@@ -1284,7 +1287,8 @@ Completed before this phase:
 - Pre-6-E Enterprise Trust Phase F is closed: Webhook surface hardening.
 - Pre-6-E Enterprise Trust Phase G is closed: Escalation outbox and full cognition forensics.
 - Pre-6-E Enterprise Trust Phase H is closed: Celery backlog physics.
-- Final Pre-6-E gate is closed: full backend, Pyright, invariants, smoke, Alembic, and audit rerun.
+- Final Pre-6-E gate is closed and was re-run on 2026-05-23:
+  full backend, Pyright, invariants, smoke, Alembic, and audit rerun.
 
 Remaining before Phase 6-E:
 - Explicit user confirmation to start Phase 6-E.
@@ -1356,7 +1360,7 @@ Current source of truth:
 - Pre-6-E Enterprise Trust Phase F is closed.
 - Pre-6-E Enterprise Trust Phase G is closed.
 - Pre-6-E Enterprise Trust Phase H is closed.
-- Final Pre-6-E gate is closed.
+- Final Pre-6-E gate is closed and was re-run on 2026-05-23.
 - Phase 6-E is queued and must not start until the user explicitly
   confirms that phase boundary.
 
@@ -1398,8 +1402,8 @@ Current verified baseline:
 - Pre-6-E Phase F complete: Webhook Surface Hardening.
 - Pre-6-E Phase G complete: Escalation Outbox and Full Cognition Forensics.
 - Pre-6-E Phase H complete: Celery Backlog Physics.
-- Final Pre-6-E gate complete: full backend, Pyright, invariants,
-  smoke, Alembic, and enterprise-trust audit rerun.
+- Final Pre-6-E gate complete and re-run on 2026-05-23: full backend,
+  Pyright, invariants, smoke, Alembic, and enterprise-trust audit rerun.
 - Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
   canonical event fabric before the demo trace-inspector milestone.
 
