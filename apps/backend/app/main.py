@@ -24,7 +24,7 @@ from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import JWKSAuthProvider
 from app.core.config import Settings, get_settings
-from app.core.http import close_shared_http_client
+from app.core.http import close_shared_http_client, init_shared_http_client
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
@@ -135,6 +135,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "environment": settings.ENVIRONMENT,
         },
     )
+    init_shared_http_client()
     await verify_redis_memory_policy(
         redis_client=cast(RedisConfigClient, get_redis_client()),
         expected_policy=settings.REDIS_REQUIRED_MAXMEMORY_POLICY,
