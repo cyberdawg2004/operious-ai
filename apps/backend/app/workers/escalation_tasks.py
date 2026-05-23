@@ -22,7 +22,7 @@ from app.workers.celery_app import celery_app
 _T = TypeVar("_T")
 
 
-@celery_app.task(name="create_governance_escalation", bind=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+@celery_app.task(name="create_governance_escalation", bind=True, ignore_result=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
 def create_governance_escalation(
     _self: Any,
     governance_decision_id: str,

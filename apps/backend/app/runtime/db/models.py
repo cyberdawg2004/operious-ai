@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -101,4 +102,66 @@ class ProviderCircuitStateRow(Base):
     )
 
 
-__all__ = ["ProviderCircuitStateRow"]
+class DeadLetterTaskRow(Base):
+    """Durable record for worker tasks that exhausted their retry budget."""
+
+    __tablename__ = "dead_letter_tasks"
+
+    dead_letter_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    task_name: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    task_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "execution_records.execution_id",
+            name="fk_dead_letter_tasks_execution_id_execution_records",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint("length(task_name) > 0", name="task_name_nonempty"),
+        CheckConstraint("length(task_id) > 0", name="task_id_nonempty"),
+        CheckConstraint("length(reason) > 0", name="reason_nonempty"),
+        CheckConstraint("retry_count >= 0", name="dead_letter_retry_nonnegative"),
+        UniqueConstraint(
+            "task_name",
+            "task_id",
+            name="uq_dead_letter_tasks_task_name_task_id",
+        ),
+        Index(
+            "ix_dead_letter_tasks_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+    )
+
+
+__all__ = ["DeadLetterTaskRow", "ProviderCircuitStateRow"]

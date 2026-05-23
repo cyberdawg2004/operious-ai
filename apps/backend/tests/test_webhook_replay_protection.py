@@ -10,13 +10,16 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.boundary.exceptions import WebhookReplayError
 from app.boundary.persistence import (
     BoundaryIngressQuery,
     InMemoryBoundaryPersistence,
+    PostgresBoundaryPersistence,
     WebhookNonceRecord,
 )
+from app.tenant.db.models import TenantRow
 from app.services.ticket_ingress_service import (
     TicketIngressRejected,
     TicketIngressService,
@@ -25,6 +28,7 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
+from tests.conftest import requires_postgres
 
 MASTER_KEY = "phase-f-replay-master-key-32-bytes-min"
 TENANT_ID = "tenant-phase-f-replay"
@@ -112,6 +116,39 @@ async def test_webhook_nonce_expiry_cleanup() -> None:
     assert "already been accepted" in str(exc_info.value)
 
 
+@pytest.mark.asyncio
+@requires_postgres
+async def test_postgres_webhook_nonce_replay_and_cleanup(
+    pg_session: AsyncSession,
+) -> None:
+    await pg_session.merge(TenantRow(tenant_id=TENANT_ID))
+    repo = PostgresBoundaryPersistence(pg_session)
+    now = datetime.now(timezone.utc)
+    live = WebhookNonceRecord(
+        tenant_id=TENANT_ID,
+        channel_type="email",
+        nonce="postgres-live-message",
+        received_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+    expired = WebhookNonceRecord(
+        tenant_id=TENANT_ID,
+        channel_type="email",
+        nonce="postgres-expired-message",
+        received_at=now - timedelta(hours=2),
+        expires_at=now - timedelta(hours=1),
+    )
+
+    await repo.record_webhook_nonce(live)
+    with pytest.raises(WebhookReplayError):
+        await repo.record_webhook_nonce(live)
+    await repo.record_webhook_nonce(expired)
+
+    deleted = await repo.delete_expired_webhook_nonces(now=now, limit=10)
+
+    assert deleted == 1
+
+
 def test_webhook_nonce_migration_has_tenant_channel_nonce_uniqueness() -> None:
     migration_path = (
         Path(__file__).resolve().parents[1]
@@ -125,6 +162,21 @@ def test_webhook_nonce_migration_has_tenant_channel_nonce_uniqueness() -> None:
     assert "uq_webhook_nonce_records_tenant_channel_nonce" in source
     assert "ENABLE ROW LEVEL SECURITY" in source
     assert "operious_tenant_rls_allows(tenant_id)" in source
+
+
+def test_webhook_nonce_cleanup_task_is_scheduled() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    celery_source = (app_root / "workers" / "celery_app.py").read_text(
+        encoding="utf-8"
+    )
+    task_source = (
+        app_root / "workers" / "webhook_nonce_tasks.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"app.workers.webhook_nonce_tasks"' in celery_source
+    assert '"cleanup-expired-webhook-nonces-hourly"' in celery_source
+    assert '"task": "cleanup_expired_webhook_nonces"' in celery_source
+    assert '@celery_app.task(name="cleanup_expired_webhook_nonces"' in task_source
 
 
 async def _service_with_channel(

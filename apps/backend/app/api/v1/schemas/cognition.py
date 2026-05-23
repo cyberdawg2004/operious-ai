@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.cognition.models import (
     ApprovalApplicationResult,
     ApprovalLifecycleResult,
+    CognitionAuditRecord,
     KnowledgeRollbackResult,
 )
 from app.sop_intelligence.enums import ApprovalStatus
@@ -226,9 +227,47 @@ class KnowledgeRollbackResponse(BaseModel):
         )
 
 
+class CognitionAuditRecordResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    audit_id: str
+    tenant_id: str
+    execution_id: str
+    prompt_full: str
+    completion_full: str
+    prompt_sha256: str
+    completion_sha256: str
+    model_name: str
+    token_usage: dict[str, Any]
+    captured_at: str
+    usage_id: str | None = None
+
+    @classmethod
+    def from_record(
+        cls,
+        record: CognitionAuditRecord,
+    ) -> "CognitionAuditRecordResponse":
+        return cls(
+            audit_id=str(record.audit_id),
+            tenant_id=record.tenant_id,
+            execution_id=record.execution_id,
+            usage_id=(
+                str(record.usage_id) if record.usage_id is not None else None
+            ),
+            prompt_full=record.prompt_full,
+            completion_full=record.completion_full,
+            prompt_sha256=record.prompt_sha256,
+            completion_sha256=record.completion_sha256,
+            model_name=record.model_name,
+            token_usage=dict(record.token_usage),
+            captured_at=record.captured_at.isoformat(),
+        )
+
+
 __all__ = [
     "ApprovalApplicationResponse",
     "ApprovalLifecycleResponse",
+    "CognitionAuditRecordResponse",
     "CognitionApprovalResponse",
     "KnowledgeDocumentSummaryResponse",
     "KnowledgeDocumentVersionPageResponse",

@@ -27,7 +27,7 @@ from app.workers.celery_app import celery_app
 _T = TypeVar("_T")
 
 
-@celery_app.task(name="recover_stale_executions", bind=True)
+@celery_app.task(name="recover_stale_executions", bind=True, ignore_result=True)
 def recover_stale_executions(
     _self: Any,
     *,
@@ -70,7 +70,11 @@ def recover_stale_executions(
     )
 
 
-@celery_app.task(name="reconcile_stale_execution_outbox", bind=True)
+@celery_app.task(
+    name="reconcile_stale_execution_outbox",
+    bind=True,
+    ignore_result=True,
+)
 def reconcile_stale_execution_outbox(
     _self: Any,
     *,

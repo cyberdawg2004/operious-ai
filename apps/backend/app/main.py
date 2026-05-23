@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import sentry_sdk
 from fastapi import FastAPI, Request
@@ -26,7 +26,8 @@ from app.auth.providers import JWKSAuthProvider
 from app.core.config import Settings, get_settings
 from app.core.http import close_shared_http_client
 from app.core.logging import configure_logging, get_logger
-from app.core.redis import close_redis
+from app.core.redis import close_redis, get_redis_client
+from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine
 from app.middleware.authority_context import (
     AUTHORITY_HEADERS,
@@ -133,6 +134,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "version": settings.APP_VERSION,
             "environment": settings.ENVIRONMENT,
         },
+    )
+    await verify_redis_memory_policy(
+        redis_client=cast(RedisConfigClient, get_redis_client()),
+        expected_policy=settings.REDIS_REQUIRED_MAXMEMORY_POLICY,
+        check_logger=logger,
     )
     logger.info("lifespan_yield_begin")
     try:

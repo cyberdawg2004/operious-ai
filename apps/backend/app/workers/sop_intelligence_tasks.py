@@ -25,7 +25,7 @@ from app.workers.celery_app import celery_app
 _T = TypeVar("_T")
 
 
-@celery_app.task(name="propose_sop_intelligence_change", bind=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+@celery_app.task(name="propose_sop_intelligence_change", bind=True, ignore_result=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
 def propose_sop_intelligence_change(
     _self: Any,
     session_id: str,

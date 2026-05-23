@@ -35,7 +35,11 @@ from app.execution.persistence import (
     OutboxQuery,
     PostgresExecutionPersistence,
 )
-from app.execution.publisher import ExecutionPublisher
+from app.execution.publisher import (
+    ExecutionPublisher,
+    QueueBackpressureCheck,
+    QueueBackpressureError,
+)
 from app.execution.runtime import (
     ExecutionClaimResult,
     ExecutionOutboxClaimResult,
@@ -81,6 +85,8 @@ __all__ = [
     "OutboxPage",
     "OutboxQuery",
     "PostgresExecutionPersistence",
+    "QueueBackpressureCheck",
+    "QueueBackpressureError",
     "as_attempt_id",
     "as_execution_id",
     "as_outbox_id",

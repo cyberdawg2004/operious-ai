@@ -42,8 +42,10 @@ from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
 )
+from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
+from app.workers.dead_letter_persistence import record_dead_letter_task
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 
 _T = TypeVar("_T")
@@ -69,6 +71,9 @@ def execute_diagnostic_agent(
             execution_id=execution_id,
             worker_id=worker_id,
             max_attempts=_max_execution_attempts(self),
+            task_name="execute_diagnostic_agent",
+            task_id=_task_id(self),
+            retry_count=_task_retries(self),
         )
     )
     if result.get("status") == "retry_requested":
@@ -83,6 +88,9 @@ async def execute_diagnostic_agent_runtime(
     execution_id: str,
     worker_id: str = "inline:diagnostic",
     max_attempts: int = 1,
+    task_name: str = "execute_diagnostic_agent",
+    task_id: str | None = None,
+    retry_count: int = 0,
 ) -> dict[str, object]:
     session_factory = get_session_factory()
     async with session_factory() as session:
@@ -252,6 +260,23 @@ async def execute_diagnostic_agent_runtime(
                     worker_id=worker_id,
                     failure=failure,
                 )
+                dead_letter_task_recorded = await _record_dead_letter_task(
+                    session=session,
+                    tenant_id=tenant_id,
+                    task_name=task_name,
+                    task_id=(
+                        task_id
+                        or _fallback_task_id(
+                            task_name=task_name,
+                            execution_id=str(execution.execution_id),
+                            attempt_id=str(attempt.attempt_id),
+                        )
+                    ),
+                    execution_id=str(execution.execution_id),
+                    attempt_id=str(attempt.attempt_id),
+                    retry_count=retry_count,
+                    failure=failure,
+                )
                 status = "dead_lettered"
             else:
                 execution_failed = await _fail_execution_record(
@@ -263,6 +288,7 @@ async def execute_diagnostic_agent_runtime(
                     failure=failure,
                     retry_requested=True,
                 )
+                dead_letter_task_recorded = False
                 status = "retry_requested"
             return {
                 "execution_id": str(execution.execution_id),
@@ -274,6 +300,7 @@ async def execute_diagnostic_agent_runtime(
                 "status": status,
                 "failure_event_persisted": failure_event_persisted,
                 "execution_failed": execution_failed,
+                "dead_letter_task_recorded": dead_letter_task_recorded,
                 **failure,
             }
 
@@ -448,6 +475,39 @@ async def _dead_letter_execution_record(
         return False
 
 
+async def _record_dead_letter_task(
+    *,
+    session: AsyncSession,
+    tenant_id: str,
+    task_name: str,
+    task_id: str,
+    execution_id: str,
+    attempt_id: str,
+    retry_count: int,
+    failure: Mapping[str, object],
+) -> bool:
+    try:
+        await record_dead_letter_task(
+            session=session,
+            tenant_id=tenant_id,
+            task_name=task_name,
+            task_id=task_id,
+            execution_id=execution_id,
+            reason=str(failure.get("message") or failure),
+            retry_count=retry_count,
+            metadata={
+                "attempt_id": attempt_id,
+                "error_type": failure.get("error_type"),
+                "attempt_number": failure.get("attempt_number"),
+            },
+        )
+        await session.commit()
+        return True
+    except Exception:  # noqa: BLE001
+        await session.rollback()
+        return False
+
+
 def _bounded_failure_metadata(
     exc: BaseException,
     *,
@@ -500,6 +560,27 @@ def _worker_id(task_self: Any) -> str:
     return "celery:unknown"
 
 
+def _task_id(task_self: Any) -> str | None:
+    request = getattr(task_self, "request", None)
+    task_id = getattr(request, "id", None)
+    return task_id if isinstance(task_id, str) and task_id else None
+
+
+def _task_retries(task_self: Any) -> int:
+    request = getattr(task_self, "request", None)
+    retries = getattr(request, "retries", None)
+    return retries if isinstance(retries, int) and retries >= 0 else 0
+
+
+def _fallback_task_id(
+    *,
+    task_name: str,
+    execution_id: str,
+    attempt_id: str,
+) -> str:
+    return f"{task_name}:{execution_id}:{attempt_id}"
+
+
 def _max_execution_attempts(task_self: Any) -> int:
     max_retries = getattr(task_self, "max_retries", None)
     if isinstance(max_retries, int) and max_retries >= 0:
@@ -541,7 +622,10 @@ def _diagnostic_cognition_runtime(
     return DiagnosticCognitionRuntime(
         knowledge_runtime=knowledge_runtime,
         llm_client=llm_client,
-        usage_persistence=PostgresCognitionUsagePersistence(session),
+        usage_persistence=PostgresCognitionUsagePersistence(
+            session,
+            audit_encryptor=_cognition_audit_encryptor(),
+        ),
         governance_repository=PostgresGovernanceRepository(session),
         config=DiagnosticCognitionRuntimeConfig(
             max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,
@@ -553,6 +637,15 @@ def _diagnostic_cognition_runtime(
             output_token_micro_usd=settings.COGNITION_LLM_OUTPUT_TOKEN_MICRO_USD,
         ),
     )
+
+
+def _cognition_audit_encryptor() -> TenantCredentialEncryptor:
+    key = get_settings().TENANT_CREDENTIAL_MASTER_KEY
+    if key:
+        return TenantCredentialEncryptor(platform_master_key=key)
+    if _running_under_pytest():
+        return TenantCredentialEncryptor(platform_master_key=b"0" * 32)
+    raise RuntimeError("TENANT_CREDENTIAL_MASTER_KEY must be configured")
 
 
 def _running_under_pytest() -> bool:

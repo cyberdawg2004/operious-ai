@@ -32,7 +32,7 @@ from app.coordination.models.payload import CoordinationPayload
 from app.coordination.models.recipients import CoordinationRecipient
 from app.coordination.runtime import CoordinationRuntime
 from app.execution import ExecutionRuntime, GovernanceAdmissionToken
-from app.execution.publisher import ExecutionPublisher
+from app.execution.publisher import ExecutionPublisher, QueueBackpressureError
 from app.escalation.publisher import EscalationPublisher
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
@@ -282,9 +282,26 @@ class DispatchService:
             },
         )
 
-        await self._execution_publisher.publish_execution(
-            execution_id=str(execution_request.execution.execution_id),
-        )
+        try:
+            await self._execution_publisher.publish_execution(
+                execution_id=str(execution_request.execution.execution_id),
+            )
+        except QueueBackpressureError:
+            return DispatchResult(
+                dispatch_id=str(coordination_result.coordination_id),
+                session_id=str(session.identity.session_id),
+                execution_id=str(execution_request.execution.execution_id),
+                governance_decision_id=str(governance_decision_id),
+                verdict=CoordinationDispatchOutcome.DEGRADED.value,
+                arbitration_evaluation_id=(
+                    arbitration.evaluation_id if arbitration is not None else None
+                ),
+                arbitration_outcome=(
+                    arbitration.outcome if arbitration is not None else None
+                ),
+                halted=True,
+                halt_reason=QueueBackpressureError.reason,
+            )
 
         return DispatchResult(
             dispatch_id=str(coordination_result.coordination_id),

@@ -7,8 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cognition.models import (
     ApprovalApplicationResult,
     ApprovalLifecycleResult,
+    CognitionAuditRecord,
     KnowledgeRollbackResult,
 )
+from app.cognition.identity import as_cognition_audit_id
+from app.cognition.exceptions import CognitionNotFoundError
+from app.cognition.persistence import CognitionUsagePersistenceProtocol
 from app.cognition.runtime import CognitionRuntime
 from app.tenant.identity import as_knowledge_document_id
 from app.tenant.persistence import (
@@ -25,9 +29,11 @@ class CognitionService:
         *,
         runtime: CognitionRuntime,
         session: AsyncSession,
+        usage_persistence: CognitionUsagePersistenceProtocol | None = None,
     ) -> None:
         self._runtime = runtime
         self._session = session
+        self._usage_persistence = usage_persistence
 
     async def approve_approval(
         self,
@@ -112,6 +118,22 @@ class CognitionService:
                 offset=offset,
             ),
         )
+
+    async def get_cognition_audit_record(
+        self,
+        *,
+        tenant_id: str,
+        audit_id: str,
+    ) -> CognitionAuditRecord:
+        if self._usage_persistence is None:
+            raise CognitionNotFoundError("cognition audit persistence unavailable")
+        record = await self._usage_persistence.get_cognition_audit(
+            as_cognition_audit_id(audit_id),
+            expected_tenant_id=tenant_id,
+        )
+        if record is None:
+            raise CognitionNotFoundError("cognition audit record not found")
+        return record
 
 
 __all__ = ["CognitionService"]

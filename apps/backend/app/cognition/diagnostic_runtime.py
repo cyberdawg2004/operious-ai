@@ -15,9 +15,14 @@ from app.cognition.exceptions import (
     CognitionSemanticValidationError,
 )
 from app.cognition.governance import LLMDiagnosticOutputPolicy
-from app.cognition.identity import CognitionLLMUsageId, derive_llm_usage_id
+from app.cognition.identity import (
+    CognitionLLMUsageId,
+    derive_cognition_audit_id,
+    derive_llm_usage_id,
+)
 from app.cognition.llm import DiagnosticLLMClient, DiagnosticLLMMessage
 from app.cognition.models import (
+    CognitionAuditRecord,
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
     DiagnosticLLMCompletion,
@@ -128,11 +133,21 @@ class DiagnosticCognitionRuntime:
             model=self._llm_client.model_name,
         )
         completion: DiagnosticLLMCompletion | None = None
+        audit_id: str | None = None
+        messages = (DiagnosticLLMMessage(role="user", content=prompt),)
         try:
             completion = await self._complete_llm(
                 system_prompt=_SYSTEM_PROMPT,
-                messages=(DiagnosticLLMMessage(role="user", content=prompt),),
+                messages=messages,
                 tenant_id=tenant_id,
+            )
+            audit_id = await self._save_cognition_audit(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                system_prompt=_SYSTEM_PROMPT,
+                messages=messages,
+                completion=completion,
             )
             parsed = _parse_output(completion.text)
             semantic = validate_governance_terms(
@@ -168,6 +183,8 @@ class DiagnosticCognitionRuntime:
                 ),
                 metadata={
                     "governance_decision_id": governance_decision_id,
+                    "cognition_audit_id": audit_id,
+                    "cognition_audit_record_id": audit_id,
                     "citation_count": len(retrieval.citations),
                     "semantic_terms": list(semantic.output_terms),
                     "raw_completion_sha256": _raw_completion_sha256(completion),
@@ -191,6 +208,8 @@ class DiagnosticCognitionRuntime:
                 retrieval=retrieval,
                 metadata={
                     "raw": dict(completion.raw_metadata),
+                    "cognition_audit_id": audit_id,
+                    "cognition_audit_record_id": audit_id,
                     "raw_completion_sha256": _raw_completion_sha256(completion),
                 },
             )
@@ -205,6 +224,7 @@ class DiagnosticCognitionRuntime:
                 provider=self._llm_client.provider_name,
                 model=self._llm_client.model_name,
                 completion=completion,
+                audit_id=audit_id,
             )
             raise
         except CognitionGovernanceRejectionError as exc:
@@ -218,6 +238,7 @@ class DiagnosticCognitionRuntime:
                 provider=self._llm_client.provider_name,
                 model=self._llm_client.model_name,
                 completion=completion,
+                audit_id=audit_id,
             )
             raise
         except CognitionLLMProviderError as exc:
@@ -231,6 +252,7 @@ class DiagnosticCognitionRuntime:
                 provider=self._llm_client.provider_name,
                 model=self._llm_client.model_name,
                 completion=completion,
+                audit_id=audit_id,
             )
             raise
         except Exception as exc:
@@ -244,6 +266,7 @@ class DiagnosticCognitionRuntime:
                 provider=self._llm_client.provider_name,
                 model=self._llm_client.model_name,
                 completion=completion,
+                audit_id=audit_id,
                 failed=True,
             )
             raise CognitionLLMProviderError(
@@ -352,6 +375,59 @@ class DiagnosticCognitionRuntime:
         except Exception as exc:
             raise CognitionPersistenceError("LLM usage persistence failed") from exc
 
+    async def _save_cognition_audit(
+        self,
+        *,
+        usage_id: CognitionLLMUsageId,
+        tenant_id: str,
+        execution_id: str,
+        system_prompt: str,
+        messages: tuple[DiagnosticLLMMessage, ...],
+        completion: DiagnosticLLMCompletion,
+    ) -> str:
+        prompt_full = _full_prompt_snapshot(
+            system_prompt=system_prompt,
+            messages=messages,
+        )
+        prompt_sha256 = _sha256_text(prompt_full)
+        completion_sha256 = _raw_completion_sha256(completion)
+        audit_id = derive_cognition_audit_id(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            model=completion.model,
+            prompt_sha256=prompt_sha256,
+            completion_sha256=completion_sha256,
+        )
+        record = CognitionAuditRecord(
+            audit_id=audit_id,
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            usage_id=usage_id,
+            prompt_full=prompt_full,
+            completion_full=completion.text,
+            prompt_sha256=prompt_sha256,
+            completion_sha256=completion_sha256,
+            model_name=completion.model,
+            token_usage={
+                "provider": completion.provider,
+                "model": completion.model,
+                "prompt_tokens": completion.usage.prompt_tokens,
+                "completion_tokens": completion.usage.completion_tokens,
+                "total_tokens": completion.usage.total_tokens,
+            },
+            captured_at=_utcnow(),
+        )
+        try:
+            await self._usage_persistence.save_cognition_audit(
+                record,
+                expected_tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            raise CognitionPersistenceError(
+                "cognition audit persistence failed"
+            ) from exc
+        return str(audit_id)
+
     async def _save_rejected_usage(
         self,
         *,
@@ -364,6 +440,7 @@ class DiagnosticCognitionRuntime:
         provider: str,
         model: str,
         completion: DiagnosticLLMCompletion | None = None,
+        audit_id: str | None = None,
         failed: bool = False,
     ) -> None:
         prompt_tokens = completion.usage.prompt_tokens if completion is not None else 0
@@ -401,6 +478,14 @@ class DiagnosticCognitionRuntime:
             metadata={
                 "error_type": error.__class__.__name__,
                 "message": _bounded_message(error),
+                **(
+                    {
+                        "cognition_audit_id": audit_id,
+                        "cognition_audit_record_id": audit_id,
+                    }
+                    if audit_id is not None
+                    else {}
+                ),
                 **(
                     {"raw_completion_sha256": _raw_completion_sha256(completion)}
                     if completion is not None
@@ -562,7 +647,29 @@ def _usage_record(
 
 
 def _raw_completion_sha256(completion: DiagnosticLLMCompletion) -> str:
-    return hashlib.sha256(completion.text.encode("utf-8")).hexdigest()
+    return _sha256_text(completion.text)
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _full_prompt_snapshot(
+    *,
+    system_prompt: str,
+    messages: tuple[DiagnosticLLMMessage, ...],
+) -> str:
+    return json.dumps(
+        {
+            "system": system_prompt,
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in messages
+            ],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _estimate_cost(

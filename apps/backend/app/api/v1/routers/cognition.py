@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.v1.schemas.cognition import (
     ApprovalApplicationResponse,
     ApprovalLifecycleResponse,
+    CognitionAuditRecordResponse,
     KnowledgeDocumentVersionPageResponse,
     KnowledgeRollbackRequest,
     KnowledgeRollbackResponse,
@@ -113,6 +114,33 @@ async def list_knowledge_document_versions(
         offset=offset,
     )
     return KnowledgeDocumentVersionPageResponse.from_page(page)
+
+
+@router.get(
+    "/audits/{audit_id}",
+    response_model=CognitionAuditRecordResponse,
+)
+async def get_cognition_audit_record(
+    audit_id: str,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: CognitionService = Depends(get_cognition_service),
+) -> CognitionAuditRecordResponse:
+    try:
+        record = await service.get_cognition_audit_record(
+            tenant_id=expected_tenant_id,
+            audit_id=audit_id,
+        )
+    except CognitionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "cognition_audit_record_not_found"},
+        ) from exc
+    except CognitionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "cognition_audit_read_failed"},
+        ) from exc
+    return CognitionAuditRecordResponse.from_record(record)
 
 
 @router.post(

@@ -6,8 +6,12 @@ import uuid
 from typing import NewType
 
 CognitionLLMUsageId = NewType("CognitionLLMUsageId", uuid.UUID)
+CognitionAuditId = NewType("CognitionAuditId", uuid.UUID)
 
 _LLM_USAGE_NAMESPACE = uuid.UUID("7d7f91de-38e4-555c-bc45-7739d1185df6")
+_COGNITION_AUDIT_NAMESPACE = uuid.UUID(
+    "7d7f91de-38e4-555c-bc45-7739d1185df7"
+)
 
 
 def derive_llm_usage_id(
@@ -32,6 +36,34 @@ def as_llm_usage_id(value: str | uuid.UUID) -> CognitionLLMUsageId:
     return CognitionLLMUsageId(value if isinstance(value, uuid.UUID) else uuid.UUID(value))
 
 
+def derive_cognition_audit_id(
+    *,
+    tenant_id: str,
+    execution_id: str,
+    model: str,
+    prompt_sha256: str,
+    completion_sha256: str,
+) -> CognitionAuditId:
+    """Derive a stable forensic snapshot id for one completed LLM call."""
+
+    seed = "|".join(
+        (
+            _normalize(tenant_id, "tenant_id"),
+            _normalize(execution_id, "execution_id"),
+            _normalize(model, "model"),
+            _normalize(prompt_sha256, "prompt_sha256"),
+            _normalize(completion_sha256, "completion_sha256"),
+        )
+    )
+    return CognitionAuditId(uuid.uuid5(_COGNITION_AUDIT_NAMESPACE, seed))
+
+
+def as_cognition_audit_id(value: str | uuid.UUID) -> CognitionAuditId:
+    return CognitionAuditId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
 def _normalize(value: str, field: str) -> str:
     normalized = value.strip().casefold()
     if not normalized:
@@ -40,7 +72,10 @@ def _normalize(value: str, field: str) -> str:
 
 
 __all__ = [
+    "CognitionAuditId",
     "CognitionLLMUsageId",
+    "as_cognition_audit_id",
     "as_llm_usage_id",
+    "derive_cognition_audit_id",
     "derive_llm_usage_id",
 ]

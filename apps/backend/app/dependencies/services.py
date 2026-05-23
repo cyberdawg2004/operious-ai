@@ -61,12 +61,13 @@ from app.coordination.registry import CoordinationRegistry
 from app.coordination.models.participants import CoordinationParticipant
 from app.coordination.runtime import CoordinationRuntime
 from app.cognition import CognitionRuntime
+from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.execution.celery_publisher import CeleryExecutionPublisher
-from app.execution.publisher import ExecutionPublisher
+from app.execution.publisher import ExecutionPublisher, QueueBackpressureCheck
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
 from app.escalation.publisher import EscalationPublisher
@@ -230,6 +231,13 @@ async def get_dispatch_service(
     )
     deferred_escalation_publisher = _DeferredEscalationPublisher(
         delegate=CeleryEscalationPublisher(),
+        escalation_runtime=EscalationAgentRuntime(
+            escalation_persistence=PostgresEscalationPersistence(session),
+            governance_repository=PostgresGovernanceRepository(session),
+            session_persistence=PostgresSessionPersistence(session),
+        ),
+        session=session,
+        publisher_id="api:dispatch",
     )
     tenant_topology_provider = TenantCoordinationTopologyRuntimeProvider(
         tenant_configuration_runtime=TenantConfigurationRuntime(
@@ -312,12 +320,24 @@ def get_cognition_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> CognitionService:
     """Return the Cognition Hub lifecycle service for this request."""
+    settings = get_settings()
+    audit_encryptor = (
+        TenantCredentialEncryptor(
+            platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+        )
+        if settings.TENANT_CREDENTIAL_MASTER_KEY
+        else None
+    )
     return CognitionService(
         runtime=CognitionRuntime(
             approval_persistence=PostgresSOPApprovalPersistence(session),
             tenant_configuration_repository=(
                 PostgresTenantConfigurationRepository(session)
             ),
+        ),
+        usage_persistence=PostgresCognitionUsagePersistence(
+            session,
+            audit_encryptor=audit_encryptor,
         ),
         session=session,
     )
@@ -436,10 +456,20 @@ class _EscalationIntent:
 
 
 class _DeferredEscalationPublisher(EscalationPublisher):
-    """Request-scoped escalation publisher that flushes after DB commit."""
+    """Request-scoped escalation outbox publisher."""
 
-    def __init__(self, *, delegate: EscalationPublisher) -> None:
+    def __init__(
+        self,
+        *,
+        delegate: EscalationPublisher,
+        escalation_runtime: EscalationAgentRuntime,
+        session: AsyncSession,
+        publisher_id: str,
+    ) -> None:
         self._delegate = delegate
+        self._escalation_runtime = escalation_runtime
+        self._session = session
+        self._publisher_id = publisher_id
         self._intents: list[_EscalationIntent] = []
 
     async def publish_governance_denial(
@@ -459,11 +489,50 @@ class _DeferredEscalationPublisher(EscalationPublisher):
 
     async def flush(self) -> None:
         for intent in self._intents:
-            await self._delegate.publish_governance_denial(
+            prepared = await self._escalation_runtime.prepare_governance_denial_outbox(
                 governance_decision_id=intent.governance_decision_id,
-                tenant_id=intent.tenant_id,
+                expected_tenant_id=intent.tenant_id,
                 session_id=intent.session_id,
+                metadata={
+                    "source_governance_decision_id": intent.governance_decision_id,
+                    "source_session_id": intent.session_id,
+                },
             )
+            claim = await self._escalation_runtime.claim_outbox_for_escalation(
+                escalation_id=prepared.escalation.escalation_id,
+                publisher_id=self._publisher_id,
+                expected_tenant_id=intent.tenant_id,
+            )
+            if not claim.claimed or claim.outbox is None:
+                if claim.reason == "outbox_not_publishable:published":
+                    continue
+                raise EscalationOutboxPublishError(
+                    prepared.escalation.escalation_id,
+                    claim.reason or "outbox_claim_refused",
+                )
+            await self._session.commit()
+            try:
+                await self._delegate.publish_governance_denial(
+                    governance_decision_id=intent.governance_decision_id,
+                    tenant_id=intent.tenant_id,
+                    session_id=intent.session_id,
+                )
+            except Exception as exc:
+                await self._escalation_runtime.mark_outbox_failed(
+                    outbox_id=claim.outbox.outbox_id,
+                    error=_bounded_publish_error(exc),
+                    expected_tenant_id=intent.tenant_id,
+                )
+                await self._session.commit()
+                raise EscalationOutboxPublishError(
+                    prepared.escalation.escalation_id,
+                    _bounded_publish_error(exc),
+                ) from exc
+            await self._escalation_runtime.mark_outbox_published(
+                outbox_id=claim.outbox.outbox_id,
+                expected_tenant_id=intent.tenant_id,
+            )
+            await self._session.commit()
 
 
 class _DeferredExecutionPublisher(ExecutionPublisher):
@@ -487,6 +556,8 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
         self,
         execution_id: str,
     ) -> None:
+        if isinstance(self._delegate, QueueBackpressureCheck):
+            await self._delegate.check_backpressure()
         self._diagnostic_executions.append(
             _DiagnosticExecutionIntent(execution_id=execution_id)
         )
@@ -533,6 +604,17 @@ class ExecutionOutboxPublishError(RuntimeError):
             f"execution outbox publish failed for {execution_id}: {reason}"
         )
         self.execution_id = execution_id
+        self.reason = reason
+
+
+class EscalationOutboxPublishError(RuntimeError):
+    """Raised when a committed escalation intent cannot be published."""
+
+    def __init__(self, escalation_id: str, reason: str) -> None:
+        super().__init__(
+            f"escalation outbox publish failed for {escalation_id}: {reason}"
+        )
+        self.escalation_id = escalation_id
         self.reason = reason
 
 

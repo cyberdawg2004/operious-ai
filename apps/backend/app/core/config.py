@@ -124,8 +124,17 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+    REDIS_RESULT_DB: int = 1
     REDIS_PASSWORD: str | None = None
     REDIS_URL: str | None = None
+    CELERY_RESULT_BACKEND_URL: str | None = None
+    CELERY_RESULT_EXPIRES_SECONDS: int = 3600
+    CELERY_TASK_SOFT_TIME_LIMIT_SECONDS: int = 300
+    CELERY_TASK_TIME_LIMIT_SECONDS: int = 600
+    CELERY_VISIBILITY_TIMEOUT_SECONDS: int = 3600
+    EXECUTION_QUEUE_NAME: str = "celery"
+    EXECUTION_QUEUE_MAX_DEPTH: int = 10_000
+    REDIS_REQUIRED_MAXMEMORY_POLICY: str = "allkeys-lru"
 
     # ─── AI providers (gateway-level) ────────────────────────────────
     AI_DEFAULT_PROVIDER: str = "openai"
@@ -288,6 +297,19 @@ class Settings(BaseSettings):
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def celery_result_backend_url(self) -> str:
+        if self.CELERY_RESULT_BACKEND_URL:
+            return _normalize_redis_url(self.CELERY_RESULT_BACKEND_URL)
+        if self.REDIS_URL:
+            return _redis_url_with_database(self.redis_url, self.REDIS_RESULT_DB)
+        auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return (
+            f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/"
+            f"{self.REDIS_RESULT_DB}"
+        )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -316,6 +338,22 @@ def _normalize_redis_url(url: str) -> str:
             parsed.netloc,
             parsed.path,
             urlencode(query),
+            parsed.fragment,
+        )
+    )
+
+
+def _redis_url_with_database(url: str, database: int) -> str:
+    """Return ``url`` with its logical Redis database path replaced."""
+
+    normalized = _normalize_redis_url(url)
+    parsed = urlsplit(normalized)
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/{database}",
+            parsed.query,
             parsed.fragment,
         )
     )

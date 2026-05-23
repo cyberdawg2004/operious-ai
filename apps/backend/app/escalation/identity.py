@@ -9,6 +9,7 @@ from app.identity import coerce_tenant_id
 
 
 EscalationId = NewType("EscalationId", uuid.UUID)
+EscalationOutboxId = NewType("EscalationOutboxId", uuid.UUID)
 
 _ESCALATION_NAMESPACE = uuid.UUID("8f85a2aa-0001-4a01-9001-000000000001")
 _ESCALATION_EVENT_NAMESPACE = uuid.UUID(
@@ -16,6 +17,9 @@ _ESCALATION_EVENT_NAMESPACE = uuid.UUID(
 )
 _ESCALATION_GOVERNANCE_NAMESPACE = uuid.UUID(
     "8f85a2aa-0003-4a01-9001-000000000003"
+)
+_ESCALATION_OUTBOX_NAMESPACE = uuid.UUID(
+    "8f85a2aa-0004-4a01-9001-000000000004"
 )
 
 
@@ -77,17 +81,41 @@ def derive_escalation_override_action_id(
     )
 
 
+def derive_escalation_outbox_id(
+    *,
+    escalation_id: uuid.UUID | str,
+    tenant_id: str,
+) -> EscalationOutboxId:
+    """Derive the stable outbox row id for one escalation."""
+
+    tenant = coerce_tenant_id(tenant_id)
+    return EscalationOutboxId(
+        uuid.uuid5(_ESCALATION_OUTBOX_NAMESPACE, f"{tenant}|{escalation_id}")
+    )
+
+
 def as_escalation_id(value: uuid.UUID | str) -> EscalationId:
     """Coerce a boundary value into an escalation id."""
 
     return EscalationId(value if isinstance(value, uuid.UUID) else uuid.UUID(value))
 
 
+def as_escalation_outbox_id(value: uuid.UUID | str) -> EscalationOutboxId:
+    """Coerce a boundary value into an escalation outbox id."""
+
+    return EscalationOutboxId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
 __all__ = [
     "EscalationId",
+    "EscalationOutboxId",
     "as_escalation_id",
+    "as_escalation_outbox_id",
     "derive_escalation_event_id",
     "derive_escalation_id",
     "derive_escalation_override_action_id",
     "derive_escalation_override_decision_id",
+    "derive_escalation_outbox_id",
 ]

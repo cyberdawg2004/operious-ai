@@ -23,6 +23,7 @@ from app.cognition.llm import (
 from app.cognition.models import (
     ApprovalApplicationResult,
     ApprovalLifecycleResult,
+    CognitionAuditRecord,
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
     DiagnosticReasoningResult,
@@ -36,6 +37,7 @@ __all__ = [
     "AnthropicMessagesClient",
     "CognitionError",
     "CognitionGovernanceRejectionError",
+    "CognitionAuditRecord",
     "CognitionLLMConfigurationError",
     "CognitionLLMProviderError",
     "CognitionLLMUsageRecord",

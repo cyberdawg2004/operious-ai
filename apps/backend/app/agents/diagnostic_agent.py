@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from pydantic import BaseModel, ConfigDict
 
 from app.cognition.diagnostic_runtime import DiagnosticCognitionRuntime
@@ -22,6 +24,7 @@ class DiagnosticResult(BaseModel):
     total_tokens: int = 0
     estimated_cost_micro_usd: int = 0
     governance_decision_id: str | None = None
+    cognition_audit_id: str | None = None
 
 
 class DiagnosticAgent:
@@ -69,6 +72,10 @@ class DiagnosticAgent:
                 total_tokens=result.total_tokens,
                 estimated_cost_micro_usd=result.estimated_cost_micro_usd,
                 governance_decision_id=result.governance_decision_id,
+                cognition_audit_id=_optional_metadata_str(
+                    result.metadata,
+                    "cognition_audit_id",
+                ),
             )
         normalized = content.casefold()
         category, confidence = _classify(normalized)
@@ -129,6 +136,11 @@ def _classify(content: str) -> tuple[str, float]:
 
 def _contains_any(content: str, needles: tuple[str, ...]) -> bool:
     return any(needle in content for needle in needles)
+
+
+def _optional_metadata_str(metadata: Mapping[str, Any], key: str) -> str | None:
+    value: Any | None = metadata.get(key)
+    return str(value) if value is not None else None
 
 
 __all__ = ["DiagnosticAgent", "DiagnosticResult"]

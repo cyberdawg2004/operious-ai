@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from app.escalation.enums import EscalationStatus
+from app.escalation.enums import EscalationOutboxStatus, EscalationStatus
 from app.escalation.exceptions import (
     EscalationNotFoundError,
     EscalationResolutionError,
@@ -16,8 +16,11 @@ from app.escalation.identity import (
     derive_escalation_id,
     derive_escalation_override_action_id,
     derive_escalation_override_decision_id,
+    derive_escalation_outbox_id,
 )
 from app.escalation.persistence import (
+    EscalationOutboxQuery,
+    EscalationOutboxRecord,
     EscalationPage,
     EscalationPersistenceProtocol,
     EscalationQuery,
@@ -44,6 +47,30 @@ _OVERRIDE_POLICY_CHAIN_ID = "escalation.manager_override"
 _OVERRIDE_POLICY_NAME = "escalation.human_approval"
 _OVERRIDE_RULE_ID = "manager_override"
 _OVERRIDE_HANDLER = "human_manager_override"
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationOutboxClaimResult:
+    """Outcome of claiming one escalation outbox row."""
+
+    claimed: bool
+    outbox: EscalationOutboxRecord | None
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationOutboxReconcileSweepResult:
+    """Rows recovered from stuck escalation publication state."""
+
+    requeued: tuple[EscalationOutboxRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationOutboxPreparation:
+    """Escalation record plus its durable publication row."""
+
+    escalation: EscalationRecord
+    outbox: EscalationOutboxRecord
 
 
 class EscalationAgentRuntime:
@@ -172,6 +199,195 @@ class EscalationAgentRuntime:
             query,
             expected_tenant_id=expected_tenant_id,
         )
+
+    async def ensure_outbox_for_escalation(
+        self,
+        record: EscalationRecord,
+        *,
+        expected_tenant_id: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> EscalationOutboxRecord:
+        """Create or return the durable publication row for an escalation."""
+
+        _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        if record.tenant_id != expected_tenant_id:
+            raise EscalationRuntimeError(
+                "escalation tenant_id does not match expected_tenant_id"
+            )
+        existing = await self._escalations.get_escalation_outbox_by_escalation(
+            record.escalation_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if existing is not None:
+            return existing
+        now = datetime.now(timezone.utc)
+        outbox = EscalationOutboxRecord(
+            outbox_id=str(
+                derive_escalation_outbox_id(
+                    escalation_id=record.escalation_id,
+                    tenant_id=record.tenant_id,
+                )
+            ),
+            escalation_id=record.escalation_id,
+            tenant_id=record.tenant_id,
+            status=EscalationOutboxStatus.PENDING,
+            created_at=now,
+            metadata={
+                "governance_decision_id": record.governance_decision_id,
+                "session_id": record.session_id,
+                **dict(metadata or {}),
+            },
+        )
+        return await self._escalations.save_escalation_outbox(
+            outbox,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def prepare_governance_denial_outbox(
+        self,
+        *,
+        governance_decision_id: str,
+        expected_tenant_id: str,
+        session_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> EscalationOutboxPreparation:
+        """Prepare the escalation publication row from denial lineage."""
+
+        record = await self.create_for_governance_denial(
+            governance_decision_id=governance_decision_id,
+            expected_tenant_id=expected_tenant_id,
+            session_id=session_id,
+        )
+        outbox = await self.ensure_outbox_for_escalation(
+            record,
+            expected_tenant_id=expected_tenant_id,
+            metadata=metadata,
+        )
+        return EscalationOutboxPreparation(escalation=record, outbox=outbox)
+
+    async def get_outbox_by_escalation(
+        self,
+        escalation_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> EscalationOutboxRecord | None:
+        _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        return await self._escalations.get_escalation_outbox_by_escalation(
+            escalation_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def claim_outbox_for_escalation(
+        self,
+        *,
+        escalation_id: str,
+        publisher_id: str,
+        expected_tenant_id: str,
+    ) -> EscalationOutboxClaimResult:
+        """Transition a pending outbox row to publishing."""
+
+        _require_nonempty(publisher_id, "publisher_id")
+        _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        current = await self._escalations.get_escalation_outbox_by_escalation(
+            escalation_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if current is None:
+            return EscalationOutboxClaimResult(
+                claimed=False,
+                outbox=None,
+                reason="outbox_missing",
+            )
+        if current.status is not EscalationOutboxStatus.PENDING:
+            return EscalationOutboxClaimResult(
+                claimed=False,
+                outbox=current,
+                reason=f"outbox_not_publishable:{current.status.value}",
+            )
+        claimed_at = datetime.now(timezone.utc)
+        claimed = await self._escalations.claim_escalation_outbox(
+            escalation_id=escalation_id,
+            publisher_id=publisher_id,
+            claimed_at=claimed_at,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if claimed is None:
+            return EscalationOutboxClaimResult(
+                claimed=False,
+                outbox=None,
+                reason="outbox_claim_lost",
+            )
+        return EscalationOutboxClaimResult(
+            claimed=(
+                claimed.status is EscalationOutboxStatus.PUBLISHING
+                and claimed.publisher_id == publisher_id
+                and claimed.republish_count == current.republish_count + 1
+            ),
+            outbox=claimed,
+            reason=None
+            if claimed.status is EscalationOutboxStatus.PUBLISHING
+            else f"outbox_not_publishable:{claimed.status.value}",
+        )
+
+    async def mark_outbox_published(
+        self,
+        *,
+        outbox_id: str,
+        expected_tenant_id: str,
+    ) -> EscalationOutboxRecord:
+        _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        return await self._escalations.mark_escalation_outbox_published(
+            outbox_id=outbox_id,
+            published_at=datetime.now(timezone.utc),
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def mark_outbox_failed(
+        self,
+        *,
+        outbox_id: str,
+        error: str,
+        expected_tenant_id: str,
+        dead_letter: bool = False,
+    ) -> EscalationOutboxRecord:
+        _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        return await self._escalations.mark_escalation_outbox_failed(
+            outbox_id=outbox_id,
+            error=error,
+            failed_at=datetime.now(timezone.utc),
+            dead_letter=dead_letter,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def reconcile_stale_outbox_records(
+        self,
+        *,
+        stale_before: datetime,
+        expected_tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> EscalationOutboxReconcileSweepResult:
+        """Return stuck publishing rows to pending for re-publication."""
+
+        page = await self._escalations.list_escalation_outbox(
+            EscalationOutboxQuery(
+                status=EscalationOutboxStatus.PUBLISHING,
+                limit=limit,
+            ),
+            expected_tenant_id=expected_tenant_id,
+        )
+        requeued: list[EscalationOutboxRecord] = []
+        now = datetime.now(timezone.utc)
+        for outbox in page.items:
+            recovered = await self._escalations.requeue_stale_escalation_outbox(
+                outbox_id=outbox.outbox_id,
+                stale_before=stale_before,
+                requeued_at=now,
+                reason="stale_publishing_claim",
+                expected_tenant_id=expected_tenant_id,
+            )
+            if recovered is not None:
+                requeued.append(recovered)
+        return EscalationOutboxReconcileSweepResult(requeued=tuple(requeued))
 
     async def approve_escalation(
         self,

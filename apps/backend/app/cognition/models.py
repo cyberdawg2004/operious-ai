@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Mapping
 
-from app.cognition.identity import CognitionLLMUsageId
+from app.cognition.identity import CognitionAuditId, CognitionLLMUsageId
 from app.knowledge.models import KnowledgeRetrievalResult
 from app.sop_intelligence.persistence import ApprovalRecord
 from app.tenant.persistence import (
@@ -67,6 +67,23 @@ class CognitionLLMUsageRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class CognitionAuditRecord:
+    """Encrypted-at-rest prompt/completion forensic snapshot."""
+
+    audit_id: CognitionAuditId
+    tenant_id: str
+    execution_id: str
+    prompt_full: str
+    completion_full: str
+    prompt_sha256: str
+    completion_sha256: str
+    model_name: str
+    token_usage: Mapping[str, Any]
+    captured_at: datetime
+    usage_id: CognitionLLMUsageId | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DiagnosticLLMUsage:
     prompt_tokens: int
     completion_tokens: int
@@ -104,6 +121,7 @@ class DiagnosticReasoningResult:
 __all__ = [
     "ApprovalApplicationResult",
     "ApprovalLifecycleResult",
+    "CognitionAuditRecord",
     "CognitionLLMUsageRecord",
     "CognitionLLMUsageStatus",
     "DiagnosticLLMCompletion",

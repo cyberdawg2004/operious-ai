@@ -1,21 +1,21 @@
 # Operious AI Consolidated Master Plan
 
 Updated baseline after Phase 6-D plus Pre-6-E Enterprise Trust
-Hardening phases A-D and recovery verification. This document is the
+Hardening phases A-H and recovery verification. This document is the
 canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
-- Tests: 2,172 passed, 2 skipped, 0 xfailed after
-  Pre-6-E Enterprise Trust Hardening phases A-E.
+- Tests: 2,192 passed, 2 skipped, 0 xfailed after
+  Pre-6-E Enterprise Trust Hardening phases A-H.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
-  Phase D, and Phase E are closed. Phase F, Phase G, and Phase H remain
-  the next hardening wedges before Phase 6-E may begin.
+  Phase D, Phase E, Phase F, Phase G, and Phase H are closed. The
+  final Pre-6-E gate remains before Phase 6-E may begin.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors, 686 warnings across the backend surface.
+- Pyright: 0 errors, 676 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0027_provider_circuit_states (head)` on the
-  `operious_test` database after Phase D verification.
+- Alembic current: `0031_dead_letter_tasks (head)` on the
+  `operious_test` database after Phase H verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -23,9 +23,9 @@ canonical handoff plan for the next Codex session.
   Phase 5-A, Phase 5-B, Phase 5-C, Phase 6-A, Phase 6-B,
   Phase 6-C, Phase 6-D, and the Pre-6-E constitutional correctness
   wedge, plus Pre-6-E Enterprise Trust Hardening Phase A,
-  Phase B, Phase C, Phase D, and Phase E.
-- Next phase: Pre-6-E Enterprise Trust Hardening Phase F, Webhook Surface
-  Hardening. Phase 6-E remains queued after phases F-H are closed.
+  Phase B, Phase C, Phase D, Phase E, Phase F, Phase G, and Phase H.
+- Next phase: Final Pre-6-E gate and enterprise-trust audit rerun.
+  Phase 6-E remains queued until that gate is closed.
 
 ## Completed Work Ledger
 
@@ -1113,18 +1113,94 @@ hydration exposes the platform to enterprise operators.
 - [x] Verified Phase E focused tests, affected persistence/router
   clusters, Pyright, smoke recovery, and full backend regression.
 
+#### Pre-6-E Enterprise Trust Phase F - Webhook Surface Hardening - Done
+
+- [x] Added `RequestBodyLimitMiddleware` and registered it as the
+  outermost ASGI middleware so `Content-Length` and chunked request
+  bodies are rejected above `SURVIVABILITY_REQUEST_BODY_MAX_BYTES`.
+- [x] Added durable `webhook_nonce_records` persistence with
+  tenant/channel/nonce uniqueness, expiry timestamps, RLS policy, and
+  Alembic migration `0028_webhook_nonce_records`.
+- [x] Added signed webhook timestamp and nonce extraction for email,
+  WhatsApp, Shulex, and Lark payloads.
+- [x] Updated `TicketIngressService` to verify signatures before nonce
+  persistence, reject stale signed webhooks outside the five-minute
+  freshness window, and reject replayed nonces before boundary runtime
+  ingestion.
+- [x] Added bounded webhook nonce cleanup through boundary persistence
+  and the `cleanup_expired_webhook_nonces` Celery transport task.
+- [x] Updated webhook determinism coverage to compare identical payloads
+  across clean stores while same-store duplicate delivery is now
+  correctly rejected as replay.
+- [x] Added Phase F tests for request body limits, webhook freshness,
+  replay rejection, nonce cleanup, middleware registration, and migration
+  shape.
+- [x] Verified Phase F focused tests, affected webhook/router/multi-tenant
+  tests, middleware/boundary/router invariants, Alembic head, Pyright,
+  and full backend regression.
+
+#### Pre-6-E Enterprise Trust Phase G - Escalation Outbox and Full Cognition Forensics - Done
+
+- [x] Added durable `escalation_outbox` persistence with claim,
+  publish, fail, stale-requeue, and re-publication semantics via
+  Alembic migration `0029_escalation_outbox`.
+- [x] Replaced request-scoped escalation direct publish with outbox
+  preparation, claim-before-transport, mark-published/failed terminal
+  transitions, and a scheduled stale escalation outbox reconciler.
+- [x] Added encrypted-at-rest cognition audit snapshots via
+  `cognition_audit_records` and Alembic migration
+  `0030_cognition_audit_records`.
+- [x] Persisted full prompt and completion snapshots for completed
+  diagnostic LLM calls, with deterministic audit IDs and SHA-256 prompt
+  and completion hashes.
+- [x] Exposed tenant-scoped cognition audit reads through the Cognition
+  Hub service/API and linked audit record IDs into session timeline
+  operational event projection metadata.
+- [x] Added Phase G tests for stale escalation outbox recovery,
+  cognition audit persistence, encrypted audit storage, and trace
+  inspector audit links.
+- [x] Verified Phase G focused tests, affected cognition/escalation
+  suites, Alembic head, Pyright, and full backend regression.
+
+#### Pre-6-E Enterprise Trust Phase H - Celery Backlog Physics - Done
+
+- [x] Split Celery broker and result backend defaults across separate
+  Redis logical databases and added result TTL, soft/hard task time
+  limits, and broker visibility-timeout settings.
+- [x] Marked fire-and-forget supervisor, QA, SOP intelligence,
+  escalation, recovery, and cleanup tasks with `ignore_result=True`
+  while preserving diagnostic execution result retention.
+- [x] Added Redis queue-depth admission in `CeleryExecutionPublisher`
+  with `QueueBackpressureError` and converted dispatch publication
+  saturation into a degraded halted `DispatchResult` with
+  `halt_reason="queue_backpressure"`.
+- [x] Added durable `dead_letter_tasks` persistence with deterministic
+  IDs, tenant-scoped RLS, Alembic migration `0031_dead_letter_tasks`,
+  and Sentry alert emission on insert.
+- [x] Recorded dead-letter task rows when the diagnostic worker exhausts
+  its retry budget and dead-letters the execution.
+- [x] Added Redis `maxmemory-policy` startup verification and documented
+  the Upstash `allkeys-lru` requirement in
+  `docs/persistence/redis-backlog-physics.md`.
+- [x] Added Phase H tests for queue-depth rejection, Celery TTL/backlog
+  configuration, dead-letter task Sentry alerts, and Redis policy
+  warnings.
+- [x] Verified Phase H focused tests, affected execution/dispatch
+  suites, Alembic head, Pyright, smoke, invariants, and full backend
+  regression.
+
 #### Next Pre-6-E Hardening Wedges
 
 - [x] Phase E: Bounded Read Paths. Replace load-all-then-slice
   persistence reads with SQL-native pagination and add AST invariants
   blocking unbounded production reads.
-- [ ] Phase F: Webhook Surface Hardening. Enforce request body limits,
+- [x] Phase F: Webhook Surface Hardening. Enforce request body limits,
   signed webhook freshness windows, nonce persistence, replay rejection,
   and nonce cleanup.
-- [ ] Phase G: Escalation Outbox and Full Cognition Forensics. Move
+- [x] Phase G: Escalation Outbox and Full Cognition Forensics. Move
   escalation publishing to outbox claim/publish/recover semantics and
   persist encrypted full prompt/completion cognition audit records.
-- [ ] Phase H: Celery Backlog Physics. Add broker/result TTL controls,
+- [x] Phase H: Celery Backlog Physics. Add broker/result TTL controls,
   queue depth admission, dead-letter task records, and Redis memory
   policy health checks.
 - [ ] Final Pre-6-E Gate. Re-run full backend tests, Pyright, hardening
@@ -1134,7 +1210,7 @@ hydration exposes the platform to enterprise operators.
 ### 6-E: Frontend Hydration - Items 7, PR_W15 - Queued
 
 - Not started. Do not begin Phase 6-E until Pre-6-E Enterprise Trust
-  Hardening phases E-H and the final gate are closed.
+  Hardening Phase H and the final gate are closed.
 - Command Center connected to real APIs.
 - Trace Inspector renders `operational_events`.
 - Operations Queue renders escalation records.
@@ -1170,10 +1246,10 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Phase E closed; Pre-6-E Enterprise Trust Phase F - Webhook Surface Hardening is queued pending user confirmation.
-Current test baseline: 2,172 passed, 2 skipped; smoke tests 4/4 green.
-Current Pyright baseline: 0 errors, 686 warnings; warnings must not grow.
-Current Alembic head: 0027_provider_circuit_states.
+Current phase: Phase H closed; Final Pre-6-E gate and enterprise-trust audit rerun are queued pending user confirmation.
+Current test baseline: 2,192 passed, 2 skipped; smoke tests 4/4 green.
+Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
+Current Alembic head: 0031_dead_letter_tasks.
 
 Completed before this phase:
 - Phase 6-A through Phase 6-D are closed.
@@ -1183,11 +1259,11 @@ Completed before this phase:
 - Pre-6-E Enterprise Trust Phase C is closed: UUID5 determinism in lineage paths.
 - Pre-6-E Enterprise Trust Phase D is closed: Provider circuit breaker with retry budget.
 - Pre-6-E Enterprise Trust Phase E is closed: Bounded read paths.
+- Pre-6-E Enterprise Trust Phase F is closed: Webhook surface hardening.
+- Pre-6-E Enterprise Trust Phase G is closed: Escalation outbox and full cognition forensics.
+- Pre-6-E Enterprise Trust Phase H is closed: Celery backlog physics.
 
 Remaining before Phase 6-E:
-- Phase F: Webhook Surface Hardening.
-- Phase G: Escalation Outbox and Full Cognition Forensics.
-- Phase H: Celery Backlog Physics.
 - Final Pre-6-E gate and enterprise-trust audit rerun.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
@@ -1212,7 +1288,7 @@ pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coor
 pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
-Do not start Phase F, Phase G, Phase H, or Phase 6-E until the user confirms the next phase boundary.
+Do not start the final Pre-6-E gate or Phase 6-E until the user confirms the next phase boundary.
 ```
 
 ## New Chat Hyperprompt
@@ -1222,7 +1298,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Phase E closed; Pre-6-E Enterprise Trust Phase F - Webhook Surface Hardening is queued pending user confirmation.
+Current phase: Phase H closed; Final Pre-6-E gate and enterprise-trust audit rerun are queued pending user confirmation.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -1254,16 +1330,18 @@ Current source of truth:
 - Pre-6-E Enterprise Trust Phase C is closed.
 - Pre-6-E Enterprise Trust Phase D is closed.
 - Pre-6-E Enterprise Trust Phase E is closed.
-- Pre-6-E Enterprise Trust Phase F is next after user confirmation.
-- Phase 6-E is queued and must not start until phases E-H and the final
-  Pre-6-E gate are closed.
+- Pre-6-E Enterprise Trust Phase F is closed.
+- Pre-6-E Enterprise Trust Phase G is closed.
+- Pre-6-E Enterprise Trust Phase H is closed.
+- Phase 6-E is queued and must not start until the final Pre-6-E gate
+  is closed.
 
 Current verified baseline:
-- Tests: 2,172 passed, 2 skipped, 0 xfailed.
+- Tests: 2,192 passed, 2 skipped, 0 xfailed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
-- Pyright warnings: 686; warnings must not grow phase over phase.
-- Alembic current: 0027_provider_circuit_states (head).
+- Pyright warnings: 676; warnings must not grow phase over phase.
+- Alembic current: 0031_dead_letter_tasks (head).
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -1293,21 +1371,22 @@ Current verified baseline:
 - Pre-6-E Phase C complete: UUID5 Determinism in All Lineage Paths.
 - Pre-6-E Phase D complete: Provider Circuit Breaker with Retry Budget.
 - Pre-6-E Phase E complete: Bounded Read Paths.
+- Pre-6-E Phase F complete: Webhook Surface Hardening.
+- Pre-6-E Phase G complete: Escalation Outbox and Full Cognition Forensics.
+- Pre-6-E Phase H complete: Celery Backlog Physics.
 - Phase 3-D.1 scheduled follow-up: ApprovalRecord projection into the
   canonical event fabric before the demo trace-inspector milestone.
 
 Goal for this chat:
-Await user confirmation, then implement Phase F only.
+Await user confirmation, then run the final Pre-6-E gate only.
 
-Phase F scope:
-- Webhook Surface Hardening.
-- Do not start Phase F, Phase G, Phase H, or Phase 6-E until the user
-  confirms the phase boundary.
+Final gate scope:
+- Full backend regression, Pyright, hardening invariants, smoke tests,
+  and enterprise-trust audit rerun.
+- Do not start the final gate or Phase 6-E until the user confirms the
+  phase boundary.
 
-Queued after Phase F:
-- Phase G: Escalation Outbox and Full Cognition Forensics.
-- Phase H: Celery Backlog Physics.
-- Final Pre-6-E gate.
+Queued after the final gate:
 - Phase 6-E: Frontend Hydration - Items 7, PR_W15.
 
 Constitutional rules:
@@ -1331,15 +1410,16 @@ Constitutional rules:
 - Frontend remains untouched until Phase 6-E starts.
 
 Before editing:
-- Inspect existing webhook/router/adapter contracts, persistence return
-  types, tests, and invariants before editing.
+- Inspect the final-gate commands, audit expectations, current
+  migrations, tests, and invariants before making any changes.
 - Preserve existing router/service/runtime/persistence layering.
 - Do not weaken tenant scoping, deterministic identity, RLS, governance,
-  or chronology constraints while hardening webhooks.
-- Modify only what is necessary to close Phase F.
+  chronology, or replay constraints while hardening broker physics.
+- Modify only what is necessary to close the final gate if verification
+  exposes a defect.
 
-After Phase F:
-- Run focused Phase F checks.
+After the final gate:
+- Run the final gate checks from the master directive.
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
@@ -1353,5 +1433,5 @@ Final answer must include:
 - Runtime/service/router changes.
 - Replay, governance, frontend, and transport implications.
 - Tests run and results.
-- Whether Phase F is closed or still open.
+- Whether the final gate is closed or still open.
 ```

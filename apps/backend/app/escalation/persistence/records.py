@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Mapping
+
+from app.escalation.enums import EscalationOutboxStatus
 
 
 def _empty_metadata() -> dict[str, Any]:
@@ -70,4 +73,22 @@ class EscalationRecord:
         )
 
 
-__all__ = ["EscalationRecord"]
+@dataclass(frozen=True, slots=True)
+class EscalationOutboxRecord:
+    """Durable publication row for one escalation intent."""
+
+    outbox_id: str
+    escalation_id: str
+    tenant_id: str
+    status: EscalationOutboxStatus
+    created_at: datetime
+    claimed_at: datetime | None = None
+    published_at: datetime | None = None
+    publisher_id: str | None = None
+    republish_count: int = 0
+    dead_letter: bool = False
+    last_error: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
+
+
+__all__ = ["EscalationOutboxRecord", "EscalationRecord"]

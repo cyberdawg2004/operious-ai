@@ -1,6 +1,6 @@
 """Escalation substrate public surface."""
 
-from app.escalation.enums import EscalationStatus
+from app.escalation.enums import EscalationOutboxStatus, EscalationStatus
 from app.escalation.exceptions import (
     EscalationError,
     EscalationNotFoundError,
@@ -10,13 +10,19 @@ from app.escalation.exceptions import (
 )
 from app.escalation.identity import (
     EscalationId,
+    EscalationOutboxId,
     as_escalation_id,
+    as_escalation_outbox_id,
     derive_escalation_event_id,
     derive_escalation_id,
     derive_escalation_override_action_id,
     derive_escalation_override_decision_id,
+    derive_escalation_outbox_id,
 )
 from app.escalation.persistence import (
+    EscalationOutboxPage,
+    EscalationOutboxQuery,
+    EscalationOutboxRecord,
     EscalationPage,
     EscalationPersistenceProtocol,
     EscalationQuery,
@@ -31,6 +37,11 @@ __all__ = [
     "EscalationError",
     "EscalationId",
     "EscalationNotFoundError",
+    "EscalationOutboxId",
+    "EscalationOutboxPage",
+    "EscalationOutboxQuery",
+    "EscalationOutboxRecord",
+    "EscalationOutboxStatus",
     "EscalationPage",
     "EscalationPersistenceError",
     "EscalationPersistenceProtocol",
@@ -42,8 +53,10 @@ __all__ = [
     "EscalationStatus",
     "InMemoryEscalationPersistence",
     "as_escalation_id",
+    "as_escalation_outbox_id",
     "derive_escalation_event_id",
     "derive_escalation_id",
     "derive_escalation_override_action_id",
     "derive_escalation_override_decision_id",
+    "derive_escalation_outbox_id",
 ]

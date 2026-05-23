@@ -14,4 +14,13 @@ class EscalationStatus(StrEnum):
     REJECTED = "rejected"
 
 
-__all__ = ["EscalationStatus"]
+class EscalationOutboxStatus(StrEnum):
+    """Durable escalation publication lifecycle states."""
+
+    PENDING = "pending"
+    PUBLISHING = "publishing"
+    PUBLISHED = "published"
+    FAILED = "failed"
+
+
+__all__ = ["EscalationOutboxStatus", "EscalationStatus"]

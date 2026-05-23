@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from app.events import (
     EventCausality,
@@ -278,6 +278,8 @@ def _projection_metadata(
     session: OperationalSession,
     event: SessionTimelineEvent,
 ) -> Mapping[str, Any]:
+    timeline_payload = dict(event.payload)
+    cognition_audit_id = _cognition_audit_id_from_payload(timeline_payload)
     return canonicalize_payload(
         {
             "projection_source": "session_timeline",
@@ -304,7 +306,9 @@ def _projection_metadata(
             ),
             "timeline_annotation": event.annotation,
             "timeline_idempotency_key": event.idempotency_key,
-            "timeline_payload": dict(event.payload),
+            "timeline_payload": timeline_payload,
+            "cognition_audit_id": cognition_audit_id,
+            "cognition_audit_record_id": cognition_audit_id,
         }
     )
 
@@ -314,6 +318,23 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value)
     return text or None
+
+
+def _cognition_audit_id_from_payload(payload: Mapping[str, Any]) -> str | None:
+    nested = payload.get("payload")
+    if isinstance(nested, Mapping):
+        nested_payload = cast(Mapping[str, Any], nested)
+        nested_value: Any | None = nested_payload.get(
+            "cognition_audit_id"
+        ) or nested_payload.get(
+            "cognition_audit_record_id"
+        )
+        if nested_value is not None:
+            return str(nested_value)
+    value: Any | None = payload.get("cognition_audit_id") or payload.get(
+        "cognition_audit_record_id"
+    )
+    return str(value) if value is not None else None
 
 
 __all__ = [
