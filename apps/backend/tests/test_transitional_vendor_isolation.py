@@ -92,15 +92,21 @@ _GUARDED_PACKAGES: tuple[str, ...] = (
     "core",
     "db",
     "dependencies",
+    "events",
+    "execution",
     "governance",
     "hardening",
     "middleware",
     "observability",
     "organizational_intelligence",
+    "qa",
     "repositories",
     "services",
     "session",
+    "sop_intelligence",
     "supervisor",
+    "tenant",
+    "workers",
 )
 
 
