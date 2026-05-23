@@ -6,6 +6,7 @@ import asyncio
 import os
 import sys
 from collections.abc import Coroutine, Mapping
+from dataclasses import dataclass
 from threading import Thread
 from typing import Any, TypeVar, cast
 
@@ -93,6 +94,56 @@ async def execute_diagnostic_agent_runtime(
     retry_count: int = 0,
 ) -> dict[str, object]:
     session_factory = get_session_factory()
+    prepared = await _prepare_diagnostic_execution(
+        session_factory=session_factory,
+        execution_id=execution_id,
+        worker_id=worker_id,
+    )
+    if isinstance(prepared, dict):
+        return prepared
+
+    try:
+        result = await _generate_diagnostic_reasoning_for_work_item(
+            session_factory=session_factory,
+            work_item=prepared,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return await _persist_diagnostic_failure(
+            session_factory=session_factory,
+            work_item=prepared,
+            worker_id=worker_id,
+            max_attempts=max_attempts,
+            task_name=task_name,
+            task_id=task_id,
+            retry_count=retry_count,
+            exc=exc,
+        )
+
+    return await _persist_diagnostic_success(
+        session_factory=session_factory,
+        work_item=prepared,
+        worker_id=worker_id,
+        result=result,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _DiagnosticExecutionWorkItem:
+    execution_id: str
+    attempt_id: str
+    attempt_number: int
+    dispatch_id: str
+    session_id: str
+    tenant_id: str
+    content: str
+
+
+async def _prepare_diagnostic_execution(
+    *,
+    session_factory: Any,
+    execution_id: str,
+    worker_id: str,
+) -> _DiagnosticExecutionWorkItem | dict[str, object]:
     async with session_factory() as session:
         execution_runtime = ExecutionRuntime(
             persistence=PostgresExecutionPersistence(session)
@@ -117,192 +168,251 @@ async def execute_diagnostic_agent_runtime(
                 "execution claim did not produce attempt lineage"
             )
         await session.commit()
+        execution_id_text = str(execution.execution_id)
+        attempt_id_text = str(attempt.attempt_id)
+        attempt_number = attempt.attempt_number
         dispatch_id = execution.dispatch_id
         session_id = execution.session_id
         tenant_id = execution.tenant_id
-        try:
-            claim_lost = await _claim_lost_payload(
-                execution_runtime=execution_runtime,
-                execution_id=str(execution.execution_id),
-                attempt_id=str(attempt.attempt_id),
-                worker_id=worker_id,
-            )
-            if claim_lost is not None:
-                return {
-                    **claim_lost,
-                    "dispatch_id": dispatch_id,
-                    "session_id": session_id,
-                    "tenant_id": tenant_id,
-                }
-            await timeline.append_event(
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                event_type=_STARTED,
-                payload={
-                    "execution_id": str(execution.execution_id),
-                    "attempt_id": str(attempt.attempt_id),
-                    "attempt_number": attempt.attempt_number,
-                },
-                idempotency_key=_timeline_idempotency_key(
-                    execution_id=str(execution.execution_id),
-                    attempt_id=str(attempt.attempt_id),
-                    event_type=_STARTED,
-                ),
-            )
-            await session.commit()
-
-            content = await _load_dispatch_content(
-                coordination_repo=coordination_repo,
-                session_repo=session_repo,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-            )
-            result = await DiagnosticAgent(
-                cognition_runtime=_diagnostic_cognition_runtime(session)
-            ).execute(
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                content=content,
-                execution_id=str(execution.execution_id),
-            )
-            claim_lost = await _claim_lost_payload(
-                execution_runtime=execution_runtime,
-                execution_id=str(execution.execution_id),
-                attempt_id=str(attempt.attempt_id),
-                worker_id=worker_id,
-            )
-            if claim_lost is not None:
-                return {
-                    **claim_lost,
-                    "dispatch_id": dispatch_id,
-                    "session_id": session_id,
-                    "tenant_id": tenant_id,
-                }
-            await timeline.append_event(
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                event_type=_COMPLETED,
-                payload=result.model_dump(),
-                idempotency_key=_timeline_idempotency_key(
-                    execution_id=str(execution.execution_id),
-                    attempt_id=str(attempt.attempt_id),
-                    event_type=_COMPLETED,
-                ),
-            )
-            completed_payload = result.model_dump()
-            await execution_runtime.complete_execution(
-                execution_id=execution.execution_id,
-                attempt_id=attempt.attempt_id,
-                worker_id=worker_id,
-                result=completed_payload,
-            )
-            await session.commit()
-            supervisor_queued = await _queue_supervisor_if_closed(
-                session_repo=session_repo,
-                session_id=session_id,
-                tenant_id=tenant_id,
-            )
+        claim_lost = await _claim_lost_payload(
+            execution_runtime=execution_runtime,
+            execution_id=execution_id_text,
+            attempt_id=attempt_id_text,
+            worker_id=worker_id,
+        )
+        if claim_lost is not None:
             return {
-                "execution_id": str(execution.execution_id),
-                "attempt_id": str(attempt.attempt_id),
-                "attempt_number": attempt.attempt_number,
+                **claim_lost,
                 "dispatch_id": dispatch_id,
                 "session_id": session_id,
                 "tenant_id": tenant_id,
-                "status": "completed",
-                "supervisor_evaluation_queued": supervisor_queued,
-                "summary": result.summary,
-                "category": result.category,
-                "confidence": result.confidence,
             }
-        except Exception as exc:  # noqa: BLE001
-            await session.rollback()
-            terminal = attempt.attempt_number >= max(1, max_attempts)
-            failure = _bounded_failure_metadata(
-                exc,
-                execution_id=str(execution.execution_id),
-                attempt_id=str(attempt.attempt_id),
-                attempt_number=attempt.attempt_number,
-                retry_requested=not terminal,
-            )
-            claim_lost = await _claim_lost_payload(
-                execution_runtime=execution_runtime,
-                execution_id=str(execution.execution_id),
-                attempt_id=str(attempt.attempt_id),
-                worker_id=worker_id,
-            )
-            if claim_lost is not None:
-                return {
-                    **claim_lost,
-                    "dispatch_id": dispatch_id,
-                    "session_id": session_id,
-                    "tenant_id": tenant_id,
-                    **failure,
-                }
-            failure_event_persisted = await _append_failure_event(
-                session=session,
-                timeline=timeline,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                tenant_id=tenant_id,
-                failure=failure,
-            )
-            if terminal:
-                execution_failed = await _dead_letter_execution_record(
-                    execution_runtime=execution_runtime,
-                    session=session,
-                    execution_id=execution.execution_id,
-                    attempt_id=attempt.attempt_id,
-                    worker_id=worker_id,
-                    failure=failure,
-                )
-                dead_letter_task_recorded = await _record_dead_letter_task(
-                    session=session,
-                    tenant_id=tenant_id,
-                    task_name=task_name,
-                    task_id=(
-                        task_id
-                        or _fallback_task_id(
-                            task_name=task_name,
-                            execution_id=str(execution.execution_id),
-                            attempt_id=str(attempt.attempt_id),
-                        )
-                    ),
-                    execution_id=str(execution.execution_id),
-                    attempt_id=str(attempt.attempt_id),
-                    retry_count=retry_count,
-                    failure=failure,
-                )
-                status = "dead_lettered"
-            else:
-                execution_failed = await _fail_execution_record(
-                    execution_runtime=execution_runtime,
-                    session=session,
-                    execution_id=execution.execution_id,
-                    attempt_id=attempt.attempt_id,
-                    worker_id=worker_id,
-                    failure=failure,
-                    retry_requested=True,
-                )
-                dead_letter_task_recorded = False
-                status = "retry_requested"
+        await timeline.append_event(
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            event_type=_STARTED,
+            payload={
+                "execution_id": execution_id_text,
+                "attempt_id": attempt_id_text,
+                "attempt_number": attempt_number,
+            },
+            idempotency_key=_timeline_idempotency_key(
+                execution_id=execution_id_text,
+                attempt_id=attempt_id_text,
+                event_type=_STARTED,
+            ),
+        )
+        await session.commit()
+
+        content = await _load_dispatch_content(
+            coordination_repo=coordination_repo,
+            session_repo=session_repo,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+        await session.commit()
+        return _DiagnosticExecutionWorkItem(
+            execution_id=execution_id_text,
+            attempt_id=attempt_id_text,
+            attempt_number=attempt_number,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            content=content,
+        )
+
+
+async def _generate_diagnostic_reasoning_for_work_item(
+    *,
+    session_factory: Any,
+    work_item: _DiagnosticExecutionWorkItem,
+) -> DiagnosticResult:
+    session = session_factory()
+    try:
+        result = await _generate_diagnostic_reasoning_draft(
+            cognition_runtime=_diagnostic_cognition_runtime(session),
+            dispatch_id=work_item.dispatch_id,
+            session_id=work_item.session_id,
+            tenant_id=work_item.tenant_id,
+            content=work_item.content,
+            execution_id=work_item.execution_id,
+        )
+        await session.commit()
+        return result
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+
+async def _persist_diagnostic_success(
+    *,
+    session_factory: Any,
+    work_item: _DiagnosticExecutionWorkItem,
+    worker_id: str,
+    result: DiagnosticResult,
+) -> dict[str, object]:
+    async with session_factory() as session:
+        execution_runtime = ExecutionRuntime(
+            persistence=PostgresExecutionPersistence(session)
+        )
+        session_repo = PostgresSessionPersistence(session)
+        timeline = TimelineRuntime(persistence=session_repo)
+        claim_lost = await _claim_lost_payload(
+            execution_runtime=execution_runtime,
+            execution_id=work_item.execution_id,
+            attempt_id=work_item.attempt_id,
+            worker_id=worker_id,
+        )
+        if claim_lost is not None:
             return {
-                "execution_id": str(execution.execution_id),
-                "attempt_id": str(attempt.attempt_id),
-                "attempt_number": attempt.attempt_number,
-                "dispatch_id": dispatch_id,
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "status": status,
-                "failure_event_persisted": failure_event_persisted,
-                "execution_failed": execution_failed,
-                "dead_letter_task_recorded": dead_letter_task_recorded,
+                **claim_lost,
+                "dispatch_id": work_item.dispatch_id,
+                "session_id": work_item.session_id,
+                "tenant_id": work_item.tenant_id,
+            }
+        await timeline.append_event(
+            dispatch_id=work_item.dispatch_id,
+            session_id=work_item.session_id,
+            tenant_id=work_item.tenant_id,
+            event_type=_COMPLETED,
+            payload=result.model_dump(),
+            idempotency_key=_timeline_idempotency_key(
+                execution_id=work_item.execution_id,
+                attempt_id=work_item.attempt_id,
+                event_type=_COMPLETED,
+            ),
+        )
+        completed_payload = result.model_dump()
+        await execution_runtime.complete_execution(
+            execution_id=work_item.execution_id,
+            attempt_id=work_item.attempt_id,
+            worker_id=worker_id,
+            result=completed_payload,
+        )
+        await session.commit()
+        supervisor_queued = await _queue_supervisor_if_closed(
+            session_repo=session_repo,
+            session_id=work_item.session_id,
+            tenant_id=work_item.tenant_id,
+        )
+        return {
+            "execution_id": work_item.execution_id,
+            "attempt_id": work_item.attempt_id,
+            "attempt_number": work_item.attempt_number,
+            "dispatch_id": work_item.dispatch_id,
+            "session_id": work_item.session_id,
+            "tenant_id": work_item.tenant_id,
+            "status": "completed",
+            "supervisor_evaluation_queued": supervisor_queued,
+            "summary": result.summary,
+            "category": result.category,
+            "confidence": result.confidence,
+        }
+
+
+async def _persist_diagnostic_failure(
+    *,
+    session_factory: Any,
+    work_item: _DiagnosticExecutionWorkItem,
+    worker_id: str,
+    max_attempts: int,
+    task_name: str,
+    task_id: str | None,
+    retry_count: int,
+    exc: BaseException,
+) -> dict[str, object]:
+    async with session_factory() as session:
+        execution_runtime = ExecutionRuntime(
+            persistence=PostgresExecutionPersistence(session)
+        )
+        session_repo = PostgresSessionPersistence(session)
+        timeline = TimelineRuntime(persistence=session_repo)
+        terminal = work_item.attempt_number >= max(1, max_attempts)
+        failure = _bounded_failure_metadata(
+            exc,
+            execution_id=work_item.execution_id,
+            attempt_id=work_item.attempt_id,
+            attempt_number=work_item.attempt_number,
+            retry_requested=not terminal,
+        )
+        claim_lost = await _claim_lost_payload(
+            execution_runtime=execution_runtime,
+            execution_id=work_item.execution_id,
+            attempt_id=work_item.attempt_id,
+            worker_id=worker_id,
+        )
+        if claim_lost is not None:
+            return {
+                **claim_lost,
+                "dispatch_id": work_item.dispatch_id,
+                "session_id": work_item.session_id,
+                "tenant_id": work_item.tenant_id,
                 **failure,
             }
+        failure_event_persisted = await _append_failure_event(
+            session=session,
+            timeline=timeline,
+            dispatch_id=work_item.dispatch_id,
+            session_id=work_item.session_id,
+            tenant_id=work_item.tenant_id,
+            failure=failure,
+        )
+        if terminal:
+            execution_failed = await _dead_letter_execution_record(
+                execution_runtime=execution_runtime,
+                session=session,
+                execution_id=work_item.execution_id,
+                attempt_id=work_item.attempt_id,
+                worker_id=worker_id,
+                failure=failure,
+            )
+            dead_letter_task_recorded = await _record_dead_letter_task(
+                session=session,
+                tenant_id=work_item.tenant_id,
+                task_name=task_name,
+                task_id=(
+                    task_id
+                    or _fallback_task_id(
+                        task_name=task_name,
+                        execution_id=work_item.execution_id,
+                        attempt_id=work_item.attempt_id,
+                    )
+                ),
+                execution_id=work_item.execution_id,
+                attempt_id=work_item.attempt_id,
+                retry_count=retry_count,
+                failure=failure,
+            )
+            status = "dead_lettered"
+        else:
+            execution_failed = await _fail_execution_record(
+                execution_runtime=execution_runtime,
+                session=session,
+                execution_id=work_item.execution_id,
+                attempt_id=work_item.attempt_id,
+                worker_id=worker_id,
+                failure=failure,
+                retry_requested=True,
+            )
+            dead_letter_task_recorded = False
+            status = "retry_requested"
+        return {
+            "execution_id": work_item.execution_id,
+            "attempt_id": work_item.attempt_id,
+            "attempt_number": work_item.attempt_number,
+            "dispatch_id": work_item.dispatch_id,
+            "session_id": work_item.session_id,
+            "tenant_id": work_item.tenant_id,
+            "status": status,
+            "failure_event_persisted": failure_event_persisted,
+            "execution_failed": execution_failed,
+            "dead_letter_task_recorded": dead_letter_task_recorded,
+            **failure,
+        }
 
 
 async def _load_dispatch_content(
