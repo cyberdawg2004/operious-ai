@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -73,6 +74,7 @@ TenantTopologyRuntimeProvider = Callable[
 
 _DISPATCH_SENDER_ID = "runtime:boundary-ingress"
 _DISPATCH_RECIPIENT_ID = "agent:ticket-triage"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +288,18 @@ class DispatchService:
             await self._execution_publisher.publish_execution(
                 execution_id=str(execution_request.execution.execution_id),
             )
-        except QueueBackpressureError:
+        except QueueBackpressureError as exc:
+            logger.warning(
+                "queue_backpressure_triggered",
+                extra={
+                    "logical_queue": exc.logical_queue,
+                    "queue_name": exc.queue_name,
+                    "current_depth": exc.queue_depth,
+                    "configured_limit": exc.max_queue_depth,
+                    "tenant_id": tenant_id,
+                    "dispatch_id": str(coordination_result.coordination_id),
+                },
+            )
             return DispatchResult(
                 dispatch_id=str(coordination_result.coordination_id),
                 session_id=str(session.identity.session_id),

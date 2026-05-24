@@ -10,9 +10,15 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.queue_admission import (
+    RedisQueueDepthAdmission,
+    QueueBackpressureError,
+)
 from app.core.redis_policy import verify_redis_memory_policy
+from app.api.v1.schemas.health import HealthResponse
+from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.execution.celery_publisher import CeleryExecutionPublisher
-from app.execution.publisher import QueueBackpressureError
+from app.services.health_service import HealthService
 from app.workers import dead_letter_persistence
 from app.workers.agent_tasks import execute_diagnostic_agent
 from app.workers.celery_app import celery_app
@@ -30,12 +36,16 @@ from tests.conftest import requires_postgres
 
 
 class _QueueDepthRedis:
-    def __init__(self, depth: int) -> None:
+    def __init__(self, depth: int | Mapping[str, int]) -> None:
         self.depth = depth
         self.checked_queue: str | None = None
+        self.checked_queues: list[str] = []
 
     async def llen(self, name: str) -> int:
         self.checked_queue = name
+        self.checked_queues.append(name)
+        if isinstance(self.depth, Mapping):
+            return self.depth[name]
         return self.depth
 
 
@@ -63,6 +73,102 @@ async def test_execution_publisher_rejects_when_queue_depth_exceeded() -> None:
     assert exc.value.reason == "queue_backpressure"
     assert exc.value.queue_depth == 10_001
     assert redis.checked_queue == "celery"
+
+
+@pytest.mark.asyncio
+async def test_queue_backpressure_log_contains_operational_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    redis = _QueueDepthRedis(depth=51)
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(QueueBackpressureError) as exc:
+        await RedisQueueDepthAdmission(redis_client=redis).check(
+            logical_queue="diagnostic",
+            queue_name="celery",
+            max_queue_depth=50,
+            tenant_id="tenant-backpressure",
+            dispatch_id="dispatch-backpressure",
+        )
+
+    assert exc.value.reason == "queue_backpressure"
+    assert exc.value.logical_queue == "diagnostic"
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "queue_backpressure_triggered"
+    )
+    assert record.queue_name == "celery"
+    assert record.current_depth == 51
+    assert record.configured_limit == 50
+    assert record.tenant_id == "tenant-backpressure"
+    assert record.dispatch_id == "dispatch-backpressure"
+
+
+@pytest.mark.asyncio
+async def test_escalation_publisher_rejects_when_queue_depth_exceeded() -> None:
+    redis = _QueueDepthRedis(depth=51)
+    publisher = CeleryEscalationPublisher(
+        redis_client=redis,
+        queue_name="escalation",
+        max_queue_depth=50,
+    )
+
+    with pytest.raises(QueueBackpressureError) as exc:
+        await publisher.publish_governance_denial(
+            governance_decision_id="decision-backpressure",
+            tenant_id="tenant-backpressure",
+        )
+
+    assert exc.value.reason == "queue_backpressure"
+    assert exc.value.logical_queue == "escalation"
+    assert exc.value.queue_depth == 51
+    assert redis.checked_queue == "escalation"
+
+
+@pytest.mark.asyncio
+async def test_health_report_includes_queue_depth_statuses() -> None:
+    settings = get_settings().model_copy(
+        update={
+            "EXECUTION_QUEUE_NAME": "diagnostic",
+            "EXECUTION_QUEUE_MAX_DEPTH": 100,
+            "ESCALATION_QUEUE_NAME": "escalation",
+            "ESCALATION_QUEUE_MAX_DEPTH": 50,
+            "SUPERVISOR_QUEUE_NAME": "supervisor",
+            "SUPERVISOR_QUEUE_MAX_DEPTH": 50,
+            "QA_QUEUE_NAME": "qa",
+            "QA_QUEUE_MAX_DEPTH": 50,
+            "SOP_INTELLIGENCE_QUEUE_NAME": "sop",
+            "SOP_INTELLIGENCE_QUEUE_MAX_DEPTH": 50,
+        }
+    )
+    redis = _QueueDepthRedis(
+        {
+            "diagnostic": 0,
+            "escalation": 41,
+            "supervisor": 51,
+            "qa": 1,
+            "sop": 2,
+        }
+    )
+    service = HealthService(
+        settings=settings,
+        redis_provider=lambda: redis,  # type: ignore[arg-type]
+    )
+
+    report = await service.health()
+    response = HealthResponse.from_report(report)
+
+    assert response.status == "degraded"
+    assert response.queues["diagnostic"].model_dump() == {
+        "depth": 0,
+        "limit": 100,
+        "status": "ok",
+        "queue_name": "diagnostic",
+        "error": None,
+    }
+    assert response.queues["escalation"].status == "degraded"
+    assert response.queues["supervisor"].status == "saturated"
 
 
 def test_task_results_expire_within_ttl() -> None:

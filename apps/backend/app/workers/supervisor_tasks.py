@@ -13,6 +13,7 @@ from collections.abc import Coroutine
 from threading import Thread
 from typing import Any, TypeVar, cast
 
+from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.execution import PostgresExecutionPersistence
 from app.governance.persistence import PostgresGovernanceRepository
@@ -21,6 +22,7 @@ from app.supervisor.evaluators.builtin import build_default_evaluator_registry
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.supervisor.runtime import SupervisorRuntime
 from app.workers.celery_app import celery_app
+from app.workers.queue_admission import admit_qa_publish
 from app.workers.qa_tasks import score_supervisor_inspection
 
 _T = TypeVar("_T")
@@ -54,7 +56,10 @@ async def evaluate_session_supervisor_runtime(
         )
         inspection = await runtime.evaluate_session(session_id)
         await session.commit()
-        qa_scoring_queued = _queue_qa_scoring(inspection.inspection_id, inspection.tenant_id)
+        qa_scoring_queued = await _queue_qa_scoring(
+            inspection.inspection_id,
+            inspection.tenant_id,
+        )
         return {
             "status": "completed",
             "session_id": session_id,
@@ -67,10 +72,14 @@ async def evaluate_session_supervisor_runtime(
         }
 
 
-def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
+async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
     if tenant_id is None or not tenant_id:
         return False
-    cast(Any, score_supervisor_inspection).delay(inspection_id, tenant_id)
+    await admit_qa_publish(tenant_id=tenant_id)
+    cast(Any, score_supervisor_inspection).apply_async(
+        args=(inspection_id, tenant_id),
+        queue=get_settings().QA_QUEUE_NAME,
+    )
     return True
 
 

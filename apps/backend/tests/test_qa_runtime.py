@@ -330,14 +330,16 @@ def test_qa_worker_task_accepts_only_primitive_lineage() -> None:
     )
 
 
-def test_supervisor_task_queues_qa_after_inspection_commit(
+@pytest.mark.asyncio
+async def test_supervisor_task_queues_qa_after_inspection_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str]] = []
 
     class _FakeTask:
-        def delay(self, inspection_id: str, tenant_id: str) -> None:
-            calls.append((inspection_id, tenant_id))
+        def apply_async(self, *, args: tuple[str, str], queue: str) -> None:
+            del queue
+            calls.append(args)
 
     monkeypatch.setattr(
         supervisor_tasks,
@@ -345,12 +347,12 @@ def test_supervisor_task_queues_qa_after_inspection_commit(
         _FakeTask(),
     )
 
-    assert supervisor_tasks._queue_qa_scoring(  # pyright: ignore[reportPrivateUsage]
+    assert await supervisor_tasks._queue_qa_scoring(  # pyright: ignore[reportPrivateUsage]
         _INSPECTION_ID,
         "tenant-acme",
     )
     assert calls == [(_INSPECTION_ID, "tenant-acme")]
-    assert not supervisor_tasks._queue_qa_scoring(  # pyright: ignore[reportPrivateUsage]
+    assert not await supervisor_tasks._queue_qa_scoring(  # pyright: ignore[reportPrivateUsage]
         _INSPECTION_ID,
         None,
     )

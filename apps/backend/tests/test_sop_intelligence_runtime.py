@@ -291,7 +291,8 @@ def test_sop_worker_task_accepts_only_primitive_lineage() -> None:
     )
 
 
-def test_qa_task_queues_sop_intelligence_as_low_priority(
+@pytest.mark.asyncio
+async def test_qa_task_queues_sop_intelligence_as_low_priority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -306,7 +307,7 @@ def test_qa_task_queues_sop_intelligence_as_low_priority(
         _FakeTask(),
     )
 
-    assert qa_tasks._queue_sop_intelligence(_score())  # pyright: ignore[reportPrivateUsage]
+    assert await qa_tasks._queue_sop_intelligence(_score())  # pyright: ignore[reportPrivateUsage]
     assert calls == [
         {
             "args": (_SESSION_ID, _TENANT_ID, _INSPECTION_ID),
@@ -315,7 +316,7 @@ def test_qa_task_queues_sop_intelligence_as_low_priority(
         }
     ]
     calls.clear()
-    assert not qa_tasks._queue_sop_intelligence(  # pyright: ignore[reportPrivateUsage]
+    assert not await qa_tasks._queue_sop_intelligence(  # pyright: ignore[reportPrivateUsage]
         _score(overall=0.5)
     )
     assert calls == []

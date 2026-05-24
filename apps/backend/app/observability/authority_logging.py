@@ -49,10 +49,10 @@ class AuthorityContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         authority = get_request_authority()
         if authority is None:
-            record.tenant_id = _DEFAULT
-            record.principal_id = _DEFAULT
-            record.organization_id = _DEFAULT
-            record.environment_id = _DEFAULT
+            record.tenant_id = _record_value(record, "tenant_id")
+            record.principal_id = _record_value(record, "principal_id")
+            record.organization_id = _record_value(record, "organization_id")
+            record.environment_id = _record_value(record, "environment_id")
         else:
             record.tenant_id = authority.tenant_id or _DEFAULT
             record.principal_id = authority.principal_id or _DEFAULT
@@ -64,6 +64,11 @@ class AuthorityContextFilter(logging.Filter):
             get_request_authority_source() or _DEFAULT
         )
         return True
+
+
+def _record_value(record: logging.LogRecord, name: str) -> object:
+    value = getattr(record, name, None)
+    return value if value not in (None, "") else _DEFAULT
 
 
 __all__ = ["AuthorityContextFilter"]

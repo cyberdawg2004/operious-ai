@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     CELERY_VISIBILITY_TIMEOUT_SECONDS: int = 3600
     EXECUTION_QUEUE_NAME: str = "celery"
     EXECUTION_QUEUE_MAX_DEPTH: int = 10_000
+    ESCALATION_QUEUE_NAME: str = "celery"
+    ESCALATION_QUEUE_MAX_DEPTH: int = 10_000
+    SUPERVISOR_QUEUE_NAME: str = "celery"
+    SUPERVISOR_QUEUE_MAX_DEPTH: int = 10_000
+    QA_QUEUE_NAME: str = "celery"
+    QA_QUEUE_MAX_DEPTH: int = 10_000
+    SOP_INTELLIGENCE_QUEUE_NAME: str = "low_priority"
+    SOP_INTELLIGENCE_QUEUE_MAX_DEPTH: int = 10_000
     REDIS_REQUIRED_MAXMEMORY_POLICY: str = "allkeys-lru"
 
     # ─── AI providers (gateway-level) ────────────────────────────────

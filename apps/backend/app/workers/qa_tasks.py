@@ -12,12 +12,14 @@ from collections.abc import Coroutine
 from threading import Thread
 from typing import Any, TypeVar, cast
 
+from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.qa.persistence import PostgresQAPersistence
 from app.qa.persistence.records import QAScoreRecord
 from app.qa.runtime import QAAgentRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.workers.celery_app import celery_app
+from app.workers.queue_admission import admit_sop_intelligence_publish
 from app.workers.sop_intelligence_tasks import (
     propose_sop_intelligence_change,
 )
@@ -58,7 +60,7 @@ async def score_supervisor_inspection_runtime(
             expected_tenant_id=tenant_id,
         )
         await session.commit()
-        sop_intelligence_queued = _queue_sop_intelligence(score)
+        sop_intelligence_queued = await _queue_sop_intelligence(score)
         return {
             "status": "completed",
             "inspection_id": inspection_id,
@@ -70,7 +72,7 @@ async def score_supervisor_inspection_runtime(
         }
 
 
-def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
+async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
     """Queue low-priority SOP proposal after high-confidence QA."""
 
     if score.overall_score < _SOP_INTELLIGENCE_CONFIDENCE_THRESHOLD:
@@ -80,9 +82,10 @@ def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
         session_id = score.metadata.get("source_session_id")
     if session_id is None:
         return False
+    await admit_sop_intelligence_publish(tenant_id=score.tenant_id)
     cast(Any, propose_sop_intelligence_change).apply_async(
         args=(str(session_id), score.tenant_id, score.inspection_id),
-        queue="low_priority",
+        queue=get_settings().SOP_INTELLIGENCE_QUEUE_NAME,
         priority=9,
     )
     return True

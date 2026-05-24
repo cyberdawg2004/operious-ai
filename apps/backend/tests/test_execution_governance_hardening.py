@@ -49,6 +49,7 @@ from app.execution import (
     ExecutionRuntime,
     InMemoryExecutionPersistence,
     OutboxQuery,
+    QueueBackpressureError,
 )
 from app.governance.persistence import (
     GovernanceDecisionRecord,
@@ -431,6 +432,47 @@ async def test_dispatch_halts_coordination_denial_before_session_execution_or_tr
 
 
 @pytest.mark.asyncio
+async def test_dispatch_records_queue_backpressure_halt_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    boundary_repo = InMemoryBoundaryPersistence()
+    ingress = _boundary_ingress_record()
+    await boundary_repo.save_ingress(ingress)
+    session_repo = InMemorySessionPersistence()
+    execution_store = InMemoryExecutionPersistence()
+    service = DispatchService(
+        coordination_runtime=cast(CoordinationRuntime, _AcceptedCoordinationRuntime()),
+        boundary_ingress_repository=boundary_repo,
+        session_repository=session_repo,
+        execution_runtime=ExecutionRuntime(persistence=execution_store),
+        execution_publisher=_BackpressureExecutionPublisher(),
+        execution_governance_runtime=cast(
+            ExecutionGovernanceRuntime,
+            _AllowingExecutionGovernanceRuntime(),
+        ),
+    )
+    caplog.set_level("WARNING")
+
+    result = await service.dispatch(
+        ingress_id=str(ingress.ingress_id),
+        tenant_id=TENANT_ID,
+    )
+
+    assert result.halted is True
+    assert result.halt_reason == "queue_backpressure"
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "queue_backpressure_triggered"
+    )
+    assert record.queue_name == "celery"
+    assert record.current_depth == 10_001
+    assert record.configured_limit == 10_000
+    assert record.tenant_id == TENANT_ID
+    assert record.dispatch_id == result.dispatch_id
+
+
+@pytest.mark.asyncio
 async def test_dispatch_derives_byte_stable_downstream_lineage_ids() -> None:
     ingress = _boundary_ingress_record()
     boundary_repo_a = InMemoryBoundaryPersistence()
@@ -763,6 +805,17 @@ class _RecordingExecutionPublisher:
 
     async def publish_execution(self, execution_id: str) -> None:
         self._published.append(execution_id)
+
+
+class _BackpressureExecutionPublisher:
+    async def publish_execution(self, execution_id: str) -> None:
+        del execution_id
+        raise QueueBackpressureError(
+            logical_queue="diagnostic",
+            queue_name="celery",
+            queue_depth=10_001,
+            max_queue_depth=10_000,
+        )
 
 
 def _boundary_ingress_record() -> BoundaryIngressRecord:

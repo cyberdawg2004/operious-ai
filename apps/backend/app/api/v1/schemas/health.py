@@ -17,11 +17,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.queue_admission import QueueDepthReport
 from app.services.health_service import DependencyReport, HealthReport
 
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
 DependencyStatus = Literal["ok", "unavailable"]
+QueueStatus = Literal["ok", "degraded", "saturated", "unavailable"]
 
 
 class DependencyResultSchema(BaseModel):
@@ -44,6 +46,36 @@ class DependencyResultSchema(BaseModel):
         )
 
 
+class QueueDepthSchema(BaseModel):
+    """Per-Celery-queue pressure entry in the health response."""
+
+    model_config = ConfigDict(frozen=True)
+
+    depth: int = Field(..., description="Current Redis queue depth.")
+    limit: int = Field(..., description="Configured queue depth admission limit.")
+    status: QueueStatus = Field(..., description="Queue pressure status.")
+    queue_name: str | None = Field(None, description="Physical Redis queue name.")
+    error: str | None = Field(None, description="Exception class name on failure.")
+
+    @classmethod
+    def from_domain(cls, queue: QueueDepthReport) -> "QueueDepthSchema":
+        return cls(
+            depth=queue.depth,
+            limit=queue.limit,
+            status=queue.status,
+            queue_name=queue.queue_name,
+            error=queue.error,
+        )
+
+
+def _empty_dependencies() -> list[DependencyResultSchema]:
+    return []
+
+
+def _empty_queues() -> dict[str, QueueDepthSchema]:
+    return {}
+
+
 class HealthResponse(BaseModel):
     """Stable JSON contract for `/health`, `/live`, and `/ready`."""
 
@@ -56,8 +88,12 @@ class HealthResponse(BaseModel):
     environment: str = Field(..., description="Runtime environment.")
     timestamp: datetime = Field(..., description="UTC timestamp of the check.")
     dependencies: list[DependencyResultSchema] = Field(
-        default_factory=list,
+        default_factory=_empty_dependencies,
         description="Per-dependency results (populated for /ready).",
+    )
+    queues: dict[str, QueueDepthSchema] = Field(
+        default_factory=_empty_queues,
+        description="Per-Celery-queue depth reports.",
     )
 
     @classmethod
@@ -72,6 +108,10 @@ class HealthResponse(BaseModel):
             dependencies=[
                 DependencyResultSchema.from_domain(d) for d in report.dependencies
             ],
+            queues={
+                name: QueueDepthSchema.from_domain(queue)
+                for name, queue in report.queues.items()
+            },
         )
 
 
@@ -79,6 +119,8 @@ __all__ = [
     "CheckName",
     "ProbeStatus",
     "DependencyStatus",
+    "QueueStatus",
     "DependencyResultSchema",
+    "QueueDepthSchema",
     "HealthResponse",
 ]

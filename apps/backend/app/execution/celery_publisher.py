@@ -7,8 +7,9 @@ import sys
 from typing import Any, Protocol, cast
 
 from app.core.config import get_settings
+from app.core.queue_admission import RedisQueueDepthAdmission
 from app.core.redis import get_redis_client
-from app.execution.publisher import ExecutionPublisher, QueueBackpressureError
+from app.execution.publisher import ExecutionPublisher
 from app.workers.agent_tasks import (
     execute_diagnostic_agent,
     execute_diagnostic_agent_runtime,
@@ -45,7 +46,12 @@ class CeleryExecutionPublisher(ExecutionPublisher):
             else run_inline_under_pytest
         )
 
-    async def check_backpressure(self) -> None:
+    async def check_backpressure(
+        self,
+        *,
+        tenant_id: str | None = None,
+        dispatch_id: str | None = None,
+    ) -> None:
         """Reject publication before Celery accepts more work."""
 
         client = self._redis_client
@@ -54,13 +60,13 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                 return
             client = cast(QueueDepthClient, get_redis_client())
             self._redis_client = client
-        queue_depth = await client.llen(self._queue_name)
-        if queue_depth > self._max_queue_depth:
-            raise QueueBackpressureError(
-                queue_name=self._queue_name,
-                queue_depth=queue_depth,
-                max_queue_depth=self._max_queue_depth,
-            )
+        await RedisQueueDepthAdmission(redis_client=client).check(
+            logical_queue="diagnostic",
+            queue_name=self._queue_name,
+            max_queue_depth=self._max_queue_depth,
+            tenant_id=tenant_id,
+            dispatch_id=dispatch_id,
+        )
 
     async def publish_execution(
         self,
@@ -75,7 +81,10 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                 )
             return
         else:
-            task.delay(execution_id=execution_id)
+            task.apply_async(
+                kwargs={"execution_id": execution_id},
+                queue=self._queue_name,
+            )
 
 
 def _running_under_pytest() -> bool:

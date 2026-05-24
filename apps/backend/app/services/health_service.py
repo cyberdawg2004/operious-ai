@@ -36,6 +36,12 @@ from app.core.health import (
     check_redis,
     run_with_timeout,
 )
+from app.core.queue_admission import (
+    QueueDepthReport,
+    aggregate_queue_status,
+    celery_queue_depth_limits,
+    collect_queue_depth_reports,
+)
 from app.repositories.system_health_repository import SystemHealthRepository
 from app.services.base import BaseService
 
@@ -64,6 +70,10 @@ class DependencyReport:
         )
 
 
+def _empty_queues() -> dict[str, QueueDepthReport]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class HealthReport:
     """Domain view of an entire probe result.
@@ -81,6 +91,7 @@ class HealthReport:
     environment: str
     timestamp: datetime
     dependencies: tuple[DependencyReport, ...] = field(default_factory=tuple)
+    queues: dict[str, QueueDepthReport] = field(default_factory=_empty_queues)
 
 
 class HealthService(BaseService):
@@ -119,8 +130,15 @@ class HealthService(BaseService):
     # ─── Public API ────────────────────────────────────────────────────
 
     async def health(self) -> HealthReport:
-        """Cheap, dependency-free health snapshot."""
-        return self._build_report(check="health", status="ok", dependencies=())
+        """Health snapshot including Redis-backed queue depth pressure."""
+
+        queues = await self._probe_queue_depths()
+        return self._build_report(
+            check="health",
+            status=aggregate_queue_status(queues),
+            dependencies=(),
+            queues=queues,
+        )
 
     async def liveness(self) -> HealthReport:
         """Liveness probe — process responsiveness only.
@@ -218,12 +236,38 @@ class HealthService(BaseService):
 
         return await check_redis(self._redis_provider(), timeout=timeout)
 
+    async def _probe_queue_depths(self) -> dict[str, QueueDepthReport]:
+        """Return bounded Celery queue depth health reports."""
+
+        limits = celery_queue_depth_limits(self._settings)
+        timeout = self._settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS
+        try:
+            return await asyncio.wait_for(
+                collect_queue_depth_reports(
+                    redis_client=self._redis_provider(),
+                    limits=limits,
+                ),
+                timeout=timeout,
+            )
+        except TimeoutError:
+            return {
+                limit.logical_name: QueueDepthReport(
+                    depth=-1,
+                    limit=limit.max_depth,
+                    status="unavailable",
+                    queue_name=limit.queue_name,
+                    error="TimeoutError",
+                )
+                for limit in limits
+            }
+
     def _build_report(
         self,
         *,
         check: CheckName,
         status: ProbeStatus,
         dependencies: tuple[DependencyReport, ...],
+        queues: dict[str, QueueDepthReport] | None = None,
     ) -> HealthReport:
         return HealthReport(
             check=check,
@@ -233,6 +277,7 @@ class HealthService(BaseService):
             environment=self._settings.ENVIRONMENT,
             timestamp=datetime.now(timezone.utc),
             dependencies=dependencies,
+            queues=queues or {},
         )
 
 

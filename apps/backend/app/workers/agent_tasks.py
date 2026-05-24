@@ -47,6 +47,7 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import record_dead_letter_task
+from app.workers.queue_admission import admit_supervisor_publish
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 
 _T = TypeVar("_T")
@@ -304,6 +305,7 @@ async def _persist_diagnostic_success(
             session_repo=session_repo,
             session_id=work_item.session_id,
             tenant_id=work_item.tenant_id,
+            dispatch_id=work_item.dispatch_id,
         )
         return {
             "execution_id": work_item.execution_id,
@@ -505,6 +507,7 @@ async def _queue_supervisor_if_closed(
     session_repo: SessionPersistenceProtocol,
     session_id: str,
     tenant_id: str,
+    dispatch_id: str | None = None,
 ) -> bool:
     session = await session_repo.get_session(
         as_session_id(session_id),
@@ -512,7 +515,11 @@ async def _queue_supervisor_if_closed(
     )
     if session is None or not is_terminal_session(session.lifecycle_phase):
         return False
-    cast(Any, evaluate_session_supervisor).delay(session_id)
+    await admit_supervisor_publish(tenant_id=tenant_id, dispatch_id=dispatch_id)
+    cast(Any, evaluate_session_supervisor).apply_async(
+        args=(session_id,),
+        queue=get_settings().SUPERVISOR_QUEUE_NAME,
+    )
     return True
 
 
