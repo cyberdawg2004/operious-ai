@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping, cast
@@ -39,6 +40,7 @@ from app.boundary.models.source import BoundarySource
 from app.boundary.persistence import BoundaryPersistenceProtocol
 from app.boundary.persistence.records import WebhookNonceRecord
 from app.boundary.registry import BoundaryAdapterRegistry
+from app.db.tenant_context import set_current_tenant
 from app.identity import AuthorityContext
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
@@ -133,22 +135,35 @@ class TicketIngressService:
             body=body,
             headers=headers,
         )
+        resolved_tenant_id = (
+            await self._tenant_configuration_runtime.resolve_tenant_by_routing_address(
+                routing_address=routing_address,
+            )
+        )
+        await _end_read_only_routing_transaction(self._session)
+        if resolved_tenant_id is None:
+            raise TicketIngressRejected(
+                code="unknown_channel_route",
+                reason="channel route is not configured or active",
+            )
+        if tenant_hint is not None and tenant_hint != resolved_tenant_id:
+            raise TicketIngressRejected(
+                code="tenant_route_mismatch",
+                reason="channel route does not belong to tenant scope",
+            )
+        set_current_tenant(resolved_tenant_id)
         channel_config = (
             await self._tenant_configuration_runtime
             .resolve_active_channel_for_routing_address(
                 channel_type=tenant_channel_type,
                 routing_address=routing_address,
+                expected_tenant_id=resolved_tenant_id,
             )
         )
         if channel_config is None:
             raise TicketIngressRejected(
                 code="unknown_channel_route",
                 reason="channel route is not configured or active",
-            )
-        if tenant_hint is not None and tenant_hint != channel_config.tenant_id:
-            raise TicketIngressRejected(
-                code="tenant_route_mismatch",
-                reason="channel route does not belong to tenant scope",
             )
 
         if not _webhook_signature_header_present(
@@ -329,6 +344,15 @@ class TicketIngressService:
             ) from exc
         except WebhookReplayError:
             return False
+
+
+async def _end_read_only_routing_transaction(session: object) -> None:
+    """End anonymous routing lookups before tenant-scoped RLS work begins."""
+
+    rollback = getattr(session, "rollback", None)
+    if rollback is None:
+        return
+    await cast(Callable[[], Awaitable[None]], rollback)()
 
 
 class TicketIngressServiceError(RuntimeError):
