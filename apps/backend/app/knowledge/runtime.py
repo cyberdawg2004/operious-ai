@@ -242,7 +242,7 @@ class KnowledgeRuntime:
             for entry in page.items
             if entry.vector.dimensions == len(query_vector)
         ]
-        candidates = scored
+        candidates = sorted(scored, key=lambda item: item[0], reverse=True)
         decisions, included = _apply_budget(
             candidates,
             max_tokens=token_budget,

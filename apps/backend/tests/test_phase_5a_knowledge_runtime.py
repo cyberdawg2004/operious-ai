@@ -314,6 +314,10 @@ async def test_retrieval_falls_back_when_search_prefilter_is_too_strict() -> Non
     )
 
     assert result.items
+    assert [item.score for item in result.items] == sorted(
+        (item.score for item in result.items),
+        reverse=True,
+    )
     assert knowledge_repo.queries[0].search_text is not None
     assert knowledge_repo.queries[1].search_text is None
     assert knowledge_repo.queries[1].limit is not None
