@@ -3,8 +3,8 @@
 Updated baseline after Phase 6-D, Pre-6-E Enterprise Trust Hardening
 phases A-H, the re-run final Pre-6-E gate, Phase 6-E Frontend
 Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
-Phase 6-F Anker demo artifact kit, and the Wedge 0 local backend
-hardening pass.
+Phase 6-F Anker demo artifact kit, and the Wedge 0 backend hardening
+pass deployed and live-verified on Fly.io.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -13,9 +13,10 @@ This document is the canonical handoff plan for the next Codex session.
   passed, 2 skipped, 0 xfailed after Phase 3-D.1 ApprovalRecord
   projection.
 - Phase 6-F focused artifact checks: 6 passed.
-- Wedge 0 local backend verification: 2,224 passed, 2 skipped,
+- Wedge 0 backend verification: 2,224 passed, 2 skipped,
   0 xfailed; invariant subset 162 passed, 2 skipped; smoke 4/4 green;
-  Pyright 0 errors across `apps/backend/app`.
+  Pyright 0 errors across `apps/backend/app`; live Fly.io deploy
+  succeeded and the fresh product-defect rerun completed.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
@@ -39,11 +40,13 @@ This document is the canonical handoff plan for the next Codex session.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F is in progress. The demo artifact
   kit is complete and production seeding has produced real Anker pilot
-  sessions. Four sessions from fresh run `20260524014342` completed with
-  diagnostic timelines; the fresh product-defect session is still a
-  retry/failure outlier, so the demo set temporarily uses the prior
-  completed product-defect session until a clean fresh product rerun or
-  root-cause fix closes the phase.
+  sessions. Wedge 0 live verification closed the fresh product-defect
+  outlier with session `2432a590-f7bc-5d5d-97f9-94a7d0039851`.
+  The selected controlled-demo set now uses the fresh charging, Arabic,
+  product-defect, and ambiguous sessions plus prior completed refund
+  proof session `5bb139de-079b-5c20-a2da-3660b203a576`, because the
+  latest fresh refund rerun dead-lettered after four retries with
+  `diagnostic cognition failed: RuntimeError`.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -1815,13 +1818,53 @@ Rules of engagement:
     `/api/v1/session/sessions`,
     `/api/v1/session/{session_id}/timeline`, and
     `/api/v1/session/sessions/{session_id}/events`.
+- Wedge 0 live verification on 2026-05-24:
+  - Backend commit `971001d` deployed to Fly.io image
+    `registry.fly.io/operious-ai-imad:deployment-01KSBZ37T5CY7VX6JN591J4PFT`.
+  - Fly secret `CORS_ALLOW_ORIGINS` was updated to match production
+    domains because the old secret overrode `fly.toml`.
+  - Live health returned healthy JSON from
+    `https://operious-ai-imad.fly.dev/api/v1/health`.
+  - Live CORS preflight for `https://app.operious.com` returned
+    `access-control-allow-origin: https://app.operious.com`.
+  - Fresh product-defect session
+    `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed on attempt 3 with
+    category `product_defect`, confidence `0.91`, cognition audit
+    `3d2798b5-e94c-5c68-a361-b209dac7e1d8`, and governance decision
+    `26ec0c2f-19b2-5afa-b52b-50f54c58ed4c`.
+  - Identity-collision failure did not reproduce after deploy. The
+    remaining fresh-run outlier is refund session
+    `d6b45aef-2146-5e6d-ba85-367615857cef`, which dead-lettered after
+    four retries with `diagnostic cognition failed: RuntimeError`.
+- Selected controlled Anker demo proof set:
+  - Charging allow:
+    `df6139ba-81fa-5f1d-9b3e-ceba6e7bb135`, category
+    `charging_issue`, confidence `0.93`, governance decision
+    `e5de882a-1a4a-5f39-9b86-7785e8f39aac`.
+  - Refund over limit:
+    `5bb139de-079b-5c20-a2da-3660b203a576`, category `refund_issue`,
+    confidence `0.97`, governance decision
+    `399aa156-3261-5e48-90b1-f65b320f24ca`.
+  - Arabic-language review:
+    `79b38add-3086-55f1-9820-db820697fb13`, category
+    `charging_issue`, confidence `0.82`, governance decision
+    `35b6e371-6f87-5988-835b-4c7b17fb171b`.
+  - Product defect:
+    `2432a590-f7bc-5d5d-97f9-94a7d0039851`, category
+    `product_defect`, confidence `0.91`, governance decision
+    `26ec0c2f-19b2-5afa-b52b-50f54c58ed4c`.
+  - Ambiguous human review:
+    `2e16bdcc-c518-504e-952c-b4e3d11cad41`, category
+    `charging_issue`, confidence `0.82`, governance decision
+    `1f0535d1-38f3-5371-b906-9240fa7284e4`.
 - Open to close Phase 6-F:
-  - Root-cause or rerun the fresh product-defect ticket so the
-    `20260524014342` run has five clean completed timelines, or formally
-    select the prior completed product-defect proof session for the demo.
   - Confirm the five selected sessions open in Command Center Trace
-    Inspector with real timeline events.
-  - Capture session IDs and the live demo evidence for the Jiao Ma call.
+    Inspector with real timeline events. Live API timeline/event
+    endpoints are verified; browser verification remains intentionally
+    skipped unless the user explicitly allows it.
+  - Capture screenshots/recording and stakeholder evidence for the Jiao
+    Ma call.
+  - Investigate the latest fresh refund dead-letter before Anker go-live.
 
 ## 9+ Enterprise Readiness Program - No Tolerance Below 9
 
@@ -1922,8 +1965,24 @@ Status on 2026-05-24:
   - Invariant subset -> 162 passed, 2 skipped.
   - Smoke -> 4 passed.
   - Full backend -> 2,224 passed, 2 skipped.
-- Production deploy and a fresh product-defect seed rerun remain required
-  before declaring the live Anker environment repaired.
+- Production deploy and fresh product-defect seed rerun are complete.
+  Wedge 0 is live-verified and closed; Wedge 1 remains queued pending
+  explicit user confirmation.
+- Live verification details:
+  - Fly.io deploy completed on 2026-05-24 from commit `971001d`.
+  - Live health returned healthy JSON.
+  - Live CORS preflight from `https://app.operious.com` returned
+    `access-control-allow-origin: https://app.operious.com`.
+  - Fresh product-defect session
+    `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed with
+    product-defect classification, cognition audit lineage, and
+    governance decision lineage.
+  - The old duplicate governance decision ID failure did not recur.
+  - Separate live finding: fresh refund session
+    `d6b45aef-2146-5e6d-ba85-367615857cef` dead-lettered after four
+    retries with generic `RuntimeError` classification. This is queued as
+    a Phase 6-F demo hardening follow-up and must be investigated before
+    Anker go-live.
 
 Scope:
 
@@ -1970,18 +2029,18 @@ Scope:
   - Focused cognition/governance/identity tests pass.
   - Invariant subset passes.
   - Smoke passes.
-  - Fresh product-defect seed rerun completes, or failure root cause is
-    proven unrelated to identity collisions.
+  - Fresh product-defect seed rerun completed in production and proved the
+    prior identity-collision failure repaired.
 
 Acceptance criteria:
 
-- The product-defect retry bug is fixed or converted into an explicit,
-  correctly classified failure mode.
+- The product-defect retry bug is fixed for the live rerun; remaining
+  generic retry classification is isolated to the fresh refund scenario.
 - No duplicate governance decision ID can be produced by process restart,
   worker restart, or multi-worker execution.
 - Wedge 0 closes with a documented identity inventory and no hidden
   process-local generator on persisted critical paths.
-- Live closure requires deploying this hardening pass to Fly.io and
+- Live closure completed on 2026-05-24 after deploying to Fly.io and
   rerunning the fresh product-defect Anker ticket.
 
 ### Existing Required Wedges
@@ -2108,8 +2167,8 @@ The 9+ final gate cannot close until:
 
 ## Queued Roadmap After Phase 6-F
 
-- Wedge 0 live verification: deploy the local runtime identity hardening
-  pass and rerun the fresh product-defect Anker ticket.
+- Wedge 0 live verification is closed: runtime identity hardening was
+  deployed to Fly.io and the fresh product-defect Anker ticket completed.
 - Wedge 1 - Reliability Before Anker Goes Live.
 - Wedge 2 - Celery/Redis Hardening.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
@@ -2149,8 +2208,8 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 0 Runtime Identity Collision Elimination is locally hardened and verified; production deploy plus fresh product-defect rerun remain open before Wedge 1 starts.
-Current verified backend baseline after Wedge 0 local hardening: 2,224 passed, 2 skipped; invariant subset 162 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed.
+Current phase: Wedge 0 Runtime Identity Collision Elimination is live-verified and closed; Phase 6-F demo evidence capture remains open before Wedge 1 starts.
+Current verified backend baseline after Wedge 0 hardening: 2,224 passed, 2 skipped; invariant subset 162 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
 Current Alembic head: 0031_dead_letter_tasks.
 
@@ -2198,26 +2257,28 @@ Completed before the next phase:
   Anker demo seed script, SOP corpus, five demo tickets, and stakeholder
   walkthrough live under `apps/backend/scripts/anker_demo/`; focused
   tests and Pyright pass.
-- Wedge 0 local hardening is complete:
+- Wedge 0 hardening is complete and live-verified:
   diagnostic cognition governance uses domain-seeded UUID5 decisions,
   diagnostic attempts are threaded into cognition, all `_RUNTIME_COUNTER`
   identity modules are boot-scoped, governance persistence failures are
   no longer mislabeled as provider failures, and the CORS authority-header
-  regression is fixed.
+  regression is fixed. Commit `971001d` was deployed to Fly.io, live
+  health/CORS passed, and fresh product-defect rerun completed.
 
 Remaining before the next wedge:
-- Deploy the Wedge 0 hardening pass to Fly.io before retrying the fresh
-  product-defect Anker ticket in production.
-- Resolve the fresh product-defect outlier from run `20260524014342`,
-  by rerunning it after Wedge 0 deploy, or formally select prior
-  completed product-defect session
-  `8ba795db-45fa-5674-94b6-4f888e70c8ed` for the demo set.
 - Confirm the five selected `anker-pilot` sessions open in Command
-  Center Trace Inspector with real session timeline/events.
+  Center Trace Inspector with real session timeline/events:
+  `df6139ba-81fa-5f1d-9b3e-ceba6e7bb135`,
+  `5bb139de-079b-5c20-a2da-3660b203a576`,
+  `79b38add-3086-55f1-9820-db820697fb13`,
+  `2432a590-f7bc-5d5d-97f9-94a7d0039851`, and
+  `2e16bdcc-c518-504e-952c-b4e3d11cad41`.
 - Capture the selected session IDs and demo evidence for the Jiao Ma
   call.
+- Investigate the latest fresh refund dead-letter
+  `d6b45aef-2146-5e6d-ba85-367615857cef` before Anker go-live.
 - Do not start Wedge 1, Wedge 2, Wedge 3, Wedge 4, vector retrieval
-  SQL-native, or pilot launch until Wedge 0 is deployed/live-verified
+  SQL-native, or pilot launch until Phase 6-F evidence capture is closed
   and their phase boundaries are explicitly confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
@@ -2243,10 +2304,10 @@ pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Do not start the next master-plan wedge until the user confirms the
-phase boundary. The current boundary is Wedge 0 live verification:
-deploy to Fly.io and rerun the product-defect Anker ticket. Wedge 1 is
-queued but must not start until the user confirms. The enterprise target
-is no rating axis below 9/10.
+phase boundary. The current boundary is Phase 6-F demo evidence capture:
+verify the selected sessions in Command Center/Trace Inspector and record
+the evidence package. Wedge 1 is queued but must not start until the user
+confirms. The enterprise target is no rating axis below 9/10.
 ```
 
 ## New Chat Hyperprompt
@@ -2256,9 +2317,9 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Wedge 0 Runtime Identity Collision Elimination is locally
-hardened and verified. Production deploy plus fresh product-defect rerun
-remain open before Wedge 1 starts.
+Current phase: Wedge 0 Runtime Identity Collision Elimination is
+live-verified and closed. Phase 6-F demo evidence capture remains open
+before Wedge 1 starts.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -2298,8 +2359,9 @@ Current source of truth:
 - Phase 3-D.1 ApprovalRecord projection follow-up is closed.
 
 Current verified baseline:
-- Wedge 0 local backend verification: 2,224 passed, 2 skipped,
-  0 xfailed.
+- Wedge 0 backend verification: 2,224 passed, 2 skipped,
+  0 xfailed; live Fly.io deploy and fresh product-defect rerun are
+  complete.
 - Wedge 0 invariant subset: 162 passed, 2 skipped.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
@@ -2355,15 +2417,17 @@ Current verified baseline:
   preserved.
 
 Goal for this chat:
-Deploy Wedge 0 to Fly.io, rerun the fresh product-defect Anker ticket,
-and complete Phase 6-F live demo proof capture. Production run
-`20260524014342` produced five real sessions, four of which have
-completed diagnostic timelines; the fresh product-defect session failed
-because governance decision fallback IDs could collide across worker
-restarts. Wedge 0 fixes this locally; live verification remains. If the
-fresh rerun is not needed for the call, formally use prior completed
-product-defect session `8ba795db-45fa-5674-94b6-4f888e70c8ed`. Capture
-session IDs plus Trace Inspector evidence. Do not start a local dev
+Complete Phase 6-F demo evidence capture and do not start Wedge 1 until
+the user explicitly confirms that phase boundary. Wedge 0 deployed to
+Fly.io from commit `971001d`; live health/CORS passed; fresh
+product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851`
+completed with real cognition audit and governance decision lineage.
+The selected demo set is:
+`df6139ba-81fa-5f1d-9b3e-ceba6e7bb135`,
+`5bb139de-079b-5c20-a2da-3660b203a576`,
+`79b38add-3086-55f1-9820-db820697fb13`,
+`2432a590-f7bc-5d5d-97f9-94a7d0039851`, and
+`2e16bdcc-c518-504e-952c-b4e3d11cad41`. Do not start a local dev
 server unless the user explicitly allows it.
 
 Current Command Center 2 status:
@@ -2390,17 +2454,19 @@ Current Command Center 2 status:
   `pytest apps/backend/tests/test_anker_demo_assets.py -q` -> 6 passed;
   Pyright on the seed script and focused test -> 0 errors.
 - Phase 6-F live production seed status:
-  run `20260524014342` produced completed charging, refund, Arabic, and
-  ambiguous timelines; fresh product-defect session
-  `5e28c731-6ea3-51d3-aabf-92777a96acfe` is the remaining outlier.
-- Wedge 0 local hardening status:
+  selected controlled-demo sessions have real live timeline events via
+  `/api/v1/session/{session_id}/timeline`; Command Center browser proof
+  remains to be captured.
+- Wedge 0 live hardening status:
   diagnostic cognition governance is domain-seeded, diagnostic attempt
   lineage is threaded into cognition, all `_RUNTIME_COUNTER` identity
   modules are boot-scoped, cognition governance persistence failures are
-  classified as `CognitionPersistenceError`, and full backend is green.
+  classified as `CognitionPersistenceError`, full backend is green, and
+  fresh product-defect session
+  `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed in production.
 
 Queued next:
-- Wedge 0 live verification: deploy and rerun product-defect ticket.
+- Phase 6-F Command Center evidence capture.
 - Wedge 1 Reliability.
 - Wedge 2 Celery/Redis Hardening.
 - Wedge 3 UUID4 and Ambient Identity Fallback Elimination.
