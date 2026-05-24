@@ -64,7 +64,7 @@ class OperationalPatternAnalysisRuntime:
     )
 
     def __init__(self) -> None:
-        self._runtime_instance_id = uuid.uuid4()
+        self._runtime_instance_id = uuid.uuid4()  # EPHEMERAL: runtime trace only
         self._sequence = 0
 
     @property

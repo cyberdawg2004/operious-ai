@@ -63,35 +63,35 @@ _DEPENDENCY_NAMESPACE = uuid.UUID(
 
 
 def generate_audit_id() -> HardeningAuditId:
-    return HardeningAuditId(uuid.uuid4())
+    return HardeningAuditId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_finding_id() -> HardeningFindingId:
-    return HardeningFindingId(uuid.uuid4())
+    return HardeningFindingId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_trace_id() -> HardeningTraceId:
-    return HardeningTraceId(uuid.uuid4())
+    return HardeningTraceId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_correlation_id() -> HardeningCorrelationId:
-    return HardeningCorrelationId(uuid.uuid4())
+    return HardeningCorrelationId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_boundary_id() -> SemanticAuthorityBoundaryId:
-    return SemanticAuthorityBoundaryId(uuid.uuid4())
+    return SemanticAuthorityBoundaryId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_violation_id() -> BoundaryViolationId:
-    return BoundaryViolationId(uuid.uuid4())
+    return BoundaryViolationId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_failure_record_id() -> FailureContainmentRecordId:
-    return FailureContainmentRecordId(uuid.uuid4())
+    return FailureContainmentRecordId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_dependency_audit_id() -> DependencyAuditId:
-    return DependencyAuditId(uuid.uuid4())
+    return DependencyAuditId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 # ─── Replay-safe deterministic UUID5 derivers ───────────────────────

@@ -96,7 +96,7 @@ class SopRuntime:
     ) -> None:
         self._persistence = persistence
         self._analyzer = analyzer or DeterministicSopAnalyzer()
-        self._runtime_instance_id = uuid.uuid4()
+        self._runtime_instance_id = uuid.uuid4()  # EPHEMERAL: runtime trace only
         self._sequence = 0
         # 2.75-\u03b1: capability legality gate. Inert when None.
         self._capability_governance = capability_governance

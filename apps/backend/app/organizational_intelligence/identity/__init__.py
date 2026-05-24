@@ -103,77 +103,77 @@ _CORRELATION_NAMESPACE = uuid.UUID(
 
 
 def generate_sop_id() -> SopId:
-    return SopId(uuid.uuid4())
+    return SopId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_sop_version_id() -> SopVersionId:
-    return SopVersionId(uuid.uuid4())
+    return SopVersionId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_sop_finding_id() -> SopFindingId:
-    return SopFindingId(uuid.uuid4())
+    return SopFindingId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_sop_analysis_id() -> SopAnalysisId:
-    return SopAnalysisId(uuid.uuid4())
+    return SopAnalysisId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_tonality_analysis_id() -> TonalityAnalysisId:
-    return TonalityAnalysisId(uuid.uuid4())
+    return TonalityAnalysisId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_communication_pattern_id() -> CommunicationPatternId:
-    return CommunicationPatternId(uuid.uuid4())
+    return CommunicationPatternId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_memory_artifact_id() -> MemoryArtifactId:
-    return MemoryArtifactId(uuid.uuid4())
+    return MemoryArtifactId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_candidate_pattern_id() -> CandidatePatternId:
-    return CandidatePatternId(uuid.uuid4())
+    return CandidatePatternId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_approved_pattern_id() -> ApprovedPatternId:
-    return ApprovedPatternId(uuid.uuid4())
+    return ApprovedPatternId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_memory_evolution_proposal_id() -> (
     MemoryEvolutionProposalId
 ):
-    return MemoryEvolutionProposalId(uuid.uuid4())
+    return MemoryEvolutionProposalId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_pattern_lineage_id() -> PatternLineageId:
-    return PatternLineageId(uuid.uuid4())
+    return PatternLineageId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_operational_pattern_observation_id() -> (
     OperationalPatternObservationId
 ):
-    return OperationalPatternObservationId(uuid.uuid4())
+    return OperationalPatternObservationId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_operational_pattern_analysis_id() -> (
     OperationalPatternAnalysisId
 ):
-    return OperationalPatternAnalysisId(uuid.uuid4())
+    return OperationalPatternAnalysisId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_recommendation_id() -> RecommendationId:
-    return RecommendationId(uuid.uuid4())
+    return RecommendationId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_approval_id() -> ApprovalId:
-    return ApprovalId(uuid.uuid4())
+    return ApprovalId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_trace_id() -> IntelligenceTraceId:
-    return IntelligenceTraceId(uuid.uuid4())
+    return IntelligenceTraceId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 def generate_correlation_id() -> IntelligenceCorrelationId:
-    return IntelligenceCorrelationId(uuid.uuid4())
+    return IntelligenceCorrelationId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
 # ─── Replay-safe deterministic UUID5 derivers ───────────────────────

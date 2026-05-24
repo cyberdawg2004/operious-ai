@@ -24,7 +24,7 @@ EventId = NewType("EventId", str)
 
 
 # Deterministic namespace for OperationalEvent identifiers.
-# Generated once via ``uuid.uuid4()`` and pinned here; the value is
+# Generated once with a UUID4 tool and pinned here; the value is
 # stable across releases. Changing it would break every existing
 # replay anchor.
 _EVENT_NAMESPACE = uuid.UUID("3f8b6c4e-5b27-4a92-9c1a-1c8b1f0c7c2d")
