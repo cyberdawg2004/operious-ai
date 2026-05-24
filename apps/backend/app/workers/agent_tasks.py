@@ -632,15 +632,14 @@ async def _record_dead_letter_task(
     failure: Mapping[str, object],
 ) -> bool:
     try:
-        attempt_count = failure.get("attempt_count") or failure.get(
-            "attempt_number"
-        )
         await record_dead_letter_task(
             session=session,
             tenant_id=tenant_id,
             task_name=task_name,
             task_id=task_id,
             execution_id=execution_id,
+            session_id=session_id,
+            attempt_count=retry_count,
             reason=str(failure.get("message") or failure),
             retry_count=retry_count,
             metadata={
@@ -649,7 +648,7 @@ async def _record_dead_letter_task(
                 "dispatch_id": dispatch_id,
                 "session_id": session_id,
                 "tenant_id": tenant_id,
-                "attempt_count": attempt_count,
+                "attempt_count": retry_count,
                 "error_type": failure.get("error_type"),
                 "error_class": failure.get("error_class"),
                 "error_message": failure.get("error_message"),

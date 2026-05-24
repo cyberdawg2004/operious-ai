@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -10,14 +11,14 @@ from typing import Any
 
 import sentry_sdk
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deterministic_identity import derive_runtime_id
 from app.db.repository import BaseRepository
 from app.runtime.db.models import DeadLetterTaskRow
 from app.tenant.db.models import TenantRow
 
-_DEAD_LETTER_TASK_NAMESPACE = uuid.UUID("8ee257e8-99d4-5cdf-9baa-02eb42cc7c01")
+_logger = logging.getLogger(__name__)
 
 
 def _empty_metadata() -> Mapping[str, Any]:
@@ -45,27 +46,49 @@ class PostgresDeadLetterTaskPersistence(BaseRepository):
         record: DeadLetterTaskRecord,
     ) -> DeadLetterTaskRecord:
         await self.session.merge(TenantRow(tenant_id=record.tenant_id))
-        existing = await self.session.get(
-            DeadLetterTaskRow,
+        stmt = (
+            pg_insert(DeadLetterTaskRow)
+            .values(
+                dead_letter_task_id=record.dead_letter_task_id,
+                tenant_id=record.tenant_id,
+                task_name=record.task_name,
+                task_id=record.task_id,
+                execution_id=record.execution_id,
+                reason=record.reason,
+                retry_count=record.retry_count,
+                created_at=record.created_at,
+                metadata_json=dict(record.metadata),
+            )
+            .on_conflict_do_nothing(
+                index_elements=[DeadLetterTaskRow.dead_letter_task_id]
+            )
+        )
+        result = await self.session.execute(stmt)
+        inserted = getattr(result, "rowcount", 0) == 1
+        if inserted:
+            _capture_dead_letter_alert(record)
+            return record
+
+        existing = await self.get_dead_letter_task(
             record.dead_letter_task_id,
+            expected_tenant_id=record.tenant_id,
         )
-        if existing is not None:
-            return _row_to_record(existing)
-        row = DeadLetterTaskRow(
-            dead_letter_task_id=record.dead_letter_task_id,
-            tenant_id=record.tenant_id,
-            task_name=record.task_name,
-            task_id=record.task_id,
-            execution_id=record.execution_id,
-            reason=record.reason,
-            retry_count=record.retry_count,
-            created_at=record.created_at,
-            metadata_json=dict(record.metadata),
+        _logger.info(
+            "dlq_replay_idempotent_write",
+            extra={
+                "dead_letter_task_id": str(record.dead_letter_task_id),
+                "tenant_id": record.tenant_id,
+                "task_name": record.task_name,
+                "task_id": record.task_id,
+                "execution_id": (
+                    str(record.execution_id)
+                    if record.execution_id is not None
+                    else None
+                ),
+                "attempt_count": record.metadata.get("attempt_count"),
+            },
         )
-        self.session.add(row)
-        await self.session.flush()
-        _capture_dead_letter_alert(record)
-        return record
+        return existing or record
 
     async def get_dead_letter_task(
         self,
@@ -88,9 +111,11 @@ async def record_dead_letter_task(
     tenant_id: str,
     task_name: str,
     task_id: str,
+    execution_id: str | uuid.UUID,
+    session_id: str,
+    attempt_count: int,
     reason: str,
     retry_count: int,
-    execution_id: str | uuid.UUID | None = None,
     created_at: datetime | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> DeadLetterTaskRecord:
@@ -100,9 +125,9 @@ async def record_dead_letter_task(
     record = DeadLetterTaskRecord(
         dead_letter_task_id=derive_dead_letter_task_id(
             tenant_id=tenant_id,
-            task_name=task_name,
-            task_id=task_id,
             execution_id=parsed_execution_id,
+            session_id=session_id,
+            attempt_count=attempt_count,
         ),
         tenant_id=tenant_id,
         task_name=task_name,
@@ -111,7 +136,13 @@ async def record_dead_letter_task(
         reason=reason,
         retry_count=retry_count,
         created_at=created_at or datetime.now(timezone.utc),
-        metadata=dict(metadata or {}),
+        metadata={
+            **dict(metadata or {}),
+            "execution_id": str(parsed_execution_id),
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "attempt_count": attempt_count,
+        },
     )
     return await PostgresDeadLetterTaskPersistence(session).record_dead_letter_task(
         record
@@ -121,19 +152,15 @@ async def record_dead_letter_task(
 def derive_dead_letter_task_id(
     *,
     tenant_id: str,
-    task_name: str,
-    task_id: str,
-    execution_id: uuid.UUID | None,
+    execution_id: str | uuid.UUID,
+    session_id: str,
+    attempt_count: int,
 ) -> uuid.UUID:
-    return derive_runtime_id(
-        namespace=_DEAD_LETTER_TASK_NAMESPACE,
-        tenant_id=tenant_id,
-        seed_components=(
-            "dead_letter_task",
-            task_name,
-            task_id,
-            str(execution_id) if execution_id is not None else "",
-        ),
+    if attempt_count < 0:
+        raise ValueError("attempt_count must be >= 0")
+    return uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"dlq:{tenant_id}:{execution_id}:{session_id}:{attempt_count}",
     )
 
 
@@ -145,9 +172,7 @@ def _capture_dead_letter_alert(record: DeadLetterTaskRecord) -> None:
     )
 
 
-def _parse_execution_id(value: str | uuid.UUID | None) -> uuid.UUID | None:
-    if value is None:
-        return None
+def _parse_execution_id(value: str | uuid.UUID) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(value)

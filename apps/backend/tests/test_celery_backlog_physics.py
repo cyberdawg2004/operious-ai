@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.core.config import get_settings
 from app.core.queue_admission import (
     RedisQueueDepthAdmission,
@@ -24,6 +27,7 @@ from app.workers.agent_tasks import execute_diagnostic_agent
 from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import (
     PostgresDeadLetterTaskPersistence,
+    derive_dead_letter_task_id,
     record_dead_letter_task,
 )
 from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_outbox
@@ -32,7 +36,7 @@ from app.workers.execution_recovery_tasks import reconcile_stale_execution_outbo
 from app.workers.qa_tasks import score_supervisor_inspection
 from app.workers.sop_intelligence_tasks import propose_sop_intelligence_change
 from app.workers.supervisor_tasks import evaluate_session_supervisor
-from tests.conftest import requires_postgres
+from tests.conftest import execution_admission_token, requires_postgres
 
 
 class _QueueDepthRedis:
@@ -56,6 +60,29 @@ class _ConfigRedis:
     async def config_get(self, pattern: str = "*") -> Mapping[str, Any]:
         del pattern
         return self.config
+
+
+async def _request_execution(
+    pg_session: AsyncSession,
+    *,
+    tenant_id: str,
+    dispatch_id: str,
+    session_id: str,
+):
+    requested_at = datetime(2026, 5, 24, tzinfo=timezone.utc)
+    runtime = ExecutionRuntime(
+        persistence=PostgresExecutionPersistence(pg_session)
+    )
+    return await runtime.request_diagnostic_execution(
+        dispatch_id=dispatch_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        requested_at=requested_at,
+        admission_token=execution_admission_token(
+            tenant_id=tenant_id,
+            admitted_at=requested_at,
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -209,14 +236,21 @@ async def test_dead_letter_task_creates_sentry_alert(
         "capture_message",
         _capture_message,
     )
+    execution = await _request_execution(
+        pg_session,
+        tenant_id="tenant-phase-h",
+        dispatch_id="dispatch-phase-h",
+        session_id="session-phase-h",
+    )
+    execution_id = execution.execution.execution_id
 
     dead_letter_metadata = {
-        "execution_id": "execution-phase-h",
+        "execution_id": str(execution_id),
         "attempt_id": "attempt-phase-h",
         "dispatch_id": "dispatch-phase-h",
         "session_id": "session-phase-h",
         "tenant_id": "tenant-phase-h",
-        "attempt_count": 4,
+        "attempt_count": 3,
         "error_class": "RuntimeError",
         "error_message": "diagnostic cognition failed",
         "last_traceback": "Traceback (most recent call last): RuntimeError",
@@ -233,6 +267,9 @@ async def test_dead_letter_task_creates_sentry_alert(
         tenant_id="tenant-phase-h",
         task_name="execute_diagnostic_agent",
         task_id="task-phase-h",
+        execution_id=execution_id,
+        session_id="session-phase-h",
+        attempt_count=3,
         reason="retry budget exhausted",
         retry_count=3,
         metadata=dead_letter_metadata,
@@ -248,12 +285,119 @@ async def test_dead_letter_task_creates_sentry_alert(
     assert persisted is not None
     assert persisted.reason == "retry budget exhausted"
     assert persisted.retry_count == 3
-    assert persisted.metadata["attempt_count"] == 4
+    assert persisted.metadata["attempt_count"] == 3
     assert persisted.metadata["error_class"] == "RuntimeError"
     assert persisted.metadata["error_message"] == "diagnostic cognition failed"
     assert str(persisted.metadata["last_traceback"]).startswith("Traceback")
     assert persisted.metadata["task_payload"] == dead_letter_metadata["task_payload"]
     assert captured == [("dead_letter_task_created", "error")]
+
+
+def test_dead_letter_task_id_is_deterministic_without_task_id() -> None:
+    execution_id = uuid.uuid5(uuid.NAMESPACE_URL, "execution:phase-3")
+
+    first = derive_dead_letter_task_id(
+        tenant_id="tenant-phase-3",
+        execution_id=execution_id,
+        session_id="session-phase-3",
+        attempt_count=3,
+    )
+    second = derive_dead_letter_task_id(
+        tenant_id="tenant-phase-3",
+        execution_id=execution_id,
+        session_id="session-phase-3",
+        attempt_count=3,
+    )
+    different_execution = derive_dead_letter_task_id(
+        tenant_id="tenant-phase-3",
+        execution_id=uuid.uuid5(uuid.NAMESPACE_URL, "execution:other"),
+        session_id="session-phase-3",
+        attempt_count=3,
+    )
+    different_attempt = derive_dead_letter_task_id(
+        tenant_id="tenant-phase-3",
+        execution_id=execution_id,
+        session_id="session-phase-3",
+        attempt_count=4,
+    )
+
+    assert second == first
+    assert different_execution != first
+    assert different_attempt != first
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_dead_letter_task_replay_is_idempotent_and_logged(
+    pg_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    captured: list[tuple[str, str | None]] = []
+
+    def _capture_message(message: str, level: str | None = None) -> None:
+        captured.append((message, level))
+
+    monkeypatch.setattr(
+        dead_letter_persistence.sentry_sdk,
+        "capture_message",
+        _capture_message,
+    )
+    caplog.set_level(logging.INFO, logger="app.workers.dead_letter_persistence")
+
+    execution = await _request_execution(
+        pg_session,
+        tenant_id="tenant-phase-3",
+        dispatch_id="dispatch-phase-3",
+        session_id="session-phase-3",
+    )
+    execution_id = execution.execution.execution_id
+
+    first = await record_dead_letter_task(
+        session=pg_session,
+        tenant_id="tenant-phase-3",
+        task_name="execute_diagnostic_agent",
+        task_id="celery-task-first",
+        execution_id=execution_id,
+        session_id="session-phase-3",
+        attempt_count=3,
+        reason="retry budget exhausted",
+        retry_count=3,
+        metadata={"task_payload": {"execution_id": str(execution_id)}},
+    )
+    await pg_session.commit()
+
+    replay = await record_dead_letter_task(
+        session=pg_session,
+        tenant_id="tenant-phase-3",
+        task_name="execute_diagnostic_agent",
+        task_id="celery-task-replay",
+        execution_id=execution_id,
+        session_id="session-phase-3",
+        attempt_count=3,
+        reason="retry budget exhausted again",
+        retry_count=3,
+        metadata={"task_payload": {"execution_id": str(execution_id)}},
+    )
+    await pg_session.commit()
+
+    repo = PostgresDeadLetterTaskPersistence(pg_session)
+    persisted = await repo.get_dead_letter_task(
+        first.dead_letter_task_id,
+        expected_tenant_id="tenant-phase-3",
+    )
+
+    assert replay.dead_letter_task_id == first.dead_letter_task_id
+    assert replay.task_id == "celery-task-first"
+    assert persisted is not None
+    assert persisted.task_id == "celery-task-first"
+    assert captured == [("dead_letter_task_created", "error")]
+    assert any(
+        record.message == "dlq_replay_idempotent_write"
+        and getattr(record, "dead_letter_task_id") == str(first.dead_letter_task_id)
+        and getattr(record, "attempt_count") == 3
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio
