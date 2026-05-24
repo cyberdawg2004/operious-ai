@@ -9,7 +9,7 @@ from threading import Thread
 from typing import Any, TypeVar
 
 from app.core.config import get_settings
-from app.db.session import get_session_factory
+from app.db.session import get_owner_session_factory
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
 from app.escalation.runtime import EscalationAgentRuntime
@@ -74,7 +74,9 @@ async def reconcile_stale_escalation_outbox_runtime(
     limit: int = 100,
     tenant_id: str | None = None,
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
     async with session_factory() as session:
         runtime = EscalationAgentRuntime(
             escalation_persistence=PostgresEscalationPersistence(session),

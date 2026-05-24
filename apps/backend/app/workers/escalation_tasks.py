@@ -13,6 +13,7 @@ from threading import Thread
 from typing import Any, TypeVar
 
 from app.db.session import get_session_factory
+from app.db.tenant_context import set_current_tenant
 from app.escalation.persistence import PostgresEscalationPersistence
 from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.persistence import PostgresGovernanceRepository
@@ -37,13 +38,18 @@ def create_governance_escalation(
 ) -> dict[str, object]:
     """Create a pending escalation for one governance DENY decision."""
 
-    return _run_async(
-        create_governance_escalation_runtime(
-            governance_decision_id=governance_decision_id,
+    set_current_tenant(tenant_id)
+    try:
+        return _run_async(
+            create_governance_escalation_runtime(
+                governance_decision_id=governance_decision_id,
+                tenant_id=tenant_id,
+                session_id=session_id,
+            ),
             tenant_id=tenant_id,
-            session_id=session_id,
         )
-    )
+    finally:
+        set_current_tenant(None)
 
 
 async def create_governance_escalation_runtime(
@@ -52,45 +58,56 @@ async def create_governance_escalation_runtime(
     tenant_id: str,
     session_id: str | None = None,
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        runtime = EscalationAgentRuntime(
-            escalation_persistence=PostgresEscalationPersistence(session),
-            governance_repository=PostgresGovernanceRepository(session),
-            session_persistence=PostgresSessionPersistence(session),
-        )
-        prepared = await runtime.prepare_governance_denial_outbox(
-            governance_decision_id=governance_decision_id,
-            expected_tenant_id=tenant_id,
-            session_id=session_id,
-        )
-        await session.commit()
-        return {
-            "status": "completed",
-            "governance_decision_id": governance_decision_id,
-            "escalation_id": prepared.escalation.escalation_id,
-            "session_id": prepared.escalation.session_id,
-            "tenant_id": prepared.escalation.tenant_id,
-            "queue_status": prepared.escalation.status,
-            "outbox_id": prepared.outbox.outbox_id,
-            "outbox_status": prepared.outbox.status.value,
-        }
+    set_current_tenant(tenant_id)
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            runtime = EscalationAgentRuntime(
+                escalation_persistence=PostgresEscalationPersistence(session),
+                governance_repository=PostgresGovernanceRepository(session),
+                session_persistence=PostgresSessionPersistence(session),
+            )
+            prepared = await runtime.prepare_governance_denial_outbox(
+                governance_decision_id=governance_decision_id,
+                expected_tenant_id=tenant_id,
+                session_id=session_id,
+            )
+            await session.commit()
+            return {
+                "status": "completed",
+                "governance_decision_id": governance_decision_id,
+                "escalation_id": prepared.escalation.escalation_id,
+                "session_id": prepared.escalation.session_id,
+                "tenant_id": prepared.escalation.tenant_id,
+                "queue_status": prepared.escalation.status,
+                "outbox_id": prepared.outbox.outbox_id,
+                "outbox_status": prepared.outbox.status.value,
+            }
+    finally:
+        set_current_tenant(None)
 
 
-def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        set_current_tenant(tenant_id)
+        try:
+            return asyncio.run(coro)
+        finally:
+            set_current_tenant(None)
 
     results: list[_T] = []
     errors: list[BaseException] = []
 
     def _runner() -> None:
+        set_current_tenant(tenant_id)
         try:
             results.append(asyncio.run(coro))
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
+        finally:
+            set_current_tenant(None)
 
     thread = Thread(target=_runner)
     thread.start()

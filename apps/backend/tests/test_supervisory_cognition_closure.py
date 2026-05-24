@@ -261,7 +261,7 @@ def test_supervisory_cognition_workers_are_registered_celery_tasks() -> None:
 
 def test_supervisory_cognition_worker_entrypoints_accept_primitive_lineage() -> None:
     expected = {
-        evaluate_session_supervisor_runtime: ("session_id",),
+        evaluate_session_supervisor_runtime: ("session_id", "tenant_id"),
         score_supervisor_inspection_runtime: ("inspection_id", "tenant_id"),
         create_governance_escalation_runtime: (
             "governance_decision_id",

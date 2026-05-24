@@ -803,13 +803,15 @@ class _RecordingExecutionPublisher:
     def published(self) -> tuple[str, ...]:
         return tuple(self._published)
 
-    async def publish_execution(self, execution_id: str) -> None:
+    async def publish_execution(self, execution_id: str, *, tenant_id: str) -> None:
+        del tenant_id
         self._published.append(execution_id)
 
 
 class _BackpressureExecutionPublisher:
-    async def publish_execution(self, execution_id: str) -> None:
+    async def publish_execution(self, execution_id: str, *, tenant_id: str) -> None:
         del execution_id
+        del tenant_id
         raise QueueBackpressureError(
             logical_queue="diagnostic",
             queue_name="celery",

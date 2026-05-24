@@ -14,6 +14,7 @@ from typing import Any, TypeVar, cast
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
+from app.db.tenant_context import set_current_tenant
 from app.qa.persistence import PostgresQAPersistence
 from app.qa.persistence.records import QAScoreRecord
 from app.qa.runtime import QAAgentRuntime
@@ -42,12 +43,17 @@ def score_supervisor_inspection(
 ) -> dict[str, object]:
     """Score one persisted supervisor inspection through QA."""
 
-    return _run_async(
-        score_supervisor_inspection_runtime(
-            inspection_id=inspection_id,
+    set_current_tenant(tenant_id)
+    try:
+        return _run_async(
+            score_supervisor_inspection_runtime(
+                inspection_id=inspection_id,
+                tenant_id=tenant_id,
+            ),
             tenant_id=tenant_id,
         )
-    )
+    finally:
+        set_current_tenant(None)
 
 
 async def score_supervisor_inspection_runtime(
@@ -55,27 +61,31 @@ async def score_supervisor_inspection_runtime(
     inspection_id: str,
     tenant_id: str,
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        runtime = QAAgentRuntime(
-            supervisor_repository=PostgresSupervisorRepository(session),
-            qa_persistence=PostgresQAPersistence(session),
-        )
-        score = await runtime.score_inspection(
-            inspection_id,
-            expected_tenant_id=tenant_id,
-        )
-        await session.commit()
-        sop_intelligence_queued = await _queue_sop_intelligence(score)
-        return {
-            "status": "completed",
-            "inspection_id": inspection_id,
-            "score_id": score.score_id,
-            "execution_id": score.execution_id,
-            "tenant_id": score.tenant_id,
-            "overall_score": score.overall_score,
-            "sop_intelligence_queued": sop_intelligence_queued,
-        }
+    set_current_tenant(tenant_id)
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            runtime = QAAgentRuntime(
+                supervisor_repository=PostgresSupervisorRepository(session),
+                qa_persistence=PostgresQAPersistence(session),
+            )
+            score = await runtime.score_inspection(
+                inspection_id,
+                expected_tenant_id=tenant_id,
+            )
+            await session.commit()
+            sop_intelligence_queued = await _queue_sop_intelligence(score)
+            return {
+                "status": "completed",
+                "inspection_id": inspection_id,
+                "score_id": score.score_id,
+                "execution_id": score.execution_id,
+                "tenant_id": score.tenant_id,
+                "overall_score": score.overall_score,
+                "sop_intelligence_queued": sop_intelligence_queued,
+            }
+    finally:
+        set_current_tenant(None)
 
 
 async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
@@ -97,20 +107,27 @@ async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
     return True
 
 
-def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        set_current_tenant(tenant_id)
+        try:
+            return asyncio.run(coro)
+        finally:
+            set_current_tenant(None)
 
     results: list[_T] = []
     errors: list[BaseException] = []
 
     def _runner() -> None:
+        set_current_tenant(tenant_id)
         try:
             results.append(asyncio.run(coro))
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
+        finally:
+            set_current_tenant(None)
 
     thread = Thread(target=_runner)
     thread.start()

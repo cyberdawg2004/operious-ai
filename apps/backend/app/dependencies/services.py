@@ -460,6 +460,7 @@ def _governance_handler_registry() -> EnforcementHandlerRegistry:
 @dataclass(frozen=True, slots=True)
 class _DiagnosticExecutionIntent:
     execution_id: str
+    tenant_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,11 +572,16 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
     async def publish_execution(
         self,
         execution_id: str,
+        *,
+        tenant_id: str,
     ) -> None:
         if isinstance(self._delegate, QueueBackpressureCheck):
-            await self._delegate.check_backpressure()
+            await self._delegate.check_backpressure(tenant_id=tenant_id)
         self._diagnostic_executions.append(
-            _DiagnosticExecutionIntent(execution_id=execution_id)
+            _DiagnosticExecutionIntent(
+                execution_id=execution_id,
+                tenant_id=tenant_id,
+            )
         )
 
     async def flush(self) -> None:
@@ -595,6 +601,7 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
             try:
                 await self._delegate.publish_execution(
                     execution_id=intent.execution_id,
+                    tenant_id=intent.tenant_id,
                 )
             except Exception as exc:
                 await self._execution_runtime.mark_outbox_failed(

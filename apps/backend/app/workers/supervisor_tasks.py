@@ -15,6 +15,7 @@ from typing import Any, TypeVar, cast
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
+from app.db.tenant_context import set_current_tenant
 from app.execution import PostgresExecutionPersistence
 from app.governance.persistence import PostgresGovernanceRepository
 from app.session.persistence import PostgresSessionPersistence
@@ -38,44 +39,58 @@ _T = TypeVar("_T")
 def evaluate_session_supervisor(
     _self: Any,
     session_id: str,
+    tenant_id: str,
 ) -> dict[str, object]:
     """Evaluate one closed session through supervisor persistence."""
 
-    return _run_async(
-        evaluate_session_supervisor_runtime(session_id=session_id)
-    )
+    set_current_tenant(tenant_id)
+    try:
+        return _run_async(
+            evaluate_session_supervisor_runtime(
+                session_id=session_id,
+                tenant_id=tenant_id,
+            ),
+            tenant_id=tenant_id,
+        )
+    finally:
+        set_current_tenant(None)
 
 
 async def evaluate_session_supervisor_runtime(
     *,
     session_id: str,
+    tenant_id: str,
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        supervisor_repository = PostgresSupervisorRepository(session)
-        runtime = SupervisorRuntime(
-            evaluator_registry=build_default_evaluator_registry(),
-            supervisor_repository=supervisor_repository,
-            session_persistence=PostgresSessionPersistence(session),
-            execution_persistence=PostgresExecutionPersistence(session),
-            governance_repository=PostgresGovernanceRepository(session),
-        )
-        inspection = await runtime.evaluate_session(session_id)
-        await session.commit()
-        qa_scoring_queued = await _queue_qa_scoring(
-            inspection.inspection_id,
-            inspection.tenant_id,
-        )
-        return {
-            "status": "completed",
-            "session_id": session_id,
-            "inspection_id": inspection.inspection_id,
-            "execution_id": inspection.execution_id,
-            "tenant_id": inspection.tenant_id,
-            "decision_kind": inspection.decision.kind,
-            "compliance_score": inspection.compliance_score,
-            "qa_scoring_queued": qa_scoring_queued,
-        }
+    set_current_tenant(tenant_id)
+    try:
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            supervisor_repository = PostgresSupervisorRepository(session)
+            runtime = SupervisorRuntime(
+                evaluator_registry=build_default_evaluator_registry(),
+                supervisor_repository=supervisor_repository,
+                session_persistence=PostgresSessionPersistence(session),
+                execution_persistence=PostgresExecutionPersistence(session),
+                governance_repository=PostgresGovernanceRepository(session),
+            )
+            inspection = await runtime.evaluate_session(session_id)
+            await session.commit()
+            qa_scoring_queued = await _queue_qa_scoring(
+                inspection.inspection_id,
+                inspection.tenant_id,
+            )
+            return {
+                "status": "completed",
+                "session_id": session_id,
+                "inspection_id": inspection.inspection_id,
+                "execution_id": inspection.execution_id,
+                "tenant_id": inspection.tenant_id,
+                "decision_kind": inspection.decision.kind,
+                "compliance_score": inspection.compliance_score,
+                "qa_scoring_queued": qa_scoring_queued,
+            }
+    finally:
+        set_current_tenant(None)
 
 
 async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
@@ -89,20 +104,27 @@ async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
     return True
 
 
-def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        set_current_tenant(tenant_id)
+        try:
+            return asyncio.run(coro)
+        finally:
+            set_current_tenant(None)
 
     results: list[_T] = []
     errors: list[BaseException] = []
 
     def _runner() -> None:
+        set_current_tenant(tenant_id)
         try:
             results.append(asyncio.run(coro))
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
+        finally:
+            set_current_tenant(None)
 
     thread = Thread(target=_runner)
     thread.start()

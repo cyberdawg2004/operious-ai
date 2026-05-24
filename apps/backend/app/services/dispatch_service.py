@@ -287,6 +287,7 @@ class DispatchService:
         try:
             await self._execution_publisher.publish_execution(
                 execution_id=str(execution_request.execution.execution_id),
+                tenant_id=tenant_id,
             )
         except QueueBackpressureError as exc:
             logger.warning(

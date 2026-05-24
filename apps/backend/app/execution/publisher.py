@@ -15,6 +15,8 @@ class ExecutionPublisher(Protocol):
     async def publish_execution(
         self,
         execution_id: str,
+        *,
+        tenant_id: str,
     ) -> None:
         ...
 

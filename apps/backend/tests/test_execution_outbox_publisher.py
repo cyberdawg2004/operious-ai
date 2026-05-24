@@ -22,9 +22,11 @@ _NOW = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
 class _RecordingPublisher:
     def __init__(self) -> None:
         self.execution_ids: list[str] = []
+        self.tenant_ids: list[str] = []
 
-    async def publish_execution(self, execution_id: str) -> None:
+    async def publish_execution(self, execution_id: str, *, tenant_id: str) -> None:
         self.execution_ids.append(execution_id)
+        self.tenant_ids.append(tenant_id)
 
 
 class _CommitRecorder:
@@ -58,10 +60,14 @@ async def test_deferred_publisher_claims_outbox_before_transport() -> None:
         publisher_id="test:publisher",
     )
 
-    await deferred.publish_execution(str(request.execution.execution_id))
+    await deferred.publish_execution(
+        str(request.execution.execution_id),
+        tenant_id="tenant-a",
+    )
     await deferred.flush()
 
     assert publisher.execution_ids == [str(request.execution.execution_id)]
+    assert publisher.tenant_ids == ["tenant-a"]
     assert commits.count == 2
     outbox = await store.list_outbox(
         OutboxQuery(state=ExecutionOutboxState.PUBLISHED)

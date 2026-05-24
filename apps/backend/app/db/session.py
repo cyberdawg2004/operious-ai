@@ -10,6 +10,7 @@ FastAPI-facing request-scoped session provider lives in
 from __future__ import annotations
 
 import logging
+import os
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
     close_all_sessions,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from app.core.config import Settings, get_settings
 from app.db.tenant_context import get_current_tenant
@@ -28,6 +30,8 @@ from app.db.url import build_database_engine_config
 logger = logging.getLogger(__name__)
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+_owner_engine: AsyncEngine | None = None
+_owner_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def _build_engine(settings: Settings) -> AsyncEngine:
@@ -56,6 +60,21 @@ def _build_engine(settings: Settings) -> AsyncEngine:
     )
     _install_tenant_context_listener(engine)
     return engine
+
+
+def _build_owner_engine(settings: Settings) -> AsyncEngine:
+    owner_url = os.environ.get("ALEMBIC_DATABASE_URL") or Settings().database_url
+    engine_config = build_database_engine_config(
+        owner_url,
+        connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
+    )
+    return create_async_engine(
+        engine_config.async_url,
+        echo=settings.DB_ECHO,
+        poolclass=NullPool,
+        connect_args=engine_config.connect_args,
+        future=True,
+    )
 
 
 def _set_tenant_context_on_begin(conn: Connection) -> None:
@@ -116,40 +135,75 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
+def get_owner_session_factory() -> async_sessionmaker[AsyncSession]:
+    """
+    Owner-privileged session factory for cross-tenant maintenance.
+    Bypasses RLS. Only use in PRIVILEGED_PATH contexts.
+    Never use for application request handling.
+    """
+
+    global _owner_engine, _owner_session_factory
+
+    if _owner_session_factory is None:
+        logger.info("db_owner_sessionmaker_create_begin")
+        settings = get_settings()
+        _owner_engine = _build_owner_engine(settings)
+        _owner_session_factory = async_sessionmaker(
+            bind=_owner_engine,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+            class_=AsyncSession,
+        )
+        logger.info("db_owner_sessionmaker_create_complete")
+    return _owner_session_factory
+
+
 async def dispose_engine() -> None:
     """Cleanly dispose the engine on application shutdown."""
 
-    global _engine, _session_factory
+    global _engine, _session_factory, _owner_engine, _owner_session_factory
 
     engine = _engine
+    owner_engine = _owner_engine
     _engine = None
     _session_factory = None
+    _owner_engine = None
+    _owner_session_factory = None
 
-    if engine is None:
+    if engine is None and owner_engine is None:
         logger.info("db_engine_dispose_skipped")
         return
 
     logger.info("db_async_sessions_close_begin")
     await close_all_sessions()
     logger.info("db_async_sessions_close_complete")
-    logger.info("db_engine_dispose_begin")
-    await engine.dispose()
-    logger.info("db_engine_dispose_complete")
+    if engine is not None:
+        logger.info("db_engine_dispose_begin")
+        await engine.dispose()
+        logger.info("db_engine_dispose_complete")
+    if owner_engine is not None:
+        logger.info("db_owner_engine_dispose_begin")
+        await owner_engine.dispose()
+        logger.info("db_owner_engine_dispose_complete")
 
 
 def reset_engine_state() -> None:
     """Forget cached async DB objects after fork or event-loop boundary."""
 
-    global _engine, _session_factory
+    global _engine, _session_factory, _owner_engine, _owner_session_factory
 
     _engine = None
     _session_factory = None
+    _owner_engine = None
+    _owner_session_factory = None
     logger.info("db_engine_state_reset")
 
 
 __all__ = [
     "dispose_engine",
     "get_engine",
+    "get_owner_session_factory",
     "get_session_factory",
     "reset_engine_state",
 ]

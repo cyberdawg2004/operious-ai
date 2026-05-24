@@ -28,6 +28,7 @@ from app.coordination.persistence import (
 )
 from app.core.config import get_settings
 from app.db.session import dispose_engine, get_session_factory, reset_engine_state
+from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.governance.persistence import PostgresGovernanceRepository
 from app.knowledge import (
@@ -69,39 +70,52 @@ _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 def execute_diagnostic_agent(
     self: Any,
     execution_id: str,
+    tenant_id: str,
 ) -> dict[str, object]:
     """Run one bounded DiagnosticAgent execution."""
-    reset_engine_state()
-    worker_id = _worker_id(self)
-    result = _run_async(
-        execute_diagnostic_agent_runtime(
-            execution_id=execution_id,
-            worker_id=worker_id,
-            max_attempts=_max_execution_attempts(self),
-            task_name="execute_diagnostic_agent",
-            task_id=_task_id(self),
-            retry_count=_task_retries(self),
+    previous_tenant = get_current_tenant()
+    set_current_tenant(tenant_id)
+    try:
+        reset_engine_state()
+        worker_id = _worker_id(self)
+        result = _run_async(
+            execute_diagnostic_agent_runtime(
+                execution_id=execution_id,
+                tenant_id=tenant_id,
+                worker_id=worker_id,
+                max_attempts=_max_execution_attempts(self),
+                task_name="execute_diagnostic_agent",
+                task_id=_task_id(self),
+                retry_count=_task_retries(self),
+            ),
+            tenant_id=tenant_id,
         )
-    )
-    if result.get("status") == "retry_requested":
-        raise self.retry(
-            exc=DiagnosticExecutionRetry(str(result.get("message") or result)),
-            countdown=_retry_countdown(self),
-        )
-    if result.get("status") == "dead_lettered":
-        raise DiagnosticExecutionDeadLettered(str(result.get("message") or result))
-    return result
+        if result.get("status") == "retry_requested":
+            raise self.retry(
+                exc=DiagnosticExecutionRetry(str(result.get("message") or result)),
+                countdown=_retry_countdown(self),
+            )
+        if result.get("status") == "dead_lettered":
+            raise DiagnosticExecutionDeadLettered(
+                str(result.get("message") or result)
+            )
+        return result
+    finally:
+        set_current_tenant(previous_tenant)
 
 
 async def execute_diagnostic_agent_runtime(
     *,
     execution_id: str,
+    tenant_id: str,
     worker_id: str = "inline:diagnostic",
     max_attempts: int = 1,
     task_name: str = "execute_diagnostic_agent",
     task_id: str | None = None,
     retry_count: int = 0,
 ) -> dict[str, object]:
+    previous_tenant = get_current_tenant()
+    set_current_tenant(tenant_id)
     try:
         session_factory = get_session_factory()
         prepared = await _prepare_diagnostic_execution(
@@ -137,7 +151,11 @@ async def execute_diagnostic_agent_runtime(
             result=result,
         )
     finally:
-        await dispose_engine()
+        try:
+            if not _running_under_pytest():
+                await dispose_engine()
+        finally:
+            set_current_tenant(previous_tenant)
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,7 +552,7 @@ async def _queue_supervisor_if_closed(
         return False
     await admit_supervisor_publish(tenant_id=tenant_id, dispatch_id=dispatch_id)
     cast(Any, evaluate_session_supervisor).apply_async(
-        args=(session_id,),
+        args=(session_id, tenant_id),
         queue=get_settings().SUPERVISOR_QUEUE_NAME,
     )
     return True
@@ -869,20 +887,29 @@ def _timeline_idempotency_key(
     return f"execution.{execution_id}.attempt.{attempt_id}.event.{event_type}"
 
 
-def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
+def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        previous_tenant = get_current_tenant()
+        set_current_tenant(tenant_id)
+        try:
+            return asyncio.run(coro)
+        finally:
+            set_current_tenant(previous_tenant)
 
     results: list[_T] = []
     errors: list[BaseException] = []
 
     def _runner() -> None:
+        previous_tenant = get_current_tenant()
+        set_current_tenant(tenant_id)
         try:
             results.append(asyncio.run(coro))
         except BaseException as exc:  # noqa: BLE001
             errors.append(exc)
+        finally:
+            set_current_tenant(previous_tenant)
 
     thread = Thread(target=_runner)
     thread.start()

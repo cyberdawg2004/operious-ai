@@ -104,7 +104,10 @@ async def test_execution_publisher_rejects_when_queue_depth_exceeded() -> None:
     )
 
     with pytest.raises(QueueBackpressureError) as exc:
-        await publisher.publish_execution("execution-phase-h")
+        await publisher.publish_execution(
+            "execution-phase-h",
+            tenant_id="tenant-backpressure",
+        )
 
     assert exc.value.reason == "queue_backpressure"
     assert exc.value.queue_depth == 10_001

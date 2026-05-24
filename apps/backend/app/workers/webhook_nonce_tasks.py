@@ -9,7 +9,7 @@ from threading import Thread
 from typing import Any, TypeVar
 
 from app.boundary.persistence import PostgresBoundaryPersistence
-from app.db.session import get_session_factory
+from app.db.session import get_owner_session_factory
 from app.workers.celery_app import celery_app
 
 _T = TypeVar("_T")
@@ -52,7 +52,9 @@ async def cleanup_expired_webhook_nonces_runtime(
         raise ValueError("limit must be positive")
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    session_factory = get_session_factory()
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
     async with session_factory() as session:
         repo = PostgresBoundaryPersistence(session)
         deleted = await repo.delete_expired_webhook_nonces(

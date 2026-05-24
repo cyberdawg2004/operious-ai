@@ -13,8 +13,10 @@ import pytest
 
 APP_ROOT = Path(__file__).parent.parent / "app"
 DEPRECATED_ROOT = APP_ROOT / "_deprecated"
+WORKERS_ROOT = APP_ROOT / "workers"
 
 _UUID4_MARKERS = ("EPHEMERAL:", "APPROVED_EXCEPTION:")
+_PRIVILEGED_PATH_MARKER = "PRIVILEGED_PATH:"
 _RUNTIME_COUNTER_TOKENS = (
     "_RUNTIME_COUNTER",
     "runtime_counter",
@@ -90,6 +92,36 @@ def test_runtime_counter_modules_have_boot_nonce() -> None:
             if any(token in line for token in _RUNTIME_COUNTER_TOKENS):
                 relative = path.relative_to(APP_ROOT.parent)
                 violations.append(f"{relative}:{line_no}: {line.strip()}")
+
+    assert not violations, "\n".join(violations)
+
+
+def test_worker_session_factories_are_tenant_context_guarded_or_privileged() -> None:
+    violations: list[str] = []
+    for path in sorted(WORKERS_ROOT.glob("*.py")):
+        source = path.read_text()
+        relative = path.relative_to(APP_ROOT.parent)
+
+        if (
+            "get_owner_session_factory(" in source
+            and _PRIVILEGED_PATH_MARKER not in source
+        ):
+            violations.append(
+                f"{relative}: owner session factory requires PRIVILEGED_PATH marker"
+            )
+
+        session_index = source.find("get_session_factory(")
+        if session_index == -1:
+            continue
+
+        tenant_context_index = source.find("set_current_tenant(")
+        if (
+            tenant_context_index == -1
+            or tenant_context_index > session_index
+        ) and _PRIVILEGED_PATH_MARKER not in source:
+            violations.append(
+                f"{relative}: app session factory requires tenant context first"
+            )
 
     assert not violations, "\n".join(violations)
 

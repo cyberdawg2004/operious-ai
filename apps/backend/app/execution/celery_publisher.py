@@ -71,18 +71,24 @@ class CeleryExecutionPublisher(ExecutionPublisher):
     async def publish_execution(
         self,
         execution_id: str,
+        *,
+        tenant_id: str,
     ) -> None:
-        await self.check_backpressure()
+        await self.check_backpressure(tenant_id=tenant_id)
         task = cast(Any, execute_diagnostic_agent)
         if _running_under_pytest():
             if self._run_inline_under_pytest:
                 await execute_diagnostic_agent_runtime(
                     execution_id=execution_id,
+                    tenant_id=tenant_id,
                 )
             return
         else:
             task.apply_async(
-                kwargs={"execution_id": execution_id},
+                kwargs={
+                    "execution_id": execution_id,
+                    "tenant_id": tenant_id,
+                },
                 queue=self._queue_name,
             )
 

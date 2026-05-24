@@ -13,7 +13,7 @@ from threading import Thread
 from typing import Any, TypeVar
 
 from app.core.config import get_settings
-from app.db.session import get_session_factory
+from app.db.session import get_owner_session_factory
 from app.execution import (
     ExecutionOutboxReconcileResult,
     ExecutionOutboxReconcileSweepResult,
@@ -134,7 +134,9 @@ async def recover_stale_executions_runtime(
     limit: int = 100,
     reason: str = "execution claim expired",
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
     async with session_factory() as session:
         runtime = ExecutionRuntime(
             persistence=PostgresExecutionPersistence(session)
@@ -157,7 +159,9 @@ async def reconcile_stale_execution_outbox_runtime(
     tenant_id: str | None = None,
     reason: str = "publisher lease expired",
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
     async with session_factory() as session:
         runtime = ExecutionRuntime(
             persistence=PostgresExecutionPersistence(session)
