@@ -45,16 +45,20 @@ def validate_governance_terms(
     *,
     canonical_text: str,
     output_text: str,
+    allowed_text: str | None = None,
 ) -> SemanticPreservationResult:
     """Ensure model output does not drop or invent governance terms."""
 
     canonical_terms = _terms(canonical_text)
+    allowed_terms = (
+        canonical_terms if allowed_text is None else _terms(allowed_text)
+    )
     output_terms = _terms(output_text)
     result = SemanticPreservationResult(
         canonical_terms=tuple(sorted(canonical_terms)),
         output_terms=tuple(sorted(output_terms)),
         missing_terms=tuple(sorted(canonical_terms - output_terms)),
-        introduced_terms=tuple(sorted(output_terms - canonical_terms)),
+        introduced_terms=tuple(sorted(output_terms - allowed_terms)),
     )
     if not result.valid:
         raise CognitionSemanticValidationError(

@@ -149,9 +149,11 @@ class DiagnosticCognitionRuntime:
             )
             parsed = _parse_output(completion.text)
             semantic = validate_governance_terms(
-                canonical_text=f"{content}\n\n{_context_text(retrieval)}",
+                canonical_text=content,
+                allowed_text=f"{content}\n\n{_context_text(retrieval)}",
                 output_text=(
-                    f"{parsed.summary}\n{parsed.category.value}"
+                    f"{parsed.summary}\n{parsed.category.value}\n"
+                    f"{parsed.reasoning}"
                 ),
             )
             governance_decision_id = await self._govern_output(

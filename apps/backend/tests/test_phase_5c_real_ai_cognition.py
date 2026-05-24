@@ -246,9 +246,9 @@ def test_confidence_label_is_normalized_to_numeric_score() -> None:
 async def test_semantic_validator_rejects_governance_keyword_drift() -> None:
     client = _ScriptedLLMClient(
         text=(
-            '{"summary":"Offer a refund and legal escalation.",'
-            '"category":"refund_issue","confidence":0.74,'
-            '"reasoning":"Introduces refund legal escalation."}'
+            '{"summary":"Open an RMA compliance case and mark denied.",'
+            '"category":"charging_issue","confidence":0.74,'
+            '"reasoning":"Introduces RMA compliance denied terms."}'
         )
     )
     runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
