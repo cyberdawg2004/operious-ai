@@ -331,7 +331,7 @@ def _normalize_redis_url(url: str) -> str:
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     if "ssl_cert_reqs" in query:
         return url
-    query["ssl_cert_reqs"] = "CERT_REQUIRED"
+    query["ssl_cert_reqs"] = "required"
     return urlunsplit(
         (
             parsed.scheme,
