@@ -303,6 +303,8 @@ class Settings(BaseSettings):
         if self.CELERY_RESULT_BACKEND_URL:
             return _normalize_redis_url(self.CELERY_RESULT_BACKEND_URL)
         if self.REDIS_URL:
+            if urlsplit(self.redis_url).scheme == "rediss":
+                return self.redis_url
             return _redis_url_with_database(self.redis_url, self.REDIS_RESULT_DB)
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return (

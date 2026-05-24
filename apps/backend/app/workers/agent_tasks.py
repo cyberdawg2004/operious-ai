@@ -60,6 +60,7 @@ _MAX_EXECUTION_ATTEMPTS = 4
     name="execute_diagnostic_agent",
     bind=True,
     max_retries=3,
+    ignore_result=True,
 )
 def execute_diagnostic_agent(
     self: Any,

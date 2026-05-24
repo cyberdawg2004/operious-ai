@@ -14,6 +14,7 @@ from app.core.redis_policy import verify_redis_memory_policy
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.execution.publisher import QueueBackpressureError
 from app.workers import dead_letter_persistence
+from app.workers.agent_tasks import execute_diagnostic_agent
 from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import (
     PostgresDeadLetterTaskPersistence,
@@ -75,7 +76,8 @@ def test_task_results_expire_within_ttl() -> None:
     assert celery_app.conf.broker_transport_options == {
         "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
     }
-    assert celery_app.conf.task_ignore_result is False
+    assert celery_app.conf.task_ignore_result is True
+    assert getattr(execute_diagnostic_agent, "ignore_result") is True
     assert getattr(evaluate_session_supervisor, "ignore_result") is True
     assert getattr(score_supervisor_inspection, "ignore_result") is True
     assert getattr(propose_sop_intelligence_change, "ignore_result") is True
