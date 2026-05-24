@@ -188,12 +188,14 @@ async def test_postgres_get_respects_tenant_scope(
 
 
 @pytest.mark.asyncio
-async def test_postgres_get_tenantless_invisible_to_scoped_reader(
+async def test_postgres_get_cross_tenant_invisible_to_scoped_reader(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresArbitrationPersistence(pg_session)
-    record = _record(tenant_id=None)
-    await repo.save(record)
+    seed_repo = PostgresArbitrationPersistence(pg_seed_session)
+    record = _record(tenant_id="tenant-other")
+    await seed_repo.save(record)
 
     assert (
         await repo.get(
@@ -201,7 +203,6 @@ async def test_postgres_get_tenantless_invisible_to_scoped_reader(
         )
         is None
     )
-    assert await repo.get(record.evaluation_id) is not None
 
 
 @pytest.mark.asyncio

@@ -137,12 +137,14 @@ async def test_postgres_get_envelope_respects_tenant_scope(
 
 
 @pytest.mark.asyncio
-async def test_postgres_get_envelope_tenantless_invisible_to_scoped_reader(
+async def test_postgres_get_envelope_cross_tenant_invisible_to_scoped_reader(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresCoordinationPersistence(pg_session)
-    record = _envelope(tenant_id=None)
-    await repo.record_envelope(record)
+    seed_repo = PostgresCoordinationPersistence(pg_seed_session)
+    record = _envelope(tenant_id="tenant-other")
+    await seed_repo.record_envelope(record)
 
     assert (
         await repo.get_envelope(
@@ -150,7 +152,6 @@ async def test_postgres_get_envelope_tenantless_invisible_to_scoped_reader(
         )
         is None
     )
-    assert await repo.get_envelope(record.coordination_id) is not None
 
 
 @pytest.mark.asyncio

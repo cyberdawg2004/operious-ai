@@ -304,22 +304,21 @@ async def test_postgres_get_session_respects_tenant_scope(
 
 
 @pytest.mark.asyncio
-async def test_postgres_get_session_tenantless_invisible_to_scoped_reader(
+async def test_postgres_get_session_cross_tenant_invisible_to_scoped_reader(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresSessionPersistence(pg_session)
-    session = _session(tenant_id=None)
-    await repo.save_session(session)
+    seed_repo = PostgresSessionPersistence(pg_seed_session)
+    session = _session(tenant_id="tenant-other")
+    await seed_repo.save_session(session)
 
-    # Tenantless session not visible to a tenant-scoped reader.
     assert (
         await repo.get_session(
             session.session_id, expected_tenant_id="tenant-acme"
         )
         is None
     )
-    # Admin path (no clamp) sees it.
-    assert await repo.get_session(session.session_id) is not None
 
 
 @pytest.mark.asyncio

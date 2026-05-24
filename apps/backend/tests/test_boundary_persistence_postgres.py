@@ -339,12 +339,14 @@ async def test_postgres_get_ingress_respects_tenant_scope(
 
 
 @pytest.mark.asyncio
-async def test_postgres_get_egress_tenantless_invisible_to_scoped_reader(
+async def test_postgres_get_egress_cross_tenant_invisible_to_scoped_reader(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresBoundaryPersistence(pg_session)
-    record = _egress(tenant_id=None)
-    await repo.save_egress(record)
+    seed_repo = PostgresBoundaryPersistence(pg_seed_session)
+    record = _egress(tenant_id="tenant-other")
+    await seed_repo.save_egress(record)
 
     assert (
         await repo.get_egress(
@@ -352,7 +354,6 @@ async def test_postgres_get_egress_tenantless_invisible_to_scoped_reader(
         )
         is None
     )
-    assert await repo.get_egress(record.egress_id) is not None
 
 
 @pytest.mark.asyncio

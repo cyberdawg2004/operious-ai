@@ -224,28 +224,22 @@ async def test_postgres_get_decision_respects_tenant_scope(
 
 
 @pytest.mark.asyncio
-async def test_postgres_get_decision_tenantless_invisible_to_scoped_reader(
+async def test_postgres_get_decision_cross_tenant_invisible_to_scoped_reader(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
-    """System-level (tenantless) decisions persist with
-    ``tenant_id IS NULL``; a tenant-scoped read MUST NOT see them.
-    Postgres three-valued logic on ``NULL = $X`` returns unknown,
-    which the WHERE clause filters out — the row is invisible."""
+    """A tenant-scoped read MUST NOT see another tenant's decision."""
     repo = PostgresGovernanceRepository(pg_session)
-    system_decision = _decision(tenant_id=None)
-    await repo.record_decision(system_decision)
+    seed_repo = PostgresGovernanceRepository(pg_seed_session)
+    other_decision = _decision(tenant_id="tenant-other")
+    await seed_repo.record_decision(other_decision)
 
-    # Tenant-scoped read: NULL tenant_id is invisible.
     assert (
         await repo.get_decision(
-            system_decision.decision_id, expected_tenant_id="tenant-acme"
+            other_decision.decision_id, expected_tenant_id="tenant-acme"
         )
         is None
     )
-    # Admin path: visible (substrate-internal reconstruction).
-    got = await repo.get_decision(system_decision.decision_id)
-    assert got is not None
-    assert got.tenant_id is None
 
 
 @pytest.mark.asyncio

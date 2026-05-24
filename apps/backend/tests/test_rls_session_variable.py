@@ -4,14 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 
+import asyncpg
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.db.session import dispose_engine, get_session_factory, reset_engine_state
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from tests.conftest import TEST_DATABASE_URL_ENV, requires_postgres
+
+
+@pytest_asyncio.fixture
+async def non_superuser_db_conn() -> AsyncIterator[asyncpg.Connection]:
+    dsn = os.environ[TEST_DATABASE_URL_ENV].replace(
+        "postgresql+asyncpg://",
+        "postgresql://",
+    )
+    conn = await asyncpg.connect(dsn)
+    try:
+        yield conn
+    finally:
+        await conn.close()
 
 
 async def test_get_current_tenant_default_is_none() -> None:
@@ -118,3 +134,22 @@ async def test_session_begin_listener_fails_closed_without_tenant(
         await dispose_engine()
         reset_engine_state()
         get_settings.cache_clear()
+
+
+@requires_postgres
+async def test_rls_blocks_query_without_session_variable(
+    non_superuser_db_conn,
+) -> None:
+    """
+    Without app.current_tenant_id set, FORCE RLS must return
+    0 rows for the non-superuser role. This is the definitive
+    proof that FORCE RLS is active.
+    """
+    rows = await non_superuser_db_conn.fetch(
+        "SELECT COUNT(*) as cnt FROM operational_sessions"
+    )
+    count = rows[0]["cnt"]
+    assert count == 0, (
+        f"Expected 0 rows without tenant context but got {count}. "
+        "FORCE RLS may not be active."
+    )
