@@ -26,7 +26,7 @@ from app.coordination.persistence import (
     PostgresCoordinationPersistence,
 )
 from app.core.config import get_settings
-from app.db.session import get_session_factory
+from app.db.session import dispose_engine, get_session_factory, reset_engine_state
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.governance.persistence import PostgresGovernanceRepository
 from app.knowledge import (
@@ -67,6 +67,7 @@ def execute_diagnostic_agent(
     execution_id: str,
 ) -> dict[str, object]:
     """Run one bounded DiagnosticAgent execution."""
+    reset_engine_state()
     worker_id = _worker_id(self)
     result = _run_async(
         execute_diagnostic_agent_runtime(
@@ -94,38 +95,41 @@ async def execute_diagnostic_agent_runtime(
     task_id: str | None = None,
     retry_count: int = 0,
 ) -> dict[str, object]:
-    session_factory = get_session_factory()
-    prepared = await _prepare_diagnostic_execution(
-        session_factory=session_factory,
-        execution_id=execution_id,
-        worker_id=worker_id,
-    )
-    if isinstance(prepared, dict):
-        return prepared
-
     try:
-        result = await _generate_diagnostic_reasoning_for_work_item(
+        session_factory = get_session_factory()
+        prepared = await _prepare_diagnostic_execution(
             session_factory=session_factory,
-            work_item=prepared,
+            execution_id=execution_id,
+            worker_id=worker_id,
         )
-    except Exception as exc:  # noqa: BLE001
-        return await _persist_diagnostic_failure(
+        if isinstance(prepared, dict):
+            return prepared
+
+        try:
+            result = await _generate_diagnostic_reasoning_for_work_item(
+                session_factory=session_factory,
+                work_item=prepared,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return await _persist_diagnostic_failure(
+                session_factory=session_factory,
+                work_item=prepared,
+                worker_id=worker_id,
+                max_attempts=max_attempts,
+                task_name=task_name,
+                task_id=task_id,
+                retry_count=retry_count,
+                exc=exc,
+            )
+
+        return await _persist_diagnostic_success(
             session_factory=session_factory,
             work_item=prepared,
             worker_id=worker_id,
-            max_attempts=max_attempts,
-            task_name=task_name,
-            task_id=task_id,
-            retry_count=retry_count,
-            exc=exc,
+            result=result,
         )
-
-    return await _persist_diagnostic_success(
-        session_factory=session_factory,
-        work_item=prepared,
-        worker_id=worker_id,
-        result=result,
-    )
+    finally:
+        await dispose_engine()
 
 
 @dataclass(frozen=True, slots=True)

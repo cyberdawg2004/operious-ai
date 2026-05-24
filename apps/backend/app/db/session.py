@@ -115,8 +115,19 @@ async def dispose_engine() -> None:
     logger.info("db_engine_dispose_complete")
 
 
+def reset_engine_state() -> None:
+    """Forget cached async DB objects after fork or event-loop boundary."""
+
+    global _engine, _session_factory
+
+    _engine = None
+    _session_factory = None
+    logger.info("db_engine_state_reset")
+
+
 __all__ = [
     "dispose_engine",
     "get_engine",
     "get_session_factory",
+    "reset_engine_state",
 ]
