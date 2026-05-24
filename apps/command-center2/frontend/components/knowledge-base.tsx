@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import {
   createKnowledgeDocument,
   formatApiError,
+  ingestKnowledgeDocument,
   listKnowledgeDocuments,
   listKnowledgeVersions,
   updateKnowledgeDocument,
@@ -62,6 +63,7 @@ type ModalState =
       error: string | null;
       isLoading: boolean;
     }
+  | { type: "notice"; title: string; message: string }
   | { type: "pending"; message: string };
 
 export function KnowledgeBase() {
@@ -73,6 +75,7 @@ export function KnowledgeBase() {
   const [modal, setModal] = useState<ModalState>({ type: "none" });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
 
   const loadDocuments = useCallback(
     () =>
@@ -184,6 +187,27 @@ export function KnowledgeBase() {
     } catch (caught: unknown) {
       setFormError(formatApiError(caught));
       setIsSubmitting(false);
+    }
+  };
+
+  const handleIngestDocument = async (document: TenantKnowledgeDocument) => {
+    setBusyDocumentId(document.document_id);
+    try {
+      const result = await ingestKnowledgeDocument(document.document_id);
+      setModal({
+        type: "notice",
+        title: "Knowledge indexed",
+        message: `${result.chunk_count} chunks and ${result.vector_count} vectors written to ${result.vector_index_name}.`,
+      });
+      reload();
+    } catch (caught: unknown) {
+      setModal({
+        type: "notice",
+        title: "Knowledge ingest failed",
+        message: formatApiError(caught),
+      });
+    } finally {
+      setBusyDocumentId(null);
     }
   };
 
@@ -360,6 +384,8 @@ export function KnowledgeBase() {
                         onView={() => setModal({ type: "view", document: doc })}
                         onEdit={() => setModal({ type: "edit", document: doc })}
                         onHistory={() => void openVersions(doc)}
+                        onIngest={() => void handleIngestDocument(doc)}
+                        ingestBusy={busyDocumentId === doc.document_id}
                         onDelete={() =>
                           setModal({
                             type: "pending",
@@ -419,6 +445,13 @@ export function KnowledgeBase() {
               onAction={closeModal}
             />
           )}
+          {modal.type === "notice" && (
+            <NoticeState
+              title={modal.title}
+              message={modal.message}
+              onClose={closeModal}
+            />
+          )}
           {modal.type === "upload" && (
             <DocumentForm
               title="Upload Document"
@@ -454,11 +487,15 @@ function ActionMenu({
   onView,
   onEdit,
   onHistory,
+  onIngest,
+  ingestBusy,
   onDelete,
 }: {
   onView: () => void;
   onEdit: () => void;
   onHistory: () => void;
+  onIngest: () => void;
+  ingestBusy: boolean;
   onDelete: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -479,6 +516,12 @@ function ActionMenu({
             <MenuAction icon={Eye} label="View" onClick={onView} close={() => setIsOpen(false)} />
             <MenuAction icon={Pencil} label="Edit" onClick={onEdit} close={() => setIsOpen(false)} />
             <MenuAction icon={History} label="Version History" onClick={onHistory} close={() => setIsOpen(false)} />
+            <MenuAction
+              icon={Upload}
+              label={ingestBusy ? "Indexing" : "Ingest"}
+              onClick={onIngest}
+              close={() => setIsOpen(false)}
+            />
             <MenuAction icon={Trash2} label="Delete" onClick={onDelete} close={() => setIsOpen(false)} danger />
           </div>
         </>
@@ -782,6 +825,29 @@ function VersionHistoryState({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function NoticeState({
+  title,
+  message,
+  onClose,
+}: {
+  title: string;
+  message: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <h2 className="font-serif text-[28px] font-semibold text-ink-primary">{title}</h2>
+      <p className="text-[14px] leading-relaxed text-ink-secondary">{message}</p>
+      <button
+        onClick={onClose}
+        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white hover:bg-gold-muted"
+      >
+        Close
+      </button>
     </div>
   );
 }

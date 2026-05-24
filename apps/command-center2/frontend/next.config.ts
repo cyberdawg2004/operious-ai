@@ -1,12 +1,16 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+
+const repoRoot = path.resolve(process.cwd(), "../../..");
 
 const nextConfig: NextConfig = {
   experimental: {
     workerThreads: false,
     cpus: 1,
   },
+  outputFileTracingRoot: repoRoot,
   turbopack: {
-    root: process.cwd(),
+    root: repoRoot,
   },
   webpack: (config, { dev }) => {
     if (dev) {

@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { OperationsQueue } from "@/components/operations-queue";
-import { TraceInspector } from "@/components/trace-inspector";
+import { TraceInspector, type TraceLookup } from "@/components/trace-inspector";
 import { CognitionHub } from "@/components/cognition-hub";
 import { KnowledgeBase } from "@/components/knowledge-base";
 import { CommandPalette } from "@/components/command-palette";
@@ -27,6 +27,7 @@ import {
   getConfiguredPrincipalId,
   getConfiguredTenantId,
 } from "@/lib/api";
+import { useAuthSession } from "@/lib/use-auth-session";
 import { cn } from "@/lib/utils";
 
 const viewMeta: Record<string, { eyebrow: string; title: string; description: string }> = {
@@ -85,12 +86,13 @@ const viewMeta: Record<string, { eyebrow: string; title: string; description: st
 export default function Home() {
   const [activeItem, setActiveItem] = useState("operations");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [selectedTraceLookup, setSelectedTraceLookup] = useState<TraceLookup | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const operatorLabel = getConfiguredOperatorLabel();
-  const principalId = getConfiguredPrincipalId();
-  const tenantId = getConfiguredTenantId();
+  const authSession = useAuthSession();
+  const operatorLabel = authSession.operatorLabel || getConfiguredOperatorLabel();
+  const principalId = authSession.principal?.principal_id ?? getConfiguredPrincipalId();
+  const tenantId = authSession.principal?.tenant_id ?? getConfiguredTenantId();
   const activeMeta = viewMeta[activeItem] ?? viewMeta.operations;
 
   useEffect(() => {
@@ -113,8 +115,8 @@ export default function Home() {
     };
   }, [mobileSidebarOpen]);
 
-  const openTrace = (traceId: string) => {
-    setSelectedTraceId(traceId);
+  const openTrace = (value: string, mode: TraceLookup["mode"] = "governance_decision_id") => {
+    setSelectedTraceLookup({ value, mode });
     setActiveItem("trace");
     setMobileSidebarOpen(false);
   };
@@ -126,7 +128,7 @@ export default function Home() {
 
   const handleNavigate = (itemId: string) => {
     if (itemId === "trace") {
-      setSelectedTraceId(null);
+      setSelectedTraceLookup(null);
     }
     setActiveItem(itemId);
     setMobileSidebarOpen(false);
@@ -139,8 +141,8 @@ export default function Home() {
       case "trace":
         return (
           <TraceInspector
-            key={selectedTraceId ?? "manual-trace"}
-            initialTraceId={selectedTraceId}
+            key={selectedTraceLookup?.value ?? "manual-trace"}
+            initialLookup={selectedTraceLookup}
           />
         );
       case "cognition":
@@ -158,7 +160,7 @@ export default function Home() {
       case "audit":
         return <AuditExportsView />;
       case "settings":
-        return <SettingsView />;
+        return <SettingsView authSession={authSession} />;
       default:
         return <OperationsQueue onOpenTrace={openTrace} />;
     }

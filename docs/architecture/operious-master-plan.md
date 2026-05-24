@@ -1873,6 +1873,88 @@ Rules of engagement:
     remaining fresh-run outlier is refund session
     `d6b45aef-2146-5e6d-ba85-367615857cef`, which dead-lettered after
     four retries with `diagnostic cognition failed: RuntimeError`.
+- Command Center production API-base hotfix on 2026-05-24:
+  - Root cause for `Unable to load sessions` / `Not Found (404)` was a
+    production frontend API base that could reach Fly.io without the
+    required `/api/v1` prefix. The backend route
+    `/api/v1/session/sessions` remained healthy; the non-v1 Fly path
+    returned `detail: "Not Found"`.
+  - Updated Vercel production env for `operious-ai-command-center`:
+    `NEXT_PUBLIC_API_BASE_URL` and
+    `NEXT_PUBLIC_OPERIOUS_API_BASE_URL` now point to
+    `https://operious-ai-imad.fly.dev/api/v1`.
+  - Redeployed the existing production deployment through Vercel without
+    deploying the dirty local worktree. Fresh production deployment
+    `dpl_hdsAPzCLC5aAVJyfj3VMD97nTzsC` is aliased at
+    `https://app.operious.com`.
+  - Verified `https://app.operious.com` still redirects unauthenticated
+    users to Auth0 login, `/api/auth/access-token` returns clean 401
+    without a session, and Fly.io serves
+    `/api/v1/session/sessions` for tenant `anker-pilot` with CORS allow
+    origin `https://app.operious.com`.
+- Command Center proof-set UI hotfix on 2026-05-24:
+  - Root cause for unrelated timestamps and pending-looking rows was
+    that Operations Queue listed the generic tenant session page and used
+    raw `lifecycle_phase`. These diagnostic demo sessions can remain
+    lifecycle `initiated` even after the tenant-scoped timeline records
+    `diagnostic_analysis_completed`.
+  - Operations Queue now loads the five selected Phase 6-F sessions by
+    exact live session ID, enriches each row from
+    `/api/v1/session/{session_id}/timeline`, and displays proof status
+    from diagnostic timeline events rather than raw session lifecycle.
+  - The proof table shows scenario, diagnostic classification,
+    confidence, opened timestamp, governance decision ID, cognition audit
+    ID, and event count for the selected `anker-pilot` evidence set.
+  - The generic tenant session list is sorted by `opened_at` descending
+    and labels sessions with recorded timeline evidence as
+    `Timeline Ready`.
+  - Deployed as narrow frontend production deployment
+    `dpl_H3ZxFTaQCdfVoHbSgD1MUTkhXsqm`, aliased at
+    `https://app.operious.com`.
+- Command Center authority/sign-out hotfix on 2026-05-24:
+  - Root cause for the persisted `authority_source_conflict` after commit
+    `a2cd679` was deployment drift plus unset authority mode. The
+    previous proof-set deployment was built from clean `HEAD` with only
+    the Operations Queue proof-table change, so the `a2cd679`
+    `lib/api.ts`, `lib/api-client.ts`, and `sidebar.tsx` authority and
+    sign-out changes were not in production.
+  - Vercel production env for `operious-ai-command-center` now defines
+    both `NEXT_PUBLIC_BACKEND_AUTHORITY_MODE=tenant-header` and
+    `NEXT_PUBLIC_OPERIOUS_BACKEND_AUTHORITY_MODE=tenant-header`.
+  - Production deployment `dpl_DkEf6Kt4DhJrP7iHytD6TRRuiMFu` includes
+    the authority-mode client changes, the hard-navigation sign-out
+    button, and the Phase 6-F proof-set Operations Queue. It is aliased
+    at `https://app.operious.com`.
+  - Verified backend XOR behavior directly: `X-Tenant-ID: anker-pilot`
+    only returns 200 for `/api/v1/session/sessions`; adding
+    `Authorization: Bearer fake` returns the expected
+    `authority_source_conflict` 400.
+- Phase 6-F production investigation notes on 2026-05-24:
+  - Sessions `2b7af7a5-96be-5ec9-ba1e-40f19435dc8c`,
+    `5bb139de-079b-5c20-a2da-3660b203a576`, and
+    `8ba795db-45fa-5674-94b6-4f888e70c8ed` all have
+    `diagnostic_analysis_completed` timeline events, but their
+    session records still show `lifecycle_phase=initiated`.
+  - Current session lifecycle is an explicit classification, not an
+    automatic state machine. `SessionRuntime.open_session()` records
+    `INITIATED`; `SessionRuntime.record_lifecycle()` is the explicit
+    transition API. The diagnostic worker success path in
+    `app.workers.agent_tasks._persist_diagnostic_success()` appends
+    `diagnostic_analysis_completed` and completes the execution record
+    but does not call `record_lifecycle()`. There is no `completed`
+    value in `SessionLifecyclePhase`; available phases are `initiated`,
+    `active`, `dormant`, `terminated`, and `archived`.
+  - Fly's current `fly logs --no-tail` buffer did not contain a
+    `RuntimeError`, `diagnostic cognition failed`, or traceback entry.
+    Observability DLQ and session timeline evidence show the wrapper
+    error `diagnostic cognition failed: RuntimeError` classified as
+    `CognitionLLMProviderError`, but not the underlying exception chain.
+    Capturing that chain requires either retained application logs or a
+    fresh reproduction while logs are actively tailed.
+  - `GET /api/v1/sop-intelligence/approvals` for tenant `anker-pilot`
+    returned `total=0`, so Cognition Hub is empty because no approval
+    records exist for the tenant; it is not merely a frontend display
+    issue.
 - Selected controlled Anker demo proof set:
   - Charging allow:
     `df6139ba-81fa-5f1d-9b3e-ceba6e7bb135`, category
@@ -2483,6 +2565,31 @@ Current Command Center 2 status:
   Marketing production is aliased at `https://www.operious.com`, backend
   CORS includes production domains, and Auth0 login redirects to the
   configured Auth0 tenant.
+- Production API-base hotfix complete:
+  `operious-ai-command-center` Vercel production env now points both
+  `NEXT_PUBLIC_API_BASE_URL` and
+  `NEXT_PUBLIC_OPERIOUS_API_BASE_URL` at
+  `https://operious-ai-imad.fly.dev/api/v1`; redeploy
+  `dpl_hdsAPzCLC5aAVJyfj3VMD97nTzsC` is aliased at
+  `https://app.operious.com`.
+- Production proof-set UI hotfix complete:
+  Operations Queue now pins and enriches the five selected Phase 6-F
+  sessions from live timeline data and production deployment
+  `dpl_H3ZxFTaQCdfVoHbSgD1MUTkhXsqm` is aliased at
+  `https://app.operious.com`.
+- Production authority/sign-out hotfix complete:
+  `NEXT_PUBLIC_BACKEND_AUTHORITY_MODE` and
+  `NEXT_PUBLIC_OPERIOUS_BACKEND_AUTHORITY_MODE` are set to
+  `tenant-header`; deployment `dpl_DkEf6Kt4DhJrP7iHytD6TRRuiMFu`
+  includes the `a2cd679` client authority changes, hard-navigation
+  sign-out, and proof-set Operations Queue, and is aliased at
+  `https://app.operious.com`.
+- Phase 6-F production investigation complete for the urgent 2026-05-24
+  report: the three requested sessions have diagnostic completion
+  timeline events but session lifecycle remains explicitly
+  `initiated`; Fly's current log buffer does not retain the underlying
+  RuntimeError traceback; SOP Intelligence approvals for `anker-pilot`
+  currently return `total=0`.
 - Phase 6-F artifact kit complete:
   `apps/backend/scripts/anker_demo/seed_anker_demo.py`, five SOP files,
   `demo_tickets.json`, `demo_walkthrough.md`, and

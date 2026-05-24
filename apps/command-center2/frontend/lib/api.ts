@@ -6,6 +6,7 @@ export type ApiPage<T> = {
   items: T[];
   total: number;
   offset: number;
+  limit?: number;
 };
 
 export type ApiErrorPayload = {
@@ -89,6 +90,76 @@ export type OperationalTraceSpan = {
   created_at: string | null;
 };
 
+export type AuthPrincipal = {
+  principal_id: string | null;
+  tenant_id: string | null;
+  organization_id: string | null;
+  environment_id: string | null;
+  capabilities: string[];
+  authority_source: "verified" | "header" | "anonymous";
+};
+
+export type OperationalEvent = {
+  event_id: string;
+  operational_act: string;
+  substrate: string;
+  root_event_id: string;
+  parent_event_id: string | null;
+  causality_depth: number;
+  runtime_instance_id: string;
+  sequence: number;
+  occurred_at: string;
+  tenant_id: string | null;
+  principal_id: string | null;
+  organization_id: string | null;
+  environment_id: string | null;
+  tenant_authority_source: string | null;
+  governance_decision: string | null;
+  governance_decision_id: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type OperationalReplayTrace = {
+  root_event_id: string | null;
+  status: "complete" | "partial" | "invalid";
+  events: OperationalEvent[];
+  lineage_edges: {
+    source_event_id: string;
+    target_event_id: string;
+    relation: string;
+    source_substrate: string;
+    target_substrate: string;
+    metadata: Record<string, unknown>;
+  }[];
+  unresolved_lineage: {
+    source_event_id: string;
+    relation: string;
+    target_key: string;
+    metadata: Record<string, unknown>;
+  }[];
+  findings: {
+    code: string;
+    severity: "warning" | "error";
+    message: string;
+    event_id: string | null;
+    metadata: Record<string, unknown>;
+  }[];
+};
+
+export type EscalationRecord = {
+  escalation_id: string;
+  session_id: string;
+  tenant_id: string;
+  reason: string;
+  governance_decision_id: string;
+  status: "pending" | "reviewed" | "approved" | "rejected";
+  created_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
+  resolved_by: string | null;
+  governance_override_decision_id: string | null;
+};
+
 export type ApprovalRecord = {
   approval_id: string;
   tenant_id: string;
@@ -161,6 +232,21 @@ export type TenantChannelConfiguration = {
   credential_rotation_expires_at: string | null;
 };
 
+export type TenantChannelCreateRequest = {
+  channel_type: string;
+  routing_address: string;
+  credentials: Record<string, unknown>;
+  webhook_secret: string;
+  status?: TenantChannelConfiguration["status"];
+};
+
+export type TenantChannelUpdateRequest = {
+  routing_address?: string;
+  credentials?: Record<string, unknown>;
+  webhook_secret?: string;
+  status?: TenantChannelConfiguration["status"];
+};
+
 export type OperationalAlert = {
   alert_id: string;
   tenant_id: string;
@@ -201,6 +287,29 @@ export type TenantKnowledgeCreateRequest = {
 export type TenantKnowledgeUpdateRequest = {
   content?: string;
   status?: TenantKnowledgeDocument["status"];
+};
+
+export type KnowledgeIngestionResponse = {
+  tenant_id: string;
+  document_id: string;
+  document_version: number;
+  chunk_count: number;
+  vector_count: number;
+  vector_index_name: string;
+  indexed_at: string;
+};
+
+export type TenantGovernancePolicyCreateRequest = {
+  policy_type: string;
+  parameters: Record<string, unknown>;
+  status?: TenantGovernancePolicy["status"];
+  effective_from: string;
+};
+
+export type TenantGovernancePolicyUpdateRequest = {
+  parameters?: Record<string, unknown>;
+  status?: TenantGovernancePolicy["status"];
+  effective_from?: string;
 };
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -344,6 +453,40 @@ export function listSessions(query: { limit: number; offset: number }) {
   });
 }
 
+export function readCurrentPrincipal() {
+  return apiRequest<AuthPrincipal>("/auth/me");
+}
+
+export function listEscalations(query: {
+  status?: EscalationRecord["status"];
+  session_id?: string;
+  governance_decision_id?: string;
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<ApiPage<EscalationRecord>>("/escalations", { query });
+}
+
+export function approveEscalation(escalationId: string, resolution: string) {
+  return apiRequest<EscalationRecord>(
+    `/escalations/${encodeURIComponent(escalationId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    }
+  );
+}
+
+export function rejectEscalation(escalationId: string, resolution: string) {
+  return apiRequest<EscalationRecord>(
+    `/escalations/${encodeURIComponent(escalationId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    }
+  );
+}
+
 export function readOperationalMetrics(windowStart: Date, windowEnd: Date) {
   return apiRequest<OperationalMetrics>("/observability/metrics", {
     query: {
@@ -355,6 +498,20 @@ export function readOperationalMetrics(windowStart: Date, windowEnd: Date) {
 
 export function listTraceSpans(query: { trace_id?: string; limit: number; offset: number }) {
   return apiRequest<ApiPage<OperationalTraceSpan>>("/observability/traces", {
+    query,
+  });
+}
+
+export function loadOperationalReplayTrace(query: {
+  event_id?: string;
+  root_event_id?: string;
+  governance_decision_id?: string;
+  operational_act?: string;
+  substrate?: string;
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<OperationalReplayTrace>("/operational-events/replay", {
     query,
   });
 }
@@ -414,6 +571,13 @@ export function updateKnowledgeDocument(
   );
 }
 
+export function ingestKnowledgeDocument(documentId: string) {
+  return apiRequest<KnowledgeIngestionResponse>(
+    `/knowledge/documents/${encodeURIComponent(documentId)}/ingest`,
+    { method: "POST" }
+  );
+}
+
 export function listKnowledgeVersions(documentId: string) {
   return apiRequest<ApiPage<KnowledgeDocumentVersion>>("/cognition/knowledge/versions", {
     query: {
@@ -430,6 +594,26 @@ export function listGovernancePolicies() {
   });
 }
 
+export function createGovernancePolicy(request: TenantGovernancePolicyCreateRequest) {
+  return apiRequest<TenantGovernancePolicy>("/tenant/policies", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateGovernancePolicy(
+  policyId: string,
+  request: TenantGovernancePolicyUpdateRequest
+) {
+  return apiRequest<TenantGovernancePolicy>(
+    `/tenant/policies/${encodeURIComponent(policyId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }
+  );
+}
+
 export function listTopologyConfigurations() {
   return apiRequest<ApiPage<TenantTopologyConfiguration>>("/tenant/topologies", {
     query: { limit: 100, offset: 0 },
@@ -440,6 +624,33 @@ export function listChannelConfigurations() {
   return apiRequest<ApiPage<TenantChannelConfiguration>>("/tenant/channels", {
     query: { limit: 100, offset: 0 },
   });
+}
+
+export function createChannelConfiguration(request: TenantChannelCreateRequest) {
+  return apiRequest<TenantChannelConfiguration>("/tenant/channels", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateChannelConfiguration(
+  configId: string,
+  request: TenantChannelUpdateRequest
+) {
+  return apiRequest<TenantChannelConfiguration>(
+    `/tenant/channels/${encodeURIComponent(configId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }
+  );
+}
+
+export function verifyChannelConfiguration(configId: string) {
+  return apiRequest<TenantChannelConfiguration>(
+    `/tenant/channels/${encodeURIComponent(configId)}/verify`,
+    { method: "POST" }
+  );
 }
 
 export function listOperationalAlerts(windowStart: Date, windowEnd: Date) {
