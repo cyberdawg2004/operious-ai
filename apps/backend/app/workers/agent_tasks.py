@@ -50,6 +50,10 @@ from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import record_dead_letter_task
 from app.workers.queue_admission import admit_supervisor_publish
+from app.workers.queues import (
+    QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_SUPERVISOR,
+)
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 
 _T = TypeVar("_T")
@@ -62,6 +66,7 @@ _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 
 @celery_app.task(
     name="execute_diagnostic_agent",
+    queue=QUEUE_DIAGNOSTIC_NORMAL,
     bind=True,
     max_retries=3,
     default_retry_delay=_DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS,
@@ -553,7 +558,7 @@ async def _queue_supervisor_if_closed(
     await admit_supervisor_publish(tenant_id=tenant_id, dispatch_id=dispatch_id)
     cast(Any, evaluate_session_supervisor).apply_async(
         args=(session_id, tenant_id),
-        queue=get_settings().SUPERVISOR_QUEUE_NAME,
+        queue=QUEUE_SUPERVISOR,
     )
     return True
 

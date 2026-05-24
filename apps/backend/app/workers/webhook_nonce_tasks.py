@@ -11,12 +11,14 @@ from typing import Any, TypeVar
 from app.boundary.persistence import PostgresBoundaryPersistence
 from app.db.session import get_owner_session_factory
 from app.workers.celery_app import celery_app
+from app.workers.queues import QUEUE_WEBHOOK_MAINTENANCE
 
 _T = TypeVar("_T")
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="cleanup_expired_webhook_nonces",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
     bind=True,
     ignore_result=True,
     max_retries=1,

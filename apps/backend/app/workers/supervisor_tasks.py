@@ -13,7 +13,6 @@ from collections.abc import Coroutine
 from threading import Thread
 from typing import Any, TypeVar, cast
 
-from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.db.tenant_context import set_current_tenant
 from app.execution import PostgresExecutionPersistence
@@ -24,6 +23,7 @@ from app.supervisor.persistence import PostgresSupervisorRepository
 from app.supervisor.runtime import SupervisorRuntime
 from app.workers.celery_app import celery_app
 from app.workers.queue_admission import admit_qa_publish
+from app.workers.queues import QUEUE_QA, QUEUE_SUPERVISOR
 from app.workers.qa_tasks import score_supervisor_inspection
 
 _T = TypeVar("_T")
@@ -31,6 +31,7 @@ _T = TypeVar("_T")
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="evaluate_session_supervisor",
+    queue=QUEUE_SUPERVISOR,
     bind=True,
     ignore_result=True,
     max_retries=1,
@@ -99,7 +100,7 @@ async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
     await admit_qa_publish(tenant_id=tenant_id)
     cast(Any, score_supervisor_inspection).apply_async(
         args=(inspection_id, tenant_id),
-        queue=get_settings().QA_QUEUE_NAME,
+        queue=QUEUE_QA,
     )
     return True
 

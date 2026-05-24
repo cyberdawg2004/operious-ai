@@ -40,6 +40,7 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentRecord,
 )
 from app.workers import qa_tasks
+from app.workers.queues import QUEUE_SOP_INTELLIGENCE
 
 _NOW = datetime(2026, 5, 22, 14, tzinfo=timezone.utc)
 _TENANT_ID = "tenant-acme"
@@ -292,7 +293,7 @@ def test_sop_worker_task_accepts_only_primitive_lineage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_qa_task_queues_sop_intelligence_as_low_priority(
+async def test_qa_task_queues_sop_intelligence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -311,7 +312,7 @@ async def test_qa_task_queues_sop_intelligence_as_low_priority(
     assert calls == [
         {
             "args": (_SESSION_ID, _TENANT_ID, _INSPECTION_ID),
-            "queue": "low_priority",
+            "queue": QUEUE_SOP_INTELLIGENCE,
             "priority": 9,
         }
     ]

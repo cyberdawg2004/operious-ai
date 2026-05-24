@@ -3,8 +3,18 @@
 from __future__ import annotations
 
 from celery import Celery
+from kombu import Queue
 
 from app.core.config import get_settings
+from app.workers.queues import (
+    ALL_QUEUES,
+    QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_ESCALATION,
+    QUEUE_QA,
+    QUEUE_SOP_INTELLIGENCE,
+    QUEUE_SUPERVISOR,
+    QUEUE_WEBHOOK_MAINTENANCE,
+)
 
 settings = get_settings()
 
@@ -30,6 +40,25 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    task_queues=[Queue(name) for name in ALL_QUEUES],
+    task_default_queue=QUEUE_DIAGNOSTIC_NORMAL,
+    task_routes={
+        "execute_diagnostic_agent": {"queue": QUEUE_DIAGNOSTIC_NORMAL},
+        "create_governance_escalation": {"queue": QUEUE_ESCALATION},
+        "evaluate_session_supervisor": {"queue": QUEUE_SUPERVISOR},
+        "score_supervisor_inspection": {"queue": QUEUE_QA},
+        "propose_sop_intelligence_change": {"queue": QUEUE_SOP_INTELLIGENCE},
+        "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        "reconcile_stale_execution_outbox": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
+        "reconcile_stale_escalation_outbox": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
+        "cleanup_expired_webhook_nonces": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
+    },
     task_acks_late=True,
     task_ignore_result=True,
     result_expires=settings.CELERY_RESULT_EXPIRES_SECONDS,
@@ -45,11 +74,13 @@ celery_app.conf.update(
             "task": "cleanup_expired_webhook_nonces",
             "schedule": 3600.0,
             "kwargs": {"limit": 1000},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
         "reconcile-stale-escalation-outbox-minutely": {
             "task": "reconcile_stale_escalation_outbox",
             "schedule": 60.0,
             "kwargs": {"limit": 100},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
     },
 )

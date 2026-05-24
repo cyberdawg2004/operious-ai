@@ -19,12 +19,14 @@ from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.persistence import PostgresGovernanceRepository
 from app.session.persistence import PostgresSessionPersistence
 from app.workers.celery_app import celery_app
+from app.workers.queues import QUEUE_ESCALATION
 
 _T = TypeVar("_T")
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="create_governance_escalation",
+    queue=QUEUE_ESCALATION,
     bind=True,
     ignore_result=True,
     max_retries=2,

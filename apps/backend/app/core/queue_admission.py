@@ -8,6 +8,14 @@ from dataclasses import dataclass
 from inspect import isawaitable
 from typing import Any, Literal, Protocol
 
+from app.workers.queues import (
+    QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_ESCALATION,
+    QUEUE_QA,
+    QUEUE_SOP_INTELLIGENCE,
+    QUEUE_SUPERVISOR,
+)
+
 QueueHealthStatus = Literal["ok", "degraded", "saturated", "unavailable"]
 
 
@@ -164,27 +172,27 @@ def celery_queue_depth_limits(settings: Any) -> tuple[QueueDepthLimit, ...]:
     return (
         QueueDepthLimit(
             logical_name="diagnostic",
-            queue_name=settings.EXECUTION_QUEUE_NAME,
+            queue_name=QUEUE_DIAGNOSTIC_NORMAL,
             max_depth=settings.EXECUTION_QUEUE_MAX_DEPTH,
         ),
         QueueDepthLimit(
             logical_name="escalation",
-            queue_name=settings.ESCALATION_QUEUE_NAME,
+            queue_name=QUEUE_ESCALATION,
             max_depth=settings.ESCALATION_QUEUE_MAX_DEPTH,
         ),
         QueueDepthLimit(
             logical_name="supervisor",
-            queue_name=settings.SUPERVISOR_QUEUE_NAME,
+            queue_name=QUEUE_SUPERVISOR,
             max_depth=settings.SUPERVISOR_QUEUE_MAX_DEPTH,
         ),
         QueueDepthLimit(
             logical_name="qa",
-            queue_name=settings.QA_QUEUE_NAME,
+            queue_name=QUEUE_QA,
             max_depth=settings.QA_QUEUE_MAX_DEPTH,
         ),
         QueueDepthLimit(
             logical_name="sop_intelligence",
-            queue_name=settings.SOP_INTELLIGENCE_QUEUE_NAME,
+            queue_name=QUEUE_SOP_INTELLIGENCE,
             max_depth=settings.SOP_INTELLIGENCE_QUEUE_MAX_DEPTH,
         ),
     )

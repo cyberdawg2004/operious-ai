@@ -58,6 +58,7 @@ from app.governance.persistence import (
 from app.runtime import ExecutionGovernanceEvaluation, ExecutionGovernanceRuntime
 from app.services.dispatch_service import DispatchService
 from app.session.persistence import InMemorySessionPersistence
+from app.workers.queues import QUEUE_DIAGNOSTIC_NORMAL
 from app.session.persistence import SessionQuery
 from app.tenant.enums import (
     TenantExecutionCircuitState,
@@ -465,7 +466,7 @@ async def test_dispatch_records_queue_backpressure_halt_reason(
         for record in caplog.records
         if record.message == "queue_backpressure_triggered"
     )
-    assert record.queue_name == "celery"
+    assert record.queue_name == QUEUE_DIAGNOSTIC_NORMAL
     assert record.current_depth == 10_001
     assert record.configured_limit == 10_000
     assert record.tenant_id == TENANT_ID
@@ -814,7 +815,7 @@ class _BackpressureExecutionPublisher:
         del tenant_id
         raise QueueBackpressureError(
             logical_queue="diagnostic",
-            queue_name="celery",
+            queue_name=QUEUE_DIAGNOSTIC_NORMAL,
             queue_depth=10_001,
             max_queue_depth=10_000,
         )

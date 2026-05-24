@@ -16,6 +16,14 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.workers.queues import (
+    QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_ESCALATION,
+    QUEUE_QA,
+    QUEUE_SOP_INTELLIGENCE,
+    QUEUE_SUPERVISOR,
+)
+
 Environment = Literal["local", "development", "staging", "production", "test"]
 
 # Repository-root anchored environment resolution.
@@ -132,15 +140,15 @@ class Settings(BaseSettings):
     CELERY_TASK_SOFT_TIME_LIMIT_SECONDS: int = 300
     CELERY_TASK_TIME_LIMIT_SECONDS: int = 600
     CELERY_VISIBILITY_TIMEOUT_SECONDS: int = 3600
-    EXECUTION_QUEUE_NAME: str = "celery"
+    EXECUTION_QUEUE_NAME: str = QUEUE_DIAGNOSTIC_NORMAL
     EXECUTION_QUEUE_MAX_DEPTH: int = 10_000
-    ESCALATION_QUEUE_NAME: str = "celery"
+    ESCALATION_QUEUE_NAME: str = QUEUE_ESCALATION
     ESCALATION_QUEUE_MAX_DEPTH: int = 10_000
-    SUPERVISOR_QUEUE_NAME: str = "celery"
+    SUPERVISOR_QUEUE_NAME: str = QUEUE_SUPERVISOR
     SUPERVISOR_QUEUE_MAX_DEPTH: int = 10_000
-    QA_QUEUE_NAME: str = "celery"
+    QA_QUEUE_NAME: str = QUEUE_QA
     QA_QUEUE_MAX_DEPTH: int = 10_000
-    SOP_INTELLIGENCE_QUEUE_NAME: str = "low_priority"
+    SOP_INTELLIGENCE_QUEUE_NAME: str = QUEUE_SOP_INTELLIGENCE
     SOP_INTELLIGENCE_QUEUE_MAX_DEPTH: int = 10_000
     REDIS_REQUIRED_MAXMEMORY_POLICY: str = "allkeys-lru"
 

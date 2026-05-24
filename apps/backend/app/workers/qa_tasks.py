@@ -12,7 +12,6 @@ from collections.abc import Coroutine
 from threading import Thread
 from typing import Any, TypeVar, cast
 
-from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.db.tenant_context import set_current_tenant
 from app.qa.persistence import PostgresQAPersistence
@@ -21,6 +20,7 @@ from app.qa.runtime import QAAgentRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.workers.celery_app import celery_app
 from app.workers.queue_admission import admit_sop_intelligence_publish
+from app.workers.queues import QUEUE_QA, QUEUE_SOP_INTELLIGENCE
 from app.workers.sop_intelligence_tasks import (
     propose_sop_intelligence_change,
 )
@@ -31,6 +31,7 @@ _SOP_INTELLIGENCE_CONFIDENCE_THRESHOLD = 0.85
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="score_supervisor_inspection",
+    queue=QUEUE_QA,
     bind=True,
     ignore_result=True,
     max_retries=1,
@@ -101,7 +102,7 @@ async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
     await admit_sop_intelligence_publish(tenant_id=score.tenant_id)
     cast(Any, propose_sop_intelligence_change).apply_async(
         args=(str(session_id), score.tenant_id, score.inspection_id),
-        queue=get_settings().SOP_INTELLIGENCE_QUEUE_NAME,
+        queue=QUEUE_SOP_INTELLIGENCE,
         priority=9,
     )
     return True

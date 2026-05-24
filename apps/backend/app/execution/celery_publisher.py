@@ -14,6 +14,7 @@ from app.workers.agent_tasks import (
     execute_diagnostic_agent,
     execute_diagnostic_agent_runtime,
 )
+from app.workers.queues import QUEUE_DIAGNOSTIC_NORMAL
 
 
 class QueueDepthClient(Protocol):
@@ -34,7 +35,7 @@ class CeleryExecutionPublisher(ExecutionPublisher):
     ) -> None:
         settings = get_settings()
         self._redis_client = redis_client
-        self._queue_name = queue_name or settings.EXECUTION_QUEUE_NAME
+        self._queue_name = queue_name or QUEUE_DIAGNOSTIC_NORMAL
         self._max_queue_depth = (
             max_queue_depth
             if max_queue_depth is not None
@@ -61,7 +62,7 @@ class CeleryExecutionPublisher(ExecutionPublisher):
             client = cast(QueueDepthClient, get_redis_client())
             self._redis_client = client
         await RedisQueueDepthAdmission(redis_client=client).check(
-            logical_queue="diagnostic",
+            logical_queue=QUEUE_DIAGNOSTIC_NORMAL,
             queue_name=self._queue_name,
             max_queue_depth=self._max_queue_depth,
             tenant_id=tenant_id,

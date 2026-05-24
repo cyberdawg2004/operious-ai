@@ -23,12 +23,14 @@ from app.execution import (
     PostgresExecutionPersistence,
 )
 from app.workers.celery_app import celery_app
+from app.workers.queues import QUEUE_WEBHOOK_MAINTENANCE
 
 _T = TypeVar("_T")
 
 
 @celery_app.task(
     name="recover_stale_executions",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
     bind=True,
     ignore_result=True,
     max_retries=5,
@@ -78,6 +80,7 @@ def recover_stale_executions(
 
 @celery_app.task(
     name="reconcile_stale_execution_outbox",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
     bind=True,
     ignore_result=True,
     max_retries=5,

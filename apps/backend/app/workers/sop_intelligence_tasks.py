@@ -23,12 +23,14 @@ from app.sop_intelligence.runtime import SOPIntelligenceRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
+from app.workers.queues import QUEUE_SOP_INTELLIGENCE
 
 _T = TypeVar("_T")
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="propose_sop_intelligence_change",
+    queue=QUEUE_SOP_INTELLIGENCE,
     bind=True,
     ignore_result=True,
     max_retries=1,

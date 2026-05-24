@@ -14,6 +14,7 @@ from app.workers.escalation_tasks import (
     create_governance_escalation,
     create_governance_escalation_runtime,
 )
+from app.workers.queues import QUEUE_ESCALATION
 
 
 class CeleryEscalationPublisher(EscalationPublisher):
@@ -28,7 +29,7 @@ class CeleryEscalationPublisher(EscalationPublisher):
     ) -> None:
         settings = get_settings()
         self._redis_client = redis_client
-        self._queue_name = queue_name or settings.ESCALATION_QUEUE_NAME
+        self._queue_name = queue_name or QUEUE_ESCALATION
         self._max_queue_depth = (
             max_queue_depth
             if max_queue_depth is not None
@@ -48,7 +49,7 @@ class CeleryEscalationPublisher(EscalationPublisher):
             client = get_redis_client()
             self._redis_client = client
         await RedisQueueDepthAdmission(redis_client=client).check(
-            logical_queue="escalation",
+            logical_queue=QUEUE_ESCALATION,
             queue_name=self._queue_name,
             max_queue_depth=self._max_queue_depth,
             tenant_id=tenant_id,

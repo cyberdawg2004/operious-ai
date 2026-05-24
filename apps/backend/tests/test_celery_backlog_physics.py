@@ -34,6 +34,13 @@ from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_out
 from app.workers.escalation_tasks import create_governance_escalation
 from app.workers.execution_recovery_tasks import reconcile_stale_execution_outbox
 from app.workers.qa_tasks import score_supervisor_inspection
+from app.workers.queues import (
+    QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_ESCALATION,
+    QUEUE_QA,
+    QUEUE_SOP_INTELLIGENCE,
+    QUEUE_SUPERVISOR,
+)
 from app.workers.sop_intelligence_tasks import propose_sop_intelligence_change
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 from tests.conftest import execution_admission_token, requires_postgres
@@ -99,7 +106,7 @@ async def test_execution_publisher_rejects_when_queue_depth_exceeded() -> None:
     redis = _QueueDepthRedis(depth=10_001)
     publisher = CeleryExecutionPublisher(
         redis_client=redis,
-        queue_name="celery",
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         max_queue_depth=10_000,
     )
 
@@ -111,7 +118,7 @@ async def test_execution_publisher_rejects_when_queue_depth_exceeded() -> None:
 
     assert exc.value.reason == "queue_backpressure"
     assert exc.value.queue_depth == 10_001
-    assert redis.checked_queue == "celery"
+    assert redis.checked_queue == QUEUE_DIAGNOSTIC_NORMAL
 
 
 @pytest.mark.asyncio
@@ -124,7 +131,7 @@ async def test_queue_backpressure_log_contains_operational_context(
     with pytest.raises(QueueBackpressureError) as exc:
         await RedisQueueDepthAdmission(redis_client=redis).check(
             logical_queue="diagnostic",
-            queue_name="celery",
+            queue_name=QUEUE_DIAGNOSTIC_NORMAL,
             max_queue_depth=50,
             tenant_id="tenant-backpressure",
             dispatch_id="dispatch-backpressure",
@@ -137,7 +144,7 @@ async def test_queue_backpressure_log_contains_operational_context(
         for record in caplog.records
         if record.message == "queue_backpressure_triggered"
     )
-    assert record.queue_name == "celery"
+    assert record.queue_name == QUEUE_DIAGNOSTIC_NORMAL
     assert record.current_depth == 51
     assert record.configured_limit == 50
     assert record.tenant_id == "tenant-backpressure"
@@ -169,25 +176,25 @@ async def test_escalation_publisher_rejects_when_queue_depth_exceeded() -> None:
 async def test_health_report_includes_queue_depth_statuses() -> None:
     settings = get_settings().model_copy(
         update={
-            "EXECUTION_QUEUE_NAME": "diagnostic",
+            "EXECUTION_QUEUE_NAME": QUEUE_DIAGNOSTIC_NORMAL,
             "EXECUTION_QUEUE_MAX_DEPTH": 100,
-            "ESCALATION_QUEUE_NAME": "escalation",
+            "ESCALATION_QUEUE_NAME": QUEUE_ESCALATION,
             "ESCALATION_QUEUE_MAX_DEPTH": 50,
-            "SUPERVISOR_QUEUE_NAME": "supervisor",
+            "SUPERVISOR_QUEUE_NAME": QUEUE_SUPERVISOR,
             "SUPERVISOR_QUEUE_MAX_DEPTH": 50,
-            "QA_QUEUE_NAME": "qa",
+            "QA_QUEUE_NAME": QUEUE_QA,
             "QA_QUEUE_MAX_DEPTH": 50,
-            "SOP_INTELLIGENCE_QUEUE_NAME": "sop",
+            "SOP_INTELLIGENCE_QUEUE_NAME": QUEUE_SOP_INTELLIGENCE,
             "SOP_INTELLIGENCE_QUEUE_MAX_DEPTH": 50,
         }
     )
     redis = _QueueDepthRedis(
         {
-            "diagnostic": 0,
-            "escalation": 41,
-            "supervisor": 51,
-            "qa": 1,
-            "sop": 2,
+            QUEUE_DIAGNOSTIC_NORMAL: 0,
+            QUEUE_ESCALATION: 41,
+            QUEUE_SUPERVISOR: 51,
+            QUEUE_QA: 1,
+            QUEUE_SOP_INTELLIGENCE: 2,
         }
     )
     service = HealthService(
@@ -203,7 +210,7 @@ async def test_health_report_includes_queue_depth_statuses() -> None:
         "depth": 0,
         "limit": 100,
         "status": "ok",
-        "queue_name": "diagnostic",
+        "queue_name": QUEUE_DIAGNOSTIC_NORMAL,
         "error": None,
     }
     assert response.queues["escalation"].status == "degraded"
