@@ -6,7 +6,8 @@ Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
 Phase 6-F Anker demo artifact kit, the Wedge 0 backend hardening pass
 deployed and live-verified on Fly.io, Wedge 1 Phase 0 through final-gate
 reliability hardening, and Wedge 2 Celery/Redis hardening through final
-production verification.
+production verification, and Wedge 3 UUID4 / ambient identity fallback
+elimination through final production verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -30,14 +31,22 @@ This document is the canonical handoff plan for the next Codex session.
   deployment image `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S` is live;
   production health includes diagnostic, escalation, supervisor, QA, and
   SOP intelligence queue-depth sections with status `ok`.
+- Wedge 3 final gate backend verification: 2,294 passed, 2 skipped;
+  expanded invariant subset including the identity invariant 193 passed,
+  2 skipped; smoke 4/4 green; Pyright 0 errors and 654 warnings;
+  Alembic current `0032_escalation_outbox_claim_id (head)`; the final
+  active-app UUID4 grep returned empty after excluding quarantined
+  `_deprecated` paths; Fly.io deployment image
+  `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3` is live; production health
+  returned `status: ok` with all five queues `ok` at depth 0.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors, 675 warnings across the backend surface.
+- Pyright: 0 errors, 654 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
 - Alembic current: `0032_escalation_outbox_claim_id (head)` on the
-  `operious_test` database after Wedge 2 final-gate verification.
+  `operious_test` database after Wedge 3 final-gate verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -52,7 +61,8 @@ This document is the canonical handoff plan for the next Codex session.
   redirects through Auth0, and Marketing serves on `www.operious.com`.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F evidence capture remains open,
-  and Wedge 2 Celery/Redis Hardening is closed. The demo
+  and Wedge 3 UUID4 / Ambient Identity Fallback Elimination is closed.
+  The demo
   artifact kit is complete and
   production seeding has produced real Anker pilot sessions. Wedge 0
   live verification closed the fresh product-defect outlier with session
@@ -93,6 +103,14 @@ This document is the canonical handoff plan for the next Codex session.
   hour; queue-depth admission covers diagnostic, escalation, supervisor,
   QA, and SOP intelligence queues; health exposes queue depth; and DLQ
   metadata now carries full traceback and replay/triage lineage.
+  Wedge 3 is complete: active persisted lineage paths no longer use
+  UUID4 fallbacks; ambient `_RUNTIME_COUNTER` identity modules are pinned
+  by boot-nonce invariants; the DLQ record ID is deterministic from
+  tenant, execution, session, and attempt count; duplicate DLQ replay
+  writes are idempotent and structured-logged; and the dispatch path
+  re-audit proves boundary, dispatch, session, execution, governance,
+  cognition, escalation, and DLQ lineage IDs are UUID5-derived from
+  stable inputs.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2039,23 +2057,23 @@ before real Anker traffic or any second-client commitment.
 
 ### Current Honest Ratings
 
-- Architecture / substrate design: 8.7/10.
-- Audit, replay, governance foundation: 8.8/10.
-- Production deployment capacity: 7.4/10.
-- Demo readiness for controlled Anker call: 7.8/10.
-- Enterprise-grade readiness overall: 7.5/10.
+- Architecture / substrate design: 9.0/10.
+- Audit, replay, governance foundation: 9.1/10.
+- Production deployment capacity: 7.7/10.
+- Demo readiness for controlled Anker call: 8.0/10.
+- Enterprise-grade readiness overall: 8.0/10.
 
 These ratings are intentionally conservative. The architecture is strong,
-and Wedge 0, Wedge 1, and Wedge 2 have removed the known runtime
+and Wedge 0, Wedge 1, Wedge 2, and Wedge 3 have removed the known runtime
 identity, diagnostic schema-validation, request-body, escalation outbox,
 webhook replay/freshness, Celery result-retention, Redis queue-depth,
-worker privilege, and DLQ traceback blockers. The remaining gap is still
-operational maturity: production Redis policy is unverifiable from the
-Upstash Redis command surface and requires dashboard confirmation,
-queue-age/load tests and autoscaling contracts are not yet proven, Wedge
-3 still needs to eliminate UUID4 and ambient identity fallbacks, and
-Phase 6-F still needs browser evidence plus the session lifecycle/SOP
-intelligence follow-ups before Anker go-live.
+worker privilege, DLQ traceback, and ambient identity fallback blockers.
+The remaining gap is still operational maturity: production Redis policy
+is unverifiable from the Upstash Redis command surface and requires
+dashboard confirmation, queue-age/load tests and autoscaling contracts
+are not yet proven, Wedge 4 must force tenant isolation at the database
+policy level, and Phase 6-F still needs browser evidence plus the session
+lifecycle/SOP intelligence follow-ups before Anker go-live.
 
 ### Rating Targets Before Pilot Launch
 
@@ -2318,26 +2336,68 @@ Acceptance criteria:
   Wedge 2 finding retained for operations: the production Upstash Redis
   policy cannot be verified through Redis CONFIG and still requires the
   documented dashboard check that `maxmemory-policy` is `allkeys-lru`.
-  Remaining Wedge 3 handoff: re-audit UUID4 and ambient identity
-  fallbacks now that DLQ metadata and queue lineage are richer; ensure
-  DLQ replay/recovery references remain deterministic; add invariants
-  for any remaining persisted runtime path that can still call
-  `uuid.uuid4()` or use `_RUNTIME_COUNTER` without an approved
-  ephemeral/test-only marker.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination:
-  eliminate UUID4 fallbacks and process-local runtime identity fallbacks
-  in arbitration, supervisor, boundary, session, governance, execution,
-  coordination, and cognition paths; add invariants that fail if those
-  paths call `uuid.uuid4()` or `_RUNTIME_COUNTER` without an explicitly
-  approved ephemeral/test-only marker. Dispatch path is already mostly
-  clean but must be re-audited after Wedge 0. Expected effort: one or
-  more Codex sessions, no migration unless persisted IDs require
-  backfill metadata.
+  Closed on 2026-05-24. No migration was required. Phase 0 completed the
+  full identity inventory. PERSISTED_LINEAGE MUST FIX findings were:
+  Phase 0 `apps/backend/app/middleware/request_context.py:56` request
+  context fallback, `apps/backend/app/hardening/validation/runtime.py:120`
+  hardening validation runtime ID fallback,
+  `apps/backend/app/agents/runtime/runtime.py:77` agent runtime instance
+  fallback, `apps/backend/app/agents/runtime/runtime.py:109` agent
+  execution lineage fallback, `apps/backend/app/agents/tools/invoker.py:76`
+  tool invocation fallback, and
+  `apps/backend/app/agents/tools/session.py:92` tool session fallback.
+  The agent execution lineage fallback was the highest-risk item because
+  agent execution records are persisted lineage. BOOT_NONCE_MISSING had
+  no active findings: `_RUNTIME_COUNTER` modules in boundary, boundary
+  translation, boundary voice, coordination, coordination
+  policy/topology, governance decision/trace, execution, session, and
+  arbitration identity already had boot-nonce protection. EPHEMERAL
+  acceptable findings were the hardening identity factories,
+  organizational-intelligence envelope ID factories, and OI runtime
+  instance trace IDs; these now carry inline `EPHEMERAL:` markers.
+  TEST_ONLY had no active app findings. APPROVED_EXCEPTION had no active
+  app findings. Quarantined `_deprecated` UUID4 sites remain excluded by
+  path under existing deprecated-code invariants. The DLQ audit found
+  DLQ_ID_NOT_DETERMINISTIC because the record seed still included Celery
+  `task_id`, which is unstable across replays and retries.
+  Phase 1 replaced persisted lineage UUID4 fallbacks with UUID5
+  derivations from stable tenant, lineage, operation, and request inputs;
+  EPHEMERAL markers were added only for envelope-local request/hardening
+  and OI runtime trace identifiers that are not persisted lineage.
+  Phase 2 added `apps/backend/tests/test_identity_invariants.py`: AST
+  scanning now rejects any unmarked `uuid.uuid4()` call in active app
+  paths, excludes quarantined `apps/backend/app/_deprecated/` by path,
+  verifies `_RUNTIME_COUNTER` files have boot-nonce assignments, and
+  proves runtime counters do not collide across simulated restarts.
+  Phase 3 made DLQ replay deterministic: `dead_letter_tasks` IDs derive
+  from `dlq:{tenant_id}:{execution_id}:{session_id}:{attempt_count}`,
+  never from Celery `task_id`; inserts use `ON CONFLICT DO NOTHING`; and
+  idempotent replay conflicts emit structured
+  `dlq_replay_idempotent_write` logs.
+  Phase 4 re-audited dispatch, execution publishing, and worker
+  execution paths. Boundary event, dispatch, session, execution,
+  governance decision, cognition audit, escalation outbox/claim, and
+  dead-letter IDs are UUID5-derived from documented stable inputs. The
+  end-to-end identity lineage test proves repeated synthetic ingress
+  produces identical boundary, dispatch, session, execution, and
+  governance IDs.
+  Final gate: full backend 2,294 passed, 2 skipped; Pyright 0 errors and
+  654 warnings; expanded invariants including identity 193 passed, 2
+  skipped; smoke 4 passed; Alembic current
+  `0032_escalation_outbox_claim_id (head)`; active-app UUID4 grep
+  returned empty after the approved `_deprecated` quarantine exclusion;
+  Fly.io deployed image `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3`;
+  production health returned `status: ok` with diagnostic, escalation,
+  supervisor, QA, and SOP intelligence queues all `ok`.
 - Wedge 4 - Multi-Tenant Security Before Second Client:
   `ALTER TABLE ... FORCE ROW LEVEL SECURITY` on tenant-scoped tables and
-  remove nullable tenant allowance from tenant-scoped tables. Must land
-  before a second enterprise client. Expected effort: one migration and
-  careful testing.
+  remove nullable tenant allowance from tenant-scoped tables. Also verify
+  runtime tenant credential fetches remain tenant-owned, add production
+  RLS policy tests for cross-tenant read/write denial, and extend tenant
+  isolation invariants where Wedge 3 exposed richer lineage metadata.
+  Must land before a second enterprise client. Expected effort: one
+  migration and careful testing.
 
 ### Post-Wedge 9+ Throughput and Capacity Program
 
@@ -2448,8 +2508,11 @@ The 9+ final gate cannot close until:
   broker retry compatibility, result TTL/ignore-result discipline,
   queue-depth admission/health/observability, and traceback-rich DLQ
   metadata are complete and live-verified.
-- Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
-- Wedge 4 - Multi-Tenant Security Before Second Client.
+- Wedge 3 - UUID4 and Ambient Identity Fallback Elimination is closed:
+  persisted active lineage uses UUID5 stable seeds, runtime counters are
+  boot-nonce verified, DLQ replay IDs are deterministic/idempotent, and
+  active-app UUID4 source invariants are green.
+- Wedge 4 - Multi-Tenant Security Before Second Client remains next.
 - Vector retrieval SQL-native:
   push `LIMIT`, tenant filter, and ranking to Postgres instead of
   Python-side slicing on the full knowledge corpus. Low priority until
@@ -2485,9 +2548,10 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 2 Celery/Redis Hardening is closed and deployed. Wedge 3 UUID4 and Ambient Identity Fallback Elimination must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
-Current verified backend baseline after Wedge 2 final gate: 2,272 passed, 2 skipped; expanded invariant subset plus Celery configuration tests 180 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app; Alembic current `0032_escalation_outbox_claim_id (head)`. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, queue-depth health returned all queues `ok`, Fly log grep returned only `redis_memory_policy_unverifiable`, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
-Current Pyright baseline: 0 errors, 675 warnings; warnings must not grow.
+Current phase: Wedge 3 UUID4 and Ambient Identity Fallback Elimination is closed and deployed. Phase 6-F demo evidence capture remains open.
+Wedge 4 Multi-Tenant Security Before Second Client must not start until the user explicitly confirms the next phase.
+Current verified backend baseline after Wedge 3 final gate: 2,294 passed, 2 skipped; expanded invariant subset including identity tests 193 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app; Alembic current `0032_escalation_outbox_claim_id (head)`. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health passed, queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current Pyright baseline: 0 errors, 654 warnings; warnings must not grow.
 Current Alembic head: 0032_escalation_outbox_claim_id.
 
 Completed before the next phase:
@@ -2565,6 +2629,25 @@ Completed before the next phase:
   `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S` is live; production health
   returned all five queues `ok`; log grep returned only
   `redis_memory_policy_unverifiable`.
+- Wedge 3 UUID4 and Ambient Identity Fallback Elimination is closed on
+  2026-05-24:
+  persisted active-app lineage paths now use UUID5 stable seeds; request
+  and hardening UUID4 fallbacks are either deterministic or explicitly
+  marked EPHEMERAL; `_RUNTIME_COUNTER` identity modules are boot-nonce
+  verified; `apps/backend/tests/test_identity_invariants.py` fails any
+  unmarked active-app UUID4 call and excludes only quarantined
+  `_deprecated` paths; DLQ record IDs derive from
+  `dlq:{tenant_id}:{execution_id}:{session_id}:{attempt_count}` without
+  Celery `task_id`; duplicate DLQ replay writes use
+  `ON CONFLICT DO NOTHING` and structured `dlq_replay_idempotent_write`
+  logs; and the dispatch re-audit proves boundary, dispatch, session,
+  execution, governance, cognition, escalation, and dead-letter lineage
+  are deterministic. Final gate: full backend 2,294 passed, 2 skipped;
+  Pyright 0 errors and 654 warnings; expanded invariants including
+  identity 193 passed, 2 skipped; smoke 4/4 green; Alembic current
+  `0032_escalation_outbox_claim_id (head)`; Fly.io deployment image
+  `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3` is live; production health
+  returned `status: ok` with all five queues `ok`.
 
 - Command Center 2 Critical Fixes Phase A is closed:
   live endpoint verification proved the `/api/v1/session/*` routes and
@@ -2608,7 +2691,7 @@ Remaining before the next wedge:
   call.
 - Investigate the latest fresh refund dead-letter
   `d6b45aef-2146-5e6d-ba85-367615857cef` before Anker go-live.
-- Do not start Wedge 3, Wedge 4, vector retrieval SQL-native, or pilot
+- Do not start Wedge 4, vector retrieval SQL-native, or pilot
   launch until their phase boundaries are explicitly confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
@@ -2634,10 +2717,10 @@ pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Do not start the next master-plan wedge until the user confirms the
-phase boundary. The last completed boundary is Wedge 2 Celery/Redis
-Hardening, which is closed and deployed. The next boundary is Wedge 3
-UUID4 and Ambient Identity Fallback Elimination, which must not start
-until the user confirms.
+phase boundary. The last completed boundary is Wedge 3 UUID4 and Ambient
+Identity Fallback Elimination, which is closed and deployed. The next
+boundary is Wedge 4 Multi-Tenant Security Before Second Client, which
+must not start until the user confirms.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -2651,7 +2734,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Wedge 2 Celery/Redis Hardening is closed.
+Current phase: Wedge 3 UUID4 and Ambient Identity Fallback Elimination is closed.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
@@ -2660,8 +2743,12 @@ and replay windows, and the final deploy/health/CORS gate are closed.
 Wedge 2 Celery/Redis Hardening is closed and deployed with queue-depth
 health, result discipline, non-root Celery worker execution, explicit
 retry budgets, exponential retry countdowns, and traceback-rich DLQ
-metadata. Wedge 3 UUID4 and Ambient Identity Fallback Elimination must
-not start until the user explicitly confirms that phase boundary.
+metadata. Wedge 3 UUID4 and Ambient Identity Fallback Elimination is
+closed and deployed with deterministic active-app lineage IDs,
+boot-nonce-verified runtime counters, deterministic/idempotent DLQ
+replay, and source-level identity invariants. Wedge 4 Multi-Tenant
+Security Before Second Client must not start until the user explicitly
+confirms that phase boundary.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -2714,12 +2801,17 @@ Current verified baseline:
   expanded invariant subset plus Celery configuration tests 180 passed,
   2 skipped; smoke 4/4 green; Pyright 0 errors and 675 warnings; Fly.io
   health queue-depth section returned all queues `ok`.
+- Wedge 3 final gate backend verification: 2,294 passed, 2 skipped;
+  expanded invariant subset including identity tests 193 passed, 2
+  skipped; smoke 4/4 green; Pyright 0 errors and 654 warnings; active-app
+  UUID4 grep returned empty with the approved `_deprecated` quarantine
+  exclusion; Fly.io health queue-depth section returned all queues `ok`.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
-- Pyright warnings: 675; warnings must not grow phase over phase.
+- Pyright warnings: 654; warnings must not grow phase over phase.
 - Alembic current: 0032_escalation_outbox_claim_id (head).
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
@@ -2768,7 +2860,7 @@ Current verified baseline:
   preserved.
 
 Goal for this chat:
-Do not start Wedge 3 until the user explicitly confirms that boundary.
+Do not start Wedge 4 until the user explicitly confirms that boundary.
 Phase 6-F demo evidence capture remains open in parallel. Wedge 0
 deployed to Fly.io from commit
 `971001d`; live health/CORS passed; fresh product-defect session
@@ -2865,10 +2957,17 @@ Current Command Center 2 status:
   `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S` is live; production health
   includes all queue-depth statuses as `ok`; log grep returns only
   `redis_memory_policy_unverifiable`.
+- Wedge 3 final gate status:
+  Wedge 3 is closed and deployed. Full backend 2,294 passed, 2 skipped;
+  Pyright 0 errors and 654 warnings; expanded invariants including
+  identity 193 passed, 2 skipped; smoke 4/4 green; Alembic current
+  `0032_escalation_outbox_claim_id (head)`; active-app UUID4 grep
+  returned empty with the approved `_deprecated` quarantine exclusion;
+  Fly.io image `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3` is live;
+  production health returned `status: ok` with all five queues `ok`.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
-- Wedge 3 UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 RLS Force.
 - Vector Retrieval SQL-native.
 - Post-wedge 9+ Throughput and Capacity Program.
