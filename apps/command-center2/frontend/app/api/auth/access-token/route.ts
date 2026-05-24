@@ -1,9 +1,10 @@
 import { getAccessToken } from "@auth0/nextjs-auth0";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { accessToken } = await getAccessToken();
+    const tokenResponse = new NextResponse();
+    const { accessToken } = await getAccessToken(request, tokenResponse);
     if (!accessToken) {
       return NextResponse.json(
         { error: "Auth0 access token unavailable" },
@@ -11,10 +12,16 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { accessToken },
-      { headers: { "Cache-Control": "no-store" } }
+      {
+        headers: {
+          "Cache-Control": "no-store",
+          ...Object.fromEntries(tokenResponse.headers),
+        },
+      }
     );
+    return response;
   } catch (error) {
     return NextResponse.json(
       {
