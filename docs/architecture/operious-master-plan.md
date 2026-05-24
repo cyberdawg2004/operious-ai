@@ -3,9 +3,10 @@
 Updated baseline after Phase 6-D, Pre-6-E Enterprise Trust Hardening
 phases A-H, the re-run final Pre-6-E gate, Phase 6-E Frontend
 Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
-Phase 6-F Anker demo artifact kit, and the Wedge 0 backend hardening
-pass deployed and live-verified on Fly.io, plus Wedge 1 Phase 0 and
-Phase 1, Phase 2, Phase 3, and final-gate reliability hardening.
+Phase 6-F Anker demo artifact kit, the Wedge 0 backend hardening pass
+deployed and live-verified on Fly.io, Wedge 1 Phase 0 through final-gate
+reliability hardening, and Wedge 2 Celery/Redis hardening through final
+production verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -22,14 +23,21 @@ This document is the canonical handoff plan for the next Codex session.
   expanded invariant subset including vendor isolation and no-load-all
   persistence paths 167 passed, 2 skipped; smoke 4/4 green; Pyright
   0 errors and 676 warnings; production Fly.io health/CORS passed.
+- Wedge 2 final gate backend verification: 2,272 passed, 2 skipped;
+  expanded invariant subset plus Celery configuration tests 180 passed,
+  2 skipped; smoke 4/4 green; Pyright 0 errors and 675 warnings;
+  Alembic current `0032_escalation_outbox_claim_id (head)`; Fly.io
+  deployment image `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S` is live;
+  production health includes diagnostic, escalation, supervisor, QA, and
+  SOP intelligence queue-depth sections with status `ok`.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors, 676 warnings across the backend surface.
+- Pyright: 0 errors, 675 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
 - Alembic current: `0032_escalation_outbox_claim_id (head)` on the
-  `operious_test` database after Wedge 1 final-gate verification.
+  `operious_test` database after Wedge 2 final-gate verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -44,7 +52,7 @@ This document is the canonical handoff plan for the next Codex session.
   redirects through Auth0, and Marketing serves on `www.operious.com`.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F evidence capture remains open,
-  and Wedge 1 Reliability Before Anker Goes Live is closed. The demo
+  and Wedge 2 Celery/Redis Hardening is closed. The demo
   artifact kit is complete and
   production seeding has produced real Anker pilot sessions. Wedge 0
   live verification closed the fresh product-defect outlier with session
@@ -77,6 +85,14 @@ This document is the canonical handoff plan for the next Codex session.
   Wedge 1 final gate is complete: full backend, Pyright, expanded
   invariants, smoke, Alembic, current Fly log-buffer grep, deployment,
   health, and CORS checks passed on 2026-05-24.
+  Wedge 2 is complete: Redis memory policy startup logging distinguishes
+  `ok`, `unverifiable`, and `misconfigured`; Upstash dashboard
+  configuration is documented; Celery workers run as the non-root
+  `celery` user; broker retry startup behavior is explicit for Celery 6;
+  fire-and-forget tasks ignore result storage; Redis result TTL is one
+  hour; queue-depth admission covers diagnostic, escalation, supervisor,
+  QA, and SOP intelligence queues; health exposes queue depth; and DLQ
+  metadata now carries full traceback and replay/triage lineage.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2023,20 +2039,23 @@ before real Anker traffic or any second-client commitment.
 
 ### Current Honest Ratings
 
-- Architecture / substrate design: 8.5/10.
-- Audit, replay, governance foundation: 8.5/10.
-- Production deployment capacity: 6/10.
-- Demo readiness for controlled Anker call: 7.5/10.
-- Enterprise-grade readiness overall: 7/10.
+- Architecture / substrate design: 8.7/10.
+- Audit, replay, governance foundation: 8.8/10.
+- Production deployment capacity: 7.4/10.
+- Demo readiness for controlled Anker call: 7.8/10.
+- Enterprise-grade readiness overall: 7.5/10.
 
 These ratings are intentionally conservative. The architecture is strong,
-and Wedge 0 plus Wedge 1 have removed the known runtime identity,
-diagnostic schema-validation, request-body, escalation outbox, and
-webhook replay/freshness blockers. The remaining gap is operational
-scale: the current Fly/Celery/Redis shape is still a small pilot
-deployment, Redis memory policy is still reported as misconfigured in
-production startup logs, and Phase 6-F still needs browser evidence plus
-the session lifecycle/SOP intelligence follow-ups before Anker go-live.
+and Wedge 0, Wedge 1, and Wedge 2 have removed the known runtime
+identity, diagnostic schema-validation, request-body, escalation outbox,
+webhook replay/freshness, Celery result-retention, Redis queue-depth,
+worker privilege, and DLQ traceback blockers. The remaining gap is still
+operational maturity: production Redis policy is unverifiable from the
+Upstash Redis command surface and requires dashboard confirmation,
+queue-age/load tests and autoscaling contracts are not yet proven, Wedge
+3 still needs to eliminate UUID4 and ambient identity fallbacks, and
+Phase 6-F still needs browser evidence plus the session lifecycle/SOP
+intelligence follow-ups before Anker go-live.
 
 ### Rating Targets Before Pilot Launch
 
@@ -2261,19 +2280,50 @@ Acceptance criteria:
   returned 200 with `access-control-allow-origin:
   https://app.operious.com`. The current Fly log buffer grep found no
   `schema validation`, `diagnostic cognition failed`, `RuntimeError`,
-  `dead-letter`, or `dead_letter` strings after the deploy. New finding:
-  startup logs still warn `redis_memory_policy_misconfigured`, which is
-  explicitly queued for Wedge 2.
+  `dead-letter`, or `dead_letter` strings after the deploy. The startup
+  `redis_memory_policy_misconfigured` finding observed at this gate was
+  subsequently closed by Wedge 2.
 - Wedge 2 - Celery/Redis Hardening:
-  `task_ignore_result=True` for fire-and-forget tasks, `result_expires`,
-  queue-depth admission before publishing, Redis memory policy and
-  Upstash configuration documentation, and DLQ routing for
-  dead-lettered tasks. Expected effort: one Codex session, no migration.
-  New Wedge 1 final-gate findings for Wedge 2: production startup logs
-  still emit `redis_memory_policy_misconfigured`; the Celery worker also
-  starts as root and emits Celery 6.0 broker retry deprecation warnings.
-  Wedge 2 must convert these from warnings into explicit configuration,
-  verification, and runbook-backed operating contracts.
+  Closed on 2026-05-24. No migration was required. Phase 0 repaired the
+  known Wedge 1 findings: Redis memory policy startup checks now log
+  `redis_memory_policy_ok`, `redis_memory_policy_unverifiable`, or
+  `redis_memory_policy_misconfigured` as distinct states; Upstash CONFIG
+  restrictions are treated as manual-dashboard verification rather than a
+  false production error; `docs/persistence/redis-upstash-configuration.md`
+  documents `maxmemory-policy = allkeys-lru`; Celery explicitly sets
+  `broker_connection_retry_on_startup = True`; and the backend image runs
+  workers as the non-root `celery` user.
+  Phase 1 closed result discipline: global `result_expires` is one hour,
+  all fire-and-forget tasks use `ignore_result=True`, and source
+  invariants prove worker/execution/escalation/coordination/service paths
+  do not read ignored Celery results.
+  Phase 2 closed queue admission: Redis LLEN admission runs before
+  diagnostic, escalation, supervisor, QA, and SOP intelligence publishes;
+  queue backpressure emits structured `queue_backpressure_triggered`
+  logs; `DispatchResult.halt_reason` records `queue_backpressure`; and
+  `/api/v1/health` reports queue depth, limit, and status.
+  Phase 3 closed retry/DLQ discipline: every Celery task has an explicit
+  retry budget, diagnostic retries use exponential countdowns, terminal
+  diagnostic failures write `dead_letter_tasks` records, and DLQ metadata
+  includes `tenant_id`, `execution_id`, `session_id`, `attempt_count`,
+  `error_class`, `error_message`, `last_traceback`, and `task_payload`.
+  Final gate: full backend 2,272 passed, 2 skipped; Pyright 0 errors and
+  675 warnings; expanded invariants plus Celery configuration 180 passed,
+  2 skipped; smoke 4 passed; Alembic current
+  `0032_escalation_outbox_claim_id (head)`; Fly.io deployed image
+  `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S`; production health returned
+  `status: ok` with all five queues `ok`; Fly log grep returned only
+  `redis_memory_policy_unverifiable` and no root/deprecation or
+  `redis_memory_policy_misconfigured` warnings.
+  Wedge 2 finding retained for operations: the production Upstash Redis
+  policy cannot be verified through Redis CONFIG and still requires the
+  documented dashboard check that `maxmemory-policy` is `allkeys-lru`.
+  Remaining Wedge 3 handoff: re-audit UUID4 and ambient identity
+  fallbacks now that DLQ metadata and queue lineage are richer; ensure
+  DLQ replay/recovery references remain deterministic; add invariants
+  for any remaining persisted runtime path that can still call
+  `uuid.uuid4()` or use `_RUNTIME_COUNTER` without an approved
+  ephemeral/test-only marker.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination:
   eliminate UUID4 fallbacks and process-local runtime identity fallbacks
   in arbitration, supervisor, boundary, session, governance, execution,
@@ -2393,7 +2443,11 @@ The 9+ final gate cannot close until:
   body enforcement, Phase 2 escalation outbox claim/publish/mark/recover
   discipline, Phase 3 webhook freshness/replay windows, and the final
   deploy/health/CORS gate are complete.
-- Wedge 2 - Celery/Redis Hardening.
+- Wedge 2 - Celery/Redis Hardening is closed: Redis/Upstash policy
+  logging and documentation, non-root Celery worker execution, Celery 6
+  broker retry compatibility, result TTL/ignore-result discipline,
+  queue-depth admission/health/observability, and traceback-rich DLQ
+  metadata are complete and live-verified.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 - Multi-Tenant Security Before Second Client.
 - Vector retrieval SQL-native:
@@ -2431,9 +2485,9 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 1 Reliability Before Anker Goes Live is closed. Wedge 2 Celery/Redis Hardening must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
-Current verified backend baseline after Wedge 1 final gate: 2,255 passed, 2 skipped; expanded invariant subset including vendor isolation and no-load-all persistence paths 167 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
-Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
+Current phase: Wedge 2 Celery/Redis Hardening is closed and deployed. Wedge 3 UUID4 and Ambient Identity Fallback Elimination must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
+Current verified backend baseline after Wedge 2 final gate: 2,272 passed, 2 skipped; expanded invariant subset plus Celery configuration tests 180 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app; Alembic current `0032_escalation_outbox_claim_id (head)`. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, queue-depth health returned all queues `ok`, Fly log grep returned only `redis_memory_policy_unverifiable`, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current Pyright baseline: 0 errors, 675 warnings; warnings must not grow.
 Current Alembic head: 0032_escalation_outbox_claim_id.
 
 Completed before the next phase:
@@ -2492,9 +2546,25 @@ Completed before the next phase:
   Alembic current `0032_escalation_outbox_claim_id (head)`; Fly.io
   deployment image `deployment-01KSCYJC6WF80W60MCNFKEVKGS` is live on
   version 57; production health and CORS GET checks passed; current Fly
-  log buffer grep found no schema-validation/dead-letter strings. New
-  finding queued for Wedge 2: production startup still logs
-  `redis_memory_policy_misconfigured`.
+  log buffer grep found no schema-validation/dead-letter strings. The
+  Redis startup warning found at this gate was subsequently closed by
+  Wedge 2.
+- Wedge 2 Celery/Redis Hardening is closed on 2026-05-24:
+  Redis memory policy startup logging distinguishes ok, unverifiable, and
+  misconfigured states; Upstash `allkeys-lru` configuration is documented;
+  Celery workers run as non-root `celery`; Celery 6 broker retry startup
+  behavior is explicit; fire-and-forget tasks ignore results; result TTL
+  is one hour; queue-depth admission covers diagnostic, escalation,
+  supervisor, QA, and SOP intelligence queues; health reports queue
+  depth/limit/status; retry budgets are explicit; diagnostic retries use
+  exponential countdowns; and DLQ metadata includes full traceback plus
+  task payload lineage. Final gate: full backend 2,272 passed, 2 skipped;
+  Pyright 0 errors and 675 warnings; invariants plus Celery configuration
+  180 passed, 2 skipped; smoke 4/4 green; Alembic current
+  `0032_escalation_outbox_claim_id (head)`; Fly.io deployment image
+  `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S` is live; production health
+  returned all five queues `ok`; log grep returned only
+  `redis_memory_policy_unverifiable`.
 
 - Command Center 2 Critical Fixes Phase A is closed:
   live endpoint verification proved the `/api/v1/session/*` routes and
@@ -2538,8 +2608,8 @@ Remaining before the next wedge:
   call.
 - Investigate the latest fresh refund dead-letter
   `d6b45aef-2146-5e6d-ba85-367615857cef` before Anker go-live.
-- Do not start Wedge 2, Wedge 3, Wedge 4, vector retrieval SQL-native,
-  or pilot launch until their phase boundaries are explicitly confirmed.
+- Do not start Wedge 3, Wedge 4, vector retrieval SQL-native, or pilot
+  launch until their phase boundaries are explicitly confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -2564,9 +2634,10 @@ pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Do not start the next master-plan wedge until the user confirms the
-phase boundary. The last completed boundary is Wedge 1 Reliability
-Before Anker Goes Live, which is closed. The next boundary is Wedge 2
-Celery/Redis Hardening, which must not start until the user confirms.
+phase boundary. The last completed boundary is Wedge 2 Celery/Redis
+Hardening, which is closed and deployed. The next boundary is Wedge 3
+UUID4 and Ambient Identity Fallback Elimination, which must not start
+until the user confirms.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -2580,14 +2651,17 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Wedge 1 Reliability Before Anker Goes Live is closed.
+Current phase: Wedge 2 Celery/Redis Hardening is closed.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
 outbox claim/publish/mark/recover discipline, Phase 3 webhook freshness
 and replay windows, and the final deploy/health/CORS gate are closed.
-Wedge 2 Celery/Redis Hardening must not start until the user explicitly
-confirms that phase boundary.
+Wedge 2 Celery/Redis Hardening is closed and deployed with queue-depth
+health, result discipline, non-root Celery worker execution, explicit
+retry budgets, exponential retry countdowns, and traceback-rich DLQ
+metadata. Wedge 3 UUID4 and Ambient Identity Fallback Elimination must
+not start until the user explicitly confirms that phase boundary.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -2636,12 +2710,16 @@ Current verified baseline:
   expanded invariant subset including vendor isolation and no-load-all
   persistence paths 167 passed, 2 skipped;
   smoke 4/4 green; Pyright 0 errors and 676 warnings.
+- Wedge 2 final gate backend verification: 2,272 passed, 2 skipped;
+  expanded invariant subset plus Celery configuration tests 180 passed,
+  2 skipped; smoke 4/4 green; Pyright 0 errors and 675 warnings; Fly.io
+  health queue-depth section returned all queues `ok`.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
-- Pyright warnings: 676; warnings must not grow phase over phase.
+- Pyright warnings: 675; warnings must not grow phase over phase.
 - Alembic current: 0032_escalation_outbox_claim_id (head).
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
@@ -2690,7 +2768,7 @@ Current verified baseline:
   preserved.
 
 Goal for this chat:
-Do not start Wedge 2 until the user explicitly confirms that boundary.
+Do not start Wedge 3 until the user explicitly confirms that boundary.
 Phase 6-F demo evidence capture remains open in parallel. Wedge 0
 deployed to Fly.io from commit
 `971001d`; live health/CORS passed; fresh product-defect session
@@ -2778,12 +2856,18 @@ Current Command Center 2 status:
 - Wedge 1 final gate status:
   Wedge 1 is closed and deployed. Full backend, Pyright, expanded
   invariants, smoke, Alembic, production deploy, health, CORS, and Fly
-  log-buffer grep passed. Wedge 2 Celery/Redis Hardening is next, but
-  must wait for explicit human confirmation.
+  log-buffer grep passed.
+- Wedge 2 final gate status:
+  Wedge 2 is closed and deployed. Full backend 2,272 passed, 2 skipped;
+  Pyright 0 errors and 675 warnings; expanded invariants plus Celery
+  configuration 180 passed, 2 skipped; smoke 4/4 green; Alembic current
+  `0032_escalation_outbox_claim_id (head)`; Fly.io image
+  `deployment-01KSD3ZXMGPA01YR4FT3YYCB9S` is live; production health
+  includes all queue-depth statuses as `ok`; log grep returns only
+  `redis_memory_policy_unverifiable`.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
-- Wedge 2 Celery/Redis Hardening.
 - Wedge 3 UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 RLS Force.
 - Vector Retrieval SQL-native.
