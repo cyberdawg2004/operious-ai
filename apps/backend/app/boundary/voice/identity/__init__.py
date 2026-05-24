@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 
@@ -41,6 +42,7 @@ _PROVIDER_NAMESPACE = uuid.UUID(
 _REPLAY_NAMESPACE = uuid.UUID(
     "030fdc2a-0008-4008-8008-200000000008"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -73,7 +75,7 @@ def generate_replay_id() -> VoiceReplayId:
 
 
 def _runtime_seed(label: str) -> str:
-    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
+    return f"runtime|{label}|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}"
 
 
 def derive_event_id(*, seed: str) -> VoiceEventId:

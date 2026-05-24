@@ -97,6 +97,10 @@ class OperationalAct(StrEnum):
     OI_MEMORY_PROPOSE = "oi_memory:propose"
     OI_RECOMMENDATION_GENERATE = "oi_recommendation:generate"
     OI_SOP_INGEST = "oi_sop:ingest"
+    OI_SOP_APPROVAL_PROPOSE = "oi_sop:approval_propose"
+    OI_SOP_APPROVAL_APPROVE = "oi_sop:approval_approve"
+    OI_SOP_APPROVAL_REJECT = "oi_sop:approval_reject"
+    OI_SOP_APPROVAL_APPLY = "oi_sop:approval_apply"
     OI_TONALITY_CLASSIFY = "oi_tonality:classify"
 
     # ─── QA chronology projection ───────────────────────────────────

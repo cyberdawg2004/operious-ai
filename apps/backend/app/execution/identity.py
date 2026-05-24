@@ -7,8 +7,9 @@ worker to perform exactly one unit of work derived from that decision.
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 from app.identity import project_optional_str
@@ -28,12 +29,16 @@ _OUTBOX_NAMESPACE: uuid.UUID = uuid.UUID(
 _ATTEMPT_NAMESPACE: uuid.UUID = uuid.UUID(
     "e0ec7001-0003-4003-8003-000000000003"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
 def generate_execution_id() -> ExecutionId:
     return ExecutionId(
-        uuid.uuid5(_EXECUTION_NAMESPACE, f"runtime|execution|{next(_RUNTIME_COUNTER)}")
+        uuid.uuid5(
+            _EXECUTION_NAMESPACE,
+            f"runtime|execution|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}",
+        )
     )
 
 

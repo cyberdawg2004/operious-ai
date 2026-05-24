@@ -30,8 +30,9 @@ breaking change to every previously derived identifier.
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 from app.identity import project_optional_str
@@ -71,6 +72,7 @@ _TRACE_NAMESPACE: uuid.UUID = uuid.UUID(
 _RECONSTRUCTION_NAMESPACE: uuid.UUID = uuid.UUID(
     "5e551001-0006-4006-8006-000000000006"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -102,7 +104,7 @@ def generate_reconstruction_id() -> SessionReconstructionId:
 
 
 def _runtime_seed(label: str) -> str:
-    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
+    return f"runtime|{label}|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay-safe deterministic UUID5 ─────────────────────────────────

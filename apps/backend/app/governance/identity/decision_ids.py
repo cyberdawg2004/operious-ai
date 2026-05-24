@@ -1,8 +1,10 @@
 """Decision ID generation + deterministic derivation.
 
-`generate_decision_id` is the **default runtime path** — UUID4,
-unique across live execution. This is what `GovernanceRuntime.evaluate`
-calls when constructing a decision.
+`generate_decision_id` is the emergency runtime fallback — UUID5
+over a per-process boot nonce plus a monotonic counter. Normal
+persisted governance paths should supply `governance.decision_seed`
+so the decision ID is derived from domain lineage instead of the
+fallback.
 
 `derive_decision_id(seed=...)` is the **replay / deterministic path**
 — UUID5 keyed against `DECISION_NAMESPACE`. Same seed → same UUID.
@@ -11,34 +13,37 @@ Used by:
 * replay tools that need byte-identical reconstruction,
 * tests that assert decision identity stability.
 
-The substrate is explicit about which path runtime uses (uuid4) and
-which path replay uses (uuid5 with a stable seed). There is no
-implicit ID stability in production — see
+The substrate is explicit about which path live lineage should use
+(stable UUID5 seeds) and which path remains only as a collision-safe
+fallback. There is no implicit ID stability in the fallback — see
 `docs/architecture/governance-replay-semantics.md`.
 """
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 
 # Fixed namespace for the governance substrate. Generated once,
 # pinned forever. Changing this would invalidate every previously
 # derived UUID — treat it as a permanent constant.
 DECISION_NAMESPACE: uuid.UUID = uuid.UUID("4d2c10a2-6c00-4f7c-8b3a-1f8d0c7e0001")
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
 def generate_decision_id() -> uuid.UUID:
-    """Return a fresh UUID4 — the runtime path.
+    """Return a fresh UUID5 fallback ID for unseeded runtime callers.
 
-    Unique across live runtime execution; never collides with prior
-    decision IDs. Used by `GovernanceRuntime` when constructing a
-    `GovernanceDecision` for live evaluation.
+    The seed is boot-scoped so a worker restart cannot replay
+    ``runtime|decision|0`` into an existing production decision row.
+    Persisted governance paths should still prefer
+    ``derive_decision_id(seed=...)`` with a domain-specific seed.
     """
     return uuid.uuid5(
         DECISION_NAMESPACE,
-        f"runtime|decision|{next(_RUNTIME_COUNTER)}",
+        f"runtime|decision|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}",
     )
 
 

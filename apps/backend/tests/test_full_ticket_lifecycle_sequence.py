@@ -88,6 +88,7 @@ from app.runtime import (
     ExecutionOperationalEventProjector,
     GovernanceOperationalEventProjector,
     SessionOperationalEventProjector,
+    SOPApprovalOperationalEventProjector,
 )
 from app.session.contracts.requests import OpenSessionRequest
 from app.session.contracts.results import OpenSessionResult
@@ -95,6 +96,12 @@ from app.session.enums import SessionScope
 from app.session.identity import derive_session_id
 from app.session.persistence import InMemorySessionPersistence
 from app.session.runtime import SessionRuntime
+from app.sop_intelligence import (
+    ApprovalRecord,
+    ApprovalStatus,
+    InMemorySOPApprovalPersistence,
+    derive_approval_id,
+)
 from app.governance.capability.acts import OperationalAct
 from tests.conftest import execution_admission_token
 
@@ -104,6 +111,8 @@ PRINCIPAL_ID = "principal-1"
 REQUEST_ID = "req-full-ticket-2-5-e"
 EXTERNAL_MESSAGE_ID = "ticket-full-lifecycle-001"
 NOW = datetime(2026, 5, 22, 14, 0, tzinfo=timezone.utc)
+ANKER_DEMO_DOCUMENT_ID = uuid.UUID("00000000-0000-0000-0000-000000006f20")
+ANKER_DEMO_QA_SCORE_ID = uuid.UUID("00000000-0000-0000-0000-000000006f21")
 
 
 class _TicketIngressAdapter(BaseIngressAdapter):
@@ -245,6 +254,7 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
     coordination_store = InMemoryCoordinationPersistence()
     session_store = InMemorySessionPersistence()
     execution_store = InMemoryExecutionPersistence()
+    approval_store = InMemorySOPApprovalPersistence()
     event_runtime = OperationalEventRuntime(
         persistence=InMemoryOperationalEventPersistence()
     )
@@ -408,6 +418,37 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
         result={"summary": "resolved"},
         completed_at=NOW + timedelta(seconds=6),
     )
+    approval = ApprovalRecord(
+        approval_id=str(
+            derive_approval_id(
+                tenant_id=TENANT_ID,
+                document_id=ANKER_DEMO_DOCUMENT_ID,
+                evidence_sessions=(str(session.identity.session_id),),
+                qa_score_id=ANKER_DEMO_QA_SCORE_ID,
+            )
+        ),
+        tenant_id=TENANT_ID,
+        document_id=str(ANKER_DEMO_DOCUMENT_ID),
+        proposed_change=(
+            "Add stopped-charging checklist for Anker PowerCore tickets."
+        ),
+        evidence_sessions=(str(session.identity.session_id),),
+        confidence=0.94,
+        status=ApprovalStatus.PENDING_REVIEW.value,
+        proposed_by="sop_intelligence_agent:v1",
+        reviewed_by=None,
+        created_at=(NOW + timedelta(seconds=7)).isoformat(),
+        metadata={
+            "anker_demo_scenario": True,
+            "source_ticket_subject": "PowerCore does not charge",
+            "source_ticket_body": "My Anker PowerCore stopped charging.",
+            "proposal_only": True,
+        },
+    )
+    await approval_store.create_approval_record(
+        approval,
+        expected_tenant_id=TENANT_ID,
+    )
 
     boundary_projection = await BoundaryOperationalEventProjector(
         boundary_persistence=boundary_store,
@@ -438,6 +479,13 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
         execution_request.execution.execution_id,
         expected_tenant_id=TENANT_ID,
     )
+    approval_projection = await SOPApprovalOperationalEventProjector(
+        approval_persistence=approval_store,
+        event_runtime=event_runtime,
+    ).project_approval(
+        approval.approval_id,
+        expected_tenant_id=TENANT_ID,
+    )
     execution_events = tuple(
         projection.operational_event for projection in execution_projections
     )
@@ -462,6 +510,7 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
         execution_request_event,
         execution_claim_event,
         execution_complete_event,
+        approval_projection.operational_event,
     )
     assert [event.operational_act for event in canonical_sequence] == [
         OperationalAct.BOUNDARY_INGEST,
@@ -471,6 +520,7 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
         OperationalAct.EXECUTION_REQUEST,
         OperationalAct.EXECUTION_CLAIM,
         OperationalAct.EXECUTION_COMPLETE,
+        OperationalAct.OI_SOP_APPROVAL_PROPOSE,
     ]
     assert {event.tenant_id for event in canonical_sequence} == {TENANT_ID}
 
@@ -478,6 +528,7 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
     coordination_event = coordination_projection.operational_event
     governance_event = governance_projection.operational_event
     session_event = session_projection.operational_event
+    approval_event = approval_projection.operational_event
     assert coordination_event.causality.parent_event_id == boundary_event.event_id
     assert coordination_event.causality.root_event_id == boundary_event.event_id
     assert coordination_event.governance_decision_id == governance_event.event_id
@@ -501,6 +552,10 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
     assert execution_complete_event.causality.parent_event_id == (
         execution_claim_event.event_id
     )
+    assert approval_event.metadata["proposal_only"] is True
+    assert approval_event.metadata["evidence_sessions"] == [
+        str(session.identity.session_id)
+    ]
 
     replay = await OperationalReplayRuntime(
         event_runtime=event_runtime
@@ -543,4 +598,9 @@ async def test_processed_ticket_projects_canonical_lifecycle_sequence() -> None:
         execution_complete_event.event_id,
         OperationalLineageRelation.LOCAL_PARENT,
         execution_claim_event.event_id,
+    ) in edges
+    assert (
+        approval_event.event_id,
+        OperationalLineageRelation.SOP_APPROVAL_EVIDENCES_SESSION,
+        session_event.event_id,
     ) in edges

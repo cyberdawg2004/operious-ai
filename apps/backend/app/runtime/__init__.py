@@ -62,6 +62,13 @@ from app.runtime.session_event_projection import (
     SessionOperationalEventProjector,
     project_session_timeline_event,
 )
+from app.runtime.sop_approval_event_projection import (
+    SOPApprovalEventProjectionError,
+    SOPApprovalOperationalEventProjection,
+    SOPApprovalOperationalEventProjector,
+    make_postgres_sop_approval_event_projector,
+    project_sop_approval_record,
+)
 from app.runtime.supervisor_event_projection import (
     SupervisorEventProjectionError,
     SupervisorOperationalEventProjection,
@@ -116,12 +123,16 @@ __all__ = [
     "SessionOperationalEventProjection",
     "SessionOperationalEventProjector",
     "SESSION_EVENT_KIND_TO_OPERATIONAL_ACT",
+    "SOPApprovalEventProjectionError",
+    "SOPApprovalOperationalEventProjection",
+    "SOPApprovalOperationalEventProjector",
     "SupervisorEventProjectionError",
     "SupervisorOperationalEventProjection",
     "SupervisorOperationalEventProjector",
     "TenantCoordinationTopologyRuntimeProvider",
     "TimelineRuntime",
     "build_coordination_topology_runtime",
+    "make_postgres_sop_approval_event_projector",
     "make_postgres_dispatch_arbitration_runtime",
     "project_arbitration_record",
     "project_boundary_ingress_record",
@@ -131,5 +142,6 @@ __all__ = [
     "project_governance_decision_record",
     "project_qa_score_record",
     "project_session_timeline_event",
+    "project_sop_approval_record",
     "project_supervisor_inspection_record",
 ]

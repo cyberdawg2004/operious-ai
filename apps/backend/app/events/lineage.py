@@ -8,9 +8,10 @@ authority.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from app.events.event import OperationalEvent
 from app.events.exceptions import EventFabricError
@@ -30,6 +31,7 @@ class OperationalLineageRelation(StrEnum):
     EXECUTION_FOR_SESSION = "execution_for_session"
     SUPERVISES_EXECUTION = "supervises_execution"
     ARBITRATES_AUTHORITY = "arbitrates_authority"
+    SOP_APPROVAL_EVIDENCES_SESSION = "sop_approval_evidences_session"
 
 
 class OperationalLineageError(EventFabricError):
@@ -176,6 +178,12 @@ def normalize_operational_lineage(
             event=event,
             by_id=by_id,
             execution_roots=execution_roots,
+            edges=edges,
+            unresolved=unresolved,
+        )
+        _add_sop_approval_evidence_session_edges(
+            event=event,
+            session_roots=session_roots,
             edges=edges,
             unresolved=unresolved,
         )
@@ -367,6 +375,46 @@ def _add_arbitration_authority_edges(
         },
         expected_target_substrate=expected_target_substrate,
     )
+
+
+def _add_sop_approval_evidence_session_edges(
+    *,
+    event: OperationalEvent,
+    session_roots: Mapping[str, OperationalEvent],
+    edges: dict[
+        tuple[EventId, OperationalLineageRelation, EventId],
+        OperationalLineageEdge,
+    ],
+    unresolved: dict[
+        tuple[EventId, OperationalLineageRelation, str],
+        OperationalLineageUnresolvedReference,
+    ],
+) -> None:
+    if event.operational_act not in {
+        OperationalAct.OI_SOP_APPROVAL_PROPOSE,
+        OperationalAct.OI_SOP_APPROVAL_APPROVE,
+        OperationalAct.OI_SOP_APPROVAL_REJECT,
+        OperationalAct.OI_SOP_APPROVAL_APPLY,
+    }:
+        return
+    evidence_sessions = event.metadata.get("evidence_sessions")
+    if not isinstance(evidence_sessions, (list, tuple)):
+        return
+    session_values = cast(Sequence[object], evidence_sessions)
+    for value in session_values:
+        session_id = str(value)
+        if not session_id:
+            continue
+        _resolve_or_record(
+            source=event,
+            relation=OperationalLineageRelation.SOP_APPROVAL_EVIDENCES_SESSION,
+            target_key=session_id,
+            target=session_roots.get(session_id),
+            edges=edges,
+            unresolved=unresolved,
+            metadata={"session_id": session_id},
+            expected_target_substrate=OperationalSubstrate.SESSION,
+        )
 
 
 def _resolve_or_record(

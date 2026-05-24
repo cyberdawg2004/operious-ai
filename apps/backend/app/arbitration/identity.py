@@ -32,8 +32,9 @@ change to every previously derived identifier in the substrate.
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 
@@ -77,6 +78,7 @@ _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
 _DEADLOCK_NAMESPACE: uuid.UUID = uuid.UUID(
     "a1b2c3d4-0008-4008-8008-000000000008"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -104,7 +106,7 @@ def generate_recommendation_id() -> ArbitrationRecommendationId:
 
 
 def _runtime_seed(label: str) -> str:
-    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
+    return f"runtime|{label}|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

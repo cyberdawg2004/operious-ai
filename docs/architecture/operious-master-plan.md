@@ -1,14 +1,21 @@
 # Operious AI Consolidated Master Plan
 
 Updated baseline after Phase 6-D, Pre-6-E Enterprise Trust Hardening
-phases A-H, the re-run final Pre-6-E gate, and Phase 6-E Frontend
-Hydration, plus the Phase 3-D.1 ApprovalRecord projection follow-up.
+phases A-H, the re-run final Pre-6-E gate, Phase 6-E Frontend
+Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
+Phase 6-F Anker demo artifact kit, and the Wedge 0 local backend
+hardening pass.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
-- Tests: 2,206 passed, 2 skipped, 0 xfailed after Phase 3-D.1
-  ApprovalRecord projection.
+- Full-suite baseline before Phase 6-F artifact additions: 2,206
+  passed, 2 skipped, 0 xfailed after Phase 3-D.1 ApprovalRecord
+  projection.
+- Phase 6-F focused artifact checks: 6 passed.
+- Wedge 0 local backend verification: 2,224 passed, 2 skipped,
+  0 xfailed; invariant subset 162 passed, 2 skipped; smoke 4/4 green;
+  Pyright 0 errors across `apps/backend/app`.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
@@ -27,9 +34,16 @@ This document is the canonical handoff plan for the next Codex session.
   Phase B, Phase C, Phase D, Phase E, Phase F, Phase G, Phase H, and
   the final Pre-6-E gate.
 - Current frontend gate: Command Center 2 Critical Fixes Phase E Final
-  Gate has passed local build/deploy checks, but remains open for live
-  Auth0 environment configuration and custom-domain confirmation.
-  Phases A-D are closed and pushed to `phase-2-2-stabilized`.
+  Gate is closed. Live production domains resolve, the Command Center
+  redirects through Auth0, and Marketing serves on `www.operious.com`.
+  Phases A-E are closed and pushed to `phase-2-2-stabilized`.
+- Current backend/demo gate: Phase 6-F is in progress. The demo artifact
+  kit is complete and production seeding has produced real Anker pilot
+  sessions. Four sessions from fresh run `20260524014342` completed with
+  diagnostic timelines; the fresh product-defect session is still a
+  retry/failure outlier, so the demo set temporarily uses the prior
+  completed product-defect session until a clean fresh product rerun or
+  root-cause fix closes the phase.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -1624,7 +1638,7 @@ Rules of engagement:
   `https://app.operious.com` and `http://localhost:3000`; web origins
   `https://app.operious.com` and `http://localhost:3000`.
 
-### Command Center 2 Phase E - Final Gate - Open On External Auth/Domain
+### Command Center 2 Phase E - Final Gate - Done
 
 - [x] Command Center `npm run lint`: passed.
 - [x] Command Center `npm run build`: passed.
@@ -1651,7 +1665,7 @@ Rules of engagement:
   `MIDDLEWARE_INVOCATION_FAILED`.
 - [x] Wrapped the Auth0 v3 App Router handler so Next 16 async route
   params are resolved before delegating to `handleAuth()`.
-- [x] Production deploy to the intended Vercel project succeeded:
+- [x] Initial production deploy to the intended Vercel project succeeded:
   - Project: `operious-ai-command-center`
   - Deployment id: `dpl_2Qbd7tLYb8pDuXTWCyyB7N4aWei6`
   - Deployment URL:
@@ -1665,23 +1679,313 @@ Rules of engagement:
   - `/sign-in` returned HTTP 200.
   - `/api/auth/login` returned HTTP 307 to
     `/sign-in?auth=unconfigured` while Auth0 production env is absent.
-- [ ] Vercel production env is still missing the Auth0 v3 server-side
-  variables required for real login:
+- [x] Vercel production env was configured with the Auth0 v3
+  server-side variables required for live login:
   `AUTH0_SECRET`, `AUTH0_BASE_URL`, `AUTH0_ISSUER_BASE_URL`,
   `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`,
   `NEXT_PUBLIC_API_BASE_URL`, and `NEXT_PUBLIC_DEFAULT_TENANT_ID`.
-  Existing production env currently uses older `NEXT_PUBLIC_AUTH0_*`
-  and `NEXT_PUBLIC_OPERIOUS_*` names.
-- [ ] `https://app.operious.com` does not resolve yet; DNS/custom-domain
-  aliasing remains external setup.
-- [ ] Live browser/Auth0 flow confirmation remains open because local
-  dev/browser verification was skipped per user instruction after the
-  laptop lag/hard restart.
+- [x] `AUTH0_BASE_URL` was explicitly updated to
+  `https://app.operious.com`.
+- [x] Final Command Center production redeploy succeeded:
+  - Project: `operious-ai-command-center`
+  - Deployment id: `dpl_C7bzYq9WmTbzLie5XyC5a1TbXP5z`
+  - Deployment URL:
+    `https://operious-ai-command-center-54vshzeez-cyberdawg2004s-projects.vercel.app`
+  - Production alias: `https://app.operious.com`
+  - Ready state: `READY`
+- [x] Final Command Center production HTTP checks:
+  - `https://app.operious.com` returned HTTP 307 to
+    `/api/auth/login?returnTo=%2F`.
+  - `https://operious-ai-command-center.vercel.app` returned HTTP 307
+    to `/api/auth/login?returnTo=%2F`.
+  - `https://app.operious.com/api/auth/login` returned HTTP 302 to
+    `https://operious-dev.uk.auth0.com/authorize` with callback
+    `https://app.operious.com/api/auth/callback`.
+- [x] Backend CORS was updated and deployed to Fly.io for production
+  domains:
+  - `https://app.operious.com`
+  - `https://www.operious.com`
+  - `https://operious.com`
+  - `http://localhost:3000`
+  - `https://operious-ai-command-center.vercel.app`
+- [x] Backend production checks:
+  - `https://operious-ai-imad.fly.dev/api/v1/health` returned HTTP 200
+    with healthy JSON.
+  - CORS response for `Origin: https://app.operious.com` included
+    `access-control-allow-origin: https://app.operious.com`.
+    The `curl -I` command returned HTTP 405 because the health route
+    does not serve `HEAD`, but the CORS header was present and correct.
+- [x] Marketing production redeploy succeeded:
+  - Project: `operious-ai-marketing`
+  - Deployment id: `dpl_6BPwjpKYnQgQtC8DdmJTPEcFHBTC`
+  - Deployment URL:
+    `https://operious-ai-marketing-pzq8z3478-cyberdawg2004s-projects.vercel.app`
+  - Production alias: `https://www.operious.com`
+  - Ready state: `READY`
+- [x] Final Marketing production HTTP checks:
+  - `https://www.operious.com` returned HTTP 200.
+  - `https://operious.com` returned HTTP 307 to
+    `https://www.operious.com/`.
+- [x] Local dev/browser verification remains intentionally skipped
+  unless the user explicitly asks for it, because the prior dev-server
+  pass caused laptop lag and a hard restart. Live HTTP/Auth0 redirect
+  verification is complete.
 
-## Queued Roadmap After Command Center 2 Fixes
+## Phase 6-F - Anker Demo Scenario - In Progress
 
-- Phase 6-F: Anker demo scenario. Complete the demo path now that
-  Phase 3-D.1 makes SOP approval lineage visible in canonical replay.
+- Goal: build an end-to-end demo artifact for Jiao Ma and the Anker
+  pilot path: tenant configuration, SOP corpus, demo tickets, canonical
+  timelines, and a stakeholder walkthrough script.
+- Use the existing backend ingestion, governance, session timeline,
+  knowledge, and Command Center Trace Inspector paths. Do not add mocks.
+- Artifact kit added under `apps/backend/scripts/anker_demo/`:
+  - `seed_anker_demo.py`: API-driven, dry-run capable seed runner for
+    `anker-pilot`.
+  - `sops/anker_charging_issue_policy.md`
+  - `sops/anker_returns_policy.md`
+  - `sops/anker_warranty_terms.md`
+  - `sops/anker_escalation_matrix.md`
+  - `sops/anker_product_defect_classification.md`
+  - `demo_tickets.json`
+  - `demo_walkthrough.md`
+- Seed runner behavior:
+  - Configures tenant-owned email channel only when channel credentials
+    are provided through environment variables. No channel credentials
+    are hardcoded.
+  - Configures execution governance and Anker demo governance policy
+    records through `/api/v1/tenant/*`.
+  - Uploads and indexes the five SOP documents through
+    `/api/v1/tenant/knowledge` and
+    `/api/v1/knowledge/documents/{document_id}/ingest`.
+  - Submits the five demo tickets through
+    `/api/v1/boundary/translation/ingress`.
+  - Dispatches each ticket through `/api/v1/coordination/dispatch`.
+  - Reads proof surfaces through `/api/v1/session/{session_id}/timeline`
+    and `/api/v1/session/sessions/{session_id}/events`.
+  - Uses deterministic UUID5-derived external ticket IDs; no uuid4
+    lineage is introduced.
+- SOP source posture:
+  - Demo policy text is paraphrased from public Anker return and warranty
+    policy themes and is marked as pilot demo corpus.
+  - Replace with Anker-approved production source text before any live
+    customer handling.
+- Focused verification added:
+  - `apps/backend/tests/test_anker_demo_assets.py`
+  - Verifies five SOP files, five tickets, deterministic external IDs,
+    dry-run coverage, and absence of dead Phase 6-E endpoints such as
+    `/operational-events/replay`.
+- Verification run:
+  - `venv/bin/python -m pytest apps/backend/tests/test_anker_demo_assets.py -q`
+    -> 6 passed.
+  - `venv/bin/pyright apps/backend/scripts/anker_demo/seed_anker_demo.py apps/backend/tests/test_anker_demo_assets.py --level error`
+    -> 0 errors.
+- Live production seeding and verification on 2026-05-24:
+  - Production Alembic on Fly/Neon verified at
+    `0031_dead_letter_tasks (head)`.
+  - `anker-pilot` tenant anchor exists in production.
+  - Seed runner now emits stderr progress lines before each ingress,
+    dispatch, timeline, and session-events request so long live API calls
+    are visible instead of appearing frozen.
+  - Seed runner supports retry-safe run IDs and per-request timeout
+    control; verified live with `--skip-channel --skip-policies
+    --skip-sops --timeout-seconds 300`.
+  - Fresh live run `20260524014342` returned five session IDs:
+    - Charging allow:
+      `2b7af7a5-96be-5ec9-ba1e-40f19435dc8c`,
+      category `charging_issue`, confidence `0.93`.
+    - Refund over limit:
+      `5bb139de-079b-5c20-a2da-3660b203a576`,
+      category `refund_issue`, confidence `0.97`.
+    - Arabic language review:
+      `ea1bc2a6-2d06-5f48-92c6-329887630e3f`,
+      category `charging_issue`, confidence `0.82`.
+    - Product defect fresh run:
+      `5e28c731-6ea3-51d3-aabf-92777a96acfe`,
+      currently retrying/failing with
+      `diagnostic cognition failed: RuntimeError`.
+    - Ambiguous human review:
+      `b2dc14b0-3de7-500c-be77-64a7be0e2822`,
+      category `charging_issue`, confidence `0.82`.
+  - Completed product-defect proof session from prior live seed:
+    `8ba795db-45fa-5674-94b6-4f888e70c8ed`,
+    category `product_defect`, confidence `0.88`, with completed
+    `diagnostic_analysis_completed` timeline event and real cognition
+    audit/governance decision IDs.
+  - Verified through live APIs:
+    `/api/v1/session/sessions`,
+    `/api/v1/session/{session_id}/timeline`, and
+    `/api/v1/session/sessions/{session_id}/events`.
+- Open to close Phase 6-F:
+  - Root-cause or rerun the fresh product-defect ticket so the
+    `20260524014342` run has five clean completed timelines, or formally
+    select the prior completed product-defect proof session for the demo.
+  - Confirm the five selected sessions open in Command Center Trace
+    Inspector with real timeline events.
+  - Capture session IDs and the live demo evidence for the Jiao Ma call.
+
+## 9+ Enterprise Readiness Program - No Tolerance Below 9
+
+Operious is no longer optimizing for "demo green." The target state is
+enterprise production readiness where every rated axis is at least 9/10
+before real Anker traffic or any second-client commitment.
+
+### Current Honest Ratings
+
+- Architecture / substrate design: 7/10.
+- Audit, replay, governance foundation: 6.5/10.
+- Production deployment capacity: 3/10.
+- Demo readiness for controlled Anker call: 6.5/10.
+- Enterprise-grade readiness overall: 4.5-5/10.
+
+These ratings are intentionally conservative. The architecture is strong,
+but the live product-defect seed exposed a runtime identity collision in
+governance decision persistence, and the current Fly/Celery production
+shape is a tiny worker deployment rather than an enterprise throughput
+deployment.
+
+### Rating Targets Before Pilot Launch
+
+- Architecture / substrate design: >= 9/10.
+  Required proof: no process-local runtime identity collisions, no
+  ambiguous ownership between routers/services/runtimes/persistence,
+  queue and worker topology expressed as explicit platform contracts, and
+  all high-risk substrates covered by invariants.
+- Audit, replay, governance foundation: >= 9/10.
+  Required proof: governance IDs never collide across process restarts,
+  audit and replay surfaces preserve every causality edge, cognition
+  failures retain precise root-cause metadata, and replay can reconstruct
+  selected Anker demo timelines without hidden substrate mutations.
+- Production deployment capacity: >= 9/10.
+  Required proof: worker pools, queue separation, queue-depth admission,
+  provider quota enforcement, DLQ routing, queue-age observability, and
+  burst/load tests for 100, 1,000, and 10,000 ticket scenarios.
+- Demo readiness for controlled Anker call: >= 9/10.
+  Required proof: five selected Anker sessions open in Command Center
+  with real timelines, diagnostic classification, governance decision
+  IDs, cognition audit IDs, and stable talking points. The demo must be
+  repeatable without relying on stale broken retries.
+- Enterprise-grade readiness overall: >= 9/10.
+  Required proof: all wedges below closed, production checks green,
+  load tests documented, rollback/runbooks written, and no known P0/P1
+  correctness, tenant isolation, replay, governance, queue, or deployment
+  gaps remain open.
+
+### Critical Finding From Live Product-Defect Retry
+
+- The fresh product-defect session
+  `5e28c731-6ea3-51d3-aabf-92777a96acfe` failed after Anthropic returned
+  HTTP 200 and after governance evaluation began.
+- Rollback-only live probe on Fly captured the original exception:
+  duplicate governance decision ID
+  `29ee4a8e-9f3d-5550-8a9c-00a8b1387837` violating
+  `pk_governance_decisions`.
+- Root cause: `generate_decision_id()` uses UUID5 over a process-local
+  counter. The counter resets across processes/restarts, so the live
+  runtime path can collide even though comments describe it as UUID4-like
+  uniqueness.
+- Same risky pattern exists in additional ambient identity generators
+  using `_RUNTIME_COUNTER` and UUID5 runtime seeds. Some critical paths
+  already supply deterministic override seeds, but the ambient generator
+  pattern is not enterprise-safe.
+- This does not invalidate the controlled Anker demo because a completed
+  prior product-defect proof session exists, but it blocks real
+  go-live.
+
+### Wedge 0 - Runtime Identity Collision Elimination
+
+Must run before Wedge 1.
+
+Status on 2026-05-24:
+
+- Local code hardening pass is complete and verified.
+- Diagnostic cognition governance now derives `governance.decision_seed`
+  from tenant, execution, dispatch, session, attempt, provider, model,
+  full prompt hash, and completion hash.
+- Diagnostic worker attempt lineage is passed into cognition so retries
+  cannot reuse a governance decision ID unless they are the same
+  idempotent attempt replay.
+- Governance decision fallback generation is still UUID5, but now uses
+  a per-process boot nonce plus the counter, so worker/process restart
+  cannot replay `runtime|decision|0` into an existing persisted row.
+- Every `_RUNTIME_COUNTER` identity module under `apps/backend/app`
+  now includes a boot-scoped seed; a source invariant pins this.
+- Cognition persistence/governance write failures are no longer wrapped
+  as provider failures. Duplicate governance writes surface as
+  `CognitionPersistenceError` and failed usage metadata stores the
+  precise error class/message.
+- The earlier production CORS hardening regression is repaired:
+  `app.main` no longer repeats authority header literals and wildcard
+  CORS origins fail closed at composition time.
+- Verification:
+  - `venv/bin/pyright apps/backend/app --level error` -> 0 errors.
+  - Focused Wedge 0 tests -> 30 passed, 1 skipped.
+  - Invariant subset -> 162 passed, 2 skipped.
+  - Smoke -> 4 passed.
+  - Full backend -> 2,224 passed, 2 skipped.
+- Production deploy and a fresh product-defect seed rerun remain required
+  before declaring the live Anker environment repaired.
+
+Scope:
+
+- Replace process-local counter-backed runtime ID generation on persisted
+  lineage/governance paths with collision-safe deterministic UUID5 seeds
+  derived from domain authority inputs.
+- Governance runtime:
+  - Require live governance decision IDs to derive from stable operation
+    context where available: tenant, stage, action, resource, request ID,
+    correlation ID, subject kind, and caller-provided decision seed.
+  - For diagnostic cognition output governance, include execution ID,
+    dispatch ID, session ID, provider, model, prompt hash, completion
+    hash, and attempt identity if available so retries cannot collide
+    unless they are a true idempotent replay.
+  - Do not weaken write-once governance persistence. Duplicate writes
+    should remain impossible except for explicitly idempotent replay
+    paths.
+- Cognition runtime:
+  - Stop wrapping internal persistence/governance integrity failures as
+    generic provider failures. Preserve provider failures as provider
+    failures, semantic failures as semantic failures, and persistence /
+    governance write failures as operational failures with root-cause
+    metadata.
+  - Ensure failed cognition usage records store the precise exception
+    class/message, including duplicate decision IDs.
+- Identity audit:
+  - Inventory every `_RUNTIME_COUNTER` identity module:
+    governance, execution, boundary, session, coordination, arbitration,
+    coordination policy/topology, boundary translation, and boundary
+    voice.
+  - Decide per module whether the generator is test-only, replay-only,
+    ephemeral-only, or persisted runtime. Persisted runtime paths must
+    have collision-safe domain seeds before go-live.
+- Tests:
+  - Add invariant tests that simulate process restart by resetting or
+    re-importing identity modules and proving persisted runtime IDs do
+    not collide.
+  - Add a diagnostic cognition regression test for repeated
+    product-defect-style governance output.
+  - Add a source invariant that flags process-local `_RUNTIME_COUNTER`
+    usage in persisted runtime identity modules unless explicitly marked
+    ephemeral/test-only.
+- Verification:
+  - Focused cognition/governance/identity tests pass.
+  - Invariant subset passes.
+  - Smoke passes.
+  - Fresh product-defect seed rerun completes, or failure root cause is
+    proven unrelated to identity collisions.
+
+Acceptance criteria:
+
+- The product-defect retry bug is fixed or converted into an explicit,
+  correctly classified failure mode.
+- No duplicate governance decision ID can be produced by process restart,
+  worker restart, or multi-worker execution.
+- Wedge 0 closes with a documented identity inventory and no hidden
+  process-local generator on persisted critical paths.
+- Live closure requires deploying this hardening pass to Fly.io and
+  rerunning the fresh product-defect Anker ticket.
+
+### Existing Required Wedges
+
 - Wedge 1 - Reliability Before Anker Goes Live:
   ASGI-level webhook body enforcement before `await request.body()`;
   escalation outbox claim/publish/mark/recover discipline; webhook
@@ -1692,21 +1996,132 @@ Rules of engagement:
   queue-depth admission before publishing, Redis memory policy and
   Upstash configuration documentation, and DLQ routing for
   dead-lettered tasks. Expected effort: one Codex session, no migration.
-- Wedge 3 - UUID4 Fallback Elimination:
-  eliminate UUID4 fallbacks in arbitration, supervisor, boundary, and
-  session substrates; add invariants that fail if those paths call
-  `uuid.uuid4()` without an explicit deterministic seed. Dispatch path
-  is already clean. Expected effort: one Codex session, no migration.
+- Wedge 3 - UUID4 and Ambient Identity Fallback Elimination:
+  eliminate UUID4 fallbacks and process-local runtime identity fallbacks
+  in arbitration, supervisor, boundary, session, governance, execution,
+  coordination, and cognition paths; add invariants that fail if those
+  paths call `uuid.uuid4()` or `_RUNTIME_COUNTER` without an explicitly
+  approved ephemeral/test-only marker. Dispatch path is already mostly
+  clean but must be re-audited after Wedge 0. Expected effort: one or
+  more Codex sessions, no migration unless persisted IDs require
+  backfill metadata.
 - Wedge 4 - Multi-Tenant Security Before Second Client:
   `ALTER TABLE ... FORCE ROW LEVEL SECURITY` on tenant-scoped tables and
-  remove nullable tenant allowance from those tables. Must land before a
-  second enterprise client. Expected effort: one migration and careful
-  testing.
+  remove nullable tenant allowance from tenant-scoped tables. Must land
+  before a second enterprise client. Expected effort: one migration and
+  careful testing.
+
+### Post-Wedge 9+ Throughput and Capacity Program
+
+These land after Wedges 0-4 and before real enterprise load.
+
+- Worker pool and autoscaling:
+  - Run separate Fly worker process groups for diagnostic, escalation,
+    supervisor, SOP intelligence, webhook nonce cleanup, and indexing.
+  - Set explicit Celery concurrency per worker group.
+  - Use non-shared CPU and memory profiles sized for provider latency and
+    database connection limits.
+  - Autoscale worker counts by queue depth and queue age, not only CPU.
+- Separate queues by task type, channel, and priority:
+  - `ingress.email`, `ingress.whatsapp`, `ingress.shopify`,
+    `ingress.voice`.
+  - `diagnostic.high`, `diagnostic.normal`, `diagnostic.retry`.
+  - `escalation`, `supervisor`, `qa`, `sop_intelligence`,
+    `knowledge_indexing`, `webhook_maintenance`, and `dead_letter`.
+  - Route live tickets ahead of retries and maintenance jobs.
+- Backpressure and admission control:
+  - Reject, defer, or shed work when queue age, queue depth, tenant quota,
+    provider quota, or DB pool pressure exceeds configured thresholds.
+  - Return explicit 429/503 admission responses for channel webhooks when
+    the platform cannot safely accept more work.
+  - Persist admission decisions and replay them as operational events.
+- Batch-safe ingestion:
+  - Add bulk ingress APIs or batch worker paths that create idempotent
+    boundary records without N+1 database round trips.
+  - Use tenant/channel/source replay keys for every item in a batch.
+  - Add burst tests for 100, 1,000, and 10,000 tickets with duplicate and
+    replay cases mixed in.
+- Provider quotas and model budget controls:
+  - Per-tenant/provider/model request-per-minute and token-per-minute
+    budgets.
+  - Retry budgets that distinguish provider 429/5xx, parsing failure,
+    semantic rejection, governance denial, and persistence failures.
+  - Circuit breaker dashboards and operator overrides.
+- Queue and failure observability:
+  - Metrics: queue depth, oldest message age, publish latency, claim
+    latency, processing duration, success rate, retry rate, dead-letter
+    rate, provider latency, provider error class, DB pool wait, and
+    tenant admission denials.
+  - Command Center operational view for queue age and DLQ inspection.
+  - Alerts: queue age SLO breach, dead-letter spike, provider circuit
+    open, Redis memory pressure, DB pool exhaustion, and replay mismatch.
+- Load and chaos testing:
+  - 100-ticket smoke burst: must complete without dead letters.
+  - 1,000-ticket pilot burst: must respect tenant quotas and finish
+    within published SLOs.
+  - 10,000-ticket stress burst: may use controlled backpressure, but must
+    not lose data, cross tenants, corrupt replay, or silently drop
+    governance decisions.
+  - Chaos cases: Redis restart, provider 429/503, Fly worker restart,
+    DB reconnect, duplicate webhooks, stale signatures, and partial
+    batch failure.
+- Runbooks and rollback:
+  - Queue backlog runbook.
+  - Provider outage runbook.
+  - Tenant isolation incident runbook.
+  - DLQ replay/recover runbook.
+  - Fly deploy rollback runbook.
+  - Neon migration rollback/forward-fix runbook.
+- Product/demo hardening:
+  - Demo data reset/seed/replay script with a single command and dry-run
+    preview.
+  - Pre-call proof checklist with session IDs, timelines, governance
+    decisions, cognition audit records, and screenshots/recording notes.
+  - Public demo tenant separated from production pilot tenant.
+- Security and compliance hardening:
+  - Tenant-scoped audit export with immutable hashes.
+  - Auth0 role/permission mapping into tenant/principal context.
+  - Secret rotation drills for channel credentials and platform provider
+    keys.
+  - Webhook signing conformance tests for every channel adapter.
+- Data and retrieval hardening:
+  - SQL-native vector retrieval with tenant filter, ranking, and limit in
+    Postgres.
+  - Index freshness and stale-document indicators.
+  - Knowledge ingestion queue separation and retry/DLQ discipline.
+  - SOP provenance and approval status surfaced in diagnostic citations.
+
+### 9+ Final Gate
+
+The 9+ final gate cannot close until:
+
+- Wedges 0-4 are closed.
+- Post-wedge throughput program has passed 100, 1,000, and 10,000 ticket
+  tests.
+- Full backend suite, invariant subset, smoke, Pyright, Alembic current,
+  and frontend build/lint are green.
+- Production Fly/Vercel/Neon/Redis environment is verified against the
+  current infrastructure runbook.
+- No known P0/P1 issue remains open in identity, governance, replay,
+  tenant isolation, queue durability, provider resilience, or
+  production deployment capacity.
+
+## Queued Roadmap After Phase 6-F
+
+- Wedge 0 live verification: deploy the local runtime identity hardening
+  pass and rerun the fresh product-defect Anker ticket.
+- Wedge 1 - Reliability Before Anker Goes Live.
+- Wedge 2 - Celery/Redis Hardening.
+- Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
+- Wedge 4 - Multi-Tenant Security Before Second Client.
 - Vector retrieval SQL-native:
   push `LIMIT`, tenant filter, and ranking to Postgres instead of
   Python-side slicing on the full knowledge corpus. Low priority until
   Anker uploads significant SOP volume.
-- Pilot launch follows the above sequence.
+- Post-wedge 9+ Throughput and Capacity Program.
+- 9+ Final Gate.
+- Pilot launch follows the above sequence only after every rating axis is
+  >= 9/10.
 
 ## Platform-Owned vs Tenant-Owned
 
@@ -1734,8 +2149,8 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Command Center 2 Critical Fixes Phase E has passed build/deploy checks but remains open for live Auth0 env and app.operious.com DNS/custom-domain confirmation.
-Current test baseline: 2,206 passed, 2 skipped; smoke tests 4/4 green.
+Current phase: Wedge 0 Runtime Identity Collision Elimination is locally hardened and verified; production deploy plus fresh product-defect rerun remain open before Wedge 1 starts.
+Current verified backend baseline after Wedge 0 local hardening: 2,224 passed, 2 skipped; invariant subset 162 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
 Current Alembic head: 0031_dead_letter_tasks.
 
@@ -1774,16 +2189,36 @@ Completed before the next phase:
 - Command Center 2 Critical Fixes Phase D is closed and pushed:
   Auth0 v3 login, route protection, token hydration, and real user
   display are wired.
+- Command Center 2 Phase E is closed:
+  production Auth0 env was configured, backend CORS was deployed to
+  Fly.io for `app.operious.com` and `www.operious.com`, Command Center
+  was deployed to `https://app.operious.com`, and Marketing was deployed
+  to `https://www.operious.com`.
+- Phase 6-F artifact kit is started and verified:
+  Anker demo seed script, SOP corpus, five demo tickets, and stakeholder
+  walkthrough live under `apps/backend/scripts/anker_demo/`; focused
+  tests and Pyright pass.
+- Wedge 0 local hardening is complete:
+  diagnostic cognition governance uses domain-seeded UUID5 decisions,
+  diagnostic attempts are threaded into cognition, all `_RUNTIME_COUNTER`
+  identity modules are boot-scoped, governance persistence failures are
+  no longer mislabeled as provider failures, and the CORS authority-header
+  regression is fixed.
 
 Remaining before the next wedge:
-- Configure the missing Vercel production Auth0 env and map
-  `https://app.operious.com` to the Command Center deployment.
-- Re-run live Auth0/browser flow confirmation after env and DNS are in
-  place, without starting a local dev server unless the user explicitly
-  allows it.
-- Do not start Phase 6-F, Wedge 1, Wedge 2, Wedge 3, Wedge 4, or vector
-  retrieval SQL-native until their phase boundaries are explicitly
-  confirmed.
+- Deploy the Wedge 0 hardening pass to Fly.io before retrying the fresh
+  product-defect Anker ticket in production.
+- Resolve the fresh product-defect outlier from run `20260524014342`,
+  by rerunning it after Wedge 0 deploy, or formally select prior
+  completed product-defect session
+  `8ba795db-45fa-5674-94b6-4f888e70c8ed` for the demo set.
+- Confirm the five selected `anker-pilot` sessions open in Command
+  Center Trace Inspector with real session timeline/events.
+- Capture the selected session IDs and demo evidence for the Jiao Ma
+  call.
+- Do not start Wedge 1, Wedge 2, Wedge 3, Wedge 4, vector retrieval
+  SQL-native, or pilot launch until Wedge 0 is deployed/live-verified
+  and their phase boundaries are explicitly confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -1808,8 +2243,10 @@ pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Do not start the next master-plan wedge until the user confirms the
-phase boundary. The current boundary is Command Center 2 Critical
-Fixes Phase E - Final Gate.
+phase boundary. The current boundary is Wedge 0 live verification:
+deploy to Fly.io and rerun the product-defect Anker ticket. Wedge 1 is
+queued but must not start until the user confirms. The enterprise target
+is no rating axis below 9/10.
 ```
 
 ## New Chat Hyperprompt
@@ -1819,7 +2256,9 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Command Center 2 Critical Fixes Phase E has passed build/deploy checks but remains open for live Auth0 env and app.operious.com DNS/custom-domain confirmation.
+Current phase: Wedge 0 Runtime Identity Collision Elimination is locally
+hardened and verified. Production deploy plus fresh product-defect rerun
+remain open before Wedge 1 starts.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -1859,7 +2298,12 @@ Current source of truth:
 - Phase 3-D.1 ApprovalRecord projection follow-up is closed.
 
 Current verified baseline:
-- Tests: 2,206 passed, 2 skipped, 0 xfailed.
+- Wedge 0 local backend verification: 2,224 passed, 2 skipped,
+  0 xfailed.
+- Wedge 0 invariant subset: 162 passed, 2 skipped.
+- Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
+  2 skipped, 0 xfailed.
+- Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
 - Pyright warnings: 676; warnings must not grow phase over phase.
@@ -1911,10 +2355,16 @@ Current verified baseline:
   preserved.
 
 Goal for this chat:
-Complete the remaining external Command Center 2 Phase E checks after
-Auth0 production env and `app.operious.com` DNS/custom-domain mapping
-are configured. Do not start a local dev server unless the user
-explicitly allows it.
+Deploy Wedge 0 to Fly.io, rerun the fresh product-defect Anker ticket,
+and complete Phase 6-F live demo proof capture. Production run
+`20260524014342` produced five real sessions, four of which have
+completed diagnostic timelines; the fresh product-defect session failed
+because governance decision fallback IDs could collide across worker
+restarts. Wedge 0 fixes this locally; live verification remains. If the
+fresh rerun is not needed for the call, formally use prior completed
+product-defect session `8ba795db-45fa-5674-94b6-4f888e70c8ed`. Capture
+session IDs plus Trace Inspector evidence. Do not start a local dev
+server unless the user explicitly allows it.
 
 Current Command Center 2 status:
 - Phase A complete: endpoint verification confirmed
@@ -1927,18 +2377,38 @@ Current Command Center 2 status:
   `68e8740 frontend: trace inspector wired to /api/v1/session/{session_id}/timeline`.
 - Phase D complete and pushed:
   `e4951f1 frontend: auth0 login flow completion`.
-- Phase E build/deploy complete:
-  `dpl_2Qbd7tLYb8pDuXTWCyyB7N4aWei6` is READY and aliased at
-  `https://operious-ai-command-center.vercel.app`.
-- Phase E open items: configure missing Vercel Auth0 v3 env, map
-  `https://app.operious.com`, and then verify the live Auth0 browser
-  flow.
+- Phase E build/deploy/domain checks complete:
+  Command Center production is aliased at `https://app.operious.com`,
+  Marketing production is aliased at `https://www.operious.com`, backend
+  CORS includes production domains, and Auth0 login redirects to the
+  configured Auth0 tenant.
+- Phase 6-F artifact kit complete:
+  `apps/backend/scripts/anker_demo/seed_anker_demo.py`, five SOP files,
+  `demo_tickets.json`, `demo_walkthrough.md`, and
+  `apps/backend/tests/test_anker_demo_assets.py`.
+- Phase 6-F focused verification complete:
+  `pytest apps/backend/tests/test_anker_demo_assets.py -q` -> 6 passed;
+  Pyright on the seed script and focused test -> 0 errors.
+- Phase 6-F live production seed status:
+  run `20260524014342` produced completed charging, refund, Arabic, and
+  ambiguous timelines; fresh product-defect session
+  `5e28c731-6ea3-51d3-aabf-92777a96acfe` is the remaining outlier.
+- Wedge 0 local hardening status:
+  diagnostic cognition governance is domain-seeded, diagnostic attempt
+  lineage is threaded into cognition, all `_RUNTIME_COUNTER` identity
+  modules are boot-scoped, cognition governance persistence failures are
+  classified as `CognitionPersistenceError`, and full backend is green.
 
 Queued next:
-- After Command Center 2 fixes: Phase 6-F Anker demo scenario, then
-  Wedge 1 Reliability, Wedge 2 Celery/Redis Hardening, Wedge 3 UUID4
-  Fallback Elimination, Wedge 4 RLS Force, Vector Retrieval SQL-native,
-  then Pilot Launch.
+- Wedge 0 live verification: deploy and rerun product-defect ticket.
+- Wedge 1 Reliability.
+- Wedge 2 Celery/Redis Hardening.
+- Wedge 3 UUID4 and Ambient Identity Fallback Elimination.
+- Wedge 4 RLS Force.
+- Vector Retrieval SQL-native.
+- Post-wedge 9+ Throughput and Capacity Program.
+- 9+ Final Gate.
+- Pilot Launch only after every rating axis is >= 9/10.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.

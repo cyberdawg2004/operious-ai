@@ -1,0 +1,48 @@
+[
+  {
+    "slug": "charging-allow",
+    "scenario": "Governed charging allow",
+    "channel": "email",
+    "language_code": "en",
+    "expected_category": "charging_issue",
+    "expected_governance": "ALLOW",
+    "raw_content": "Subject: Anker Nano charger stopped charging my phone\n\nOrder ANK-DEMO-1001. My Anker Nano charger was delivered 14 days ago and it no longer charges my iPhone with the included USB-C cable. I tried another wall outlet and another phone. No smoke, no heat, no damage. Please help with a replacement or approved return."
+  },
+  {
+    "slug": "refund-over-limit-deny-escalate",
+    "scenario": "Refund request outside policy limit",
+    "channel": "email",
+    "language_code": "en",
+    "expected_category": "refund_issue",
+    "expected_governance": "DENY_WITH_ESCALATION",
+    "raw_content": "Subject: Refund demanded after return window\n\nI bought an Anker 737 Power Bank 78 days ago from a marketplace seller. It works, but I changed my mind and want a full refund plus shipping reimbursed. I do not have the original packaging or all accessories. If you refuse I will start a chargeback."
+  },
+  {
+    "slug": "arabic-language-review",
+    "scenario": "Arabic-language support gap",
+    "channel": "email",
+    "language_code": "ar",
+    "expected_category": "charging_issue",
+    "expected_governance": "ESCALATE",
+    "raw_content": "مرحبا، اشتريت شاحن Anker قبل شهرين. الشاحن يسخن كثيرا ويتوقف عن شحن الهاتف بعد دقائق. لدي رقم الطلب ANK-DEMO-1003 وأحتاج إلى مساعدة باللغة العربية لأنني لا أفهم الردود الإنجليزية."
+  },
+  {
+    "slug": "product-defect-claim",
+    "scenario": "Product defect claim",
+    "channel": "email",
+    "language_code": "en",
+    "expected_category": "product_defect",
+    "expected_governance": "ALLOW_REVIEW",
+    "raw_content": "Subject: USB-C port defect on Anker hub\n\nOrder ANK-DEMO-1004. My Anker USB-C hub disconnects every few minutes even with three laptops and two cables. The port feels loose and the LED flickers. I can send a video and the serial number. Please check warranty replacement eligibility."
+  },
+  {
+    "slug": "ambiguous-human-review",
+    "scenario": "Ambiguous case for human review",
+    "channel": "email",
+    "language_code": "en",
+    "expected_category": "unknown_issue",
+    "expected_governance": "HUMAN_REVIEW",
+    "raw_content": "Subject: Not happy with the charger\n\nThis thing is bad and I want something done. I do not remember where I bought it, I do not have the box, and I cannot explain the issue clearly. Sometimes it works and sometimes it does not. Please fix this today."
+  }
+]
+

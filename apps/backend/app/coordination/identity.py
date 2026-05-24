@@ -45,8 +45,9 @@ treat them as permanent.
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 
@@ -77,6 +78,7 @@ _MESSAGE_NAMESPACE: uuid.UUID = uuid.UUID(
 _CORRELATION_NAMESPACE: uuid.UUID = uuid.UUID(
     "8c5f3e3d-4e70-4b2c-9d4e-3c4d5e6f7081"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -99,7 +101,7 @@ def generate_correlation_id() -> CoordinationCorrelationId:
 
 
 def _runtime_seed(label: str) -> str:
-    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
+    return f"runtime|{label}|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

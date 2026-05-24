@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cognition import (
     CognitionGovernanceRejectionError,
     CognitionLLMProviderError,
+    CognitionPersistenceError,
     CognitionSemanticValidationError,
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
@@ -30,6 +31,11 @@ from app.cognition.models import (
 from app.cognition.persistence import (
     InMemoryCognitionUsagePersistence,
     PostgresCognitionUsagePersistence,
+)
+from app.governance.identity import derive_decision_id
+from app.governance.persistence import (
+    BaseGovernanceRepository,
+    InMemoryGovernanceRepository,
 )
 from app.core.config import Settings
 from app.knowledge import (
@@ -120,6 +126,7 @@ async def _runtime(
     *,
     client: _ScriptedLLMClient,
     require_citations: bool = False,
+    governance_repository: BaseGovernanceRepository | None = None,
 ) -> tuple[
     DiagnosticCognitionRuntime,
     InMemoryTenantConfigurationRepository,
@@ -155,6 +162,7 @@ async def _runtime(
             knowledge_runtime=knowledge_runtime,
             llm_client=client,
             usage_persistence=usage_repo,
+            governance_repository=governance_repository,
             config=DiagnosticCognitionRuntimeConfig(
                 context_top_k=4,
                 context_token_budget=96,
@@ -213,6 +221,101 @@ async def test_diagnostic_cognition_uses_rag_citations_and_records_cost() -> Non
     assert result.metadata["raw_completion_sha256"] == usage.metadata[
         "raw_completion_sha256"
     ]
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_cognition_seeds_governance_decisions_from_lineage() -> None:
+    governance_repo = InMemoryGovernanceRepository()
+    client = _ScriptedLLMClient(
+        text=(
+            '{"summary":"Loose USB-C hub port with LED flicker.",'
+            '"category":"product_defect","confidence":0.88,'
+            '"reasoning":"Physical defect evidence is present."}'
+        )
+    )
+    runtime, _tenant_repo, _usage_repo, _document = await _runtime(
+        client=client,
+        governance_repository=governance_repo,
+    )
+
+    first = await runtime.reason_about_ticket(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-product-defect-1",
+        dispatch_id="dispatch-product-defect-1",
+        session_id="session-product-defect-1",
+        attempt_id="attempt-product-defect-1",
+        content="The USB-C hub port is loose and the LED flickers.",
+    )
+    second = await runtime.reason_about_ticket(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-product-defect-2",
+        dispatch_id="dispatch-product-defect-2",
+        session_id="session-product-defect-2",
+        attempt_id="attempt-product-defect-2",
+        content="The USB-C hub port is loose and the LED flickers.",
+    )
+
+    assert first.governance_decision_id is not None
+    assert second.governance_decision_id is not None
+    assert first.governance_decision_id != second.governance_decision_id
+
+    for decision_id in (
+        first.governance_decision_id,
+        second.governance_decision_id,
+    ):
+        decision = await governance_repo.get_decision(
+            decision_id,
+            expected_tenant_id=_TENANT_ID,
+        )
+        assert decision is not None
+        seed = decision.metadata["governance.decision_seed"]
+        assert isinstance(seed, str)
+        assert str(derive_decision_id(seed=seed)) == decision_id
+        assert decision.metadata["action"] == "ai.diagnostic_classification"
+        assert decision.tenant_id == _TENANT_ID
+        assert decision.subject_kind == "execution"
+
+
+@pytest.mark.asyncio
+async def test_governance_persistence_failure_is_not_reported_as_provider_error() -> None:
+    governance_repo = InMemoryGovernanceRepository()
+    client = _ScriptedLLMClient(
+        text=(
+            '{"summary":"Loose USB-C hub port with LED flicker.",'
+            '"category":"product_defect","confidence":0.88,'
+            '"reasoning":"Physical defect evidence is present."}'
+        )
+    )
+    runtime, _tenant_repo, usage_repo, _document = await _runtime(
+        client=client,
+        governance_repository=governance_repo,
+    )
+    kwargs = {
+        "tenant_id": _TENANT_ID,
+        "execution_id": "execution-product-defect-duplicate",
+        "dispatch_id": "dispatch-product-defect-duplicate",
+        "session_id": "session-product-defect-duplicate",
+        "attempt_id": "attempt-product-defect-duplicate",
+        "content": "The USB-C hub port is loose and the LED flickers.",
+    }
+
+    await runtime.reason_about_ticket(**kwargs)
+    with pytest.raises(CognitionPersistenceError) as raised:
+        await runtime.reason_about_ticket(**kwargs)
+
+    assert "diagnostic governance persistence failed" in str(raised.value)
+    assert "already recorded" in str(raised.value)
+    usage = await usage_repo.get_llm_usage(
+        derive_llm_usage_id(
+            tenant_id=_TENANT_ID,
+            execution_id=kwargs["execution_id"],
+            model=client.model_name,
+        ),
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert usage is not None
+    assert usage.status is CognitionLLMUsageStatus.FAILED
+    assert usage.metadata["error_type"] == "CognitionPersistenceError"
 
 
 def test_product_defect_category_is_canonical_and_accepted() -> None:

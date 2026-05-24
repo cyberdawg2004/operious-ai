@@ -29,7 +29,10 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine
-from app.middleware.authority_context import AuthorityContextMiddleware
+from app.middleware.authority_context import (
+    AUTHORITY_HEADERS,
+    AuthorityContextMiddleware,
+)
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.request_body_limit import RequestBodyLimitMiddleware
 from app.middleware.trusted_ingress import (
@@ -52,6 +55,23 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://operious-ai-command-center.vercel.app",
 ]
+
+
+def _build_cors_origins(raw: str) -> list[str]:
+    """Parse CORS origins and reject wildcard transport posture."""
+
+    items = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if any(origin == "*" for origin in items):
+        raise ValueError(
+            "CORS_ALLOW_ORIGINS must be a concrete allowlist; "
+            "wildcard '*' is forbidden by transport doctrine."
+        )
+    return items or list(ALLOWED_ORIGINS)
+
+
+def _build_cors_headers(raw: str) -> list[str]:
+    headers = [header.strip() for header in raw.split(",") if header.strip()]
+    return list(dict.fromkeys([*headers, *AUTHORITY_HEADERS]))
 
 
 def _problem_for_status(
@@ -324,16 +344,17 @@ def create_app(
     logger.info(
         "middleware_cors_register_begin",
         extra={
-            "origin_count": len(ALLOWED_ORIGINS),
+            "origin_count": len(_build_cors_origins(settings.CORS_ALLOW_ORIGINS)),
             "allow_credentials": True,
         },
     )
+    cors_origins = _build_cors_origins(settings.CORS_ALLOW_ORIGINS)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Tenant-ID", "X-Request-ID"],
+        allow_headers=_build_cors_headers(settings.CORS_ALLOW_HEADERS),
     )
     logger.info("middleware_cors_register_complete")
     logger.info("middleware_request_body_limit_register_begin")

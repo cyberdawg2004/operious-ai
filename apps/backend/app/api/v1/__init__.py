@@ -21,6 +21,9 @@ from app.api.v1.routers.health import router as health_router
 from app.api.v1.routers.ingress import router as ingress_router
 from app.api.v1.routers.knowledge import router as knowledge_router
 from app.api.v1.routers.observability import router as observability_router
+from app.api.v1.routers.operational_events import (
+    router as operational_events_router,
+)
 from app.api.v1.routers.session import router as session_router
 from app.api.v1.routers.sop_intelligence import (
     router as sop_intelligence_router,
@@ -49,5 +52,8 @@ api_router_v1.include_router(session_router, prefix="/session")
 api_router_v1.include_router(tenant_router, prefix="/tenant")
 api_router_v1.include_router(knowledge_router, prefix="/knowledge")
 api_router_v1.include_router(observability_router, prefix="/observability")
+api_router_v1.include_router(
+    operational_events_router, prefix="/operational-events"
+)
 
 __all__ = ["api_router_v1"]

@@ -15,6 +15,7 @@ from typing import Any, TypeVar
 from app.db.session import get_session_factory
 from app.governance.persistence import PostgresGovernanceRepository
 from app.qa.persistence import PostgresQAPersistence
+from app.runtime import make_postgres_sop_approval_event_projector
 from app.session.persistence import PostgresSessionPersistence
 from app.sop_intelligence.persistence import PostgresSOPApprovalPersistence
 from app.sop_intelligence.runtime import SOPIntelligenceRuntime
@@ -51,8 +52,9 @@ async def propose_sop_intelligence_change_runtime(
 ) -> dict[str, object]:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        approval_persistence = PostgresSOPApprovalPersistence(session)
         runtime = SOPIntelligenceRuntime(
-            approval_persistence=PostgresSOPApprovalPersistence(session),
+            approval_persistence=approval_persistence,
             session_persistence=PostgresSessionPersistence(session),
             supervisor_repository=PostgresSupervisorRepository(session),
             qa_persistence=PostgresQAPersistence(session),
@@ -66,12 +68,20 @@ async def propose_sop_intelligence_change_runtime(
             expected_tenant_id=tenant_id,
             inspection_id=inspection_id,
         )
+        projection = await make_postgres_sop_approval_event_projector(
+            session,
+            approval_persistence=approval_persistence,
+        ).project_approval(
+            record.approval_id,
+            expected_tenant_id=tenant_id,
+        )
         await session.commit()
         return {
             "status": "completed",
             "session_id": session_id,
             "tenant_id": record.tenant_id,
             "approval_id": record.approval_id,
+            "operational_event_id": projection.operational_event.event_id,
             "document_id": record.document_id,
             "queue_status": record.status,
             "confidence": record.confidence,

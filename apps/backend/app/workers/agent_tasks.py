@@ -243,6 +243,7 @@ async def _generate_diagnostic_reasoning_for_work_item(
             tenant_id=work_item.tenant_id,
             content=work_item.content,
             execution_id=work_item.execution_id,
+            attempt_id=work_item.attempt_id,
         )
         await session.commit()
         return result
@@ -485,6 +486,7 @@ async def _generate_diagnostic_reasoning_draft(
     tenant_id: str,
     content: str,
     execution_id: str,
+    attempt_id: str,
 ) -> DiagnosticResult:
     return await DiagnosticAgent(
         cognition_runtime=cognition_runtime
@@ -494,6 +496,7 @@ async def _generate_diagnostic_reasoning_draft(
         tenant_id=tenant_id,
         content=content,
         execution_id=execution_id,
+        attempt_id=attempt_id,
     )
 
 

@@ -68,6 +68,8 @@ from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.execution.publisher import ExecutionPublisher, QueueBackpressureCheck
+from app.events import PostgresOperationalEventPersistence
+from app.events.read_service import OperationalEventReader
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
 from app.escalation.publisher import EscalationPublisher
@@ -113,6 +115,7 @@ from app.services.dispatch_service import (
 from app.services.escalation_service import EscalationService
 from app.services.health_service import HealthService
 from app.services.knowledge_service import KnowledgeService
+from app.services.operational_event_service import OperationalEventService
 from app.services.operational_observability_service import (
     OperationalObservabilityService,
 )
@@ -395,6 +398,17 @@ def get_operational_observability_service(
     )
 
 
+def get_operational_event_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> OperationalEventService:
+    """Return the canonical event-fabric read service."""
+    return OperationalEventService(
+        reader=OperationalEventReader(
+            persistence=PostgresOperationalEventPersistence(session),
+        )
+    )
+
+
 def _dispatch_coordination_registry() -> CoordinationRegistry:
     registry = CoordinationRegistry()
     registry.register(
@@ -634,6 +648,7 @@ __all__ = [
     "get_governance_repository",
     "get_health_service",
     "get_knowledge_service",
+    "get_operational_event_service",
     "get_operational_observability_service",
     "get_session_repository",
     "get_sop_intelligence_service",

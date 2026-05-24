@@ -50,6 +50,7 @@ class DiagnosticAgent:
         tenant_id: str,
         content: str,
         execution_id: str | None = None,
+        attempt_id: str | None = None,
     ) -> DiagnosticResult:
         if self._cognition_runtime is not None and execution_id is not None:
             result = await self._cognition_runtime.reason_about_ticket(
@@ -58,6 +59,7 @@ class DiagnosticAgent:
                 dispatch_id=dispatch_id,
                 session_id=session_id,
                 content=content,
+                attempt_id=attempt_id,
             )
             return DiagnosticResult(
                 summary=result.summary,

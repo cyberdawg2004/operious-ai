@@ -37,8 +37,9 @@ ordinal)` so replays produce byte-identical finding identifiers.
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 
@@ -74,6 +75,7 @@ _CHAIN_NAMESPACE: uuid.UUID = uuid.UUID(
 _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
     "c2d3e4f5-6071-8293-a4b5-c6d7e8f90102"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -91,7 +93,7 @@ def generate_evaluation_id() -> CoordinationPolicyEvaluationId:
 
 
 def _runtime_seed(label: str) -> str:
-    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
+    return f"runtime|{label}|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

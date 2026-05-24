@@ -18,10 +18,12 @@ Relationship to `decision_id`:
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 
 TRACE_NAMESPACE: uuid.UUID = uuid.UUID("4d2c10a2-6c00-4f7c-8b3a-1f8d0c7e0002")
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -29,7 +31,7 @@ def generate_trace_id() -> uuid.UUID:
     """Return a fresh UUID4 — the runtime path for trace IDs."""
     return uuid.uuid5(
         TRACE_NAMESPACE,
-        f"runtime|trace|{next(_RUNTIME_COUNTER)}",
+        f"runtime|trace|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}",
     )
 
 

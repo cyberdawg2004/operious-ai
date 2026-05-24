@@ -64,6 +64,7 @@ EXPECTED_PROJECTION_MODULES: frozenset[str] = frozenset(
         "governance_event_projection.py",
         "qa_event_projection.py",
         "session_event_projection.py",
+        "sop_approval_event_projection.py",
         "supervisor_event_projection.py",
     }
 )
@@ -169,6 +170,7 @@ def test_operational_event_runtime_is_only_used_by_event_or_projection_layers() 
         "runtime/governance_event_projection.py",
         "runtime/qa_event_projection.py",
         "runtime/session_event_projection.py",
+        "runtime/sop_approval_event_projection.py",
         "runtime/supervisor_event_projection.py",
     )
     offenders: list[str] = []

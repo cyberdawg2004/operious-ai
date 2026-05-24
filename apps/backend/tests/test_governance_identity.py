@@ -13,10 +13,13 @@ Properties pinned:
 
 from __future__ import annotations
 
+import itertools
+from pathlib import Path
 import uuid
 
 import pytest
 
+from app.governance.identity import decision_ids
 from app.governance.identity import (
     DECISION_NAMESPACE,
     TRACE_NAMESPACE,
@@ -47,9 +50,45 @@ def test_generate_decision_id_returns_uuid5() -> None:
     assert uid.version == 5
 
 
+def test_generate_decision_id_is_boot_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(decision_ids, "_RUNTIME_BOOT_ID", "boot-a")
+    monkeypatch.setattr(decision_ids, "_RUNTIME_COUNTER", itertools.count())
+    first = decision_ids.generate_decision_id()
+
+    monkeypatch.setattr(decision_ids, "_RUNTIME_BOOT_ID", "boot-b")
+    monkeypatch.setattr(decision_ids, "_RUNTIME_COUNTER", itertools.count())
+    second = decision_ids.generate_decision_id()
+
+    assert first != second
+    assert first.version == 5
+    assert second.version == 5
+
+
 def test_generate_trace_id_returns_uuid5() -> None:
     uid = generate_trace_id()
     assert uid.version == 5
+
+
+def test_runtime_counter_identity_modules_are_boot_scoped() -> None:
+    identity_modules = (
+        Path("apps/backend/app/arbitration/identity.py"),
+        Path("apps/backend/app/boundary/identity.py"),
+        Path("apps/backend/app/boundary/translation/identity/__init__.py"),
+        Path("apps/backend/app/boundary/voice/identity/__init__.py"),
+        Path("apps/backend/app/coordination/identity.py"),
+        Path("apps/backend/app/coordination/policy/identity.py"),
+        Path("apps/backend/app/coordination/topology/identity.py"),
+        Path("apps/backend/app/execution/identity.py"),
+        Path("apps/backend/app/governance/identity/decision_ids.py"),
+        Path("apps/backend/app/governance/identity/trace_ids.py"),
+        Path("apps/backend/app/session/identity/__init__.py"),
+    )
+
+    for module in identity_modules:
+        source = module.read_text(encoding="utf-8")
+        assert "_RUNTIME_COUNTER" in source
+        assert "_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)" in source
+        assert "_RUNTIME_BOOT_ID" in source.split("_RUNTIME_COUNTER")[1]
 
 
 # ─── derive_* determinism ─────────────────────────────────────────────

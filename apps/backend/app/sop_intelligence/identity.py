@@ -9,8 +9,12 @@ from app.identity import coerce_tenant_id
 
 
 ApprovalId = NewType("ApprovalId", uuid.UUID)
+ApprovalEventId = NewType("ApprovalEventId", uuid.UUID)
 
 _APPROVAL_NAMESPACE = uuid.UUID("4c0af690-0001-4001-8001-000000000001")
+_APPROVAL_EVENT_NAMESPACE = uuid.UUID(
+    "4c0af690-0002-4001-8001-000000000002"
+)
 
 
 def derive_approval_id(
@@ -38,8 +42,24 @@ def as_approval_id(value: uuid.UUID | str) -> ApprovalId:
     )
 
 
+def derive_approval_event_id(
+    *,
+    approval_id: uuid.UUID | str,
+    status: str,
+) -> ApprovalEventId:
+    """Derive a stable event id for one approval-record status projection."""
+
+    if not status:
+        raise ValueError("status is required")
+    return ApprovalEventId(
+        uuid.uuid5(_APPROVAL_EVENT_NAMESPACE, f"{approval_id}|{status}")
+    )
+
+
 __all__ = [
+    "ApprovalEventId",
     "ApprovalId",
     "as_approval_id",
+    "derive_approval_event_id",
     "derive_approval_id",
 ]

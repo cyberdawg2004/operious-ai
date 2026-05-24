@@ -111,6 +111,7 @@ class DiagnosticCognitionRuntime:
         dispatch_id: str,
         session_id: str,
         content: str,
+        attempt_id: str | None = None,
     ) -> DiagnosticReasoningResult:
         retrieval = await self._knowledge_runtime.retrieve(
             tenant_id=tenant_id,
@@ -139,6 +140,12 @@ class DiagnosticCognitionRuntime:
                 messages=messages,
                 tenant_id=tenant_id,
             )
+            prompt_sha256 = _sha256_text(
+                _full_prompt_snapshot(
+                    system_prompt=_SYSTEM_PROMPT,
+                    messages=messages,
+                )
+            )
             audit_id = await self._save_cognition_audit(
                 usage_id=usage_id,
                 tenant_id=tenant_id,
@@ -161,10 +168,12 @@ class DiagnosticCognitionRuntime:
                 execution_id=execution_id,
                 dispatch_id=dispatch_id,
                 session_id=session_id,
+                attempt_id=attempt_id,
                 content=content,
                 retrieval=retrieval,
                 completion=completion,
                 parsed=parsed,
+                prompt_sha256=prompt_sha256,
                 semantic_terms=semantic.output_terms,
                 semantic_valid=True,
             )
@@ -186,6 +195,7 @@ class DiagnosticCognitionRuntime:
                     "cognition_audit_id": audit_id,
                     "cognition_audit_record_id": audit_id,
                     "citation_count": len(retrieval.citations),
+                    **({"attempt_id": attempt_id} if attempt_id is not None else {}),
                     "semantic_terms": list(semantic.output_terms),
                     "raw_completion_sha256": _raw_completion_sha256(completion),
                 },
@@ -239,6 +249,21 @@ class DiagnosticCognitionRuntime:
                 model=self._llm_client.model_name,
                 completion=completion,
                 audit_id=audit_id,
+            )
+            raise
+        except CognitionPersistenceError as exc:
+            await self._save_rejected_usage(
+                usage_id=usage_id,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                dispatch_id=dispatch_id,
+                session_id=session_id,
+                error=exc,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+                completion=completion,
+                audit_id=audit_id,
+                failed=True,
             )
             raise
         except CognitionLLMProviderError as exc:
@@ -305,10 +330,12 @@ class DiagnosticCognitionRuntime:
         execution_id: str,
         dispatch_id: str,
         session_id: str,
+        attempt_id: str | None,
         content: str,
         retrieval: KnowledgeRetrievalResult,
         completion: DiagnosticLLMCompletion,
         parsed: DiagnosticLLMOutput,
+        prompt_sha256: str,
         semantic_terms: tuple[str, ...],
         semantic_valid: bool,
     ) -> str | None:
@@ -330,22 +357,46 @@ class DiagnosticCognitionRuntime:
                 "semantic_valid": semantic_valid,
                 "semantic_terms": list(semantic_terms),
                 "usage_total_tokens": completion.usage.total_tokens,
+                **({"attempt_id": attempt_id} if attempt_id is not None else {}),
             },
         )
-        envelope = await self._governance.evaluate(
-            GovernanceContext(
-                stage=EnforcementStage.PRE_EXECUTION,
-                action="ai.diagnostic_classification",
-                resource=f"execution:{execution_id}",
-                actor="agent:diagnostic",
-                tenant_id=coerce_tenant_id(tenant_id),
-                subject=subject,
-                metadata={
-                    "dispatch_id": dispatch_id,
-                    "session_id": session_id,
-                },
-            )
+        decision_seed = _diagnostic_governance_decision_seed(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            attempt_id=attempt_id,
+            provider=completion.provider,
+            model=completion.model,
+            prompt_sha256=prompt_sha256,
+            completion_sha256=_raw_completion_sha256(completion),
         )
+        try:
+            envelope = await self._governance.evaluate(
+                GovernanceContext(
+                    stage=EnforcementStage.PRE_EXECUTION,
+                    action="ai.diagnostic_classification",
+                    resource=f"execution:{execution_id}",
+                    actor="agent:diagnostic",
+                    tenant_id=coerce_tenant_id(tenant_id),
+                    subject=subject,
+                    metadata={
+                        "dispatch_id": dispatch_id,
+                        "session_id": session_id,
+                        "governance.decision_seed": decision_seed,
+                        **(
+                            {"attempt_id": attempt_id}
+                            if attempt_id is not None
+                            else {}
+                        ),
+                    },
+                )
+            )
+        except Exception as exc:
+            raise CognitionPersistenceError(
+                "diagnostic governance persistence failed: "
+                f"{exc.__class__.__name__}: {_bounded_message(exc)}"
+            ) from exc
         decision_id = (
             str(envelope.decision.decision_id)
             if envelope.decision is not None
@@ -630,6 +681,35 @@ def _usage_record(
 
 def _raw_completion_sha256(completion: DiagnosticLLMCompletion) -> str:
     return _sha256_text(completion.text)
+
+
+def _diagnostic_governance_decision_seed(
+    *,
+    tenant_id: str,
+    execution_id: str,
+    dispatch_id: str,
+    session_id: str,
+    attempt_id: str | None,
+    provider: str,
+    model: str,
+    prompt_sha256: str,
+    completion_sha256: str,
+) -> str:
+    return "cognition.diagnostic.output|" + json.dumps(
+        {
+            "attempt_id": attempt_id,
+            "completion_sha256": completion_sha256,
+            "dispatch_id": dispatch_id,
+            "execution_id": execution_id,
+            "model": model,
+            "prompt_sha256": prompt_sha256,
+            "provider": provider,
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _sha256_text(value: str) -> str:

@@ -528,5 +528,9 @@ def test_session_projection_acts_do_not_inflate_capability_governance() -> None:
         OperationalAct.SESSION_RECORD_TERMINATION,
         OperationalAct.SESSION_RECORD_ARCHIVAL,
         OperationalAct.SESSION_OBSERVE_OPERATION,
+        OperationalAct.OI_SOP_APPROVAL_PROPOSE,
+        OperationalAct.OI_SOP_APPROVAL_APPROVE,
+        OperationalAct.OI_SOP_APPROVAL_REJECT,
+        OperationalAct.OI_SOP_APPROVAL_APPLY,
     }
     assert projection_only.isdisjoint(CAPABILITY_GOVERNED_ACTS)

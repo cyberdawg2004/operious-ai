@@ -31,8 +31,9 @@ ordinal)` so replays produce byte-identical finding identifiers.
 
 from __future__ import annotations
 
-import uuid
 import itertools
+import secrets
+import uuid
 from typing import NewType
 
 
@@ -84,6 +85,7 @@ _EDGE_NAMESPACE: uuid.UUID = uuid.UUID(
 _FINDING_NAMESPACE: uuid.UUID = uuid.UUID(
     "08192a3b-5c6d-4e7f-9001-203040506070"
 )
+_RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
 
@@ -107,7 +109,7 @@ def generate_edge_id() -> TopologyEdgeId:
 
 
 def _runtime_seed(label: str) -> str:
-    return f"runtime|{label}|{next(_RUNTIME_COUNTER)}"
+    return f"runtime|{label}|{_RUNTIME_BOOT_ID}|{next(_RUNTIME_COUNTER)}"
 
 
 # ─── Replay path: deterministic UUID5 from a stable seed ─────────────

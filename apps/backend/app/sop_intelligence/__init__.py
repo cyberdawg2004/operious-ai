@@ -13,8 +13,10 @@ from app.sop_intelligence.exceptions import (
     SOPIntelligencePersistenceError,
 )
 from app.sop_intelligence.identity import (
+    ApprovalEventId,
     ApprovalId,
     as_approval_id,
+    derive_approval_event_id,
     derive_approval_id,
 )
 from app.sop_intelligence.persistence import (
@@ -29,6 +31,7 @@ from app.sop_intelligence.runtime import SOPIntelligenceRuntime
 
 __all__ = [
     "ApprovalId",
+    "ApprovalEventId",
     "ApprovalPage",
     "ApprovalQuery",
     "ApprovalRecord",
@@ -42,5 +45,6 @@ __all__ = [
     "SOPIntelligencePersistenceError",
     "SOPIntelligenceRuntime",
     "as_approval_id",
+    "derive_approval_event_id",
     "derive_approval_id",
 ]

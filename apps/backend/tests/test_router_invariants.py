@@ -133,6 +133,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
     "get_governance_repository",
     "get_health_service",
     "get_knowledge_service",
+    "get_operational_event_service",
     "get_operational_observability_service",
     "get_session_repository",
     "get_sop_intelligence_service",
