@@ -57,6 +57,11 @@ _SYSTEM_PROMPT = """You are Operious diagnostic cognition.
 Classify the support ticket using only the ticket text and cited tenant SOP
 context. Return compact JSON only with keys: summary, category, confidence,
 reasoning.
+The category value must be exactly one of: account_issue, charging_issue,
+connectivity_issue, product_defect, refund_issue, unknown_issue.
+Use charging_issue for charger, cable, battery, or device-not-charging
+symptoms. Use product_defect for physical/manufacturing defect evidence that
+is not primarily a charging or connectivity symptom.
 Use canonical English. Preserve any governance-significant terms present in
 the input or citations, and do not invent refunds, approvals, denials,
 chargebacks, RMA, legal, fraud, compliance, replacement, credit, or escalation
@@ -567,6 +572,14 @@ def _render_user_prompt(
             content,
             "tenant_sop_citations:",
             _context_text(retrieval) or "(no indexed SOP citations available)",
+            "response_contract:",
+            (
+                "Return JSON only. Required keys: summary, category, "
+                "confidence, reasoning. category must be exactly one of "
+                "account_issue, charging_issue, connectivity_issue, "
+                "product_defect, refund_issue, unknown_issue. Do not use "
+                "human-readable category labels."
+            ),
         )
     )
 

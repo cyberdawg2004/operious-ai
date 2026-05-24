@@ -54,6 +54,7 @@ class DiagnosticCategory(StrEnum):
     ACCOUNT_ISSUE = "account_issue"
     CHARGING_ISSUE = "charging_issue"
     CONNECTIVITY_ISSUE = "connectivity_issue"
+    PRODUCT_DEFECT = "product_defect"
     REFUND_ISSUE = "refund_issue"
     UNKNOWN_ISSUE = "unknown_issue"
 

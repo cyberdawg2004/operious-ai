@@ -22,7 +22,9 @@ from app.cognition.llm import DiagnosticLLMMessage
 from app.cognition.models import (
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
+    DiagnosticCategory,
     DiagnosticLLMCompletion,
+    DiagnosticLLMOutput,
     DiagnosticLLMUsage,
 )
 from app.cognition.persistence import (
@@ -60,6 +62,7 @@ class _ScriptedLLMClient:
     provider_name: str = "anthropic"
     model_name: str = "claude-sonnet-4-20250514"
     prompt_seen: str = ""
+    system_seen: str = ""
 
     async def complete(
         self,
@@ -68,8 +71,10 @@ class _ScriptedLLMClient:
         messages: Sequence[DiagnosticLLMMessage],
         max_output_tokens: int,
         temperature: float,
+        tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
-        del system_prompt, max_output_tokens, temperature
+        del max_output_tokens, temperature, tenant_id
+        self.system_seen = system_prompt
         self.prompt_seen = "\n".join(message.content for message in messages)
         return DiagnosticLLMCompletion(
             provider=self.provider_name,
@@ -195,6 +200,8 @@ async def test_diagnostic_cognition_uses_rag_citations_and_records_cost() -> Non
     assert result.citations
     assert "tenant_sop_citations" in client.prompt_seen
     assert "Refund SOP" in client.prompt_seen
+    assert "product_defect" in client.system_seen
+    assert "category must be exactly one of" in client.prompt_seen
     assert result.estimated_cost_micro_usd == 120 * 3 + 30 * 15
     assert usage is not None
     assert usage.tenant_id == _TENANT_ID
@@ -206,6 +213,20 @@ async def test_diagnostic_cognition_uses_rag_citations_and_records_cost() -> Non
     assert result.metadata["raw_completion_sha256"] == usage.metadata[
         "raw_completion_sha256"
     ]
+
+
+def test_product_defect_category_is_canonical_and_accepted() -> None:
+    parsed = DiagnosticLLMOutput.model_validate(
+        {
+            "summary": "Loose USB-C hub port with LED flicker.",
+            "category": "product_defect",
+            "confidence": 0.83,
+            "reasoning": "Physical defect evidence is present.",
+        }
+    )
+
+    assert DiagnosticCategory.PRODUCT_DEFECT.value == "product_defect"
+    assert parsed.category is DiagnosticCategory.PRODUCT_DEFECT
 
 
 @pytest.mark.asyncio

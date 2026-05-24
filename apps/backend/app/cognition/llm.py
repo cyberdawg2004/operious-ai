@@ -278,6 +278,8 @@ def _deterministic_category(content: str) -> str:
         return "charging_issue"
     if any(token in content for token in ("connect", "bluetooth", "wifi", "pair")):
         return "connectivity_issue"
+    if any(token in content for token in ("defect", "loose", "flicker", "serial")):
+        return "product_defect"
     if any(token in content for token in ("account", "login", "billing", "invoice")):
         return "account_issue"
     return "unknown_issue"
@@ -287,6 +289,7 @@ def _deterministic_confidence(category: str) -> float:
     return {
         "charging_issue": 0.88,
         "connectivity_issue": 0.84,
+        "product_defect": 0.83,
         "account_issue": 0.82,
     }.get(category, 0.42)
 

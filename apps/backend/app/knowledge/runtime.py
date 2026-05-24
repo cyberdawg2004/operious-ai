@@ -38,6 +38,10 @@ from app.tenant.enums import (
 from app.tenant.identity import TenantKnowledgeDocumentId
 from app.tenant.persistence import TenantConfigurationRepository
 
+_FALLBACK_CANDIDATE_MULTIPLIER = 4
+_FALLBACK_MIN_CANDIDATES = 32
+_FALLBACK_MAX_CANDIDATES = 200
+
 
 class KnowledgeRuntime:
     """Runtime authority for tenant-owned knowledge ingestion."""
@@ -222,6 +226,17 @@ class KnowledgeRuntime:
             ),
             expected_tenant_id=tenant_id,
         )
+        if not page.items:
+            page = await self._repository.list_vector_entries(
+                KnowledgeVectorQuery(
+                    vector_index_name=self._vector_index_name,
+                    provider=self._embedding_provider.provider_name,
+                    model=self._embedding_provider.model_name,
+                    current_only=True,
+                    limit=_fallback_candidate_limit(top_k),
+                ),
+                expected_tenant_id=tenant_id,
+            )
         scored = [
             (_cosine_similarity(query_vector, entry.vector.vector), entry)
             for entry in page.items
@@ -325,6 +340,13 @@ def _apply_budget(
                 per_document.get(entry.vector.document_id, 0) + 1
             )
     return decisions, included
+
+
+def _fallback_candidate_limit(top_k: int) -> int:
+    return min(
+        max(top_k * _FALLBACK_CANDIDATE_MULTIPLIER, _FALLBACK_MIN_CANDIDATES),
+        _FALLBACK_MAX_CANDIDATES,
+    )
 
 
 def _cosine_similarity(

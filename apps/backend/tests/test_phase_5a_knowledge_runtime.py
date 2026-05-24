@@ -27,6 +27,7 @@ from app.knowledge import (
 from app.knowledge.persistence import (
     InMemoryKnowledgeRepository,
     KnowledgeChunkRecord,
+    KnowledgeVectorPage,
     KnowledgeVectorQuery,
     KnowledgeVectorRecord,
     PostgresKnowledgeRepository,
@@ -48,6 +49,31 @@ _TENANT_ID = "tenant-acme"
 _OTHER_TENANT_ID = "tenant-other"
 _NOW = datetime(2026, 5, 22, 15, tzinfo=timezone.utc)
 _MASTER_KEY = "knowledge-router-master-key-material-32-bytes"
+
+
+class _StrictSearchKnowledgeRepository(InMemoryKnowledgeRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.queries: list[KnowledgeVectorQuery] = []
+
+    async def list_vector_entries(
+        self,
+        query: KnowledgeVectorQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> KnowledgeVectorPage:
+        self.queries.append(query)
+        if query.search_text is not None:
+            return KnowledgeVectorPage(
+                items=(),
+                total=0,
+                limit=query.limit or 0,
+                offset=query.offset,
+            )
+        return await super().list_vector_entries(
+            query,
+            expected_tenant_id=expected_tenant_id,
+        )
 
 
 def _document(
@@ -256,6 +282,42 @@ async def test_retrieval_budgeting_is_deterministic() -> None:
     assert {
         decision.reason for decision in zero_budget.budget_decisions
     } == {KnowledgeBudgetDecisionReason.EXCEEDED_TOKEN_BUDGET}
+
+
+@pytest.mark.asyncio
+async def test_retrieval_falls_back_when_search_prefilter_is_too_strict() -> None:
+    knowledge_repo = _StrictSearchKnowledgeRepository()
+    runtime, tenant_repo, _knowledge_repo = await _runtime(
+        knowledge_repo=knowledge_repo,
+    )
+    document = _document(
+        title="Charging SOP",
+        content=(
+            "Charging support covers Anker chargers, USB-C cables, "
+            "battery symptoms, overheating signals, and replacement evidence."
+        ),
+    )
+    await tenant_repo.save_knowledge_document(
+        document,
+        expected_tenant_id=_TENANT_ID,
+    )
+    await runtime.ingest_document(
+        tenant_id=_TENANT_ID,
+        document_id=document.document_id,
+    )
+
+    result = await runtime.retrieve(
+        tenant_id=_TENANT_ID,
+        query="Anker Nano charger not charging with included USB-C cable",
+        top_k=4,
+        max_tokens=64,
+    )
+
+    assert result.items
+    assert knowledge_repo.queries[0].search_text is not None
+    assert knowledge_repo.queries[1].search_text is None
+    assert knowledge_repo.queries[1].limit is not None
+    assert knowledge_repo.queries[1].limit >= 32
 
 
 @pytest.mark.asyncio
