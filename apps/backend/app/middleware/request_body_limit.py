@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from typing import cast
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.config import get_settings
+from app.survivability import PROBLEM_DETAILS_MEDIA_TYPE
 
 _JSON_RESPONSE_HEADERS: tuple[tuple[bytes, bytes], ...] = (
-    (b"content-type", b"application/json"),
+    (b"content-type", PROBLEM_DETAILS_MEDIA_TYPE.encode("ascii")),
 )
-_REQUEST_TOO_LARGE_BODY = b'{"detail":{"code":"request_body_too_large"}}'
+_REQUEST_TOO_LARGE_TITLE = "request_body_too_large"
 
 
 class RequestBodyLimitMiddleware:
@@ -44,7 +46,7 @@ class RequestBodyLimitMiddleware:
 
         content_length = _content_length(scope)
         if content_length is not None and content_length > self.max_bytes:
-            await _send_request_too_large(send)
+            await _send_request_too_large(send, max_bytes=self.max_bytes)
             return
 
         seen = 0
@@ -72,7 +74,7 @@ class RequestBodyLimitMiddleware:
         except _RequestBodyTooLarge:
             if response_started:
                 raise
-            await _send_request_too_large(send)
+            await _send_request_too_large(send, max_bytes=self.max_bytes)
 
 
 class _RequestBodyTooLarge(Exception):
@@ -94,10 +96,11 @@ def _content_length(scope: Scope) -> int | None:
     return None
 
 
-async def _send_request_too_large(send: Send) -> None:
+async def _send_request_too_large(send: Send, *, max_bytes: int) -> None:
+    body = _request_too_large_body(max_bytes=max_bytes)
     headers = (
         *_JSON_RESPONSE_HEADERS,
-        (b"content-length", str(len(_REQUEST_TOO_LARGE_BODY)).encode("ascii")),
+        (b"content-length", str(len(body)).encode("ascii")),
     )
     await send(
         {
@@ -109,9 +112,24 @@ async def _send_request_too_large(send: Send) -> None:
     await send(
         {
             "type": "http.response.body",
-            "body": _REQUEST_TOO_LARGE_BODY,
+            "body": body,
         }
     )
+
+
+def _request_too_large_body(*, max_bytes: int) -> bytes:
+    return json.dumps(
+        {
+            "type": "about:blank",
+            "title": _REQUEST_TOO_LARGE_TITLE,
+            "status": 413,
+            "detail": "Request body exceeds the configured byte limit.",
+            "code": _REQUEST_TOO_LARGE_TITLE,
+            "max_bytes": max_bytes,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 __all__ = ["RequestBodyLimitMiddleware"]

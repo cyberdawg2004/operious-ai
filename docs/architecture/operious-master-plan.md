@@ -4,7 +4,8 @@ Updated baseline after Phase 6-D, Pre-6-E Enterprise Trust Hardening
 phases A-H, the re-run final Pre-6-E gate, Phase 6-E Frontend
 Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
 Phase 6-F Anker demo artifact kit, and the Wedge 0 backend hardening
-pass deployed and live-verified on Fly.io.
+pass deployed and live-verified on Fly.io, plus Wedge 1 Phase 0 and
+Phase 1 reliability hardening.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -53,6 +54,11 @@ This document is the canonical handoff plan for the next Codex session.
   categories as semantic rejections, preserves Pydantic field-level
   validation detail in exception chains, and tightens the LLM response
   schema prompt.
+  Wedge 1 Phase 1 is complete: `RequestBodyLimitMiddleware` now returns
+  the canonical ProblemDetails envelope, remains outermost in
+  `create_app()`, rejects oversized `Content-Length` requests before any
+  body read, and aborts chunked bodies once the configured byte ceiling is
+  exceeded.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2187,6 +2193,17 @@ Acceptance criteria:
   backend 2,225 passed, 2 skipped; Pyright 0 errors, 676 warnings;
   invariants including vendor isolation 164 passed, 2 skipped; smoke
   4 passed.
+  Phase 1 ASGI body-limit enforcement closed on 2026-05-24:
+  `RequestBodyLimitMiddleware` remains the outermost user middleware in
+  `create_app()`, sources its byte ceiling from
+  `SURVIVABILITY_REQUEST_BODY_MAX_BYTES`, returns the canonical
+  `application/problem+json` error envelope, rejects oversized
+  `Content-Length` requests before downstream body reads, and aborts
+  chunked request streams when their running byte total exceeds the
+  limit. Verification: focused middleware tests 7 passed; adjacent
+  authority/ingress middleware tests 44 passed; full backend 2,229
+  passed, 2 skipped; Pyright 0 errors, 676 warnings; invariants
+  including vendor isolation 164 passed, 2 skipped; smoke 4 passed.
 - Wedge 2 - Celery/Redis Hardening:
   `task_ignore_result=True` for fire-and-forget tasks, `result_expires`,
   queue-depth admission before publishing, Redis memory policy and
@@ -2308,8 +2325,9 @@ The 9+ final gate cannot close until:
   deployed to Fly.io and the fresh product-defect Anker ticket completed.
 - Wedge 1 - Reliability Before Anker Goes Live is in progress. Phase 0
   emergency DiagnosticLLMOutput schema-validation hardening is complete;
-  Phase 1 ASGI body enforcement is next and must wait for explicit
-  human confirmation.
+  Phase 1 ASGI body enforcement is complete; Phase 2 escalation outbox
+  claim/publish/mark/recover discipline is next and must wait for
+  explicit human confirmation.
 - Wedge 2 - Celery/Redis Hardening.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 - Multi-Tenant Security Before Second Client.
@@ -2348,8 +2366,8 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 1 Reliability Before Anker Goes Live is in progress. Phase 0 emergency DiagnosticLLMOutput schema-validation hardening is complete; Phase 1 must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
-Current verified backend baseline after Wedge 1 Phase 0: 2,225 passed, 2 skipped; invariant subset including vendor isolation 164 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: Wedge 1 Reliability Before Anker Goes Live is in progress. Phase 0 emergency DiagnosticLLMOutput schema-validation hardening and Phase 1 ASGI body-limit enforcement are complete; Phase 2 must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
+Current verified backend baseline after Wedge 1 Phase 1: 2,229 passed, 2 skipped; invariant subset including vendor isolation 164 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
 Current Alembic head: 0031_dead_letter_tasks.
 
@@ -2382,6 +2400,12 @@ Completed before the next phase:
   validation, unknown category values become semantic rejections, schema
   failures preserve Pydantic field detail and `ValidationError` causes,
   and the diagnostic prompt includes the exact response schema.
+- Wedge 1 Phase 1 ASGI body-limit enforcement is closed on 2026-05-24:
+  `RequestBodyLimitMiddleware` remains the outermost user middleware,
+  sources the configured body ceiling from settings, rejects oversized
+  `Content-Length` requests before downstream body reads, aborts chunked
+  bodies once the running byte total exceeds the limit, and returns the
+  canonical ProblemDetails envelope for 413 responses.
 
 - Command Center 2 Critical Fixes Phase A is closed:
   live endpoint verification proved the `/api/v1/session/*` routes and
@@ -2425,9 +2449,9 @@ Remaining before the next wedge:
   call.
 - Investigate the latest fresh refund dead-letter
   `d6b45aef-2146-5e6d-ba85-367615857cef` before Anker go-live.
-- Do not start Wedge 1, Wedge 2, Wedge 3, Wedge 4, vector retrieval
-  SQL-native, or pilot launch until Phase 6-F evidence capture is closed
-  and their phase boundaries are explicitly confirmed.
+- Do not start Wedge 1 Phase 2, Wedge 2, Wedge 3, Wedge 4, vector
+  retrieval SQL-native, or pilot launch until their phase boundaries are
+  explicitly confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -2452,10 +2476,12 @@ pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Do not start the next master-plan wedge until the user confirms the
-phase boundary. The current boundary is Phase 6-F demo evidence capture:
-verify the selected sessions in Command Center/Trace Inspector and record
-the evidence package. Wedge 1 is queued but must not start until the user
-confirms. The enterprise target is no rating axis below 9/10.
+phase boundary. The current boundary is Wedge 1 Phase 2 escalation
+outbox claim/publish/mark/recover discipline, which must not start until
+the user confirms. Phase 6-F demo evidence capture remains open in
+parallel: verify the selected sessions in Command Center/Trace Inspector
+and record the evidence package. The enterprise target is no rating axis
+below 9/10.
 ```
 
 ## New Chat Hyperprompt
@@ -2465,9 +2491,13 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Wedge 0 Runtime Identity Collision Elimination is
-live-verified and closed. Phase 6-F demo evidence capture remains open
-before Wedge 1 starts.
+Current phase: Wedge 1 Reliability Before Anker Goes Live is in
+progress. Wedge 0 Runtime Identity Collision Elimination is
+live-verified and closed. Wedge 1 Phase 0 DiagnosticLLMOutput
+schema-validation hardening and Phase 1 ASGI body-limit enforcement are
+closed. Phase 2 escalation outbox claim/publish/mark/recover discipline
+must not start until the user explicitly confirms that phase boundary.
+Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
 - Read docs/architecture/operious-master-plan.md first.
@@ -2639,12 +2669,16 @@ Current Command Center 2 status:
   `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed in production.
 - Wedge 1 Phase 0 status:
   DiagnosticLLMOutput schema-validation hardening is complete and pushed
-  through the Phase 0 verification gate. Phase 1 ASGI webhook body
-  enforcement is next, but must wait for explicit human confirmation.
+  through the Phase 0 verification gate.
+- Wedge 1 Phase 1 status:
+  ASGI webhook body-limit enforcement is complete and pushed through the
+  Phase 1 verification gate. Phase 2 escalation outbox
+  claim/publish/mark/recover discipline is next, but must wait for
+  explicit human confirmation.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
-- Wedge 1 Reliability.
+- Wedge 1 Reliability Phase 2.
 - Wedge 2 Celery/Redis Hardening.
 - Wedge 3 UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 RLS Force.
