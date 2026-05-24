@@ -5,9 +5,11 @@ phases A-H, the re-run final Pre-6-E gate, Phase 6-E Frontend
 Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
 Phase 6-F Anker demo artifact kit, the Wedge 0 backend hardening pass
 deployed and live-verified on Fly.io, Wedge 1 Phase 0 through final-gate
-reliability hardening, and Wedge 2 Celery/Redis hardening through final
-production verification, and Wedge 3 UUID4 / ambient identity fallback
-elimination through final production verification.
+reliability hardening, Wedge 2 Celery/Redis hardening through final
+production verification, Wedge 3 UUID4 / ambient identity fallback
+elimination through final production verification, and Wedge 4 Option A
+through Phase 0 investigation plus the current Phase 1 local
+non-superuser RLS verification gate.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -39,6 +41,15 @@ This document is the canonical handoff plan for the next Codex session.
   `_deprecated` paths; Fly.io deployment image
   `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3` is live; production health
   returned `status: ok` with all five queues `ok` at depth 0.
+- Wedge 4 Option A current local gate: Phase 0 read-only investigation is
+  confirmed; Phase 1 session-variable wiring, anonymous routing resolver
+  migration work, Alembic URL precedence repair, namespace split repair,
+  SQLAlchemy transaction-local tenant context wiring, and non-superuser
+  test-role RLS fixture repair are in progress. The current local
+  non-superuser gate is full backend 2,301 passed, 2 skipped with
+  `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test`;
+  Pyright is 0 errors and 654 warnings across `apps/backend/app`; smoke
+  is 4/4 green when run with the same `TEST_DATABASE_URL`.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
@@ -61,7 +72,8 @@ This document is the canonical handoff plan for the next Codex session.
   redirects through Auth0, and Marketing serves on `www.operious.com`.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F evidence capture remains open,
-  and Wedge 3 UUID4 / Ambient Identity Fallback Elimination is closed.
+  Wedge 3 UUID4 / Ambient Identity Fallback Elimination is closed, and
+  Wedge 4 Option A is the active backend hardening wedge.
   The demo
   artifact kit is complete and
   production seeding has produced real Anker pilot sessions. Wedge 0
@@ -111,6 +123,15 @@ This document is the canonical handoff plan for the next Codex session.
   re-audit proves boundary, dispatch, session, execution, governance,
   cognition, escalation, and DLQ lineage IDs are UUID5-derived from
   stable inputs.
+  Wedge 4 Option A is in progress: Phase 0 mapped the database session
+  infrastructure, AuthorityContext tenant flow, substrate database
+  access, Celery database access, async ContextVar safety, and the exact
+  silent-failure test plan. Phase 1 now has tenant ContextVar wiring,
+  transaction-local `app.current_tenant_id` assignment through SQLAlchemy
+  begin events, anonymous webhook routing resolver migration work, and
+  RLS-aware test fixtures. The `operious_app_test` role has
+  `NOBYPASSRLS`, and the current full backend suite passes under that
+  role before FORCE RLS is applied.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2391,13 +2412,58 @@ Acceptance criteria:
   production health returned `status: ok` with diagnostic, escalation,
   supervisor, QA, and SOP intelligence queues all `ok`.
 - Wedge 4 - Multi-Tenant Security Before Second Client:
-  `ALTER TABLE ... FORCE ROW LEVEL SECURITY` on tenant-scoped tables and
-  remove nullable tenant allowance from tenant-scoped tables. Also verify
-  runtime tenant credential fetches remain tenant-owned, add production
-  RLS policy tests for cross-tenant read/write denial, and extend tenant
-  isolation invariants where Wedge 3 exposed richer lineage metadata.
-  Must land before a second enterprise client. Expected effort: one
-  migration and careful testing.
+  Active. Option A is the selected approach: wire
+  `app.current_tenant_id` per transaction before applying FORCE RLS, then
+  prove the application still sees tenant data under a non-BYPASSRLS role.
+  The failure mode is silent and severe: if the session variable is not
+  set, PostgreSQL RLS returns zero rows without raising an exception.
+  Phase 0 is confirmed complete. It established that the application
+  role must not rely on owner privileges, that the RLS policy function
+  compares row `tenant_id` to
+  `current_setting('app.current_tenant_id', true)`, and that every web,
+  repository, and worker database path must have tenant context before
+  any tenant-scoped query.
+  Phase 1 is in progress. Completed work includes:
+  Alembic URL precedence repair so `ALEMBIC_DATABASE_URL` wins over
+  `settings.database_url`; migration revision-id truncation repair via
+  `0033_widen_alembic_version`; the
+  `0033_rls_routing_resolver`/routing resolver migration work for
+  `resolve_tenant_by_routing_address(TEXT)`; canonical tenant ContextVar
+  namespace repair; transaction-local SQLAlchemy listener wiring using
+  `set_config('app.current_tenant_id', ..., true)`; AuthorityContext
+  middleware tenant setting; RLS session-variable tests; and a
+  non-superuser local role, `operious_app_test`, with `NOBYPASSRLS`.
+  Phase 1 hard-stop fixes completed so far:
+  namespace split between `apps.backend.app.db.tenant_context` and
+  `app.db.tenant_context` is closed; direct Postgres `pg_session` tests
+  now set RLS tenant context; `pg_seed_session` uses owner credentials
+  for cross-tenant seeding only; dynamic tenant tests can switch assertion
+  RLS context with `set_pg_rls_tenant()`; and the webhook replay commit
+  count regression was fixed without changing transaction semantics.
+  Phase 1 diagnostic sequence from this chat:
+  the initial non-superuser run exposed authentication/fixture problems
+  instead of app-level empty reads; `operious_app_test` password and
+  `NOBYPASSRLS` state were verified; the remaining failures were
+  categorized as RLS `WITH CHECK` insert denials from tests seeding data
+  under the wrong tenant context; representative router, persistence, and
+  replay tracebacks were inspected before fixes; the 127-failure pattern
+  was reduced to direct `pg_session` RLS context mismatch; the 30
+  remaining failures were traced to intentional cross-tenant or dynamic
+  tenant seeding; and the final fixture repair separated owner-only seed
+  writes from RLS-constrained assertion reads.
+  Current local verification after the test-fixture repairs:
+  full backend 2,301 passed, 2 skipped as `operious_app_test`;
+  Pyright 0 errors and 654 warnings; smoke 4/4 green with
+  `TEST_DATABASE_URL` set. FORCE RLS and NOT NULL migrations are not yet
+  applied. Wedge 4 remains open.
+  Next work before Phase 2: finish any remaining Phase 1 cleanup and
+  commit/push boundary, then proceed only with human confirmation to
+  Celery worker tenant-context wiring. Later phases remain:
+  worker task tenant context and owner-only lookup helpers; local
+  non-superuser end-to-end verification before FORCE RLS; FORCE RLS
+  migration; tenant_id NOT NULL migration after zero-null proof;
+  production migration/deploy/health/session-total verification; and
+  master-plan closure after all acceptance criteria pass.
 
 ### Post-Wedge 9+ Throughput and Capacity Program
 
@@ -2512,7 +2578,13 @@ The 9+ final gate cannot close until:
   persisted active lineage uses UUID5 stable seeds, runtime counters are
   boot-nonce verified, DLQ replay IDs are deterministic/idempotent, and
   active-app UUID4 source invariants are green.
-- Wedge 4 - Multi-Tenant Security Before Second Client remains next.
+- Wedge 4 - Multi-Tenant Security Before Second Client is active and
+  must finish before any second-client onboarding. Phase 0 is confirmed;
+  Phase 1 has passed the current local non-superuser verification gate
+  after RLS session-variable wiring and test-fixture repairs. Next steps
+  are human-confirmed continuation into Celery worker tenant-context
+  wiring, non-superuser end-to-end verification, FORCE RLS, tenant_id NOT
+  NULL hardening, production migration/deploy, and final closure.
 - Vector retrieval SQL-native:
   push `LIMIT`, tenant filter, and ranking to Postgres instead of
   Python-side slicing on the full knowledge corpus. Low priority until
@@ -2548,11 +2620,14 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 3 UUID4 and Ambient Identity Fallback Elimination is closed and deployed. Phase 6-F demo evidence capture remains open.
-Wedge 4 Multi-Tenant Security Before Second Client must not start until the user explicitly confirms the next phase.
-Current verified backend baseline after Wedge 3 final gate: 2,294 passed, 2 skipped; expanded invariant subset including identity tests 193 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app; Alembic current `0032_escalation_outbox_claim_id (head)`. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health passed, queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: Wedge 4 Option A - Session Variable Wiring + FORCE RLS is active. Phase 0 is confirmed complete. Phase 1 has passed the current local non-superuser RLS verification gate after tenant context wiring and pg_seed_session repairs. Phase 6-F demo evidence capture remains open in parallel.
+Do not proceed from Wedge 4 Phase 1 into Phase 2 until the user explicitly confirms that phase boundary.
+Current verified backend baseline after the Wedge 4 Phase 1 fixture repair gate: 2,301 passed, 2 skipped as `operious_app_test`; smoke tests 4/4 green when `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test` is set; Pyright 0 errors and 654 warnings across apps/backend/app. Wedge 3 final production deployment remains `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3`; Alembic was at `0032_escalation_outbox_claim_id (head)` before Wedge 4 migration work. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health passed, queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 654 warnings; warnings must not grow.
-Current Alembic head: 0032_escalation_outbox_claim_id.
+Last closed production Alembic head before Wedge 4:
+0032_escalation_outbox_claim_id. Wedge 4 local migration work includes
+0033_widen_alembic_version and the routing resolver revision; verify
+`alembic current` before continuing Phase 1/Phase 2.
 
 Completed before the next phase:
 - Phase 6-A through Phase 6-E are closed.
@@ -2648,6 +2723,27 @@ Completed before the next phase:
   `0032_escalation_outbox_claim_id (head)`; Fly.io deployment image
   `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3` is live; production health
   returned `status: ok` with all five queues `ok`.
+- Wedge 4 Option A Phase 0 is confirmed:
+  database session creation, AsyncSession engine/pool behavior,
+  AuthorityContext tenant flow, all app database substrates, Celery
+  database access, async ContextVar safety, and the silent failure test
+  plan were mapped before code changes.
+- Wedge 4 Option A Phase 1 is in progress and the current local
+  non-superuser gate is green:
+  `ALEMBIC_DATABASE_URL` precedence was repaired in migration env
+  handling; Alembic revision-id truncation was addressed by widening
+  `alembic_version.version_num` before the routing resolver revision;
+  tenant ContextVar wiring exists; SQLAlchemy sets
+  `app.current_tenant_id` transaction-locally with `set_config(...,
+  true)`; AuthorityContext middleware sets/clears tenant context;
+  anonymous webhook routing uses the SECURITY DEFINER routing resolver
+  path under migration work; the tenant_context namespace split is
+  closed; the replay commit-count regression is closed; direct Postgres
+  tests set RLS tenant context; `pg_seed_session` seeds cross-tenant test
+  rows through owner credentials only; dynamic-tenant assertion reads use
+  `set_pg_rls_tenant()`; and the current local gate is full backend
+  2,301 passed, 2 skipped, Pyright 0 errors and 654 warnings, smoke 4/4
+  with `TEST_DATABASE_URL` set.
 
 - Command Center 2 Critical Fixes Phase A is closed:
   live endpoint verification proved the `/api/v1/session/*` routes and
@@ -2679,7 +2775,35 @@ Completed before the next phase:
   regression is fixed. Commit `971001d` was deployed to Fly.io, live
   health/CORS passed, and fresh product-defect rerun completed.
 
-Remaining before the next wedge:
+Remaining in Wedge 4:
+- Finish any remaining Phase 1 cleanup and commit/push boundary work.
+- Phase 2: wire every Celery worker task so tenant context is set inside
+  each task and inside every `_run_async()` helper before
+  `get_session_factory()`. Add `tenant_id` to
+  `execute_diagnostic_agent` and `evaluate_session_supervisor` task
+  signatures where publisher context can pass it directly. For
+  unavoidable lookup paths, implement owner-only
+  `get_tenant_for_execution(execution_id)` and
+  `get_tenant_for_session(session_id)` helpers that read only tenant_id.
+  Mark genuine cross-tenant maintenance sweeps with
+  `# PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS by design, must never return tenant data.`
+  Extend identity invariants so any worker file using
+  `owner_session_factory()` must contain that marker.
+- Phase 3: create/verify the local `operious_app_test` role with
+  `NOBYPASSRLS`; run the full suite as that role before FORCE RLS;
+  run RLS correctness tests; prove cross-tenant isolation.
+- Phase 4: apply FORCE RLS migration only after Phase 3 is green; rerun
+  full non-superuser suite; enable the no-session-variable RLS test; run
+  zero-null tenant checks; then apply tenant_id NOT NULL migration only
+  if all checked tables are clean.
+- Phase 5: verify Fly secrets, run production migrations with owner
+  credentials, verify production current_user is `operious_app`,
+  BYPASSRLS is false, FORCE RLS table count is correct, anker-pilot
+  sessions remain visible with the session variable, deploy the updated
+  app, run health/session total checks, update this plan, commit, and
+  push.
+
+Remaining Phase 6-F/demo work:
 - Confirm the five selected `anker-pilot` sessions open in Command
   Center Trace Inspector with real session timeline/events:
   `df6139ba-81fa-5f1d-9b3e-ceba6e7bb135`,
@@ -2691,8 +2815,8 @@ Remaining before the next wedge:
   call.
 - Investigate the latest fresh refund dead-letter
   `d6b45aef-2146-5e6d-ba85-367615857cef` before Anker go-live.
-- Do not start Wedge 4, vector retrieval SQL-native, or pilot
-  launch until their phase boundaries are explicitly confirmed.
+- Do not start vector retrieval SQL-native or pilot launch until Wedge 4
+  is fully closed and their phase boundaries are explicitly confirmed.
 
 CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 - Router -> service -> runtime layering. Routers never access repositories or runtimes directly.
@@ -2713,14 +2837,15 @@ CONSTITUTIONAL RULES - NEVER NEGOTIABLE:
 
 AFTER EVERY WEDGE, RUN:
 pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
-pytest apps/backend/tests/test_system_smoke.py -v
-TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
+TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend/tests/test_system_smoke.py -v
+TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend -q
+venv/bin/pyright apps/backend/app
 
-Do not start the next master-plan wedge until the user confirms the
-phase boundary. The last completed boundary is Wedge 3 UUID4 and Ambient
-Identity Fallback Elimination, which is closed and deployed. The next
-boundary is Wedge 4 Multi-Tenant Security Before Second Client, which
-must not start until the user confirms.
+Do not start the next Wedge 4 phase until the user confirms the phase
+boundary. The last fully closed wedge is Wedge 3 UUID4 and Ambient
+Identity Fallback Elimination. The active boundary is Wedge 4 Phase 1;
+the next boundary is Wedge 4 Phase 2 Celery worker tenant-context
+wiring.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -2734,7 +2859,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Wedge 3 UUID4 and Ambient Identity Fallback Elimination is closed.
+Current phase: Wedge 4 Option A - Session Variable Wiring + FORCE RLS is active.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
@@ -2746,9 +2871,10 @@ retry budgets, exponential retry countdowns, and traceback-rich DLQ
 metadata. Wedge 3 UUID4 and Ambient Identity Fallback Elimination is
 closed and deployed with deterministic active-app lineage IDs,
 boot-nonce-verified runtime counters, deterministic/idempotent DLQ
-replay, and source-level identity invariants. Wedge 4 Multi-Tenant
-Security Before Second Client must not start until the user explicitly
-confirms that phase boundary.
+replay, and source-level identity invariants. Wedge 4 Phase 0 is
+confirmed, and Wedge 4 Phase 1 has passed the current local
+non-superuser RLS verification gate. Do not proceed to Wedge 4 Phase 2
+until the user explicitly confirms that phase boundary.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -2806,13 +2932,20 @@ Current verified baseline:
   skipped; smoke 4/4 green; Pyright 0 errors and 654 warnings; active-app
   UUID4 grep returned empty with the approved `_deprecated` quarantine
   exclusion; Fly.io health queue-depth section returned all queues `ok`.
+- Wedge 4 Phase 1 current local gate: 2,301 passed, 2 skipped as
+  `operious_app_test`; smoke 4/4 green when `TEST_DATABASE_URL` points to
+  `postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test`;
+  Pyright 0 errors and 654 warnings.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
 - Pyright warnings: 654; warnings must not grow phase over phase.
-- Alembic current: 0032_escalation_outbox_claim_id (head).
+- Last closed production Alembic head before Wedge 4:
+  0032_escalation_outbox_claim_id. Wedge 4 local migration work includes
+  0033_widen_alembic_version and the routing resolver revision; verify
+  current head before continuing migrations.
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -2860,8 +2993,10 @@ Current verified baseline:
   preserved.
 
 Goal for this chat:
-Do not start Wedge 4 until the user explicitly confirms that boundary.
-Phase 6-F demo evidence capture remains open in parallel. Wedge 0
+Continue Wedge 4 only from the explicitly confirmed phase boundary.
+Phase 1 is not Wedge 4 closure; the next unconfirmed boundary is Phase 2
+Celery worker tenant-context wiring. Phase 6-F demo evidence capture
+remains open in parallel. Wedge 0
 deployed to Fly.io from commit
 `971001d`; live health/CORS passed; fresh product-defect session
 `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed with real cognition
@@ -2965,10 +3100,35 @@ Current Command Center 2 status:
   returned empty with the approved `_deprecated` quarantine exclusion;
   Fly.io image `deployment-01KSD91AHEF5VJZFZBBTQJ9CM3` is live;
   production health returned `status: ok` with all five queues `ok`.
+- Wedge 4 Phase 0 status:
+  Confirmed complete. The investigation mapped AsyncSession creation,
+  engine/pool behavior, transaction lifecycle, AuthorityContext tenant
+  flow, ContextVar safety, every app database substrate, every worker DB
+  access path, and the silent failure detection test plan.
+- Wedge 4 Phase 1 current status:
+  In progress and locally green after the RLS fixture repair pass.
+  Implemented/landed work includes `ALEMBIC_DATABASE_URL` precedence
+  repair, Alembic version-column widening before the routing resolver
+  revision, tenant ContextVar wiring, SQLAlchemy transaction-local
+  session variable setting, AuthorityContext tenant setting, anonymous
+  webhook routing resolver migration work, namespace split repair,
+  webhook replay commit-count repair, `operious_app_test` role
+  authentication repair, direct `pg_session` RLS tenant setting,
+  `pg_seed_session` for owner-only cross-tenant test seeding, and
+  `set_pg_rls_tenant()` for dynamic tenant assertion reads.
+  Current local gate: full backend 2,301 passed, 2 skipped as
+  `operious_app_test`; Pyright 0 errors and 654 warnings; smoke 4/4
+  with `TEST_DATABASE_URL` set. FORCE RLS and tenant_id NOT NULL are not
+  yet applied.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
-- Wedge 4 RLS Force.
+- Wedge 4 Phase 2 Celery worker tenant-context wiring after human
+  confirmation.
+- Wedge 4 Phase 3 local non-superuser end-to-end RLS verification.
+- Wedge 4 Phase 4 FORCE RLS and tenant_id NOT NULL migrations.
+- Wedge 4 Phase 5 production migration, deploy, and health/session
+  visibility verification.
 - Vector Retrieval SQL-native.
 - Post-wedge 9+ Throughput and Capacity Program.
 - 9+ Final Gate.
@@ -3008,9 +3168,11 @@ After the next wedge:
 - Run the invariant subset:
   pytest apps/backend/tests/test_router_invariants.py apps/backend/tests/test_coordination_invariants.py apps/backend/tests/test_boundary_invariants.py apps/backend/tests/test_session_invariants.py apps/backend/tests/test_hardening_invariants.py -q
 - Run smoke:
-  pytest apps/backend/tests/test_system_smoke.py -v
+  TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend/tests/test_system_smoke.py -v
 - Run the backend suite with asyncpg TEST_DATABASE_URL, never a plain
-  postgresql:// URL.
+  postgresql:// URL. For Wedge 4, use the non-BYPASSRLS
+  `operious_app_test` role:
+  TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Final answer must include:
 - Files changed.

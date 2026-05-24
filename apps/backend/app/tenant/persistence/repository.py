@@ -74,7 +74,14 @@ class TenantConfigurationRepository(Protocol):
         *,
         channel_type: str,
         routing_address: str,
+        expected_tenant_id: str | None = None,
     ) -> TenantChannelConfigurationRecord | None: ...
+
+    async def resolve_tenant_by_routing_address(
+        self,
+        *,
+        routing_address: str,
+    ) -> str | None: ...
 
     async def save_knowledge_document(
         self,

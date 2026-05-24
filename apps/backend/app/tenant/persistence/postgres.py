@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
@@ -146,6 +146,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         *,
         channel_type: str,
         routing_address: str,
+        expected_tenant_id: str | None = None,
     ) -> TenantChannelConfigurationRecord | None:
         stmt = (
             select(TenantChannelConfigurationRow)
@@ -155,10 +156,25 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             )
             .limit(2)
         )
+        if expected_tenant_id is not None:
+            stmt = stmt.where(
+                TenantChannelConfigurationRow.tenant_id == expected_tenant_id
+            )
         rows = tuple((await self.session.execute(stmt)).scalars())
         if len(rows) != 1:
             return None
         return _channel_row_to_record(rows[0])
+
+    async def resolve_tenant_by_routing_address(
+        self,
+        *,
+        routing_address: str,
+    ) -> str | None:
+        stmt = select(func.resolve_tenant_by_routing_address(routing_address))
+        return cast(
+            str | None,
+            (await self.session.execute(stmt)).scalar_one_or_none(),
+        )
 
     async def save_knowledge_document(
         self,

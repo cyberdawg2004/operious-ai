@@ -15,6 +15,7 @@ from the repository root.
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -62,7 +63,7 @@ if config.config_file_name is not None:
 
 settings = get_settings()
 engine_config = build_database_engine_config(
-    settings.database_url,
+    os.environ.get("ALEMBIC_DATABASE_URL") or settings.database_url,
     connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
 )
 

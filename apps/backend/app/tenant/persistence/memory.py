@@ -136,14 +136,35 @@ class InMemoryTenantConfigurationRepository:
         *,
         channel_type: str,
         routing_address: str,
+        expected_tenant_id: str | None = None,
     ) -> TenantChannelConfigurationRecord | None:
         matches = [
             r
             for r in self._channels.values()
             if r.channel_type.value == channel_type
             and r.routing_address == routing_address
+            and (
+                expected_tenant_id is None
+                or r.tenant_id == expected_tenant_id
+            )
         ]
         if len(matches) != 1:
+            return None
+        return matches[0]
+
+    async def resolve_tenant_by_routing_address(
+        self,
+        *,
+        routing_address: str,
+    ) -> str | None:
+        matches = [
+            r.tenant_id
+            for r in self._channels.values()
+            if r.routing_address == routing_address
+            and r.status.value == "active"
+        ]
+        unique_matches = set(matches)
+        if len(unique_matches) != 1 or len(matches) != 1:
             return None
         return matches[0]
 

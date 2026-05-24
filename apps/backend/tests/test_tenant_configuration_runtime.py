@@ -233,6 +233,54 @@ async def test_active_channel_route_resolution_fails_closed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_routing_address_tenant_resolution_is_unique_and_active() -> None:
+    runtime = _runtime()
+    await runtime.configure_channel(
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="support@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="webhook-secret",
+        status=TenantChannelStatus.ACTIVE,
+    )
+    await runtime.configure_channel(
+        tenant_id="tenant-paused",
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="paused@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="webhook-secret",
+        status=TenantChannelStatus.PAUSED,
+    )
+
+    assert (
+        await runtime.resolve_tenant_by_routing_address(
+            routing_address="support@example.com"
+        )
+        == "tenant-acme"
+    )
+    assert (
+        await runtime.resolve_tenant_by_routing_address(
+            routing_address="paused@example.com"
+        )
+        is None
+    )
+    await runtime.configure_channel(
+        tenant_id="tenant-other",
+        channel_type=TenantChannelType.WHATSAPP,
+        routing_address="support@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="webhook-secret",
+        status=TenantChannelStatus.ACTIVE,
+    )
+    assert (
+        await runtime.resolve_tenant_by_routing_address(
+            routing_address="support@example.com"
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_knowledge_and_policy_versions_increment() -> None:
     runtime = _runtime()
     first_doc = await runtime.create_knowledge_document(

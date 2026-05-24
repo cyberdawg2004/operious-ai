@@ -67,6 +67,7 @@ from app.auth import (
     Credential,
     verified_identity_to_authority,
 )
+from app.db.tenant_context import set_current_tenant
 from app.identity.authority import AuthorityContext
 from app.identity.primitives import IdentityError
 from app.identity.runtime import (
@@ -303,9 +304,13 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
         request.state.authority_source = source
         token = set_request_authority(authority)
         source_token = set_request_authority_source(source)
+        set_current_tenant(
+            str(authority.tenant_id) if authority.tenant_id is not None else None
+        )
         try:
             response: Response = await call_next(request)
         finally:
+            set_current_tenant(None)
             reset_request_authority_source(source_token)
             reset_request_authority(token)
         return response
