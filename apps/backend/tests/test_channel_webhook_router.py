@@ -9,12 +9,19 @@ from app.api.v1.routers.ingress import create_channel_webhook_ingress
 from app.services.ticket_ingress_service import (
     TicketIngressRejected,
     TicketIngressServiceResult,
+    WebhookDuplicateDeliveryResult,
 )
 
 
 class _StubWebhookService:
-    def __init__(self, *, reject: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        reject: bool = False,
+        duplicate: bool = False,
+    ) -> None:
         self.reject = reject
+        self.duplicate = duplicate
         self.calls: list[dict[str, object]] = []
 
     async def process_channel_webhook(self, **kwargs: object):
@@ -24,6 +31,8 @@ class _StubWebhookService:
                 code="channel_webhook_verification_failed",
                 reason="bad signature",
             )
+        if self.duplicate:
+            return WebhookDuplicateDeliveryResult()
         return TicketIngressServiceResult(
             ingress_id="ingress-1",
             canonical_envelope_id="event-1",
@@ -83,5 +92,23 @@ async def test_channel_webhook_router_maps_rejection_to_400() -> None:
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == {
-        "code": "channel_webhook_verification_failed"
+        "code": "channel_webhook_verification_failed",
+        "reason": "bad signature",
     }
+
+
+@pytest.mark.asyncio
+async def test_channel_webhook_router_returns_duplicate_delivery_ack() -> None:
+    service = _StubWebhookService(duplicate=True)
+
+    response = await create_channel_webhook_ingress(
+        channel_type="email",
+        request=_FakeRequest(
+            body=b'{"message_id":"email-1","to":"support@example.com"}',
+            headers={"content-type": "application/json"},
+        ),  # type: ignore[arg-type]
+        expected_tenant_id=None,
+        service=service,  # type: ignore[arg-type]
+    )
+
+    assert response.status == "duplicate_delivery_acknowledged"

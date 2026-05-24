@@ -75,7 +75,8 @@ async def test_webhook_with_stale_timestamp_rejected(
             content_type="application/json",
         )
 
-    assert exc_info.value.code == "channel_webhook_stale"
+    assert exc_info.value.code == "stale_webhook_timestamp"
+    assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(BoundaryIngressQuery())
     assert page.total == 0
 

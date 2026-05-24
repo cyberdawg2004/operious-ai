@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,13 +47,20 @@ from app.tenant.runtime import TenantConfigurationRuntime
 TicketChannel = Literal["email", "whatsapp", "voice"]
 WebhookTicketChannel = Literal["email", "whatsapp", "shulex", "lark"]
 WEBHOOK_FRESHNESS_WINDOW_SECONDS = 300
-WEBHOOK_NONCE_TTL_SECONDS = 3600
+WEBHOOK_NONCE_TTL_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True, slots=True)
 class TicketIngressServiceResult:
     ingress_id: str
     canonical_envelope_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class WebhookDuplicateDeliveryResult:
+    status: Literal["duplicate_delivery_acknowledged"] = (
+        "duplicate_delivery_acknowledged"
+    )
 
 
 class TicketIngressService:
@@ -114,7 +122,7 @@ class TicketIngressService:
         raw_body: bytes | None,
         content_type: str | None,
         tenant_hint: str | None = None,
-    ) -> TicketIngressServiceResult:
+    ) -> TicketIngressServiceResult | WebhookDuplicateDeliveryResult:
         if self._tenant_configuration_runtime is None:
             raise TicketIngressServiceError(
                 "tenant configuration runtime is not configured"
@@ -143,6 +151,15 @@ class TicketIngressService:
                 reason="channel route does not belong to tenant scope",
             )
 
+        if not _webhook_signature_header_present(
+            channel_type=tenant_channel_type,
+            headers=headers,
+        ):
+            raise TicketIngressRejected(
+                code="missing_signature",
+                reason="webhook signature header is required",
+                status_code=400,
+            )
         webhook_secret = _select_webhook_secret(
             channel_type=tenant_channel_type,
             channel_config=channel_config,
@@ -150,20 +167,26 @@ class TicketIngressService:
             headers=headers,
             raw_body=raw_body,
         )
-        signature_verified = _webhook_signature_matches_secret(
+        if not _webhook_signature_matches_secret(
             channel_type=tenant_channel_type,
             secret=webhook_secret,
             body=body,
             headers=headers,
             raw_body=raw_body,
-        )
-        if signature_verified:
-            await self._record_webhook_freshness_nonce(
-                tenant_id=channel_config.tenant_id,
-                channel_type=tenant_channel_type.value,
-                body=body,
-                headers=headers,
+        ):
+            raise TicketIngressRejected(
+                code="invalid_signature",
+                reason="invalid_signature",
+                status_code=401,
             )
+        nonce_recorded = await self._record_webhook_freshness_nonce(
+            tenant_id=channel_config.tenant_id,
+            channel_type=tenant_channel_type.value,
+            body=body,
+            headers=headers,
+        )
+        if not nonce_recorded:
+            return WebhookDuplicateDeliveryResult()
         adapter = _webhook_adapter_for_channel(
             channel_type=tenant_channel_type,
             webhook_secret=webhook_secret,
@@ -242,8 +265,9 @@ class TicketIngressService:
             is BoundaryNormalizationStatus.UNAUTHENTICATED
         ):
             raise TicketIngressRejected(
-                code="channel_webhook_verification_failed",
-                reason=result.normalization.error or "verification failed",
+                code="invalid_signature",
+                reason=result.normalization.error or "invalid_signature",
+                status_code=401,
             )
         if not result.normalization.is_ok or result.event_id is None:
             raise TicketIngressRejected(
@@ -262,7 +286,7 @@ class TicketIngressService:
         channel_type: str,
         body: Any,
         headers: Mapping[str, str],
-    ) -> None:
+    ) -> bool:
         try:
             context = extract_webhook_security_context(
                 channel_type=channel_type,
@@ -284,21 +308,27 @@ class TicketIngressService:
                     + timedelta(seconds=WEBHOOK_NONCE_TTL_SECONDS),
                 )
             )
+            return True
         except ValueError as exc:
+            reason = str(exc)
+            code = (
+                "webhook_nonce_missing"
+                if "nonce" in reason
+                else "stale_webhook_timestamp"
+            )
             raise TicketIngressRejected(
-                code="channel_webhook_stale",
-                reason=str(exc),
+                code=code,
+                reason=reason,
+                status_code=400 if code == "webhook_nonce_missing" else 401,
             ) from exc
         except WebhookFreshnessError as exc:
             raise TicketIngressRejected(
-                code="channel_webhook_stale",
+                code="stale_webhook_timestamp",
                 reason=str(exc),
+                status_code=401,
             ) from exc
-        except WebhookReplayError as exc:
-            raise TicketIngressRejected(
-                code="channel_webhook_replayed",
-                reason=str(exc),
-            ) from exc
+        except WebhookReplayError:
+            return False
 
 
 class TicketIngressServiceError(RuntimeError):
@@ -308,10 +338,17 @@ class TicketIngressServiceError(RuntimeError):
 class TicketIngressRejected(TicketIngressServiceError):
     """Raised when an inbound channel webhook is rejected at boundary."""
 
-    def __init__(self, *, code: str, reason: str) -> None:
+    def __init__(
+        self,
+        *,
+        code: str,
+        reason: str,
+        status_code: int = 400,
+    ) -> None:
         super().__init__(reason)
         self.code = code
         self.reason = reason
+        self.status_code = status_code
 
 
 def _adapter_registry() -> BoundaryAdapterRegistry:
@@ -579,12 +616,19 @@ def _webhook_signature_matches_secret(
             ),
         )
     if channel_type is TenantChannelType.WHATSAPP:
-        return _sha256_signature_matches(
-            secret=secret,
-            body=body,
-            headers=headers,
-            raw_body=raw_body,
-            header_names=("x-hub-signature-256", "x-operious-signature"),
+        return (
+            _sha256_signature_matches(
+                secret=secret,
+                body=body,
+                headers=headers,
+                raw_body=raw_body,
+                header_names=("x-hub-signature-256", "x-operious-signature"),
+            )
+            or _twilio_signature_matches(
+                secret=secret,
+                body=body,
+                headers=headers,
+            )
         )
     if channel_type is TenantChannelType.SHULEX:
         return _sha256_signature_matches(
@@ -601,6 +645,39 @@ def _webhook_signature_matches_secret(
             headers=headers,
             raw_body=raw_body,
         )
+    return False
+
+
+def _webhook_signature_header_present(
+    *,
+    channel_type: TenantChannelType,
+    headers: Mapping[str, str],
+) -> bool:
+    if channel_type is TenantChannelType.EMAIL:
+        return _any_header(
+            headers,
+            (
+                "x-operious-signature",
+                "x-email-signature",
+                "x-amz-sns-message-signature",
+            ),
+        )
+    if channel_type is TenantChannelType.WHATSAPP:
+        return _any_header(
+            headers,
+            (
+                "x-hub-signature-256",
+                "x-operious-signature",
+                "x-twilio-signature",
+            ),
+        )
+    if channel_type is TenantChannelType.SHULEX:
+        return _any_header(
+            headers,
+            ("x-shulex-signature", "x-operious-signature"),
+        )
+    if channel_type is TenantChannelType.LARK:
+        return _header(headers, "x-lark-signature") is not None
     return False
 
 
@@ -628,6 +705,32 @@ def _sha256_signature_matches(
     if supplied.startswith("sha256="):
         supplied = supplied.removeprefix("sha256=")
     return hmac.compare_digest(supplied.lower(), expected.lower())
+
+
+def _twilio_signature_matches(
+    *,
+    secret: str,
+    body: Any,
+    headers: Mapping[str, str],
+) -> bool:
+    signature = _header(headers, "x-twilio-signature")
+    webhook_url = _header(headers, "x-operious-webhook-url")
+    if not signature or webhook_url is None or not isinstance(body, Mapping):
+        return False
+    pieces = [webhook_url]
+    typed_body = cast(Mapping[str, Any], body)
+    for key in sorted(str(k) for k in typed_body.keys()):
+        value = typed_body.get(key)
+        pieces.append(key)
+        pieces.append("" if value is None else str(value))
+    expected = base64.b64encode(
+        hmac.new(
+            secret.encode("utf-8"),
+            "".join(pieces).encode("utf-8"),
+            hashlib.sha1,
+        ).digest()
+    ).decode("ascii")
+    return hmac.compare_digest(signature.strip(), expected)
 
 
 def _lark_signature_matches(
@@ -671,6 +774,13 @@ def _header(headers: Mapping[str, str], name: str) -> str | None:
         if key.lower() == wanted:
             return value
     return None
+
+
+def _any_header(
+    headers: Mapping[str, str],
+    names: tuple[str, ...],
+) -> bool:
+    return any(_header(headers, name) is not None for name in names)
 
 
 def _webhook_ingress_seed(
@@ -759,4 +869,5 @@ __all__ = [
     "TicketIngressService",
     "TicketIngressServiceError",
     "TicketIngressServiceResult",
+    "WebhookDuplicateDeliveryResult",
 ]

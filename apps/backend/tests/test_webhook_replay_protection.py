@@ -20,10 +20,7 @@ from app.boundary.persistence import (
     WebhookNonceRecord,
 )
 from app.tenant.db.models import TenantRow
-from app.services.ticket_ingress_service import (
-    TicketIngressRejected,
-    TicketIngressService,
-)
+from app.services.ticket_ingress_service import TicketIngressService
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
@@ -67,17 +64,16 @@ async def test_webhook_with_replayed_nonce_rejected() -> None:
         raw_body=raw_body,
         content_type="application/json",
     )
-    with pytest.raises(TicketIngressRejected) as exc_info:
-        await service.process_channel_webhook(
-            channel_type="email",
-            body=body,
-            headers=headers,
-            raw_body=raw_body,
-            content_type="application/json",
-        )
+    second = await service.process_channel_webhook(
+        channel_type="email",
+        body=body,
+        headers=headers,
+        raw_body=raw_body,
+        content_type="application/json",
+    )
 
     assert first.ingress_id
-    assert exc_info.value.code == "channel_webhook_replayed"
+    assert second.status == "duplicate_delivery_acknowledged"
     assert session.commits == 1
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),

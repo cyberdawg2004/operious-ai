@@ -1,3 +1,11 @@
-from .ingress import TicketIngressRequest, TicketIngressResponse
+from .ingress import (
+    TicketIngressRequest,
+    TicketIngressResponse,
+    TicketIngressWebhookResponse,
+)
 
-__all__ = ["TicketIngressRequest", "TicketIngressResponse"]
+__all__ = [
+    "TicketIngressRequest",
+    "TicketIngressResponse",
+    "TicketIngressWebhookResponse",
+]

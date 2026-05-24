@@ -202,16 +202,13 @@ async def test_channel_webhook_rejects_failed_signature() -> None:
             content_type="application/json",
         )
 
-    assert exc_info.value.code == "channel_webhook_verification_failed"
+    assert exc_info.value.code == "invalid_signature"
+    assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),
         expected_tenant_id=TENANT_ID,
     )
-    assert page.total == 1
-    assert (
-        page.ingress[0].normalization_status
-        is BoundaryNormalizationStatus.UNAUTHENTICATED
-    )
+    assert page.total == 0
 
 
 @pytest.mark.asyncio

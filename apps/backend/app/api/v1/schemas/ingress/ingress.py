@@ -14,3 +14,9 @@ class TicketIngressResponse(BaseModel):
     ingress_id: str
     canonical_envelope_id: str
     status: str = "received"
+
+
+class TicketIngressWebhookResponse(BaseModel):
+    ingress_id: str | None = None
+    canonical_envelope_id: str | None = None
+    status: Literal["received", "duplicate_delivery_acknowledged"] = "received"

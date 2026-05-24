@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.api.v1.schemas.ingress import (
     TicketIngressRequest,
     TicketIngressResponse,
+    TicketIngressWebhookResponse,
 )
 from app.dependencies.authority import (
     request_tenant_scope_opt,
@@ -20,6 +21,7 @@ from app.services.ticket_ingress_service import (
     TicketIngressRejected,
     TicketIngressService,
     TicketIngressServiceError,
+    WebhookDuplicateDeliveryResult,
 )
 
 router = APIRouter(tags=["ingress"])
@@ -51,14 +53,14 @@ async def create_ticket_ingress(
 
 @router.post(
     "/channels/{channel_type}/webhook",
-    response_model=TicketIngressResponse,
+    response_model=TicketIngressWebhookResponse,
 )
 async def create_channel_webhook_ingress(
     channel_type: str,
     request: Request,
     expected_tenant_id: str | None = Depends(request_tenant_scope_opt),
     service: TicketIngressService = Depends(get_ticket_ingress_service),
-) -> TicketIngressResponse:
+) -> TicketIngressWebhookResponse:
     raw_body = await request.body()
     content_type = request.headers.get("content-type")
     try:
@@ -76,14 +78,18 @@ async def create_channel_webhook_ingress(
         )
     except TicketIngressRejected as exc:
         raise HTTPException(
-            status_code=400,
-            detail={"code": exc.code},
+            status_code=exc.status_code,
+            detail={"code": exc.code, "reason": exc.reason},
         ) from exc
     except TicketIngressServiceError as exc:
         raise HTTPException(
             status_code=500, detail={"code": "ticket_ingress_failed"}
         ) from exc
-    return TicketIngressResponse(
+    if isinstance(result, WebhookDuplicateDeliveryResult):
+        return TicketIngressWebhookResponse(
+            status="duplicate_delivery_acknowledged"
+        )
+    return TicketIngressWebhookResponse(
         ingress_id=result.ingress_id,
         canonical_envelope_id=result.canonical_envelope_id,
     )

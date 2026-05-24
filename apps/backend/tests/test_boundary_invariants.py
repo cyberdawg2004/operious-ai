@@ -279,3 +279,21 @@ def test_ticket_ingress_does_not_create_request_local_idempotency() -> None:
         encoding="utf-8"
     )
     assert "BoundaryIdempotencyRegistry" not in text
+
+
+def test_tenant_channel_webhooks_enforce_freshness_signature_and_nonce() -> None:
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "app/services/ticket_ingress_service.py"
+    )
+    text = path.read_text(encoding="utf-8")
+
+    for channel in ("EMAIL", "WHATSAPP", "SHULEX", "LARK"):
+        assert f"TenantChannelType.{channel}" in text
+    assert "WEBHOOK_FRESHNESS_WINDOW_SECONDS = 300" in text
+    assert "WEBHOOK_NONCE_TTL_SECONDS = 24 * 60 * 60" in text
+    assert "_webhook_signature_header_present" in text
+    assert "_webhook_signature_matches_secret" in text
+    assert "extract_webhook_security_context" in text
+    assert "record_webhook_nonce" in text
+    assert "WebhookDuplicateDeliveryResult" in text
