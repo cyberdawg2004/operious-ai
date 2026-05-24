@@ -117,15 +117,18 @@ async def test_postgres_qa_score_is_write_once(
 @pytest.mark.asyncio
 async def test_postgres_qa_queries_clamp_to_tenant(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     supervisor_repo = PostgresSupervisorRepository(pg_session)
     qa_repo = PostgresQAPersistence(pg_session)
+    seed_supervisor_repo = PostgresSupervisorRepository(pg_seed_session)
+    seed_qa_repo = PostgresQAPersistence(pg_seed_session)
     tenant_a = _inspection(tenant_id="tenant-acme")
     tenant_b = _inspection(tenant_id="tenant-other")
     await supervisor_repo.record_inspection(tenant_a)
-    await supervisor_repo.record_inspection(tenant_b)
+    await seed_supervisor_repo.record_inspection(tenant_b)
     await qa_repo.record_score(_score(tenant_a), expected_tenant_id="tenant-acme")
-    await qa_repo.record_score(
+    await seed_qa_repo.record_score(
         _score(tenant_b),
         expected_tenant_id="tenant-other",
     )

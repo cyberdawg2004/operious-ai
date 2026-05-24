@@ -14,7 +14,11 @@ from app.execution import (
 )
 from app.execution.enums import ExecutionOutboxState
 from app.execution.persistence import PostgresExecutionPersistence
-from tests.conftest import execution_admission_token, requires_postgres
+from tests.conftest import (
+    execution_admission_token,
+    requires_postgres,
+    set_pg_rls_tenant,
+)
 
 
 _NOW = datetime(2026, 5, 22, 6, tzinfo=timezone.utc)
@@ -90,6 +94,7 @@ async def test_postgres_requeues_stale_outbox_with_tenant_scope(
             admitted_at=_NOW,
         ),
     )
+    await set_pg_rls_tenant(pg_session, "tenant-other")
     other = await runtime.request_diagnostic_execution(
         dispatch_id="dispatch-postgres-stale-outbox-other",
         session_id="session-postgres-stale-outbox-other",
@@ -101,17 +106,20 @@ async def test_postgres_requeues_stale_outbox_with_tenant_scope(
         ),
     )
     old_claim = _NOW + timedelta(minutes=1)
+    await set_pg_rls_tenant(pg_session, "tenant-acme")
     await runtime.claim_outbox_for_execution(
         execution_id=own.execution.execution_id,
         publisher_id="publisher-a",
         claimed_at=old_claim,
     )
+    await set_pg_rls_tenant(pg_session, "tenant-other")
     await runtime.claim_outbox_for_execution(
         execution_id=other.execution.execution_id,
         publisher_id="publisher-b",
         claimed_at=old_claim,
     )
 
+    await set_pg_rls_tenant(pg_session, "tenant-acme")
     sweep = await runtime.reconcile_stale_outbox_records(
         stale_before=_NOW + timedelta(minutes=5),
         requeued_at=_NOW + timedelta(minutes=10),
@@ -122,6 +130,7 @@ async def test_postgres_requeues_stale_outbox_with_tenant_scope(
         OutboxQuery(tenant_id="tenant-acme"),
         expected_tenant_id="tenant-acme",
     )
+    await set_pg_rls_tenant(pg_session, "tenant-other")
     other_outbox = await runtime.list_outbox(
         OutboxQuery(tenant_id="tenant-other"),
         expected_tenant_id="tenant-other",

@@ -153,10 +153,12 @@ async def test_get_ingress_returns_200(
 
 @pytest.mark.asyncio
 async def test_get_ingress_returns_404_for_cross_tenant(
-    bnd_client: httpx.AsyncClient, pg_session: AsyncSession
+    bnd_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     record = _build_ingress(tenant_id="tenant-other")
-    await _seed_ingress(pg_session, record)
+    await _seed_ingress(pg_seed_session, record)
     response = await bnd_client.get(
         f"/api/v1/boundary/ingress/{record.ingress_id}",
         headers=_headers("tenant-acme"),
@@ -194,10 +196,14 @@ async def test_get_ingress_returns_404_for_malformed_uuid(
 
 @pytest.mark.asyncio
 async def test_list_ingress_clamps_to_tenant(
-    bnd_client: httpx.AsyncClient, pg_session: AsyncSession
+    bnd_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     await _seed_ingress(pg_session, _build_ingress(tenant_id="tenant-acme"))
-    await _seed_ingress(pg_session, _build_ingress(tenant_id="tenant-other"))
+    await _seed_ingress(
+        pg_seed_session, _build_ingress(tenant_id="tenant-other")
+    )
     response = await bnd_client.get(
         "/api/v1/boundary/ingress",
         headers=_headers("tenant-acme"),
@@ -209,10 +215,14 @@ async def test_list_ingress_clamps_to_tenant(
 
 @pytest.mark.asyncio
 async def test_list_egress_clamps_to_tenant(
-    bnd_client: httpx.AsyncClient, pg_session: AsyncSession
+    bnd_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     await _seed_egress(pg_session, _build_egress(tenant_id="tenant-acme"))
-    await _seed_egress(pg_session, _build_egress(tenant_id="tenant-other"))
+    await _seed_egress(
+        pg_seed_session, _build_egress(tenant_id="tenant-other")
+    )
     response = await bnd_client.get(
         "/api/v1/boundary/egress",
         headers=_headers("tenant-acme"),

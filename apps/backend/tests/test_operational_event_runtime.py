@@ -24,7 +24,7 @@ from app.events import (
 )
 from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 
 _RUNTIME = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -220,7 +220,9 @@ async def test_postgres_event_runtime_round_trip(
     )
     event = _event(tenant_id=f"tenant-{uuid.uuid4()}", metadata={"a": 1})
 
+    await set_pg_rls_tenant(pg_session, event.tenant_id)
     await runtime.append_event(event)
+    await set_pg_rls_tenant(pg_session, event.tenant_id)
     got = await runtime.get_event(
         event.event_id,
         expected_tenant_id=event.tenant_id,
@@ -249,7 +251,9 @@ async def test_postgres_event_runtime_rejects_chronology_collision(
         operational_act=OperationalAct.SUPERVISOR_INSPECT,
         substrate=OperationalSubstrate.SUPERVISOR,
     )
+    await set_pg_rls_tenant(pg_session, tenant_id)
     await runtime.append_event(event)
 
+    await set_pg_rls_tenant(pg_session, tenant_id)
     with pytest.raises(EventPersistenceError):
         await runtime.append_event(collision)

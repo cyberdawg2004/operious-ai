@@ -172,10 +172,12 @@ async def test_get_inspection_returns_200(
 
 @pytest.mark.asyncio
 async def test_get_inspection_404_for_cross_tenant(
-    sup_client: httpx.AsyncClient, pg_session: AsyncSession
+    sup_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     record = _inspection(tenant_id="tenant-other")
-    await _seed_inspection(pg_session, record)
+    await _seed_inspection(pg_seed_session, record)
     response = await sup_client.get(
         f"/api/v1/supervisor/inspections/{record.inspection_id}",
         headers=_headers("tenant-acme"),
@@ -185,11 +187,15 @@ async def test_get_inspection_404_for_cross_tenant(
 
 @pytest.mark.asyncio
 async def test_list_inspections_clamps_to_tenant(
-    sup_client: httpx.AsyncClient, pg_session: AsyncSession
+    sup_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     await _seed_inspection(pg_session, _inspection(tenant_id="tenant-acme"))
     await _seed_inspection(pg_session, _inspection(tenant_id="tenant-acme"))
-    await _seed_inspection(pg_session, _inspection(tenant_id="tenant-other"))
+    await _seed_inspection(
+        pg_seed_session, _inspection(tenant_id="tenant-other")
+    )
     response = await sup_client.get(
         "/api/v1/supervisor/inspections",
         headers=_headers("tenant-acme"),

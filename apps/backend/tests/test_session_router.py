@@ -166,10 +166,12 @@ async def test_get_session_returns_200(
 
 @pytest.mark.asyncio
 async def test_get_session_404_for_cross_tenant(
-    session_client: httpx.AsyncClient, pg_session: AsyncSession
+    session_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     record = _build_session(tenant_id="tenant-other")
-    await _seed_session(pg_session, record)
+    await _seed_session(pg_seed_session, record)
     response = await session_client.get(
         f"/api/v1/session/sessions/{record.session_id}",
         headers=_headers("tenant-acme"),
@@ -190,10 +192,14 @@ async def test_get_session_404_for_malformed_uuid(
 
 @pytest.mark.asyncio
 async def test_list_sessions_clamps_to_tenant(
-    session_client: httpx.AsyncClient, pg_session: AsyncSession
+    session_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     await _seed_session(pg_session, _build_session(tenant_id="tenant-acme"))
-    await _seed_session(pg_session, _build_session(tenant_id="tenant-other"))
+    await _seed_session(
+        pg_seed_session, _build_session(tenant_id="tenant-other")
+    )
     response = await session_client.get(
         "/api/v1/session/sessions",
         headers=_headers("tenant-acme"),

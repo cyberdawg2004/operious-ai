@@ -156,11 +156,13 @@ async def test_postgres_get_envelope_tenantless_invisible_to_scoped_reader(
 @pytest.mark.asyncio
 async def test_postgres_query_envelopes_clamps_to_tenant(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresCoordinationPersistence(pg_session)
+    seed_repo = PostgresCoordinationPersistence(pg_seed_session)
     await repo.record_envelope(_envelope(tenant_id="tenant-acme"))
     await repo.record_envelope(_envelope(tenant_id="tenant-acme"))
-    await repo.record_envelope(_envelope(tenant_id="tenant-other"))
+    await seed_repo.record_envelope(_envelope(tenant_id="tenant-other"))
 
     page = await repo.query_envelopes(
         CoordinationQuery(), expected_tenant_id="tenant-acme"

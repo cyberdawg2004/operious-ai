@@ -298,11 +298,13 @@ async def test_postgres_sub_records_inherit_tenant_scope_from_inspection(
 @pytest.mark.asyncio
 async def test_postgres_query_inspections_clamps_to_tenant(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresSupervisorRepository(pg_session)
+    seed_repo = PostgresSupervisorRepository(pg_seed_session)
     await repo.record_inspection(_inspection(tenant_id="tenant-acme"))
     await repo.record_inspection(_inspection(tenant_id="tenant-acme"))
-    await repo.record_inspection(_inspection(tenant_id="tenant-other"))
+    await seed_repo.record_inspection(_inspection(tenant_id="tenant-other"))
 
     page = await repo.query_inspections(
         InspectionQuery(), expected_tenant_id="tenant-acme"

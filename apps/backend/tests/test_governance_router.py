@@ -196,12 +196,13 @@ async def test_get_decision_returns_200_when_tenant_matches(
 async def test_get_decision_returns_404_for_cross_tenant_row(
     governance_client: httpx.AsyncClient,
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     """Cross-tenant access returns 404, NOT 403 — invisibility is
     indistinguishable from absence to prevent existence
     enumeration across tenants."""
     record = _build_decision(tenant_id="tenant-other")
-    await _seed_decision(pg_session, record)
+    await _seed_decision(pg_seed_session, record)
 
     response = await governance_client.get(
         f"/api/v1/governance/decisions/{record.decision_id}",
@@ -256,10 +257,13 @@ async def test_get_decision_returns_400_when_tenant_axis_missing(
 async def test_list_decisions_clamps_to_authenticated_tenant(
     governance_client: httpx.AsyncClient,
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     await _seed_decision(pg_session, _build_decision(tenant_id="tenant-acme"))
     await _seed_decision(pg_session, _build_decision(tenant_id="tenant-acme"))
-    await _seed_decision(pg_session, _build_decision(tenant_id="tenant-other"))
+    await _seed_decision(
+        pg_seed_session, _build_decision(tenant_id="tenant-other")
+    )
 
     response = await governance_client.get(
         "/api/v1/governance/decisions",
@@ -275,12 +279,15 @@ async def test_list_decisions_clamps_to_authenticated_tenant(
 async def test_list_decisions_ignores_caller_supplied_tenant_query_param(
     governance_client: httpx.AsyncClient,
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     """A request that supplies ``?tenant_id=tenant-other`` must NOT
     widen the scope. The router does not expose ``tenant_id`` as a
     query parameter — FastAPI ignores unknown extras and the
     response items are scoped to the authenticated tenant."""
-    await _seed_decision(pg_session, _build_decision(tenant_id="tenant-other"))
+    await _seed_decision(
+        pg_seed_session, _build_decision(tenant_id="tenant-other")
+    )
 
     response = await governance_client.get(
         "/api/v1/governance/decisions",
@@ -344,14 +351,15 @@ async def test_get_trace_returns_200_when_tenant_matches(
 async def test_get_trace_returns_404_for_cross_tenant(
     governance_client: httpx.AsyncClient,
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     decision_id = str(uuid.uuid4())
     await _seed_decision(
-        pg_session,
+        pg_seed_session,
         _build_decision(decision_id=decision_id, tenant_id="tenant-other"),
     )
     await _seed_trace(
-        pg_session,
+        pg_seed_session,
         _build_trace(decision_id=decision_id, tenant_id="tenant-other"),
     )
 

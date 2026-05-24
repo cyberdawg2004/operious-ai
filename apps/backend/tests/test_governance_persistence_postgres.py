@@ -41,7 +41,7 @@ from app.governance.persistence import (
     GovernanceTraceRecord,
     PostgresGovernanceRepository,
 )
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 pytestmark = [requires_postgres]
 
@@ -283,10 +283,13 @@ async def test_postgres_query_decisions_filters_by_tenant(
     base = datetime(2026, 5, 19, 9, tzinfo=timezone.utc)
     tenant_id = f"tenant-acme-{uuid.uuid4()}"
     other_tenant_id = f"tenant-other-{uuid.uuid4()}"
+    await set_pg_rls_tenant(pg_session, tenant_id)
     await repo.record_decision(_decision(tenant_id=tenant_id, decided_at=base))
     await repo.record_decision(_decision(tenant_id=tenant_id, decided_at=base.replace(second=1)))
+    await set_pg_rls_tenant(pg_session, other_tenant_id)
     await repo.record_decision(_decision(tenant_id=other_tenant_id, decided_at=base.replace(second=2)))
 
+    await set_pg_rls_tenant(pg_session, tenant_id)
     page = await repo.query_decisions(
         DecisionQuery(tenant_id=tenant_id, limit=10)
     )
@@ -301,6 +304,7 @@ async def test_postgres_query_decisions_paginates(
     repo = PostgresGovernanceRepository(pg_session)
     base = datetime(2026, 5, 19, 9, tzinfo=timezone.utc)
     tenant_id = f"tenant-page-{uuid.uuid4()}"
+    await set_pg_rls_tenant(pg_session, tenant_id)
     for i in range(5):
         await repo.record_decision(
             _decision(tenant_id=tenant_id, decided_at=base.replace(second=i))

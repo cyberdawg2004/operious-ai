@@ -50,7 +50,7 @@ from app.session.persistence import (
     SessionQuery,
     SessionRecord,
 )
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 pytestmark = [requires_postgres]
 
@@ -380,10 +380,13 @@ async def test_postgres_list_sessions_clamps_to_tenant(
     repo = PostgresSessionPersistence(pg_session)
     tenant_id = f"tenant-acme-{uuid.uuid4()}"
     other_tenant_id = f"tenant-other-{uuid.uuid4()}"
+    await set_pg_rls_tenant(pg_session, tenant_id)
     await repo.save_session(_session(tenant_id=tenant_id))
     await repo.save_session(_session(tenant_id=tenant_id))
+    await set_pg_rls_tenant(pg_session, other_tenant_id)
     await repo.save_session(_session(tenant_id=other_tenant_id))
 
+    await set_pg_rls_tenant(pg_session, tenant_id)
     page = await repo.list_sessions(
         SessionQuery(), expected_tenant_id=tenant_id
     )
@@ -417,15 +420,20 @@ async def test_postgres_list_correlations_clamps_via_parent_session(
     other_tenant_id = f"tenant-other-{uuid.uuid4()}"
     acme_session = _session(tenant_id=tenant_id)
     other_session = _session(tenant_id=other_tenant_id)
+    await set_pg_rls_tenant(pg_session, tenant_id)
     await repo.save_session(acme_session)
+    await set_pg_rls_tenant(pg_session, other_tenant_id)
     await repo.save_session(other_session)
+    await set_pg_rls_tenant(pg_session, tenant_id)
     await repo.save_correlation(
         _correlation(session_id=acme_session.session_id, external_id="acme-1")
     )
+    await set_pg_rls_tenant(pg_session, other_tenant_id)
     await repo.save_correlation(
         _correlation(session_id=other_session.session_id, external_id="other-1")
     )
 
+    await set_pg_rls_tenant(pg_session, tenant_id)
     page = await repo.list_correlations(
         SessionCorrelationQuery(), expected_tenant_id=tenant_id
     )
@@ -458,6 +466,7 @@ async def test_postgres_list_sessions_paginates(
 ) -> None:
     repo = PostgresSessionPersistence(pg_session)
     tenant_id = f"tenant-page-{uuid.uuid4()}"
+    await set_pg_rls_tenant(pg_session, tenant_id)
     for _ in range(5):
         await repo.save_session(_session(tenant_id=tenant_id))
 

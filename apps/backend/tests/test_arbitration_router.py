@@ -125,10 +125,12 @@ async def test_get_evaluation_returns_200_when_tenant_matches(
 
 @pytest.mark.asyncio
 async def test_get_evaluation_returns_404_for_cross_tenant(
-    arb_client: httpx.AsyncClient, pg_session: AsyncSession
+    arb_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     record = _build_record(tenant_id="tenant-other")
-    await _seed(pg_session, record)
+    await _seed(pg_seed_session, record)
     response = await arb_client.get(
         f"/api/v1/arbitration/evaluations/{record.evaluation_id}",
         headers=_headers("tenant-acme"),
@@ -164,11 +166,13 @@ async def test_get_evaluation_returns_401_when_anonymous(
 
 @pytest.mark.asyncio
 async def test_list_evaluations_clamps_to_tenant(
-    arb_client: httpx.AsyncClient, pg_session: AsyncSession
+    arb_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     await _seed(pg_session, _build_record(tenant_id="tenant-acme"))
     await _seed(pg_session, _build_record(tenant_id="tenant-acme"))
-    await _seed(pg_session, _build_record(tenant_id="tenant-other"))
+    await _seed(pg_seed_session, _build_record(tenant_id="tenant-other"))
     response = await arb_client.get(
         "/api/v1/arbitration/evaluations",
         headers=_headers("tenant-acme"),

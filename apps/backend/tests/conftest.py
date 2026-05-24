@@ -149,6 +149,8 @@ _MISSING_TEST_DATABASE_URL_REASON = (
     "operious_test) to enable the Postgres-backed integration "
     "tests."
 )
+_OWNER_DATABASE_USERNAME = "operious"
+_OWNER_DATABASE_PASSWORD = "operious"
 
 
 def database_url_skip_reason() -> str | None:
@@ -189,6 +191,21 @@ def _validate_dns_host(host: str) -> None:
         encoded = label.encode("idna")
         if not encoded or len(encoded) > 63:
             raise UnicodeError("invalid DNS label")
+
+
+def _owner_database_url_for_test(raw: str) -> str | None:
+    engine_config = build_database_engine_config(
+        raw,
+        connect_timeout=30.0,
+    )
+    url = make_url(engine_config.async_url)
+    if url.username == _OWNER_DATABASE_USERNAME:
+        return None
+    owner_url = url.set(
+        username=_OWNER_DATABASE_USERNAME,
+        password=_OWNER_DATABASE_PASSWORD,
+    )
+    return owner_url.render_as_string(hide_password=False)
 
 
 requires_postgres = pytest.mark.skipif(
@@ -341,6 +358,38 @@ async def pg_engine() -> AsyncIterator[AsyncEngine]:
         await engine.dispose()
 
 
+@pytest_asyncio.fixture
+async def pg_seed_engine(
+    pg_engine: AsyncEngine,
+) -> AsyncIterator[AsyncEngine | None]:
+    """Yield an owner-privileged engine for cross-tenant test seeding."""
+
+    dsn = os.environ.get(TEST_DATABASE_URL_ENV)
+    skip_reason = database_url_skip_reason()
+    if dsn is None or skip_reason is not None:
+        pytest.skip(skip_reason or _MISSING_TEST_DATABASE_URL_REASON)
+    owner_dsn = _owner_database_url_for_test(dsn)
+    if owner_dsn is None:
+        yield None
+        return
+
+    engine_config = build_database_engine_config(
+        owner_dsn,
+        connect_timeout=30.0,
+    )
+    engine = create_async_engine(
+        engine_config.async_url,
+        future=True,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+        connect_args=engine_config.connect_args,
+    )
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
 @pytest.fixture
 def pg_tenant_id() -> str:
     """
@@ -397,12 +446,62 @@ async def pg_session(
         await connection.close()
 
 
+async def set_pg_rls_tenant(
+    session: AsyncSession,
+    tenant_id: str,
+) -> None:
+    """
+    Set the PostgreSQL RLS tenant context mid-test.
+    Use when tenant_id is generated dynamically inside the
+    test body and cannot be pre-configured via pg_tenant_id.
+    Only use for assertion reads. Seeding always uses
+    pg_seed_session (owner credentials).
+    """
+
+    await session.execute(
+        text("SELECT set_config('app.current_tenant_id', :t, true)"),
+        {"t": tenant_id},
+    )
+
+
+@pytest_asyncio.fixture
+async def pg_seed_session(
+    pg_seed_engine: AsyncEngine | None,
+    pg_session: AsyncSession,
+) -> AsyncIterator[AsyncSession]:
+    """Yield an owner session for cross-tenant test seeding only."""
+
+    if pg_seed_engine is None:
+        yield pg_session
+        return
+
+    connection: AsyncConnection = await pg_seed_engine.connect()
+    transaction = await connection.begin()
+    try:
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
+        try:
+            yield session
+        finally:
+            await session.close()
+    finally:
+        if transaction.is_active:
+            await transaction.rollback()
+        await connection.close()
+
+
 __all__ = [
     "TEST_DATABASE_URL_ENV",
     "pg_engine",
+    "pg_seed_engine",
+    "pg_seed_session",
     "pg_session",
     "pg_tenant_id",
     "requires_postgres",
+    "set_pg_rls_tenant",
     "session_factory",
     "settings_for_test",
     "sqlite_engine",

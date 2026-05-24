@@ -243,6 +243,7 @@ async def test_postgres_duplicate_event_id_returns_original(
 @pytest.mark.asyncio
 async def test_postgres_concurrent_duplicate_replay_key_resolves_once(
     pg_engine: AsyncEngine,
+    pg_seed_engine: AsyncEngine | None,
 ) -> None:
     external_message_id = f"concurrent-{uuid.uuid4()}"
     replay_key = derive_replay_key(
@@ -265,8 +266,9 @@ async def test_postgres_concurrent_duplicate_replay_key_resolves_once(
         replay_key=replay_key,
         event_id=event_id,
     )
+    seed_engine = pg_seed_engine or pg_engine
     session_factory = async_sessionmaker(
-        pg_engine,
+        seed_engine,
         expire_on_commit=False,
         class_=AsyncSession,
     )
@@ -292,7 +294,7 @@ async def test_postgres_concurrent_duplicate_replay_key_resolves_once(
             assert page.total == 1
             assert page.ingress[0].ingress_id == saved[0].ingress_id
     finally:
-        async with pg_engine.begin() as conn:
+        async with seed_engine.begin() as conn:
             await conn.execute(
                 delete(BoundaryIngressRow).where(
                     BoundaryIngressRow.replay_key == replay_key
@@ -356,11 +358,13 @@ async def test_postgres_get_egress_tenantless_invisible_to_scoped_reader(
 @pytest.mark.asyncio
 async def test_postgres_list_ingress_clamps_to_tenant(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresBoundaryPersistence(pg_session)
+    seed_repo = PostgresBoundaryPersistence(pg_seed_session)
     await repo.save_ingress(_ingress(tenant_id="tenant-acme"))
     await repo.save_ingress(_ingress(tenant_id="tenant-acme"))
-    await repo.save_ingress(_ingress(tenant_id="tenant-other"))
+    await seed_repo.save_ingress(_ingress(tenant_id="tenant-other"))
 
     page = await repo.list_ingress(
         BoundaryIngressQuery(), expected_tenant_id="tenant-acme"
@@ -372,10 +376,12 @@ async def test_postgres_list_ingress_clamps_to_tenant(
 @pytest.mark.asyncio
 async def test_postgres_list_egress_clamps_to_tenant(
     pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
 ) -> None:
     repo = PostgresBoundaryPersistence(pg_session)
+    seed_repo = PostgresBoundaryPersistence(pg_seed_session)
     await repo.save_egress(_egress(tenant_id="tenant-acme"))
-    await repo.save_egress(_egress(tenant_id="tenant-other"))
+    await seed_repo.save_egress(_egress(tenant_id="tenant-other"))
 
     page = await repo.list_egress(
         BoundaryEgressQuery(), expected_tenant_id="tenant-acme"
