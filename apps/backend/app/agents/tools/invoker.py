@@ -32,7 +32,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
+from typing import Any
 
 from app.agents.context import AgentExecutionContext
 from app.agents.envelopes import ToolInvocationEnvelope
@@ -46,6 +48,7 @@ from app.agents.results import ToolInvocationRequest
 from app.agents.tools.base import BaseTool
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
+from app.agents.identity import derive_tool_invocation_id
 from app.governance.context import GovernanceContext
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
@@ -70,10 +73,18 @@ class ToolInvoker:
         self,
         request: ToolInvocationRequest,
         context: AgentExecutionContext,
+        *,
+        invocation_ordinal: int,
     ) -> ToolInvocationEnvelope:
         """Run the full pipeline. Never raises."""
         loop = asyncio.get_event_loop()
-        invocation_id = uuid.uuid4()
+        invocation_id = derive_tool_invocation_id(
+            execution_id=context.execution.execution_id,
+            tool_name=request.tool_name,
+            invocation_ordinal=invocation_ordinal,
+            payload=request.payload,
+            metadata=request.metadata,
+        )
         started_at = datetime.now(timezone.utc)
         loop_start = loop.time()
 
@@ -222,12 +233,12 @@ class ToolInvoker:
         reason: str,
         governance_envelope: GovernanceEnvelope | None,
         governance_decision_id: uuid.UUID | None = None,
-        extra_metadata: dict | None = None,
+        extra_metadata: Mapping[str, Any] | None = None,
     ) -> ToolInvocationEnvelope:
         loop = asyncio.get_event_loop()
         ended_at = datetime.now(timezone.utc)
         latency_ms = round((loop.time() - loop_start) * 1000, 2)
-        metadata: dict = {"reason": reason}
+        metadata: dict[str, Any] = {"reason": reason}
         if extra_metadata:
             metadata.update(extra_metadata)
         trace = ToolInvocationTrace(

@@ -52,7 +52,12 @@ from app.agents.exceptions import (
     AgentNotFoundError,
     StateTransitionError,
 )
-from app.agents.identity import AgentIdentity, ExecutionIdentity
+from app.agents.identity import (
+    AgentIdentity,
+    ExecutionIdentity,
+    derive_agent_execution_id,
+    derive_agent_runtime_instance_id,
+)
 from app.agents.results import AgentExecutionResult
 from app.agents.runtime.registry import AgentRegistry
 from app.agents.state_machine import assert_transition
@@ -74,7 +79,9 @@ class AgentRuntime:
     ) -> None:
         self._agents = agent_registry
         self._invoker = tool_invoker
-        self._instance_id = uuid.uuid4()
+        self._instance_id = derive_agent_runtime_instance_id(
+            agent_ids=self._agents.names()
+        )
 
     # ─── Inspection ───────────────────────────────────────────────────
 
@@ -106,8 +113,17 @@ class AgentRuntime:
         loop = asyncio.get_event_loop()
         started_at = datetime.now(timezone.utc)
         loop_start = loop.time()
-        execution_id = uuid.uuid4()
         rid = request_id if request_id is not None else get_request_id()
+        request_metadata = dict(metadata or {})
+        execution_id = derive_agent_execution_id(
+            agent_id=agent_id,
+            request=request,
+            tenant_id=tenant_id,
+            correlation_id=correlation_id,
+            parent_execution_id=parent_execution_id,
+            request_id=rid,
+            metadata=request_metadata,
+        )
 
         # 1. Resolve agent (failed lookup → fast-fail envelope).
         try:
@@ -152,7 +168,7 @@ class AgentRuntime:
             causality=ctx_causality,
             tenant_id=tenant_id,
             authority=authority,
-            metadata=dict(metadata or {}),
+            metadata=request_metadata,
         )
 
         # 3. Drive the state machine.
@@ -183,7 +199,7 @@ class AgentRuntime:
                 transitions=tuple(transitions),
                 runtime_instance_id=self._instance_id,
                 parent_chain=ctx_causality.parent_chain,
-                metadata=dict(metadata or {}),
+                metadata=request_metadata,
             )
 
         # 4. Run the agent.
@@ -247,7 +263,7 @@ class AgentRuntime:
             metadata={
                 "initiator": ctx_causality.initiator,
                 "cause": ctx_causality.cause,
-                **(dict(metadata or {})),
+                **request_metadata,
             },
         )
         return AgentExecutionEnvelope(
@@ -293,7 +309,7 @@ class AgentRuntime:
         transitions: tuple[StateTransition, ...] = (),
         runtime_instance_id: uuid.UUID | None = None,
         parent_chain: tuple[uuid.UUID, ...] = (),
-        metadata: dict | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> AgentExecutionEnvelope:
         loop = asyncio.get_event_loop()
         ended_at = datetime.now(timezone.utc)
@@ -323,7 +339,7 @@ class AgentRuntime:
             latency_ms=latency_ms,
             tool_invocation_count=0,
             error=f"{type(error).__name__}: {error}",
-            metadata=metadata or {},
+            metadata=dict(metadata or {}),
         )
         return AgentExecutionEnvelope(trace=trace, error=error)
 

@@ -26,13 +26,13 @@ invocation order.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import datetime, timezone
 
 from app.agents.context import AgentExecutionContext
 from app.agents.envelopes import ToolInvocationEnvelope
 from app.agents.enums import ToolInvocationStatus
 from app.agents.exceptions import ConstraintViolationError
+from app.agents.identity import derive_tool_invocation_id
 from app.agents.results import ToolInvocationRequest
 from app.agents.tools.invoker import ToolInvoker
 from app.agents.tracing import ToolInvocationTrace
@@ -60,7 +60,11 @@ class AgentToolSession:
             envelope = self._cap_exceeded_envelope(request, cap)
             self._envelopes.append(envelope)
             return envelope
-        envelope = await self._invoker.invoke(request, self._context)
+        envelope = await self._invoker.invoke(
+            request,
+            self._context,
+            invocation_ordinal=len(self._envelopes) + 1,
+        )
         self._envelopes.append(envelope)
         return envelope
 
@@ -89,7 +93,13 @@ class AgentToolSession:
             f"max_tool_invocations cap exceeded: {cap}"
         )
         trace = ToolInvocationTrace(
-            invocation_id=uuid.uuid4(),
+            invocation_id=derive_tool_invocation_id(
+                execution_id=self._context.execution.execution_id,
+                tool_name=request.tool_name,
+                invocation_ordinal=len(self._envelopes) + 1,
+                payload=request.payload,
+                metadata=request.metadata,
+            ),
             execution_id=self._context.execution.execution_id,
             tool_name=request.tool_name,
             status=ToolInvocationStatus.DENIED,

@@ -96,6 +96,8 @@ from app.hardening.survivability.validator import (
 )
 from app.hardening.traces.trace import HardeningTrace
 
+_RUNTIME_NAMESPACE = uuid.UUID("01087ec0-0009-4009-8009-000000000009")
+
 
 class HardeningRuntime:
     """Apex hardening runtime.
@@ -117,7 +119,12 @@ class HardeningRuntime:
         self._persistence = persistence
         self._recorder = recorder or HardeningAuditRecorder()
         self._runtime_instance_id = (
-            runtime_instance_id or uuid.uuid4()
+            runtime_instance_id
+            or _derive_runtime_instance_id(
+                persistence=persistence,
+                recorder=self._recorder,
+                capability_governance=capability_governance,
+            )
         )
         self._sequence = 0
         # 2.75-\u03b1: capability legality gate. Inert when None.
@@ -753,6 +760,35 @@ class HardeningRuntime:
         return HardeningEnvelope(
             trace=trace, result=None, error=error
         )
+
+
+def _derive_runtime_instance_id(
+    *,
+    persistence: object,
+    recorder: object,
+    capability_governance: object | None,
+) -> uuid.UUID:
+    governance_type = type(capability_governance)
+    seed = "|".join(
+        (
+            "hardening_runtime",
+            type(persistence).__module__,
+            type(persistence).__qualname__,
+            type(recorder).__module__,
+            type(recorder).__qualname__,
+            (
+                governance_type.__module__
+                if capability_governance is not None
+                else "<none>"
+            ),
+            (
+                governance_type.__qualname__
+                if capability_governance is not None
+                else "<none>"
+            ),
+        )
+    )
+    return uuid.uuid5(_RUNTIME_NAMESPACE, seed)
 
 
 __all__ = ["HardeningRuntime"]

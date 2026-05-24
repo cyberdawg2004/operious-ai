@@ -287,8 +287,8 @@ async def test_inspect_contains_evaluator_failure() -> None:
 async def test_runtime_instance_id_stable_across_calls() -> None:
     runtime = _build_runtime()
     supervisor = _build_supervisor()
-    envelope1 = await runtime.execute("ok", {})
-    envelope2 = await runtime.execute("ok", {})
+    envelope1 = await runtime.execute("ok", {}, request_id="req-1")
+    envelope2 = await runtime.execute("ok", {}, request_id="req-2")
 
     r1 = (
         await supervisor.inspect(

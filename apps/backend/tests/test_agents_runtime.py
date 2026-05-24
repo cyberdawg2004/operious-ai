@@ -272,10 +272,9 @@ async def test_request_id_threads_into_trace_when_passed() -> None:
 @pytest.mark.asyncio
 async def test_runtime_instance_id_stable_across_executions() -> None:
     rt = _runtime()
-    env1 = await rt.execute("ok", {})
-    env2 = await rt.execute("ok", {})
+    env1 = await rt.execute("ok", {}, request_id="req-1")
+    env2 = await rt.execute("ok", {}, request_id="req-2")
     assert env1.trace.runtime_instance_id == env2.trace.runtime_instance_id
-    # But execution_ids are unique.
     assert env1.trace.execution_id != env2.trace.execution_id
 
 
@@ -301,11 +300,13 @@ async def test_repeated_execution_produces_identical_trace_structure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execution_ids_are_unique_across_calls() -> None:
+async def test_execution_ids_are_deterministic_for_identical_inputs() -> None:
     rt = _runtime()
-    envs = [await rt.execute("ok", {}) for _ in range(20)]
-    ids = {env.trace.execution_id for env in envs}
-    assert len(ids) == len(envs)
+    first = await rt.execute("ok", {}, request_id="req-1")
+    second = await rt.execute("ok", {}, request_id="req-1")
+    different = await rt.execute("ok", {}, request_id="req-2")
+    assert second.trace.execution_id == first.trace.execution_id
+    assert different.trace.execution_id != first.trace.execution_id
 
 
 # ─── Constraint enforcement tests ────────────────────────────────────
