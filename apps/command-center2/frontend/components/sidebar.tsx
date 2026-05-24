@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useUser } from "@auth0/nextjs-auth0/client";
-import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
 import { useTheme } from "./theme-provider";
@@ -84,6 +83,11 @@ export function Sidebar({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+  const clearLocalAuthorityCache = () => {
+    window.localStorage.removeItem("operious_tenant_id");
+    window.localStorage.removeItem("operious_principal_id");
+    window.localStorage.removeItem("operious_operator_label");
+  };
 
   return (
     <aside
@@ -212,8 +216,12 @@ export function Sidebar({
 
       {/* Bottom section - User profile */}
       <div className={cn("p-4", collapsed && "lg:px-3")}>
-        <Link
-          href="/api/auth/logout"
+        <button
+          type="button"
+          onClick={() => {
+            clearLocalAuthorityCache();
+            window.location.assign("/api/auth/logout");
+          }}
           className={cn(
             "flex h-12 w-full items-center gap-3 rounded px-3",
             "transition-all duration-160",
@@ -246,7 +254,7 @@ export function Sidebar({
               collapsed && "lg:hidden"
             )}
           />
-        </Link>
+        </button>
 
         {/* Theme toggle */}
         <button

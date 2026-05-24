@@ -1,6 +1,6 @@
 "use client";
 
-import { getAuth0AccessToken } from "@/lib/api-client";
+import { getAuth0AccessToken, getBackendAuthorityMode } from "@/lib/api-client";
 
 export type ApiPage<T> = {
   items: T[];
@@ -266,14 +266,18 @@ async function buildHeaders(extra?: HeadersInit): Promise<Headers> {
   headers.set("Accept", "application/json");
   const tenantId = getConfiguredTenantId();
   const principalId = getConfiguredPrincipalId();
+  const authorityMode = getBackendAuthorityMode();
 
-  if (!tenantId) {
+  if (authorityMode === "tenant-header" && !tenantId) {
     throw new Error("Tenant context is not configured");
   }
 
-  if (tenantId) headers.set("X-Tenant-ID", tenantId);
-  if (principalId) headers.set("X-Principal-ID", principalId);
-  headers.set("Authorization", `Bearer ${await readAuth0Token()}`);
+  if (authorityMode === "verified-bearer") {
+    headers.set("Authorization", `Bearer ${await readAuth0Token()}`);
+  } else {
+    if (tenantId) headers.set("X-Tenant-ID", tenantId);
+    if (principalId) headers.set("X-Principal-ID", principalId);
+  }
 
   return headers;
 }

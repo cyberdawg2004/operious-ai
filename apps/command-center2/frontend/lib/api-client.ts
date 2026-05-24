@@ -1,6 +1,7 @@
 "use client";
 
 type QueryValue = string | number | boolean | null | undefined;
+export type BackendAuthorityMode = "tenant-header" | "verified-bearer";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api/v1";
 
@@ -37,6 +38,22 @@ export function getConfiguredOperatorLabel(): string {
   );
 }
 
+export function getBackendAuthorityMode(): BackendAuthorityMode {
+  const raw =
+    process.env.NEXT_PUBLIC_BACKEND_AUTHORITY_MODE ||
+    process.env.NEXT_PUBLIC_OPERIOUS_BACKEND_AUTHORITY_MODE ||
+    "";
+  const normalized = raw.trim().toLowerCase();
+  if (
+    normalized === "verified-bearer" ||
+    normalized === "bearer" ||
+    normalized === "auth0"
+  ) {
+    return "verified-bearer";
+  }
+  return "tenant-header";
+}
+
 export async function getAuth0AccessToken(): Promise<string> {
   const response = await fetch("/api/auth/access-token", {
     cache: "no-store",
@@ -61,7 +78,8 @@ export async function apiRequest(
 ): Promise<Response> {
   const { query, headers, body, ...init } = options;
   const tenantId = getConfiguredTenantId();
-  if (!tenantId) {
+  const authorityMode = getBackendAuthorityMode();
+  if (authorityMode === "tenant-header" && !tenantId) {
     throw new Error("Tenant context is not configured");
   }
 
@@ -76,14 +94,19 @@ export async function apiRequest(
 
   const requestHeaders = new Headers(headers);
   requestHeaders.set("Accept", "application/json");
-  requestHeaders.set("X-Tenant-ID", tenantId);
-  requestHeaders.set("Authorization", `Bearer ${await getAuth0AccessToken()}`);
+  if (authorityMode === "verified-bearer") {
+    requestHeaders.set("Authorization", `Bearer ${await getAuth0AccessToken()}`);
+  } else if (tenantId) {
+    requestHeaders.set("X-Tenant-ID", tenantId);
+  }
   if (body && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
   }
 
   const principalId = getConfiguredPrincipalId();
-  if (principalId) requestHeaders.set("X-Principal-ID", principalId);
+  if (authorityMode === "tenant-header" && principalId) {
+    requestHeaders.set("X-Principal-ID", principalId);
+  }
 
   return fetch(url.toString(), {
     ...init,
