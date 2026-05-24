@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.escalation.enums import EscalationOutboxStatus
 from app.escalation.persistence.records import (
@@ -42,6 +43,7 @@ class EscalationOutboxQuery:
     escalation_id: str | None = None
     tenant_id: str | None = None
     status: EscalationOutboxStatus | None = None
+    claimed_before_or_at: datetime | None = None
     limit: int = 100
     offset: int = 0
 

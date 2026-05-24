@@ -83,6 +83,7 @@ class EscalationPersistenceProtocol(Protocol):
         *,
         escalation_id: str,
         publisher_id: str,
+        claim_id: str,
         claimed_at: datetime,
         expected_tenant_id: str | None = None,
     ) -> EscalationOutboxRecord | None: ...
@@ -91,6 +92,7 @@ class EscalationPersistenceProtocol(Protocol):
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         published_at: datetime,
         expected_tenant_id: str | None = None,
     ) -> EscalationOutboxRecord: ...
@@ -99,6 +101,7 @@ class EscalationPersistenceProtocol(Protocol):
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         error: str,
         failed_at: datetime,
         dead_letter: bool = False,

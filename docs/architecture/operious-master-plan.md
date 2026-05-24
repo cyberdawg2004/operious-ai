@@ -5,7 +5,7 @@ phases A-H, the re-run final Pre-6-E gate, Phase 6-E Frontend
 Hydration, the Phase 3-D.1 ApprovalRecord projection follow-up, the
 Phase 6-F Anker demo artifact kit, and the Wedge 0 backend hardening
 pass deployed and live-verified on Fly.io, plus Wedge 1 Phase 0 and
-Phase 1 reliability hardening.
+Phase 1 and Phase 2 reliability hardening.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -18,14 +18,17 @@ This document is the canonical handoff plan for the next Codex session.
   0 xfailed; invariant subset 162 passed, 2 skipped; smoke 4/4 green;
   Pyright 0 errors across `apps/backend/app`; live Fly.io deploy
   succeeded and the fresh product-defect rerun completed.
+- Wedge 1 Phase 2 backend verification: 2,237 passed, 2 skipped;
+  invariant subset including vendor isolation 164 passed, 2 skipped;
+  smoke 4/4 green; Pyright 0 errors and 676 warnings.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 676 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0031_dead_letter_tasks (head)` on the
-  `operious_test` database after Phase 3-D.1 verification.
+- Alembic current: `0032_escalation_outbox_claim_id (head)` on the
+  `operious_test` database after Wedge 1 Phase 2 verification.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -59,6 +62,11 @@ This document is the canonical handoff plan for the next Codex session.
   `create_app()`, rejects oversized `Content-Length` requests before any
   body read, and aborts chunked bodies once the configured byte ceiling is
   exceeded.
+  Wedge 1 Phase 2 is complete: escalation outbox rows now carry a
+  deterministic per-attempt `claim_id`, terminal publish/fail marks require
+  the active claim, stale publishing rows older than the 5 minute
+  escalation lease are requeued and logged, and the request-scoped
+  deferred publisher prepares durable outbox state before transport.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2204,6 +2212,18 @@ Acceptance criteria:
   authority/ingress middleware tests 44 passed; full backend 2,229
   passed, 2 skipped; Pyright 0 errors, 676 warnings; invariants
   including vendor isolation 164 passed, 2 skipped; smoke 4 passed.
+  Phase 2 escalation outbox claim/publish/mark/recover discipline closed
+  on 2026-05-24: migration `0032_escalation_outbox_claim_id` adds the
+  durable `claim_id` token, runtime claims derive deterministic UUID5
+  claim lineage from outbox, publisher, and publish attempt count, only
+  the active claim can mark published or failed, stale publishing rows
+  older than the 5 minute escalation lease are requeued with warning
+  logs, the deferred API publisher prepares outbox state before transport,
+  and the Celery task also ensures the durable outbox row exists. Verification:
+  focused escalation/backlog/supervisory tests 30 passed; full backend
+  2,237 passed, 2 skipped; Pyright 0 errors, 676 warnings; invariants
+  including vendor isolation 164 passed, 2 skipped; smoke 4 passed;
+  Alembic current `0032_escalation_outbox_claim_id (head)`.
 - Wedge 2 - Celery/Redis Hardening:
   `task_ignore_result=True` for fire-and-forget tasks, `result_expires`,
   queue-depth admission before publishing, Redis memory policy and
@@ -2326,8 +2346,9 @@ The 9+ final gate cannot close until:
 - Wedge 1 - Reliability Before Anker Goes Live is in progress. Phase 0
   emergency DiagnosticLLMOutput schema-validation hardening is complete;
   Phase 1 ASGI body enforcement is complete; Phase 2 escalation outbox
-  claim/publish/mark/recover discipline is next and must wait for
-  explicit human confirmation.
+  claim/publish/mark/recover discipline is complete; Phase 3 webhook
+  freshness and replay windows is next and must wait for explicit human
+  confirmation.
 - Wedge 2 - Celery/Redis Hardening.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 - Multi-Tenant Security Before Second Client.
@@ -2366,10 +2387,10 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 1 Reliability Before Anker Goes Live is in progress. Phase 0 emergency DiagnosticLLMOutput schema-validation hardening and Phase 1 ASGI body-limit enforcement are complete; Phase 2 must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
-Current verified backend baseline after Wedge 1 Phase 1: 2,229 passed, 2 skipped; invariant subset including vendor isolation 164 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: Wedge 1 Reliability Before Anker Goes Live is in progress. Phase 0 emergency DiagnosticLLMOutput schema-validation hardening, Phase 1 ASGI body-limit enforcement, and Phase 2 escalation outbox claim/publish/mark/recover discipline are complete; Phase 3 must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
+Current verified backend baseline after Wedge 1 Phase 2: 2,237 passed, 2 skipped; invariant subset including vendor isolation 164 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
-Current Alembic head: 0031_dead_letter_tasks.
+Current Alembic head: 0032_escalation_outbox_claim_id.
 
 Completed before the next phase:
 - Phase 6-A through Phase 6-E are closed.
@@ -2406,6 +2427,14 @@ Completed before the next phase:
   `Content-Length` requests before downstream body reads, aborts chunked
   bodies once the running byte total exceeds the limit, and returns the
   canonical ProblemDetails envelope for 413 responses.
+- Wedge 1 Phase 2 escalation outbox claim/publish/mark/recover
+  discipline is closed on 2026-05-24:
+  escalation outbox persistence now includes deterministic `claim_id`
+  lineage, only the active claim can mark an outbox row published or
+  failed, stale publishing claims older than 5 minutes are requeued and
+  logged, the request-scoped deferred publisher prepares outbox durability
+  before transport, and Alembic head is
+  `0032_escalation_outbox_claim_id`.
 
 - Command Center 2 Critical Fixes Phase A is closed:
   live endpoint verification proved the `/api/v1/session/*` routes and
@@ -2449,7 +2478,7 @@ Remaining before the next wedge:
   call.
 - Investigate the latest fresh refund dead-letter
   `d6b45aef-2146-5e6d-ba85-367615857cef` before Anker go-live.
-- Do not start Wedge 1 Phase 2, Wedge 2, Wedge 3, Wedge 4, vector
+- Do not start Wedge 1 Phase 3, Wedge 2, Wedge 3, Wedge 4, vector
   retrieval SQL-native, or pilot launch until their phase boundaries are
   explicitly confirmed.
 
@@ -2476,9 +2505,9 @@ pytest apps/backend/tests/test_system_smoke.py -v
 TEST_DATABASE_URL=postgresql+asyncpg://operious:operious@localhost:5433/operious_test pytest apps/backend -q
 
 Do not start the next master-plan wedge until the user confirms the
-phase boundary. The current boundary is Wedge 1 Phase 2 escalation
-outbox claim/publish/mark/recover discipline, which must not start until
-the user confirms. Phase 6-F demo evidence capture remains open in
+phase boundary. The current boundary is Wedge 1 Phase 3 webhook
+freshness and replay windows, which must not start until the user
+confirms. Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
 below 9/10.
@@ -2494,9 +2523,10 @@ You are the principal infrastructure continuation engineer for Operious AI.
 Current phase: Wedge 1 Reliability Before Anker Goes Live is in
 progress. Wedge 0 Runtime Identity Collision Elimination is
 live-verified and closed. Wedge 1 Phase 0 DiagnosticLLMOutput
-schema-validation hardening and Phase 1 ASGI body-limit enforcement are
-closed. Phase 2 escalation outbox claim/publish/mark/recover discipline
-must not start until the user explicitly confirms that phase boundary.
+schema-validation hardening, Phase 1 ASGI body-limit enforcement, and
+Phase 2 escalation outbox claim/publish/mark/recover discipline are
+closed. Phase 3 webhook freshness and replay windows must not start
+until the user explicitly confirms that phase boundary.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -2541,13 +2571,16 @@ Current verified baseline:
   0 xfailed; live Fly.io deploy and fresh product-defect rerun are
   complete.
 - Wedge 0 invariant subset: 162 passed, 2 skipped.
+- Wedge 1 Phase 2 backend verification: 2,237 passed, 2 skipped;
+  invariant subset including vendor isolation 164 passed, 2 skipped;
+  smoke 4/4 green; Pyright 0 errors and 676 warnings.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
 - Pyright warnings: 676; warnings must not grow phase over phase.
-- Alembic current: 0031_dead_letter_tasks (head).
+- Alembic current: 0032_escalation_outbox_claim_id (head).
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -2595,11 +2628,12 @@ Current verified baseline:
   preserved.
 
 Goal for this chat:
-Complete Phase 6-F demo evidence capture and do not start Wedge 1 until
-the user explicitly confirms that phase boundary. Wedge 0 deployed to
-Fly.io from commit `971001d`; live health/CORS passed; fresh
-product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851`
-completed with real cognition audit and governance decision lineage.
+Continue Wedge 1 only after explicit phase confirmation and do not start
+Wedge 2 until Wedge 1 is closed by the user. Phase 6-F demo evidence
+capture remains open in parallel. Wedge 0 deployed to Fly.io from commit
+`971001d`; live health/CORS passed; fresh product-defect session
+`2432a590-f7bc-5d5d-97f9-94a7d0039851` completed with real cognition
+audit and governance decision lineage.
 The selected demo set is:
 `df6139ba-81fa-5f1d-9b3e-ceba6e7bb135`,
 `5bb139de-079b-5c20-a2da-3660b203a576`,
@@ -2672,13 +2706,16 @@ Current Command Center 2 status:
   through the Phase 0 verification gate.
 - Wedge 1 Phase 1 status:
   ASGI webhook body-limit enforcement is complete and pushed through the
-  Phase 1 verification gate. Phase 2 escalation outbox
-  claim/publish/mark/recover discipline is next, but must wait for
-  explicit human confirmation.
+  Phase 1 verification gate.
+- Wedge 1 Phase 2 status:
+  escalation outbox claim/publish/mark/recover discipline is complete
+  and pushed through the Phase 2 verification gate. Phase 3 webhook
+  freshness and replay windows is next, but must wait for explicit human
+  confirmation.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
-- Wedge 1 Reliability Phase 2.
+- Wedge 1 Reliability Phase 3.
 - Wedge 2 Celery/Redis Hardening.
 - Wedge 3 UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 RLS Force.

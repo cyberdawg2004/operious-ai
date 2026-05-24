@@ -8,12 +8,17 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.tenant.db.models import TenantRow
 from app.escalation import (
+    EscalationOutboxStatus,
     EscalationPersistenceError,
     EscalationStatus,
     derive_escalation_id,
+    derive_escalation_outbox_claim_id,
+    derive_escalation_outbox_id,
 )
 from app.escalation.persistence import (
+    EscalationOutboxRecord,
     EscalationQuery,
     EscalationRecord,
     PostgresEscalationPersistence,
@@ -88,7 +93,27 @@ def _record(*, tenant_id: str = "tenant-acme") -> EscalationRecord:
     )
 
 
+def _outbox(record: EscalationRecord) -> EscalationOutboxRecord:
+    return EscalationOutboxRecord(
+        outbox_id=str(
+            derive_escalation_outbox_id(
+                escalation_id=record.escalation_id,
+                tenant_id=record.tenant_id,
+            )
+        ),
+        escalation_id=record.escalation_id,
+        tenant_id=record.tenant_id,
+        status=EscalationOutboxStatus.PENDING,
+        created_at=_NOW,
+        metadata={
+            "governance_decision_id": record.governance_decision_id,
+            "session_id": record.session_id,
+        },
+    )
+
+
 async def _seed_lineage(pg_session: AsyncSession) -> None:
+    await pg_session.merge(TenantRow(tenant_id="tenant-acme"))
     await PostgresSessionPersistence(pg_session).save_session(_session())
     await PostgresGovernanceRepository(pg_session).record_decision(
         _decision()
@@ -138,3 +163,90 @@ async def test_postgres_escalation_write_rejects_expected_tenant_mismatch(
             _record(),
             expected_tenant_id="tenant-other",
         )
+
+
+@pytest.mark.asyncio
+async def test_postgres_escalation_outbox_claim_is_atomic(
+    pg_session: AsyncSession,
+) -> None:
+    await _seed_lineage(pg_session)
+    repo = PostgresEscalationPersistence(pg_session)
+    record = _record()
+    await repo.create_escalation(record, expected_tenant_id="tenant-acme")
+    outbox = await repo.save_escalation_outbox(
+        _outbox(record),
+        expected_tenant_id="tenant-acme",
+    )
+    claim_id = str(
+        derive_escalation_outbox_claim_id(
+            outbox_id=outbox.outbox_id,
+            publisher_id="test:same-publisher",
+            republish_count=1,
+        )
+    )
+
+    first = await repo.claim_escalation_outbox(
+        escalation_id=record.escalation_id,
+        publisher_id="test:same-publisher",
+        claim_id=claim_id,
+        claimed_at=_NOW,
+        expected_tenant_id="tenant-acme",
+    )
+    second = await repo.claim_escalation_outbox(
+        escalation_id=record.escalation_id,
+        publisher_id="test:same-publisher",
+        claim_id=claim_id,
+        claimed_at=_NOW,
+        expected_tenant_id="tenant-acme",
+    )
+
+    assert first is not None
+    assert first.status is EscalationOutboxStatus.PUBLISHING
+    assert first.claim_id == claim_id
+    assert second is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_escalation_outbox_terminal_marks_require_claim(
+    pg_session: AsyncSession,
+) -> None:
+    await _seed_lineage(pg_session)
+    repo = PostgresEscalationPersistence(pg_session)
+    record = _record()
+    await repo.create_escalation(record, expected_tenant_id="tenant-acme")
+    outbox = await repo.save_escalation_outbox(
+        _outbox(record),
+        expected_tenant_id="tenant-acme",
+    )
+    claim_id = str(
+        derive_escalation_outbox_claim_id(
+            outbox_id=outbox.outbox_id,
+            publisher_id="test:publisher",
+            republish_count=1,
+        )
+    )
+    claimed = await repo.claim_escalation_outbox(
+        escalation_id=record.escalation_id,
+        publisher_id="test:publisher",
+        claim_id=claim_id,
+        claimed_at=_NOW,
+        expected_tenant_id="tenant-acme",
+    )
+    assert claimed is not None
+
+    with pytest.raises(EscalationPersistenceError, match="claim"):
+        await repo.mark_escalation_outbox_published(
+            outbox_id=outbox.outbox_id,
+            claim_id="00000000-0000-0000-0000-00000000dead",
+            published_at=_NOW,
+            expected_tenant_id="tenant-acme",
+        )
+
+    published = await repo.mark_escalation_outbox_published(
+        outbox_id=outbox.outbox_id,
+        claim_id=claim_id,
+        published_at=_NOW,
+        expected_tenant_id="tenant-acme",
+    )
+    assert published.status is EscalationOutboxStatus.PUBLISHED
+    assert published.claim_id == claim_id

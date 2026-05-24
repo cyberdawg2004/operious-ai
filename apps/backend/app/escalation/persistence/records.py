@@ -85,6 +85,7 @@ class EscalationOutboxRecord:
     claimed_at: datetime | None = None
     published_at: datetime | None = None
     publisher_id: str | None = None
+    claim_id: str | None = None
     republish_count: int = 0
     dead_letter: bool = False
     last_error: str | None = None

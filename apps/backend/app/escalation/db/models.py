@@ -127,6 +127,9 @@ class EscalationOutboxRow(Base):
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     publisher_id: Mapped[str | None] = mapped_column(
         String(_PRINCIPAL_WIDTH), nullable=True, index=True
     )

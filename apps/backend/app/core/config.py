@@ -223,6 +223,7 @@ class Settings(BaseSettings):
     # recovery task, but these knobs only bound the runtime sweep.
     EXECUTION_CLAIM_LEASE_SECONDS: int = 900
     EXECUTION_RECOVERY_BATCH_SIZE: int = 100
+    ESCALATION_OUTBOX_CLAIM_LEASE_SECONDS: int = 300
 
     # ─── Survivability (P2-E) ────────────────────────────────────────
     # Production-survivability knobs. These are operational

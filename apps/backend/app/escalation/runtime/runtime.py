@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -16,6 +17,7 @@ from app.escalation.identity import (
     derive_escalation_id,
     derive_escalation_override_action_id,
     derive_escalation_override_decision_id,
+    derive_escalation_outbox_claim_id,
     derive_escalation_outbox_id,
 )
 from app.escalation.persistence import (
@@ -47,6 +49,7 @@ _OVERRIDE_POLICY_CHAIN_ID = "escalation.manager_override"
 _OVERRIDE_POLICY_NAME = "escalation.human_approval"
 _OVERRIDE_RULE_ID = "manager_override"
 _OVERRIDE_HANDLER = "human_manager_override"
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,10 +307,19 @@ class EscalationAgentRuntime:
                 outbox=current,
                 reason=f"outbox_not_publishable:{current.status.value}",
             )
+        next_republish_count = current.republish_count + 1
+        claim_id = str(
+            derive_escalation_outbox_claim_id(
+                outbox_id=current.outbox_id,
+                publisher_id=publisher_id,
+                republish_count=next_republish_count,
+            )
+        )
         claimed_at = datetime.now(timezone.utc)
         claimed = await self._escalations.claim_escalation_outbox(
             escalation_id=escalation_id,
             publisher_id=publisher_id,
+            claim_id=claim_id,
             claimed_at=claimed_at,
             expected_tenant_id=expected_tenant_id,
         )
@@ -321,7 +333,8 @@ class EscalationAgentRuntime:
             claimed=(
                 claimed.status is EscalationOutboxStatus.PUBLISHING
                 and claimed.publisher_id == publisher_id
-                and claimed.republish_count == current.republish_count + 1
+                and claimed.claim_id == claim_id
+                and claimed.republish_count == next_republish_count
             ),
             outbox=claimed,
             reason=None
@@ -333,11 +346,14 @@ class EscalationAgentRuntime:
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         expected_tenant_id: str,
     ) -> EscalationOutboxRecord:
         _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        _require_nonempty(claim_id, "claim_id")
         return await self._escalations.mark_escalation_outbox_published(
             outbox_id=outbox_id,
+            claim_id=claim_id,
             published_at=datetime.now(timezone.utc),
             expected_tenant_id=expected_tenant_id,
         )
@@ -346,13 +362,16 @@ class EscalationAgentRuntime:
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         error: str,
         expected_tenant_id: str,
         dead_letter: bool = False,
     ) -> EscalationOutboxRecord:
         _require_nonempty(expected_tenant_id, "expected_tenant_id")
+        _require_nonempty(claim_id, "claim_id")
         return await self._escalations.mark_escalation_outbox_failed(
             outbox_id=outbox_id,
+            claim_id=claim_id,
             error=error,
             failed_at=datetime.now(timezone.utc),
             dead_letter=dead_letter,
@@ -371,6 +390,7 @@ class EscalationAgentRuntime:
         page = await self._escalations.list_escalation_outbox(
             EscalationOutboxQuery(
                 status=EscalationOutboxStatus.PUBLISHING,
+                claimed_before_or_at=stale_before,
                 limit=limit,
             ),
             expected_tenant_id=expected_tenant_id,
@@ -386,6 +406,14 @@ class EscalationAgentRuntime:
                 expected_tenant_id=expected_tenant_id,
             )
             if recovered is not None:
+                _logger.warning(
+                    "stale_escalation_outbox_requeued",
+                    extra={
+                        "outbox_id": recovered.outbox_id,
+                        "escalation_id": recovered.escalation_id,
+                        "tenant_id": recovered.tenant_id,
+                    },
+                )
                 requeued.append(recovered)
         return EscalationOutboxReconcileSweepResult(requeued=tuple(requeued))
 

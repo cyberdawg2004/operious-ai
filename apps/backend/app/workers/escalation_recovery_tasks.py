@@ -49,7 +49,7 @@ def reconcile_stale_escalation_outbox(
             seconds=(
                 lease_seconds
                 if lease_seconds is not None
-                else settings.EXECUTION_CLAIM_LEASE_SECONDS
+                else settings.ESCALATION_OUTBOX_CLAIM_LEASE_SECONDS
             )
         )
     )
@@ -119,6 +119,7 @@ async def reconcile_stale_escalation_outbox_runtime(
             except Exception as exc:
                 await runtime.mark_outbox_failed(
                     outbox_id=claim.outbox.outbox_id,
+                    claim_id=_metadata_claim_id(claim.outbox.claim_id),
                     error=_bounded_error(exc),
                     expected_tenant_id=claim.outbox.tenant_id,
                 )
@@ -133,6 +134,7 @@ async def reconcile_stale_escalation_outbox_runtime(
                 continue
             await runtime.mark_outbox_published(
                 outbox_id=claim.outbox.outbox_id,
+                claim_id=_metadata_claim_id(claim.outbox.claim_id),
                 expected_tenant_id=claim.outbox.tenant_id,
             )
             await session.commit()
@@ -162,6 +164,12 @@ def _metadata_str(metadata: Mapping[str, Any], key: str) -> str:
 def _metadata_optional_str(metadata: Mapping[str, Any], key: str) -> str | None:
     value = metadata.get(key)
     return str(value) if value is not None else None
+
+
+def _metadata_claim_id(claim_id: str | None) -> str:
+    if claim_id is None:
+        raise ValueError("claimed escalation outbox missing claim_id")
+    return claim_id
 
 
 def _bounded_error(exc: BaseException) -> str:

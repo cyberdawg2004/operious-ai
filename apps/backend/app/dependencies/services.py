@@ -534,6 +534,7 @@ class _DeferredEscalationPublisher(EscalationPublisher):
             except Exception as exc:
                 await self._escalation_runtime.mark_outbox_failed(
                     outbox_id=claim.outbox.outbox_id,
+                    claim_id=_require_outbox_claim_id(claim.outbox.claim_id),
                     error=_bounded_publish_error(exc),
                     expected_tenant_id=intent.tenant_id,
                 )
@@ -544,6 +545,7 @@ class _DeferredEscalationPublisher(EscalationPublisher):
                 ) from exc
             await self._escalation_runtime.mark_outbox_published(
                 outbox_id=claim.outbox.outbox_id,
+                claim_id=_require_outbox_claim_id(claim.outbox.claim_id),
                 expected_tenant_id=intent.tenant_id,
             )
             await self._session.commit()
@@ -637,6 +639,15 @@ def _bounded_publish_error(exc: BaseException) -> str:
     if len(message) > 240:
         return f"{message[:237]}..."
     return message
+
+
+def _require_outbox_claim_id(claim_id: str | None) -> str:
+    if claim_id is None:
+        raise EscalationOutboxPublishError(
+            "unknown",
+            "claimed escalation outbox is missing claim_id",
+        )
+    return claim_id
 
 
 __all__ = [

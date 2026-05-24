@@ -10,6 +10,7 @@ from app.identity import coerce_tenant_id
 
 EscalationId = NewType("EscalationId", uuid.UUID)
 EscalationOutboxId = NewType("EscalationOutboxId", uuid.UUID)
+EscalationOutboxClaimId = NewType("EscalationOutboxClaimId", uuid.UUID)
 
 _ESCALATION_NAMESPACE = uuid.UUID("8f85a2aa-0001-4a01-9001-000000000001")
 _ESCALATION_EVENT_NAMESPACE = uuid.UUID(
@@ -20,6 +21,9 @@ _ESCALATION_GOVERNANCE_NAMESPACE = uuid.UUID(
 )
 _ESCALATION_OUTBOX_NAMESPACE = uuid.UUID(
     "8f85a2aa-0004-4a01-9001-000000000004"
+)
+_ESCALATION_OUTBOX_CLAIM_NAMESPACE = uuid.UUID(
+    "8f85a2aa-0005-4a01-9001-000000000005"
 )
 
 
@@ -94,6 +98,26 @@ def derive_escalation_outbox_id(
     )
 
 
+def derive_escalation_outbox_claim_id(
+    *,
+    outbox_id: uuid.UUID | str,
+    publisher_id: str,
+    republish_count: int,
+) -> EscalationOutboxClaimId:
+    """Derive the claim token for one outbox publication attempt."""
+
+    if not publisher_id:
+        raise ValueError("publisher_id is required")
+    if republish_count < 1:
+        raise ValueError("republish_count must be >= 1")
+    return EscalationOutboxClaimId(
+        uuid.uuid5(
+            _ESCALATION_OUTBOX_CLAIM_NAMESPACE,
+            f"{outbox_id}|{publisher_id}|{republish_count}",
+        )
+    )
+
+
 def as_escalation_id(value: uuid.UUID | str) -> EscalationId:
     """Coerce a boundary value into an escalation id."""
 
@@ -108,13 +132,26 @@ def as_escalation_outbox_id(value: uuid.UUID | str) -> EscalationOutboxId:
     )
 
 
+def as_escalation_outbox_claim_id(
+    value: uuid.UUID | str,
+) -> EscalationOutboxClaimId:
+    """Coerce a boundary value into an escalation outbox claim id."""
+
+    return EscalationOutboxClaimId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
 __all__ = [
     "EscalationId",
+    "EscalationOutboxClaimId",
     "EscalationOutboxId",
     "as_escalation_id",
+    "as_escalation_outbox_claim_id",
     "as_escalation_outbox_id",
     "derive_escalation_event_id",
     "derive_escalation_id",
+    "derive_escalation_outbox_claim_id",
     "derive_escalation_override_action_id",
     "derive_escalation_override_decision_id",
     "derive_escalation_outbox_id",

@@ -73,6 +73,7 @@ def test_task_results_expire_within_ttl() -> None:
         settings.CELERY_TASK_SOFT_TIME_LIMIT_SECONDS
     )
     assert celery_app.conf.task_time_limit == settings.CELERY_TASK_TIME_LIMIT_SECONDS
+    assert settings.ESCALATION_OUTBOX_CLAIM_LEASE_SECONDS == 300
     assert celery_app.conf.broker_transport_options == {
         "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
     }

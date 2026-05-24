@@ -53,7 +53,7 @@ async def create_governance_escalation_runtime(
             governance_repository=PostgresGovernanceRepository(session),
             session_persistence=PostgresSessionPersistence(session),
         )
-        record = await runtime.create_for_governance_denial(
+        prepared = await runtime.prepare_governance_denial_outbox(
             governance_decision_id=governance_decision_id,
             expected_tenant_id=tenant_id,
             session_id=session_id,
@@ -62,10 +62,12 @@ async def create_governance_escalation_runtime(
         return {
             "status": "completed",
             "governance_decision_id": governance_decision_id,
-            "escalation_id": record.escalation_id,
-            "session_id": record.session_id,
-            "tenant_id": record.tenant_id,
-            "queue_status": record.status,
+            "escalation_id": prepared.escalation.escalation_id,
+            "session_id": prepared.escalation.session_id,
+            "tenant_id": prepared.escalation.tenant_id,
+            "queue_status": prepared.escalation.status,
+            "outbox_id": prepared.outbox.outbox_id,
+            "outbox_status": prepared.outbox.status.value,
         }
 
 

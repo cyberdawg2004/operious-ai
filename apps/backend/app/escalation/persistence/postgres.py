@@ -203,6 +203,7 @@ class PostgresEscalationPersistence(BaseRepository):
         *,
         escalation_id: str,
         publisher_id: str,
+        claim_id: str,
         claimed_at: datetime,
         expected_tenant_id: str | None = None,
     ) -> EscalationOutboxRecord | None:
@@ -217,13 +218,16 @@ class PostgresEscalationPersistence(BaseRepository):
                 status=EscalationOutboxStatus.PUBLISHING.value,
                 claimed_at=claimed_at,
                 publisher_id=publisher_id,
+                claim_id=UUID(claim_id),
                 republish_count=EscalationOutboxRow.republish_count + 1,
                 last_error=None,
             )
         )
         if expected_tenant_id is not None:
             stmt = stmt.where(EscalationOutboxRow.tenant_id == expected_tenant_id)
-        await self.session.execute(stmt)
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
         return await self.get_escalation_outbox_by_escalation(
             escalation_id,
             expected_tenant_id=expected_tenant_id,
@@ -233,12 +237,32 @@ class PostgresEscalationPersistence(BaseRepository):
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         published_at: datetime,
         expected_tenant_id: str | None = None,
     ) -> EscalationOutboxRecord:
+        current = await self.get_escalation_outbox(
+            outbox_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if current is None:
+            raise EscalationPersistenceError(
+                f"unknown escalation outbox {outbox_id!r}"
+            )
+        if current.status is EscalationOutboxStatus.PUBLISHED:
+            if current.claim_id == claim_id:
+                return current
+            raise EscalationPersistenceError(
+                "escalation outbox publish claim does not match"
+            )
         stmt = (
             update(EscalationOutboxRow)
-            .where(EscalationOutboxRow.outbox_id == UUID(outbox_id))
+            .where(
+                EscalationOutboxRow.outbox_id == UUID(outbox_id),
+                EscalationOutboxRow.status
+                == EscalationOutboxStatus.PUBLISHING.value,
+                EscalationOutboxRow.claim_id == UUID(claim_id),
+            )
             .values(
                 status=EscalationOutboxStatus.PUBLISHED.value,
                 published_at=published_at,
@@ -251,7 +275,7 @@ class PostgresEscalationPersistence(BaseRepository):
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         if result.rowcount != 1:
             raise EscalationPersistenceError(
-                f"unknown escalation outbox {outbox_id!r}"
+                "only the active escalation outbox claim can be published"
             )
         record = await self.get_escalation_outbox(
             outbox_id,
@@ -267,6 +291,7 @@ class PostgresEscalationPersistence(BaseRepository):
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         error: str,
         failed_at: datetime,
         dead_letter: bool = False,
@@ -280,9 +305,27 @@ class PostgresEscalationPersistence(BaseRepository):
             raise EscalationPersistenceError(
                 f"unknown escalation outbox {outbox_id!r}"
             )
+        if record.status is EscalationOutboxStatus.FAILED:
+            if record.claim_id == claim_id:
+                return record
+            raise EscalationPersistenceError(
+                "escalation outbox failure claim does not match"
+            )
+        if (
+            record.status is not EscalationOutboxStatus.PUBLISHING
+            or record.claim_id != claim_id
+        ):
+            raise EscalationPersistenceError(
+                "only the active escalation outbox claim can fail publication"
+            )
         stmt = (
             update(EscalationOutboxRow)
-            .where(EscalationOutboxRow.outbox_id == UUID(outbox_id))
+            .where(
+                EscalationOutboxRow.outbox_id == UUID(outbox_id),
+                EscalationOutboxRow.status
+                == EscalationOutboxStatus.PUBLISHING.value,
+                EscalationOutboxRow.claim_id == UUID(claim_id),
+            )
             .values(
                 status=EscalationOutboxStatus.FAILED.value,
                 dead_letter=dead_letter,
@@ -337,6 +380,7 @@ class PostgresEscalationPersistence(BaseRepository):
                 status=EscalationOutboxStatus.PENDING.value,
                 claimed_at=None,
                 publisher_id=None,
+                claim_id=None,
                 last_error=reason,
                 metadata_json={
                     **dict(record.metadata),
@@ -427,6 +471,11 @@ def _apply_outbox_filters(
         stmt = stmt.where(EscalationOutboxRow.tenant_id == query.tenant_id)
     if query.status is not None:
         stmt = stmt.where(EscalationOutboxRow.status == query.status.value)
+    if query.claimed_before_or_at is not None:
+        stmt = stmt.where(
+            EscalationOutboxRow.claimed_at.is_not(None),
+            EscalationOutboxRow.claimed_at <= query.claimed_before_or_at,
+        )
     return stmt
 
 
@@ -479,6 +528,7 @@ def _outbox_record_to_row(record: EscalationOutboxRecord) -> EscalationOutboxRow
         created_at=record.created_at,
         claimed_at=record.claimed_at,
         published_at=record.published_at,
+        claim_id=UUID(record.claim_id) if record.claim_id is not None else None,
         publisher_id=record.publisher_id,
         republish_count=record.republish_count,
         dead_letter=record.dead_letter,
@@ -496,6 +546,7 @@ def _outbox_row_to_record(row: EscalationOutboxRow) -> EscalationOutboxRecord:
         created_at=row.created_at,
         claimed_at=row.claimed_at,
         published_at=row.published_at,
+        claim_id=str(row.claim_id) if row.claim_id is not None else None,
         publisher_id=row.publisher_id,
         republish_count=row.republish_count,
         dead_letter=row.dead_letter,

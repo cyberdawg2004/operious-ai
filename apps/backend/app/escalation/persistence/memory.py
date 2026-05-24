@@ -165,6 +165,7 @@ class InMemoryEscalationPersistence:
         *,
         escalation_id: str,
         publisher_id: str,
+        claim_id: str,
         claimed_at: datetime,
         expected_tenant_id: str | None = None,
     ) -> EscalationOutboxRecord | None:
@@ -173,12 +174,13 @@ class InMemoryEscalationPersistence:
             expected_tenant_id=expected_tenant_id,
         )
         if record is None or record.status is not EscalationOutboxStatus.PENDING:
-            return record
+            return None
         claimed = replace(
             record,
             status=EscalationOutboxStatus.PUBLISHING,
             claimed_at=claimed_at,
             publisher_id=publisher_id,
+            claim_id=claim_id,
             republish_count=record.republish_count + 1,
             last_error=None,
         )
@@ -189,6 +191,7 @@ class InMemoryEscalationPersistence:
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         published_at: datetime,
         expected_tenant_id: str | None = None,
     ) -> EscalationOutboxRecord:
@@ -199,6 +202,19 @@ class InMemoryEscalationPersistence:
         if record is None:
             raise EscalationPersistenceError(
                 f"unknown escalation outbox {outbox_id!r}"
+            )
+        if record.status is EscalationOutboxStatus.PUBLISHED:
+            if record.claim_id == claim_id:
+                return record
+            raise EscalationPersistenceError(
+                "escalation outbox publish claim does not match"
+            )
+        if (
+            record.status is not EscalationOutboxStatus.PUBLISHING
+            or record.claim_id != claim_id
+        ):
+            raise EscalationPersistenceError(
+                "only the active escalation outbox claim can be published"
             )
         updated = replace(
             record,
@@ -214,6 +230,7 @@ class InMemoryEscalationPersistence:
         self,
         *,
         outbox_id: str,
+        claim_id: str,
         error: str,
         failed_at: datetime,
         dead_letter: bool = False,
@@ -226,6 +243,19 @@ class InMemoryEscalationPersistence:
         if record is None:
             raise EscalationPersistenceError(
                 f"unknown escalation outbox {outbox_id!r}"
+            )
+        if record.status is EscalationOutboxStatus.FAILED:
+            if record.claim_id == claim_id:
+                return record
+            raise EscalationPersistenceError(
+                "escalation outbox failure claim does not match"
+            )
+        if (
+            record.status is not EscalationOutboxStatus.PUBLISHING
+            or record.claim_id != claim_id
+        ):
+            raise EscalationPersistenceError(
+                "only the active escalation outbox claim can fail publication"
             )
         updated = replace(
             record,
@@ -265,6 +295,7 @@ class InMemoryEscalationPersistence:
             status=EscalationOutboxStatus.PENDING,
             claimed_at=None,
             publisher_id=None,
+            claim_id=None,
             last_error=reason,
             metadata={
                 **dict(record.metadata),
@@ -340,6 +371,14 @@ def _outbox_matches(
     if query.tenant_id is not None and record.tenant_id != query.tenant_id:
         return False
     if query.status is not None and record.status is not query.status:
+        return False
+    if (
+        query.claimed_before_or_at is not None
+        and (
+            record.claimed_at is None
+            or record.claimed_at > query.claimed_before_or_at
+        )
+    ):
         return False
     return True
 
