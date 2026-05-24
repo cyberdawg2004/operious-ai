@@ -36,6 +36,7 @@ celery_app.conf.update(
     task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT_SECONDS,
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT_SECONDS,
     worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=True,
     broker_transport_options={
         "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
     },

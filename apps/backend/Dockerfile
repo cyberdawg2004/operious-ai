@@ -16,6 +16,11 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
+RUN addgroup --system celery \
+ && adduser --system --ingroup celery celery
+
+USER celery
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
