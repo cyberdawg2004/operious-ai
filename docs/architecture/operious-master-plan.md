@@ -1704,6 +1704,21 @@ Rules of engagement:
   - `https://app.operious.com/api/auth/login` returned HTTP 302 to
     `https://operious-dev.uk.auth0.com/authorize` with callback
     `https://app.operious.com/api/auth/callback`.
+- [x] Production Auth0 access-token hotfix on 2026-05-24:
+  - Fixed `/api/auth/access-token` to pass the concrete `NextRequest`
+    and `NextResponse` shim into Auth0 `getAccessToken()`, avoiding the
+    Auth0 v3 no-argument cookie path that calls Next 16 async
+    `cookies()` synchronously and fails with `getAll is not a function`.
+  - Commit: `f46cc9a frontend: fix auth0 access token route for next 16`.
+  - Deployment id: `dpl_2aE5AAZudDi3BFfryRjJTGTJaGao`.
+  - Deployment URL:
+    `https://operious-ai-command-center-dcgqk6sqs-cyberdawg2004s-projects.vercel.app`.
+  - Production alias: `https://app.operious.com`.
+  - Verification: Command Center `npm run lint` passed, Command Center
+    `npm run build` passed, Vercel production build passed, and
+    unauthenticated `GET https://app.operious.com/api/auth/access-token`
+    returned clean HTTP 401 `The user does not have a valid session`
+    instead of the `getAll` runtime crash.
 - [x] Backend CORS was updated and deployed to Fly.io for production
   domains:
   - `https://app.operious.com`
