@@ -38,15 +38,21 @@ This document is the canonical handoff plan for the next Codex session.
   Gate is closed. Live production domains resolve, the Command Center
   redirects through Auth0, and Marketing serves on `www.operious.com`.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
-- Current backend/demo gate: Phase 6-F is in progress. The demo artifact
-  kit is complete and production seeding has produced real Anker pilot
-  sessions. Wedge 0 live verification closed the fresh product-defect
-  outlier with session `2432a590-f7bc-5d5d-97f9-94a7d0039851`.
+- Current backend/demo gate: Phase 6-F evidence capture remains open,
+  and Wedge 1 is now in progress. The demo artifact kit is complete and
+  production seeding has produced real Anker pilot sessions. Wedge 0
+  live verification closed the fresh product-defect outlier with session
+  `2432a590-f7bc-5d5d-97f9-94a7d0039851`.
   The selected controlled-demo set now uses the fresh charging, Arabic,
   product-defect, and ambiguous sessions plus prior completed refund
   proof session `5bb139de-079b-5c20-a2da-3660b203a576`, because the
   latest fresh refund rerun dead-lettered after four retries with
   `diagnostic cognition failed: RuntimeError`.
+  Wedge 1 Phase 0 is complete: DiagnosticLLMOutput parsing now strips
+  harmless extra keys before strict validation, classifies unknown
+  categories as semantic rejections, preserves Pydantic field-level
+  validation detail in exception chains, and tightens the LLM response
+  schema prompt.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2169,6 +2175,18 @@ Acceptance criteria:
   escalation outbox claim/publish/mark/recover discipline; webhook
   freshness and replay windows for all four channel adapters. Expected
   effort: one Codex session and one escalation-outbox migration.
+  Phase 0 emergency schema-validation blocker closed on 2026-05-24:
+  production successful cognition audits show the model returns fenced
+  JSON with the expected fields, while failed timelines exposed generic
+  schema-validation/RuntimeError messages without field detail. The
+  parser now extracts the JSON object, strips extra keys that are not in
+  `DiagnosticLLMOutput`, rejects unknown category values as
+  `CognitionSemanticValidationError`, and raises schema failures with
+  field/value detail while preserving the original `ValidationError`
+  cause. Verification: focused cognition/audit tests 17 passed; full
+  backend 2,225 passed, 2 skipped; Pyright 0 errors, 676 warnings;
+  invariants including vendor isolation 164 passed, 2 skipped; smoke
+  4 passed.
 - Wedge 2 - Celery/Redis Hardening:
   `task_ignore_result=True` for fire-and-forget tasks, `result_expires`,
   queue-depth admission before publishing, Redis memory policy and
@@ -2288,7 +2306,10 @@ The 9+ final gate cannot close until:
 
 - Wedge 0 live verification is closed: runtime identity hardening was
   deployed to Fly.io and the fresh product-defect Anker ticket completed.
-- Wedge 1 - Reliability Before Anker Goes Live.
+- Wedge 1 - Reliability Before Anker Goes Live is in progress. Phase 0
+  emergency DiagnosticLLMOutput schema-validation hardening is complete;
+  Phase 1 ASGI body enforcement is next and must wait for explicit
+  human confirmation.
 - Wedge 2 - Celery/Redis Hardening.
 - Wedge 3 - UUID4 and Ambient Identity Fallback Elimination.
 - Wedge 4 - Multi-Tenant Security Before Second Client.
@@ -2327,8 +2348,8 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 0 Runtime Identity Collision Elimination is live-verified and closed; Phase 6-F demo evidence capture remains open before Wedge 1 starts.
-Current verified backend baseline after Wedge 0 hardening: 2,224 passed, 2 skipped; invariant subset 162 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: Wedge 1 Reliability Before Anker Goes Live is in progress. Phase 0 emergency DiagnosticLLMOutput schema-validation hardening is complete; Phase 1 must not start until the user explicitly confirms the next phase. Phase 6-F demo evidence capture remains open.
+Current verified backend baseline after Wedge 1 Phase 0: 2,225 passed, 2 skipped; invariant subset including vendor isolation 164 passed, 2 skipped; smoke tests 4/4 green; Pyright 0 errors across apps/backend/app. Phase 6-F focused artifact checks: 6 passed. Live Fly.io health/CORS passed, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 676 warnings; warnings must not grow.
 Current Alembic head: 0031_dead_letter_tasks.
 
@@ -2353,6 +2374,14 @@ Completed before the next phase:
   SOP approval proposals project into canonical operational_events via
   an app.runtime bridge, preserve proposal-only authority, and link
   approval lineage to evidence sessions in replay.
+- Wedge 0 Runtime Identity Collision Elimination is live-verified and
+  closed.
+- Wedge 1 Phase 0 emergency DiagnosticLLMOutput schema-validation
+  hardening is closed on 2026-05-24:
+  `DiagnosticLLMOutput` remains strict, extra keys are stripped before
+  validation, unknown category values become semantic rejections, schema
+  failures preserve Pydantic field detail and `ValidationError` causes,
+  and the diagnostic prompt includes the exact response schema.
 
 - Command Center 2 Critical Fixes Phase A is closed:
   live endpoint verification proved the `/api/v1/session/*` routes and
@@ -2608,6 +2637,10 @@ Current Command Center 2 status:
   classified as `CognitionPersistenceError`, full backend is green, and
   fresh product-defect session
   `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed in production.
+- Wedge 1 Phase 0 status:
+  DiagnosticLLMOutput schema-validation hardening is complete and pushed
+  through the Phase 0 verification gate. Phase 1 ASGI webhook body
+  enforcement is next, but must wait for explicit human confirmation.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.

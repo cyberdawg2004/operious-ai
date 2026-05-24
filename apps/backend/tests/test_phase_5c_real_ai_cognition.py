@@ -443,7 +443,7 @@ async def test_cognition_usage_persistence_is_tenant_scoped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_llm_output_with_unknown_key_is_rejected() -> None:
+async def test_llm_output_with_unknown_key_is_stripped_before_validation() -> None:
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Charging diagnosis.",'
@@ -454,14 +454,13 @@ async def test_llm_output_with_unknown_key_is_rejected() -> None:
     )
     runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
 
-    with pytest.raises(CognitionLLMProviderError):
-        await runtime.reason_about_ticket(
-            tenant_id=_TENANT_ID,
-            execution_id="execution-5c-extra-key",
-            dispatch_id="dispatch-5c-extra-key",
-            session_id="session-5c-extra-key",
-            content="Customer says charging failed.",
-        )
+    result = await runtime.reason_about_ticket(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-5c-extra-key",
+        dispatch_id="dispatch-5c-extra-key",
+        session_id="session-5c-extra-key",
+        content="Customer says charging failed.",
+    )
 
     usage_id = derive_llm_usage_id(
         tenant_id=_TENANT_ID,
@@ -473,14 +472,15 @@ async def test_llm_output_with_unknown_key_is_rejected() -> None:
         expected_tenant_id=_TENANT_ID,
     )
     assert usage is not None
-    assert usage.status is CognitionLLMUsageStatus.REJECTED
+    assert usage.status is CognitionLLMUsageStatus.ACCEPTED
+    assert result.category == "charging_issue"
     assert usage.metadata["raw_completion_sha256"] == hashlib.sha256(
         client.text.encode("utf-8")
     ).hexdigest()
 
 
 @pytest.mark.asyncio
-async def test_llm_output_with_invalid_category_is_rejected() -> None:
+async def test_llm_output_with_invalid_category_is_semantic_rejection() -> None:
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Charging diagnosis.",'
@@ -490,7 +490,7 @@ async def test_llm_output_with_invalid_category_is_rejected() -> None:
     )
     runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
 
-    with pytest.raises(CognitionLLMProviderError):
+    with pytest.raises(CognitionSemanticValidationError) as raised:
         await runtime.reason_about_ticket(
             tenant_id=_TENANT_ID,
             execution_id="execution-5c-invalid-category",
@@ -498,6 +498,8 @@ async def test_llm_output_with_invalid_category_is_rejected() -> None:
             session_id="session-5c-invalid-category",
             content="Customer says charging failed.",
         )
+    assert "category='invented_issue'" in str(raised.value)
+    assert "RuntimeError" not in str(raised.value)
 
     usage_id = derive_llm_usage_id(
         tenant_id=_TENANT_ID,
@@ -510,9 +512,52 @@ async def test_llm_output_with_invalid_category_is_rejected() -> None:
     )
     assert usage is not None
     assert usage.status is CognitionLLMUsageStatus.REJECTED
+    assert usage.metadata["error_type"] == "CognitionSemanticValidationError"
+    assert "category='invented_issue'" in str(usage.metadata["message"])
     assert usage.metadata["raw_completion_sha256"] == hashlib.sha256(
         client.text.encode("utf-8")
     ).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_llm_schema_validation_error_preserves_field_detail() -> None:
+    client = _ScriptedLLMClient(
+        text=(
+            '{"summary":"Charging diagnosis.",'
+            '"category":"charging_issue","confidence":"extremely certain",'
+            '"reasoning":"Charging issue inferred from ticket text."}'
+        )
+    )
+    runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
+
+    with pytest.raises(CognitionLLMProviderError) as raised:
+        await runtime.reason_about_ticket(
+            tenant_id=_TENANT_ID,
+            execution_id="execution-5c-schema-detail",
+            dispatch_id="dispatch-5c-schema-detail",
+            session_id="session-5c-schema-detail",
+            content="Customer says charging failed.",
+        )
+    message = str(raised.value)
+    assert "diagnostic model output failed schema validation" in message
+    assert "confidence" in message
+    assert "extremely certain" in message
+    assert "RuntimeError" not in message
+    assert raised.value.__cause__ is not None
+
+    usage_id = derive_llm_usage_id(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-5c-schema-detail",
+        model=client.model_name,
+    )
+    usage = await usage_repo.get_llm_usage(
+        usage_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert usage is not None
+    assert usage.status is CognitionLLMUsageStatus.REJECTED
+    assert usage.metadata["error_type"] == "CognitionLLMProviderError"
+    assert "confidence" in str(usage.metadata["message"])
 
 
 def test_anthropic_settings_are_typed_without_exposing_secret() -> None:

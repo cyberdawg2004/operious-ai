@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from pydantic import ValidationError
 
@@ -27,6 +27,7 @@ from app.cognition.models import (
     CognitionAuditRecord,
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
+    DiagnosticCategory,
     DiagnosticLLMCompletion,
     DiagnosticLLMOutput,
     DiagnosticReasoningResult,
@@ -55,8 +56,17 @@ from app.knowledge.runtime import KnowledgeRuntime
 
 _SYSTEM_PROMPT = """You are Operious diagnostic cognition.
 Classify the support ticket using only the ticket text and cited tenant SOP
-context. Return compact JSON only with keys: summary, category, confidence,
-reasoning.
+context. Return compact JSON only. Do not wrap it in markdown fences and do
+not include keys outside the schema below.
+
+Required JSON schema:
+{
+  "summary": "non-empty string, max 4000 characters",
+  "category": "one of: account_issue, charging_issue, connectivity_issue, product_defect, refund_issue, unknown_issue",
+  "confidence": "number between 0.0 and 1.0",
+  "reasoning": "string, max 4000 characters"
+}
+
 The category value must be exactly one of: account_issue, charging_issue,
 connectivity_issue, product_defect, refund_issue, unknown_issue.
 The confidence value must be a JSON number between 0.0 and 1.0, not a word.
@@ -67,6 +77,9 @@ Use canonical English. Preserve any governance-significant terms present in
 the input or citations, and do not invent refunds, approvals, denials,
 chargebacks, RMA, legal, fraud, compliance, replacement, credit, or escalation
 terms that are not grounded in the input or citations."""
+
+_DIAGNOSTIC_OUTPUT_FIELDS = frozenset(DiagnosticLLMOutput.model_fields)
+_CATEGORY_VALUES = tuple(category.value for category in DiagnosticCategory)
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,12 +598,91 @@ def _parse_output(text: str) -> DiagnosticLLMOutput:
         raise CognitionLLMProviderError("diagnostic model returned invalid JSON") from exc
     if not isinstance(raw, Mapping):
         raise CognitionLLMProviderError("diagnostic model returned non-object JSON")
+    raw_map = cast(Mapping[str, Any], raw)
     try:
-        return DiagnosticLLMOutput.model_validate(raw)
+        return DiagnosticLLMOutput.model_validate(raw_map)
     except ValidationError as exc:
-        raise CognitionLLMProviderError(
-            "diagnostic model output failed schema validation"
-        ) from exc
+        if _only_extra_field_errors(exc):
+            stripped: dict[str, Any] = {
+                key: value
+                for key, value in raw_map.items()
+                if key in _DIAGNOSTIC_OUTPUT_FIELDS
+            }
+            try:
+                return DiagnosticLLMOutput.model_validate(stripped)
+            except ValidationError as stripped_exc:
+                raise _diagnostic_schema_error(stripped_exc) from stripped_exc
+        if _category_value_is_unknown(raw_map, exc):
+            raise CognitionSemanticValidationError(
+                "diagnostic model output semantic rejection: "
+                f"category={_bounded_repr(raw_map.get('category'))} is not one of "
+                f"{', '.join(_CATEGORY_VALUES)}"
+            ) from exc
+        raise _diagnostic_schema_error(exc) from exc
+
+
+def _diagnostic_schema_error(exc: ValidationError) -> CognitionLLMProviderError:
+    return CognitionLLMProviderError(
+        "diagnostic model output failed schema validation: "
+        f"{_validation_error_summary(exc)}"
+    )
+
+
+def _only_extra_field_errors(exc: ValidationError) -> bool:
+    errors = exc.errors()
+    return bool(errors) and all(
+        str(error.get("type")) == "extra_forbidden" for error in errors
+    )
+
+
+def _category_value_is_unknown(
+    raw: Mapping[str, Any],
+    exc: ValidationError,
+) -> bool:
+    if "category" not in raw:
+        return False
+    return any(
+        tuple(error.get("loc", ())) == ("category",)
+        and str(error.get("type")) == "enum"
+        for error in exc.errors()
+    )
+
+
+def _validation_error_summary(exc: ValidationError) -> str:
+    parts: list[str] = []
+    for error in exc.errors():
+        loc = ".".join(str(part) for part in error.get("loc", ())) or "<root>"
+        error_type = str(error.get("type") or "validation_error")
+        message = str(error.get("msg") or "validation failed")
+        input_value = (
+            "<missing>"
+            if error_type == "missing"
+            else _bounded_repr(error.get("input"))
+        )
+        parts.append(
+            f"{loc}: {error_type}: {message}; input={input_value}"
+        )
+    return "; ".join(parts)
+
+
+def _bounded_repr(value: object) -> str:
+    text = repr(value)
+    if len(text) <= 120:
+        return text
+    return f"{text[:117]}..."
+
+
+def _schema_appendix() -> str:
+    return json.dumps(
+        {
+            "summary": "non-empty string, max 4000 characters",
+            "category": list(_CATEGORY_VALUES),
+            "confidence": "number between 0.0 and 1.0",
+            "reasoning": "string, max 4000 characters",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _extract_json(text: str) -> str:
@@ -633,7 +725,8 @@ def _render_user_prompt(
                 "account_issue, charging_issue, connectivity_issue, "
                 "product_defect, refund_issue, unknown_issue. Do not use "
                 "human-readable category labels. confidence must be a "
-                "number between 0.0 and 1.0, not a word."
+                "number between 0.0 and 1.0, not a word. Do not include "
+                f"extra keys. schema={_schema_appendix()}"
             ),
         )
     )
