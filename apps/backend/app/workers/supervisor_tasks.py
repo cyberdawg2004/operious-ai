@@ -28,7 +28,13 @@ from app.workers.qa_tasks import score_supervisor_inspection
 _T = TypeVar("_T")
 
 
-@celery_app.task(name="evaluate_session_supervisor", bind=True, ignore_result=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="evaluate_session_supervisor",
+    bind=True,
+    ignore_result=True,
+    max_retries=1,
+    default_retry_delay=30,
+)
 def evaluate_session_supervisor(
     _self: Any,
     session_id: str,

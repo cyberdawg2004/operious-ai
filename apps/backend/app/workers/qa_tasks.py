@@ -28,7 +28,13 @@ _T = TypeVar("_T")
 _SOP_INTELLIGENCE_CONFIDENCE_THRESHOLD = 0.85
 
 
-@celery_app.task(name="score_supervisor_inspection", bind=True, ignore_result=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="score_supervisor_inspection",
+    bind=True,
+    ignore_result=True,
+    max_retries=1,
+    default_retry_delay=30,
+)
 def score_supervisor_inspection(
     _self: Any,
     inspection_id: str,

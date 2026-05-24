@@ -24,6 +24,8 @@ _T = TypeVar("_T")
     name="reconcile_stale_escalation_outbox",
     bind=True,
     ignore_result=True,
+    max_retries=5,
+    default_retry_delay=30,
 )
 def reconcile_stale_escalation_outbox(
     _self: Any,

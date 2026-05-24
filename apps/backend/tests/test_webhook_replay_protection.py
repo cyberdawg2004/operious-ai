@@ -172,7 +172,7 @@ def test_webhook_nonce_cleanup_task_is_scheduled() -> None:
     assert '"app.workers.webhook_nonce_tasks"' in celery_source
     assert '"cleanup-expired-webhook-nonces-hourly"' in celery_source
     assert '"task": "cleanup_expired_webhook_nonces"' in celery_source
-    assert '@celery_app.task(name="cleanup_expired_webhook_nonces"' in task_source
+    assert 'name="cleanup_expired_webhook_nonces"' in task_source
 
 
 async def _service_with_channel(

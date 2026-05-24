@@ -210,6 +210,24 @@ async def test_dead_letter_task_creates_sentry_alert(
         _capture_message,
     )
 
+    dead_letter_metadata = {
+        "execution_id": "execution-phase-h",
+        "attempt_id": "attempt-phase-h",
+        "dispatch_id": "dispatch-phase-h",
+        "session_id": "session-phase-h",
+        "tenant_id": "tenant-phase-h",
+        "attempt_count": 4,
+        "error_class": "RuntimeError",
+        "error_message": "diagnostic cognition failed",
+        "last_traceback": "Traceback (most recent call last): RuntimeError",
+        "task_payload": {
+            "execution_id": "execution-phase-h",
+            "attempt_id": "attempt-phase-h",
+            "dispatch_id": "dispatch-phase-h",
+            "session_id": "session-phase-h",
+            "tenant_id": "tenant-phase-h",
+        },
+    }
     record = await record_dead_letter_task(
         session=pg_session,
         tenant_id="tenant-phase-h",
@@ -217,7 +235,7 @@ async def test_dead_letter_task_creates_sentry_alert(
         task_id="task-phase-h",
         reason="retry budget exhausted",
         retry_count=3,
-        metadata={"phase": "h"},
+        metadata=dead_letter_metadata,
     )
     await pg_session.commit()
 
@@ -230,7 +248,11 @@ async def test_dead_letter_task_creates_sentry_alert(
     assert persisted is not None
     assert persisted.reason == "retry budget exhausted"
     assert persisted.retry_count == 3
-    assert persisted.metadata["phase"] == "h"
+    assert persisted.metadata["attempt_count"] == 4
+    assert persisted.metadata["error_class"] == "RuntimeError"
+    assert persisted.metadata["error_message"] == "diagnostic cognition failed"
+    assert str(persisted.metadata["last_traceback"]).startswith("Traceback")
+    assert persisted.metadata["task_payload"] == dead_letter_metadata["task_payload"]
     assert captured == [("dead_letter_task_created", "error")]
 
 

@@ -6,13 +6,22 @@ import ast
 import logging
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from app.core.config import get_settings
 from app.core.redis_policy import verify_redis_memory_policy
-from app.workers.agent_tasks import execute_diagnostic_agent
+from app.workers.agent_tasks import (
+    DiagnosticNonRetryableError,
+    _DiagnosticExecutionWorkItem,
+    _bounded_failure_metadata,
+    _dead_letter_task_payload,
+    _diagnostic_failure_is_terminal,
+    _retry_countdown,
+    execute_diagnostic_agent,
+)
 from app.workers.celery_app import celery_app
 from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_outbox
 from app.workers.escalation_tasks import create_governance_escalation
@@ -44,6 +53,17 @@ _FIRE_AND_FORGET_TASKS = {
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
     "reconcile_stale_escalation_outbox": reconcile_stale_escalation_outbox,
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
+}
+_TASK_RETRY_BUDGETS = {
+    "execute_diagnostic_agent": 3,
+    "create_governance_escalation": 2,
+    "evaluate_session_supervisor": 1,
+    "score_supervisor_inspection": 1,
+    "propose_sop_intelligence_change": 1,
+    "recover_stale_executions": 5,
+    "reconcile_stale_execution_outbox": 5,
+    "reconcile_stale_escalation_outbox": 5,
+    "cleanup_expired_webhook_nonces": 1,
 }
 
 
@@ -78,6 +98,85 @@ def test_fire_and_forget_tasks_ignore_results() -> None:
     assert _FIRE_AND_FORGET_TASKS
     for task_name, task in _FIRE_AND_FORGET_TASKS.items():
         assert getattr(task, "ignore_result") is True, task_name
+
+
+def test_celery_tasks_have_explicit_retry_budgets() -> None:
+    assert set(_TASK_RETRY_BUDGETS) == set(_FIRE_AND_FORGET_TASKS)
+    for task_name, expected_budget in _TASK_RETRY_BUDGETS.items():
+        task = _FIRE_AND_FORGET_TASKS[task_name]
+
+        assert getattr(task, "max_retries") == expected_budget, task_name
+        assert getattr(task, "default_retry_delay") == 30, task_name
+
+
+def test_diagnostic_retry_countdown_uses_exponential_backoff() -> None:
+    assert _retry_countdown(_task_with_retries(0)) == 30
+    assert _retry_countdown(_task_with_retries(1)) == 60
+    assert _retry_countdown(_task_with_retries(2)) == 120
+
+
+def test_diagnostic_exhausted_retries_are_terminal() -> None:
+    assert (
+        _diagnostic_failure_is_terminal(
+            RuntimeError("temporary provider outage"),
+            attempt_number=3,
+            max_attempts=4,
+        )
+        is False
+    )
+    assert (
+        _diagnostic_failure_is_terminal(
+            RuntimeError("temporary provider outage"),
+            attempt_number=4,
+            max_attempts=4,
+        )
+        is True
+    )
+
+
+def test_diagnostic_non_retryable_errors_go_directly_to_dlq() -> None:
+    assert (
+        _diagnostic_failure_is_terminal(
+            DiagnosticNonRetryableError("invalid durable context"),
+            attempt_number=1,
+            max_attempts=4,
+        )
+        is True
+    )
+
+
+def test_diagnostic_dlq_metadata_carries_traceback_and_task_payload() -> None:
+    traceback_text = "Traceback (most recent call last): RuntimeError: boom"
+    failure = _bounded_failure_metadata(
+        RuntimeError("boom"),
+        execution_id="execution-dlq",
+        attempt_id="attempt-dlq",
+        attempt_number=4,
+        retry_requested=False,
+        last_traceback=traceback_text,
+    )
+    work_item = _DiagnosticExecutionWorkItem(
+        execution_id="execution-dlq",
+        attempt_id="attempt-dlq",
+        attempt_number=4,
+        dispatch_id="dispatch-dlq",
+        session_id="session-dlq",
+        tenant_id="tenant-dlq",
+        content="diagnostic content",
+    )
+
+    assert failure["attempt_count"] == 4
+    assert failure["error_class"] == "RuntimeError"
+    assert failure["error_message"] == "boom"
+    assert failure["last_traceback"] == traceback_text
+    assert _dead_letter_task_payload(work_item) == {
+        "execution_id": "execution-dlq",
+        "attempt_id": "attempt-dlq",
+        "attempt_number": 4,
+        "dispatch_id": "dispatch-dlq",
+        "session_id": "session-dlq",
+        "tenant_id": "tenant-dlq",
+    }
 
 
 def test_worker_and_publisher_paths_do_not_read_celery_results() -> None:
@@ -201,3 +300,7 @@ def _is_task_publish_call(node: ast.AST) -> bool:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in {"delay", "apply_async"}
     )
+
+
+def _task_with_retries(retries: int) -> SimpleNamespace:
+    return SimpleNamespace(request=SimpleNamespace(retries=retries))

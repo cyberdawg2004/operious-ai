@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import traceback
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
 from threading import Thread
@@ -55,12 +56,14 @@ _STARTED = "diagnostic_execution_started"
 _COMPLETED = "diagnostic_analysis_completed"
 _FAILED = "diagnostic_execution_failed"
 _MAX_EXECUTION_ATTEMPTS = 4
+_DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 
 
 @celery_app.task(
     name="execute_diagnostic_agent",
     bind=True,
     max_retries=3,
+    default_retry_delay=_DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS,
     ignore_result=True,
 )
 def execute_diagnostic_agent(
@@ -82,8 +85,11 @@ def execute_diagnostic_agent(
     )
     if result.get("status") == "retry_requested":
         raise self.retry(
-            exc=DiagnosticExecutionRetry(str(result.get("message") or result))
+            exc=DiagnosticExecutionRetry(str(result.get("message") or result)),
+            countdown=_retry_countdown(self),
         )
+    if result.get("status") == "dead_lettered":
+        raise DiagnosticExecutionDeadLettered(str(result.get("message") or result))
     return result
 
 
@@ -121,6 +127,7 @@ async def execute_diagnostic_agent_runtime(
                 task_id=task_id,
                 retry_count=retry_count,
                 exc=exc,
+                last_traceback=traceback.format_exc(),
             )
 
         return await _persist_diagnostic_success(
@@ -332,6 +339,7 @@ async def _persist_diagnostic_failure(
     task_id: str | None,
     retry_count: int,
     exc: BaseException,
+    last_traceback: str,
 ) -> dict[str, object]:
     async with session_factory() as session:
         execution_runtime = ExecutionRuntime(
@@ -339,13 +347,19 @@ async def _persist_diagnostic_failure(
         )
         session_repo = PostgresSessionPersistence(session)
         timeline = TimelineRuntime(persistence=session_repo)
-        terminal = work_item.attempt_number >= max(1, max_attempts)
+        terminal = _diagnostic_failure_is_terminal(
+            exc,
+            attempt_number=work_item.attempt_number,
+            max_attempts=max_attempts,
+        )
+        retry_requested = _is_retryable_diagnostic_error(exc) and not terminal
         failure = _bounded_failure_metadata(
             exc,
             execution_id=work_item.execution_id,
             attempt_id=work_item.attempt_id,
             attempt_number=work_item.attempt_number,
-            retry_requested=not terminal,
+            retry_requested=retry_requested,
+            last_traceback=last_traceback,
         )
         claim_lost = await _claim_lost_payload(
             execution_runtime=execution_runtime,
@@ -392,7 +406,10 @@ async def _persist_diagnostic_failure(
                 ),
                 execution_id=work_item.execution_id,
                 attempt_id=work_item.attempt_id,
+                dispatch_id=work_item.dispatch_id,
+                session_id=work_item.session_id,
                 retry_count=retry_count,
+                task_payload=_dead_letter_task_payload(work_item),
                 failure=failure,
             )
             status = "dead_lettered"
@@ -404,7 +421,7 @@ async def _persist_diagnostic_failure(
                 attempt_id=work_item.attempt_id,
                 worker_id=worker_id,
                 failure=failure,
-                retry_requested=True,
+                retry_requested=retry_requested,
             )
             dead_letter_task_recorded = False
             status = "retry_requested"
@@ -608,10 +625,16 @@ async def _record_dead_letter_task(
     task_id: str,
     execution_id: str,
     attempt_id: str,
+    dispatch_id: str,
+    session_id: str,
     retry_count: int,
+    task_payload: Mapping[str, object],
     failure: Mapping[str, object],
 ) -> bool:
     try:
+        attempt_count = failure.get("attempt_count") or failure.get(
+            "attempt_number"
+        )
         await record_dead_letter_task(
             session=session,
             tenant_id=tenant_id,
@@ -621,9 +644,18 @@ async def _record_dead_letter_task(
             reason=str(failure.get("message") or failure),
             retry_count=retry_count,
             metadata={
+                "execution_id": execution_id,
                 "attempt_id": attempt_id,
+                "dispatch_id": dispatch_id,
+                "session_id": session_id,
+                "tenant_id": tenant_id,
+                "attempt_count": attempt_count,
                 "error_type": failure.get("error_type"),
+                "error_class": failure.get("error_class"),
+                "error_message": failure.get("error_message"),
+                "last_traceback": failure.get("last_traceback"),
                 "attempt_number": failure.get("attempt_number"),
+                "task_payload": dict(task_payload),
             },
         )
         await session.commit()
@@ -640,17 +672,39 @@ def _bounded_failure_metadata(
     attempt_id: str,
     attempt_number: int,
     retry_requested: bool,
+    last_traceback: str,
 ) -> dict[str, object]:
-    message = str(exc)
-    if len(message) > 240:
-        message = f"{message[:237]}..."
+    error_message = str(exc)
+    message = (
+        error_message
+        if len(error_message) <= 240
+        else f"{error_message[:237]}..."
+    )
+    error_class = exc.__class__.__name__
     return {
         "execution_id": execution_id,
         "attempt_id": attempt_id,
         "attempt_number": attempt_number,
-        "error_type": exc.__class__.__name__,
+        "attempt_count": attempt_number,
+        "error_type": error_class,
+        "error_class": error_class,
+        "error_message": error_message,
+        "last_traceback": last_traceback,
         "message": message,
         "retry_requested": retry_requested,
+    }
+
+
+def _dead_letter_task_payload(
+    work_item: _DiagnosticExecutionWorkItem,
+) -> dict[str, object]:
+    return {
+        "execution_id": work_item.execution_id,
+        "attempt_id": work_item.attempt_id,
+        "attempt_number": work_item.attempt_number,
+        "dispatch_id": work_item.dispatch_id,
+        "session_id": work_item.session_id,
+        "tenant_id": work_item.tenant_id,
     }
 
 
@@ -697,6 +751,14 @@ def _task_retries(task_self: Any) -> int:
     return retries if isinstance(retries, int) and retries >= 0 else 0
 
 
+def _retry_countdown(
+    task_self: Any,
+    *,
+    base_seconds: int = _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS,
+) -> int:
+    return base_seconds * (2 ** _task_retries(task_self))
+
+
 def _fallback_task_id(
     *,
     task_name: str,
@@ -711,6 +773,28 @@ def _max_execution_attempts(task_self: Any) -> int:
     if isinstance(max_retries, int) and max_retries >= 0:
         return max_retries + 1
     return _MAX_EXECUTION_ATTEMPTS
+
+
+def _diagnostic_failure_is_terminal(
+    exc: BaseException,
+    *,
+    attempt_number: int,
+    max_attempts: int,
+) -> bool:
+    return (
+        not _is_retryable_diagnostic_error(exc)
+        or attempt_number >= max(1, max_attempts)
+    )
+
+
+def _is_retryable_diagnostic_error(exc: BaseException) -> bool:
+    return not isinstance(
+        exc,
+        (
+            DiagnosticExecutionError,
+            DiagnosticNonRetryableError,
+        ),
+    )
 
 
 def _diagnostic_cognition_runtime(
@@ -817,6 +901,14 @@ class DiagnosticExecutionError(RuntimeError):
 
 class DiagnosticExecutionRetry(RuntimeError):
     """Raised to ask Celery transport for another delivery."""
+
+
+class DiagnosticExecutionDeadLettered(RuntimeError):
+    """Raised after the worker persists terminal DLQ lineage."""
+
+
+class DiagnosticNonRetryableError(RuntimeError):
+    """Raised for diagnostic failures that should go straight to DLQ."""
 
 
 __all__ = [

@@ -15,7 +15,13 @@ from app.workers.celery_app import celery_app
 _T = TypeVar("_T")
 
 
-@celery_app.task(name="cleanup_expired_webhook_nonces", bind=True, ignore_result=True)  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="cleanup_expired_webhook_nonces",
+    bind=True,
+    ignore_result=True,
+    max_retries=1,
+    default_retry_delay=30,
+)
 def cleanup_expired_webhook_nonces(
     _self: Any,
     *,
