@@ -75,6 +75,23 @@ class DiagnosticLLMOutput(BaseModel):
             raise ValueError("summary must not be blank")
         return text
 
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _normalize_confidence(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().casefold().replace("_", " ").replace("-", " ")
+        confidence_by_label = {
+            "very high": 0.95,
+            "high": 0.9,
+            "medium high": 0.82,
+            "moderate": 0.65,
+            "medium": 0.65,
+            "low": 0.35,
+            "very low": 0.2,
+        }
+        return confidence_by_label.get(normalized, value)
+
     @field_validator("reasoning")
     @classmethod
     def _normalize_reasoning(cls, value: str) -> str:

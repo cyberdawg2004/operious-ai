@@ -229,6 +229,19 @@ def test_product_defect_category_is_canonical_and_accepted() -> None:
     assert parsed.category is DiagnosticCategory.PRODUCT_DEFECT
 
 
+def test_confidence_label_is_normalized_to_numeric_score() -> None:
+    parsed = DiagnosticLLMOutput.model_validate(
+        {
+            "summary": "Charging issue with clear evidence.",
+            "category": "charging_issue",
+            "confidence": "high",
+            "reasoning": "The issue is grounded in the ticket.",
+        }
+    )
+
+    assert parsed.confidence == 0.9
+
+
 @pytest.mark.asyncio
 async def test_semantic_validator_rejects_governance_keyword_drift() -> None:
     client = _ScriptedLLMClient(

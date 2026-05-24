@@ -59,6 +59,7 @@ context. Return compact JSON only with keys: summary, category, confidence,
 reasoning.
 The category value must be exactly one of: account_issue, charging_issue,
 connectivity_issue, product_defect, refund_issue, unknown_issue.
+The confidence value must be a JSON number between 0.0 and 1.0, not a word.
 Use charging_issue for charger, cable, battery, or device-not-charging
 symptoms. Use product_defect for physical/manufacturing defect evidence that
 is not primarily a charging or connectivity symptom.
@@ -578,7 +579,8 @@ def _render_user_prompt(
                 "confidence, reasoning. category must be exactly one of "
                 "account_issue, charging_issue, connectivity_issue, "
                 "product_defect, refund_issue, unknown_issue. Do not use "
-                "human-readable category labels."
+                "human-readable category labels. confidence must be a "
+                "number between 0.0 and 1.0, not a word."
             ),
         )
     )
