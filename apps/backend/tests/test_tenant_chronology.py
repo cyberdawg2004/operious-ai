@@ -29,6 +29,11 @@ _TENANT_ID = "tenant-chronology"
 _NOW = datetime(2026, 5, 22, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return _TENANT_ID
+
+
 @pytest.mark.asyncio
 async def test_version_history_is_append_only() -> None:
     repo = InMemoryTenantConfigurationRepository()

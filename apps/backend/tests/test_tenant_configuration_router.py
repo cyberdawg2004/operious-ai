@@ -19,6 +19,11 @@ pytestmark = [requires_postgres]
 _MASTER_KEY = "tenant-config-router-master-key-material-32-bytes"
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 @pytest_asyncio.fixture
 async def tenant_client(
     pg_session: AsyncSession,

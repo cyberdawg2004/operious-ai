@@ -71,6 +71,11 @@ _TENANT_ID = "tenant-phase-g"
 _NOW = datetime(2026, 5, 23, 9, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return _TENANT_ID
+
+
 @dataclass(slots=True)
 class _ScriptedLLMClient:
     text: str

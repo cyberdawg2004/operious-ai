@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
@@ -340,9 +341,21 @@ async def pg_engine() -> AsyncIterator[AsyncEngine]:
         await engine.dispose()
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    """
+    Default tenant ID for pg_session RLS context.
+    Override this fixture in individual tests that need a
+    different tenant.
+    """
+
+    return "test-pg-tenant"
+
+
 @pytest_asyncio.fixture
 async def pg_session(
     pg_engine: AsyncEngine,
+    pg_tenant_id: str,
 ) -> AsyncIterator[AsyncSession]:
     """Yield a Postgres ``AsyncSession`` wrapped in an outer rollback.
 
@@ -364,6 +377,10 @@ async def pg_session(
     """
     connection: AsyncConnection = await pg_engine.connect()
     transaction = await connection.begin()
+    await connection.execute(
+        text("SELECT set_config('app.current_tenant_id', :t, true)"),
+        {"t": pg_tenant_id},
+    )
     try:
         session = AsyncSession(
             bind=connection,
@@ -384,6 +401,7 @@ __all__ = [
     "TEST_DATABASE_URL_ENV",
     "pg_engine",
     "pg_session",
+    "pg_tenant_id",
     "requires_postgres",
     "session_factory",
     "settings_for_test",

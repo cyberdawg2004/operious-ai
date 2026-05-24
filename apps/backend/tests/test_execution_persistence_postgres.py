@@ -20,6 +20,11 @@ from tests.conftest import execution_admission_token, requires_postgres
 _NOW = datetime(2026, 5, 22, 6, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 @pytest.mark.asyncio
 @requires_postgres
 async def test_postgres_request_execution_persists_parent_before_outbox(

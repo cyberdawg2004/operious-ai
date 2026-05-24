@@ -46,6 +46,11 @@ _SESSION_ID = "00000000-0000-0000-0000-000000005201"
 _QA_SCORE_ID = "00000000-0000-0000-0000-000000005202"
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return _TENANT_ID
+
+
 def _document(
     *,
     tenant_id: str = _TENANT_ID,

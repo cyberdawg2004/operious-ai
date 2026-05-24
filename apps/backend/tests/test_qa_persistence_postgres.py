@@ -23,6 +23,11 @@ pytestmark = [requires_postgres]
 _NOW = datetime(2026, 5, 22, 12, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 def _id(seed: str) -> str:
     return str(uuid.uuid5(uuid.UUID("00000000-0000-0000-0000-000000003200"), seed))
 

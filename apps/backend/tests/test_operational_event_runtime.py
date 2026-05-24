@@ -31,6 +31,11 @@ _RUNTIME = uuid.UUID("22222222-2222-2222-2222-222222222222")
 _NOW = datetime(2026, 5, 22, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 def _event(
     *,
     sequence: int = 0,

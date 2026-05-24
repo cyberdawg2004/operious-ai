@@ -34,6 +34,11 @@ _SESSION_ID = "00000000-0000-0000-0000-000000003e01"
 _DENY_ID = "00000000-0000-0000-0000-000000003e02"
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 @pytest_asyncio.fixture
 async def escalation_client(
     pg_session: AsyncSession,

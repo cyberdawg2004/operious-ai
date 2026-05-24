@@ -31,6 +31,11 @@ MASTER_KEY = "phase-f-replay-master-key-32-bytes-min"
 TENANT_ID = "tenant-phase-f-replay"
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return TENANT_ID
+
+
 class _FakeSession:
     def __init__(self) -> None:
         self.commits = 0

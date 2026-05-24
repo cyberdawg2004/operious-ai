@@ -37,6 +37,11 @@ from tests.conftest import requires_postgres
 pytestmark = [requires_postgres]
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 def _at(s: int = 0) -> datetime:
     return datetime(2026, 5, 19, 9, 0, s, tzinfo=timezone.utc)
 

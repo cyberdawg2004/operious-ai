@@ -55,6 +55,11 @@ pytestmark = [requires_postgres]
 # ─── Fixtures ────────────────────────────────────────────────────────────
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 @pytest_asyncio.fixture
 async def governance_client(
     pg_session: AsyncSession,

@@ -39,6 +39,11 @@ _SESSION_ID = "00000000-0000-0000-0000-000000003d01"
 _DENY_ID = "00000000-0000-0000-0000-000000003d02"
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 def _session(*, tenant_id: str = "tenant-acme") -> SessionRecord:
     sid = SessionId(uuid.UUID(_SESSION_ID))
     return SessionRecord(

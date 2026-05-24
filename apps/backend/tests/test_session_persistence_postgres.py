@@ -55,6 +55,11 @@ from tests.conftest import requires_postgres
 pytestmark = [requires_postgres]
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 # ─── Record builders ─────────────────────────────────────────────────────
 
 

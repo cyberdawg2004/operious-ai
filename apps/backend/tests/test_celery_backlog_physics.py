@@ -39,6 +39,15 @@ from app.workers.supervisor_tasks import evaluate_session_supervisor
 from tests.conftest import execution_admission_token, requires_postgres
 
 
+@pytest.fixture
+def pg_tenant_id(request: pytest.FixtureRequest) -> str:
+    if request.node.name == "test_dead_letter_task_creates_sentry_alert":
+        return "tenant-phase-h"
+    if request.node.name == "test_dead_letter_task_replay_is_idempotent_and_logged":
+        return "tenant-phase-3"
+    return "tenant-acme"
+
+
 class _QueueDepthRedis:
     def __init__(self, depth: int | Mapping[str, int]) -> None:
         self.depth = depth

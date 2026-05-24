@@ -26,6 +26,11 @@ pytestmark = [requires_postgres]
 _NOW = datetime(2026, 5, 22, 9, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 @pytest.mark.asyncio
 async def test_slo_and_trace_span_records_are_tenant_scoped(
     pg_session: AsyncSession,

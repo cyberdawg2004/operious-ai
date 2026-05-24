@@ -31,6 +31,11 @@ pytestmark = [requires_postgres]
 _NOW = datetime(2026, 5, 22, 14, tzinfo=timezone.utc)
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return "tenant-acme"
+
+
 async def _seed_document(
     pg_session: AsyncSession,
     *,

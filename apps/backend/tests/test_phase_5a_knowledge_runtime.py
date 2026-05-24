@@ -51,6 +51,11 @@ _NOW = datetime(2026, 5, 22, 15, tzinfo=timezone.utc)
 _MASTER_KEY = "knowledge-router-master-key-material-32-bytes"
 
 
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return _TENANT_ID
+
+
 class _StrictSearchKnowledgeRepository(InMemoryKnowledgeRepository):
     def __init__(self) -> None:
         super().__init__()
