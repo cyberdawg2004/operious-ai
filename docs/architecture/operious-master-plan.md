@@ -1719,6 +1719,28 @@ Rules of engagement:
     unauthenticated `GET https://app.operious.com/api/auth/access-token`
     returned clean HTTP 401 `The user does not have a valid session`
     instead of the `getAll` runtime crash.
+- [x] Command Center backend authority-header hotfix on 2026-05-24:
+  - Fixed browser API clients so the default live mode sends tenant
+    header authority only (`X-Tenant-ID`, optional `X-Principal-ID`) and
+    does not also send `Authorization`, preserving backend authority
+    singularity and eliminating `authority_source_conflict` on all
+    hydrated pages.
+  - Added `NEXT_PUBLIC_BACKEND_AUTHORITY_MODE=verified-bearer` support
+    for the future verified-token path once Auth0 tenant claims and
+    backend JWKS verification are fully aligned.
+  - Replaced the sidebar Auth0 logout `Link` with an explicit button
+    that clears local authority cache and performs a full browser
+    navigation to `/api/auth/logout`.
+  - Commit: `a2cd679 frontend: align command center backend authority
+    headers`.
+  - Deployment id: `dpl_6E5cFeDZ35TH9YFxdULueGRgoxHF`.
+  - Production alias: `https://app.operious.com`.
+  - Verification: Command Center `npm run lint` passed, Command Center
+    `npm run build` passed, Vercel production build passed, backend
+    header-only sessions/timeline/events/knowledge/policies/channels
+    and SOP approval endpoints returned HTTP 200, and direct proof of
+    the former conflict showed `X-Tenant-ID + Authorization` still
+    returns HTTP 400 by design.
 - [x] Backend CORS was updated and deployed to Fly.io for production
   domains:
   - `https://app.operious.com`
