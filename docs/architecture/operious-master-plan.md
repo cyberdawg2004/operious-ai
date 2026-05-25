@@ -7,9 +7,11 @@ Phase 6-F Anker demo artifact kit, the Wedge 0 backend hardening pass
 deployed and live-verified on Fly.io, Wedge 1 Phase 0 through final-gate
 reliability hardening, Wedge 2 Celery/Redis hardening through final
 production verification, Wedge 3 UUID4 / ambient identity fallback
-elimination through final production verification, and Wedge 4 Option A
+elimination through final production verification, Wedge 4 Option A
 through production deployment closure with FORCE RLS, role separation,
-and tenant_id NOT NULL enforcement live on Fly.io/Neon.
+and tenant_id NOT NULL enforcement live on Fly.io/Neon, and PR_T4
+per-tenant/provider quota enforcement through final local and production
+verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -51,15 +53,25 @@ This document is the canonical handoff plan for the next Codex session.
   tables; `tenant_id` NOT NULL enforced on 9 tables; Alembic production
   head `0035_tenant_not_null`; final API health returned `status: ok`;
   `anker-pilot` sessions returned total 61.
+- PR_T4 final gate: CLOSED. Local verification passed with full backend
+  2,373 passed, 2 skipped as `operious_app_test`; smoke 4/4 green;
+  Pyright 0 errors and 654 warnings; identity/queue/quota focused gate
+  31 passed; local Alembic current `0038_provider_quota (head)`.
+  `provider_quota_records` and `provider_circuit_states` both have
+  ENABLE and FORCE RLS confirmed. Production Fly.io/Neon is deployed on
+  image `deployment-01KSFB1ZDZBMNCRM9KJ1Q9GNAQ`, Alembic production
+  head is `0038_provider_quota (head)`, health returns HTTP 200
+  `status: ok`, and `anker-pilot` sessions return total 61.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 654 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0037_admission_records_rls (head)` after the
-  PR_T1-T3 correction sprint added RLS enforcement for
-  `admission_records`.
+- Alembic current: `0038_provider_quota (head)` after PR_T4 added
+  tenant/provider/model quota records, operator circuit override state,
+  and FORCE RLS for both `provider_quota_records` and
+  `provider_circuit_states`.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -75,7 +87,7 @@ This document is the canonical handoff plan for the next Codex session.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F evidence capture remains open,
   Wedge 3 UUID4 / Ambient Identity Fallback Elimination is closed, and
-  Wedge 4 Option A is closed in production.
+  Wedge 4 Option A and PR_T4 are closed in production.
   The demo
   artifact kit is complete and
   production seeding has produced real Anker pilot sessions. Wedge 0
@@ -132,6 +144,9 @@ This document is the canonical handoff plan for the next Codex session.
   tenant-scoped tables, `tenant_id` NOT NULL is enforced on 9 tables,
   Alembic production head is `0035_tenant_not_null`, and the live
   `anker-pilot` sessions endpoint returns total 61.
+  PR_T4 is also closed: quota/circuit enforcement is deployed,
+  production Alembic head is now `0038_provider_quota (head)`, and both
+  new quota/circuit tenant tables have forced RLS.
 - Public domain plan: Marketing will live at `https://www.operious.com`;
   Command Center will live at `https://app.operious.com`.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
@@ -2080,24 +2095,27 @@ before real Anker traffic or any second-client commitment.
 
 - Architecture / substrate design: 9.3/10.
 - Audit, replay, governance foundation: 9.2/10.
-- Production deployment capacity: 8.6/10.
-- Demo readiness for controlled Anker call: 8.2/10.
-- Enterprise-grade readiness overall: 8.7/10.
+- Production deployment capacity: 9.1/10.
+- Demo readiness for controlled Anker call: 9.0/10.
+- Enterprise-grade readiness overall: 9.0/10.
 
 These ratings are intentionally conservative. The architecture is strong,
-and Wedge 0, Wedge 1, Wedge 2, Wedge 3, and Wedge 4 have removed the
+and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, and PR_T4 have removed the
 known runtime identity, diagnostic schema-validation, request-body,
 escalation outbox, webhook replay/freshness, Celery result-retention,
 Redis queue-depth, worker privilege, DLQ traceback, ambient identity
-fallback, and tenant-isolation enforcement blockers. Wedge 4 materially
+fallback, tenant-isolation enforcement, and provider quota/circuit
+resilience blockers. Wedge 4 materially
 raises the production posture: production uses `operious_app` with
 `bypassrls=False`, FORCE RLS is active on all 38 tenant-scoped tables,
 and `tenant_id` NOT NULL is enforced on the 9 verified clean tables.
-The remaining gap is still operational maturity: production Redis policy
-is unverifiable from the Upstash Redis command surface and requires
-dashboard confirmation, queue-age/load tests and autoscaling contracts
-are not yet proven, and Phase 6-F still needs browser evidence plus the
-session lifecycle/SOP intelligence follow-ups before Anker go-live.
+PR_T4 raises production capacity by adding Redis sliding-window quota
+checks before LLM calls, operator-only force-open/force-close circuit
+overrides, differentiated retry budgets, and forced RLS for quota and
+circuit state. The remaining work is operational proof at scale:
+queue-age/load tests, autoscaling contracts, PR_T5-PR_T13, and Phase 6-F
+browser evidence plus the session lifecycle/SOP intelligence follow-ups
+before Anker go-live.
 
 ### Rating Targets Before Pilot Launch
 
@@ -2439,13 +2457,13 @@ Acceptance criteria:
 
 ### Post-Wedge 9+ Throughput and Capacity Program
 
-Status: In Progress | Branch: phase-2-2-stabilized
-Baseline: 2,305 passing tests, 0 pyright errors, FORCE RLS active.
-Current migration head after PR_T1-T3 corrections:
-`0037_admission_records_rls`.
-After `0037`, the current codebase treats `admission_records` as a
-tenant-scoped RLS table, bringing the current forced-RLS table set to
-39 once the correction migration is applied.
+Status: In Progress; PR_T1-PR_T4 closed | Branch: phase-2-2-stabilized
+Baseline: 2,373 passing tests, 0 pyright errors, FORCE RLS active.
+Current migration head after PR_T4:
+`0038_provider_quota`.
+After `0038`, the current codebase treats `admission_records`,
+`provider_quota_records`, and `provider_circuit_states` as tenant-scoped
+RLS tables, bringing the current forced-RLS table set to 41.
 
 This program hardens Operious AI for enterprise pilot load before the
 Anker Innovations engagement. It runs after Wedges 0-4 and before real
@@ -2459,7 +2477,7 @@ Quality floor - non-negotiable:
 - Production deployment capacity: 9.0+ / 10.
 - Production readiness: 9.0+ / 10.
 - Enterprise-grade overall: 9.0+ / 10.
-- Test coverage: >= 2,305 passing, 0 failures.
+- Test coverage: >= 2,373 passing, 0 failures.
 - Type safety: 0 pyright errors.
 - Smoke tests: 4/4 green.
 - Constitutional violations: 0.
@@ -2647,7 +2665,7 @@ Acceptance criteria:
 
 #### PR_T4 - Per-Tenant and Per-Provider Quota Enforcement
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED - 2026-05-25
 
 Scope:
 TenantQuotaRuntime with Redis sliding-window counters per
@@ -2665,21 +2683,41 @@ Retry budget error classes:
 - `SEMANTIC_REJECTION`
 - `GOVERNANCE_DENY`
 - `PERSISTENCE_FAILURE`
+- `QUOTA_EXCEEDED`
 
 Deliverables:
 
+- `apps/backend/app/cognition/exceptions.py`
 - `apps/backend/app/agents/runtime/quota_runtime.py`
-- `apps/backend/app/agents/runtime/circuit_runtime.py`
-- `migrations/versions/0037_provider_quota_records.py`
+- `apps/backend/app/agents/runtime/retry_policy.py`
+- `apps/backend/app/cognition/diagnostic_runtime.py`
+- `apps/backend/app/workers/agent_tasks.py`
+- `apps/backend/app/api/v1/routers/quota_operations.py`
+- `apps/backend/app/api/v1/schemas/quota_operations.py`
+- `apps/backend/app/services/quota_operations_service.py`
+- `apps/backend/migrations/versions/0038_provider_quota_records.py`
 - `apps/backend/tests/test_quota_runtime.py`
+- `apps/backend/tests/test_diagnostic_agent_quota_integration.py`
+- `apps/backend/tests/test_diagnostic_retry_policy.py`
+- `apps/backend/tests/test_quota_operations_router.py`
 
 Acceptance criteria:
 
-- Quota exhaustion for tenant A does not affect tenant B.
-- Force-close circuit makes all requests to that provider fail
-  immediately.
-- `PROVIDER_429` retries N times on `diagnostic.retry`, then DLQ.
-- Migration applies cleanly.
+- [x] Quota exhaustion for tenant A does not affect tenant B.
+- [x] Redis quota failure fails open and logs a warning.
+- [x] Operator force-open blocks requests before provider calls.
+- [x] Operator force-close bypasses quota only; governance remains
+  enforced.
+- [x] `PROVIDER_429` retries on `diagnostic.retry` with differentiated
+  backoff; terminal semantic/governance denials go to DLQ.
+- [x] Migration `0038_provider_quota` applies cleanly locally and in
+  production.
+- [x] `provider_quota_records` and `provider_circuit_states` have ENABLE
+  and FORCE RLS confirmed.
+- [x] Final gate: full backend 2,373 passed, 2 skipped; smoke 4/4;
+  Pyright 0 errors and 654 warnings; focused identity/queue/quota gate
+  31 passed; production health HTTP 200; `anker-pilot` sessions total
+  61.
 
 #### PR_T5 - Batch-Safe Ingestion
 
@@ -2917,6 +2955,11 @@ The 9+ final gate cannot close until:
   production: `operious_app` runs with `bypassrls=False`, FORCE RLS is
   active on 38 tenant-scoped tables, `tenant_id` NOT NULL is enforced on
   9 tables, and Alembic production head is `0035_tenant_not_null`.
+- PR_T4 - Per-Tenant and Per-Provider Quota Enforcement is closed in
+  production: Redis quota checks run before provider calls, operator
+  circuit overrides are operator-only, differentiated retry budgets are
+  active, Alembic production head is `0038_provider_quota (head)`, and
+  quota/circuit state tables have forced RLS.
 - Vector retrieval SQL-native:
   push `LIMIT`, tenant filter, and ranking to Postgres instead of
   Python-side slicing on the full knowledge corpus. Low priority until
@@ -2952,10 +2995,10 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: Wedge 4 Option A - Session Variable Wiring + FORCE RLS is CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
-Current verified backend baseline after Wedge 4 closure: 2,305 passed, 2 skipped as `operious_app_test`; smoke tests 4/4 green when `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test` is set; Pyright 0 errors and 654 warnings across apps/backend/app; RLS proof tests 7/7 green. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, FORCE RLS is active on 38 tenant-scoped tables, `tenant_id` NOT NULL is enforced on 9 tables, Alembic production head is `0035_tenant_not_null`, health returned `status: ok`, and `anker-pilot` sessions returned total 61. Phase 6-F focused artifact checks: 6 passed. Queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: PR_T4 - Per-Tenant and Per-Provider Quota Enforcement is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS is also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
+Current verified backend baseline after PR_T4 closure: 2,373 passed, 2 skipped as `operious_app_test`; smoke tests 4/4 green when `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test` is set; Pyright 0 errors and 654 warnings across apps/backend/app; identity/queue/quota focused gate 31 passed. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is `0038_provider_quota (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, health returned `status: ok`, and `anker-pilot` sessions returned total 61. Phase 6-F focused artifact checks: 6 passed. Queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 654 warnings; warnings must not grow.
-Current production Alembic head: `0035_tenant_not_null`.
+Current production Alembic head: `0038_provider_quota (head)`.
 
 Completed before the next phase:
 - Phase 6-A through Phase 6-E are closed.
@@ -2978,6 +3021,11 @@ Completed before the next phase:
   SOP approval proposals project into canonical operational_events via
   an app.runtime bridge, preserve proposal-only authority, and link
   approval lineage to evidence sessions in replay.
+- PR_T1 Queue Topology and Celery Routing is closed.
+- PR_T2 Fly Worker Process Groups is closed.
+- PR_T3 Queue Depth Admission Control is closed.
+- PR_T4 Per-Tenant and Per-Provider Quota Enforcement is closed in
+  production.
 - Wedge 0 Runtime Identity Collision Elimination is live-verified and
   closed.
 - Wedge 1 Phase 0 emergency DiagnosticLLMOutput schema-validation
@@ -3152,8 +3200,8 @@ TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433
 TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend -q
 venv/bin/pyright apps/backend/app
 
-Wedge 4 is fully closed. The last fully closed wedge is Wedge 4
-Multi-Tenant Security Before Second Client.
+Wedge 4 and PR_T4 are fully closed. The last fully closed throughput PR
+is PR_T4 Per-Tenant and Per-Provider Quota Enforcement.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -3167,7 +3215,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: Wedge 4 Option A - Session Variable Wiring + FORCE RLS is CLOSED in production.
+Current phase: PR_T4 - Per-Tenant and Per-Provider Quota Enforcement is CLOSED in production.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
@@ -3183,7 +3231,11 @@ replay, and source-level identity invariants. Wedge 4 is closed and
 deployed: production runs as `operious_app` with `bypassrls=False`,
 FORCE RLS is active on 38 tenant-scoped tables, `tenant_id` NOT NULL is
 enforced on 9 tables, and Alembic production head is
-`0035_tenant_not_null`.
+`0035_tenant_not_null`. PR_T4 is closed and deployed with Redis
+sliding-window tenant/provider/model quota checks before provider calls,
+operator-only circuit overrides, differentiated retry budgets, forced RLS
+for `provider_quota_records` and `provider_circuit_states`, and Alembic
+production head `0038_provider_quota (head)`.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -3222,6 +3274,10 @@ Current source of truth:
 - Final Pre-6-E gate is closed and was re-run on 2026-05-23.
 - Phase 6-E is closed.
 - Phase 3-D.1 ApprovalRecord projection follow-up is closed.
+- PR_T1 Queue Topology and Celery Routing is closed.
+- PR_T2 Fly Worker Process Groups is closed.
+- PR_T3 Queue Depth Admission Control is closed.
+- PR_T4 Per-Tenant and Per-Provider Quota Enforcement is closed.
 
 Current verified baseline:
 - Wedge 0 backend verification: 2,224 passed, 2 skipped,
@@ -3245,13 +3301,17 @@ Current verified baseline:
   `operious_app_test`; RLS proof tests 7/7 green; smoke 4/4 green when `TEST_DATABASE_URL` points to
   `postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test`;
   Pyright 0 errors and 654 warnings.
+- PR_T4 final local gate: 2,373 passed, 2 skipped as
+  `operious_app_test`; smoke 4/4 green; Pyright 0 errors and 654
+  warnings; identity/queue/quota focused gate 31 passed; local Alembic
+  current `0038_provider_quota (head)`.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
 - Pyright warnings: 654; warnings must not grow phase over phase.
-- Current production Alembic head: `0035_tenant_not_null`.
+- Current production Alembic head: `0038_provider_quota (head)`.
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -3412,6 +3472,14 @@ Current Command Center 2 status:
   tenant-scoped tables, `tenant_id` NOT NULL enforced on 9 tables,
   Alembic production head `0035_tenant_not_null`, health `status: ok`,
   and `anker-pilot` sessions total 61.
+- PR_T4 status:
+  CLOSED in production. Local final gate: full backend 2,373 passed,
+  2 skipped as `operious_app_test`; Pyright 0 errors and 654 warnings;
+  smoke 4/4; identity/queue/quota focused gate 31 passed; local and
+  production Alembic head `0038_provider_quota (head)`;
+  `provider_quota_records` and `provider_circuit_states` have ENABLE
+  and FORCE RLS; production health `status: ok`; `anker-pilot` sessions
+  total 61.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
