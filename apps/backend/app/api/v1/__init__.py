@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from app.api.v1.routers.arbitration import router as arbitration_router
 from app.api.v1.routers.auth import router as auth_router
+from app.api.v1.routers.batch_ingest import router as batch_ingest_router
 from app.api.v1.routers.boundary import router as boundary_router
 from app.api.v1.routers.cognition import router as cognition_router
 from app.api.v1.routers.coordination import router as coordination_router
@@ -36,6 +37,7 @@ from app.api.v1.routers.tenant import router as tenant_router
 
 api_router_v1 = APIRouter()
 api_router_v1.include_router(health_router)
+api_router_v1.include_router(batch_ingest_router)
 api_router_v1.include_router(auth_router, prefix="/auth")
 api_router_v1.include_router(governance_router, prefix="/governance")
 api_router_v1.include_router(coordination_router, prefix="/coordination")

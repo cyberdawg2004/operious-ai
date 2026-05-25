@@ -1,3 +1,10 @@
+from .batch import (
+    BatchIngestItem,
+    BatchIngestItemResult,
+    BatchIngestRequest,
+    BatchIngestResponse,
+    BatchItemStatus,
+)
 from .ingress import (
     TicketIngressRequest,
     TicketIngressResponse,
@@ -5,6 +12,11 @@ from .ingress import (
 )
 
 __all__ = [
+    "BatchIngestItem",
+    "BatchIngestItemResult",
+    "BatchIngestRequest",
+    "BatchIngestResponse",
+    "BatchItemStatus",
     "TicketIngressRequest",
     "TicketIngressResponse",
     "TicketIngressWebhookResponse",

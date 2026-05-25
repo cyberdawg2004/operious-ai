@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import cast
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.runtime.quota_runtime import TenantQuotaRuntime
@@ -116,13 +116,19 @@ from app.services.dispatch_service import (
     DispatchService,
 )
 from app.services.escalation_service import EscalationService
-from app.hardening.admission import AdmissionGate
+from app.hardening.admission import (
+    AdmissionDecision,
+    AdmissionGate,
+    AdmissionOutcome,
+)
 from app.hardening.admission.gate import AdmissionRedisClient
+from app.dependencies.authority import require_tenant_scope
 from app.services.health_service import HealthService
 from app.services.admission_service import (
     AdmissionService,
     measure_db_pool_wait_ms,
 )
+from app.services.batch_ingest_service import BatchIngestService
 from app.services.knowledge_service import KnowledgeService
 from app.services.operational_event_service import OperationalEventService
 from app.services.operational_observability_service import (
@@ -245,6 +251,60 @@ def get_ticket_ingress_service(
     )
 
 
+def get_admission_service() -> AdmissionService:
+    """Return the platform admission service for inbound workloads."""
+    settings = get_settings()
+    session_factory = get_session_factory()
+    return AdmissionService(
+        gate=AdmissionGate(
+            redis_client=cast(AdmissionRedisClient, get_redis_client()),
+            thresholds=admission_thresholds_from_settings(settings),
+        ),
+        session_factory=session_factory,
+        db_pool_wait_provider=lambda: measure_db_pool_wait_ms(session_factory),
+    )
+
+
+async def check_batch_ingest_admission(
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    admission_service: AdmissionService = Depends(get_admission_service),
+) -> AdmissionDecision:
+    """Fail closed before batch-ingest service processing begins."""
+    decision = await admission_service.evaluate_and_persist(
+        queue_names=DIAGNOSTIC_QUEUE_PRIORITY,
+        tenant_id=expected_tenant_id,
+        channel="batch_ingest",
+        request_correlation_id=None,
+    )
+    if decision.outcome is AdmissionOutcome.ADMIT:
+        return decision
+    reason = decision.reason.value if decision.reason is not None else "UNKNOWN"
+    headers = {
+        "X-Operious-Admission-Decision-Id": str(decision.decision_id),
+    }
+    if decision.outcome is AdmissionOutcome.DEFER:
+        headers["Retry-After"] = str(decision.retry_after_seconds)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "admission_deferred",
+                "reason": reason,
+                "decision_id": str(decision.decision_id),
+                "retry_after_seconds": decision.retry_after_seconds,
+            },
+            headers=headers,
+        )
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail={
+            "code": "admission_rejected",
+            "reason": reason,
+            "decision_id": str(decision.decision_id),
+        },
+        headers=headers,
+    )
+
+
 def get_execution_publisher() -> ExecutionPublisher:
     """Return the execution publisher transport boundary."""
     return CeleryExecutionPublisher()
@@ -316,6 +376,19 @@ async def get_dispatch_service(
     except Exception:
         await session.rollback()
         raise
+
+
+def get_batch_ingest_service(
+    boundary_repository: BoundaryPersistenceProtocol = Depends(
+        get_boundary_repository
+    ),
+    dispatch_service: DispatchService = Depends(get_dispatch_service),
+) -> BatchIngestService:
+    """Return the batch-ingest service for this request."""
+    return BatchIngestService(
+        boundary_repository=boundary_repository,
+        dispatch_service=dispatch_service,
+    )
 
 
 def get_supervisor_repository(

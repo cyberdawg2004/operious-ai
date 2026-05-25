@@ -68,6 +68,9 @@ _REPLAY_KEY_NAMESPACE: uuid.UUID = uuid.UUID(
 _TRACE_NAMESPACE: uuid.UUID = uuid.UUID(
     "b0c1d2e3-0005-4005-8005-000000000005"
 )
+_BATCH_BOUNDARY_NAMESPACE: uuid.UUID = uuid.UUID(
+    "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+)
 _RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
 
@@ -134,6 +137,32 @@ def derive_ingress_id(*, seed: str) -> BoundaryIngressId:
             "derive_ingress_id requires a non-empty seed"
         )
     return BoundaryIngressId(uuid.uuid5(_INGRESS_NAMESPACE, seed))
+
+
+def make_boundary_id(
+    tenant_id: str,
+    channel_type: str,
+    source_id: str,
+    external_message_id: str,
+) -> str:
+    """Derive the deterministic batch-ingest boundary id."""
+    if not tenant_id:
+        raise ValueError("make_boundary_id requires a non-empty tenant_id")
+    if not channel_type:
+        raise ValueError(
+            "make_boundary_id requires a non-empty channel_type"
+        )
+    if not source_id:
+        raise ValueError("make_boundary_id requires a non-empty source_id")
+    if not external_message_id:
+        raise ValueError(
+            "make_boundary_id requires a non-empty external_message_id"
+        )
+    seed = (
+        f"boundary:{tenant_id}:{channel_type}:"
+        f"{source_id}:{external_message_id}"
+    )
+    return str(uuid.uuid5(_BATCH_BOUNDARY_NAMESPACE, seed))
 
 
 def derive_egress_id(*, seed: str) -> BoundaryEgressId:
@@ -229,6 +258,7 @@ __all__ = [
     "derive_event_id",
     "derive_ingress_id",
     "derive_egress_id",
+    "make_boundary_id",
     "derive_replay_key",
     "derive_trace_id",
     "as_event_id",

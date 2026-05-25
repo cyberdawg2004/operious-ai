@@ -9,10 +9,12 @@ Reads remain tenant-scoped, and list ordering remains canonical
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, or_, select, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.boundary.db.models import (
@@ -69,6 +71,43 @@ class PostgresBoundaryPersistence(BaseRepository):
                 f"duplicate ingress record: ingress_id={record.ingress_id}"
             ) from exc
         return record
+
+    async def get_existing_ingress_ids(
+        self,
+        ingress_ids: Sequence[BoundaryIngressId],
+        *,
+        expected_tenant_id: str,
+    ) -> set[BoundaryIngressId]:
+        if not ingress_ids:
+            return set()
+        stmt = select(BoundaryIngressRow.ingress_id).where(
+            BoundaryIngressRow.ingress_id.in_(ingress_ids),
+            BoundaryIngressRow.tenant_id == expected_tenant_id,
+        )
+        result = await self.session.execute(stmt)
+        return {
+            BoundaryIngressId(ingress_id)
+            for ingress_id in result.scalars()
+        }
+
+    async def bulk_insert_ingress_records(
+        self,
+        records: Sequence[BoundaryIngressRecord],
+    ) -> set[BoundaryIngressId]:
+        if not records:
+            return set()
+        rows = [_ingress_record_to_values(record) for record in records]
+        stmt = (
+            pg_insert(BoundaryIngressRow)
+            .values(rows)
+            .on_conflict_do_nothing(index_elements=["ingress_id"])
+            .returning(BoundaryIngressRow.ingress_id)
+        )
+        result = await self.session.execute(stmt)
+        return {
+            BoundaryIngressId(ingress_id)
+            for ingress_id in result.scalars()
+        }
 
     async def save_egress(self, record: BoundaryEgressRecord) -> None:
         row = _egress_record_to_row(record)
@@ -353,34 +392,40 @@ class PostgresBoundaryPersistence(BaseRepository):
 def _ingress_record_to_row(
     record: BoundaryIngressRecord,
 ) -> BoundaryIngressRow:
-    return BoundaryIngressRow(
-        ingress_id=record.ingress_id,
-        direction=record.direction.value,
-        runtime_instance_id=record.runtime_instance_id,
-        sequence=record.sequence,
-        source_type=record.source_type.value,
-        source_id=record.source_id,
-        tenant_id=record.tenant_id,
-        adapter_name=record.adapter_name,
-        normalization_status=record.normalization_status.value,
-        message_type=record.message_type.value,
-        replay_disposition=record.replay_disposition.value,
-        replay_key=record.replay_key,
-        event_id=record.event_id,
-        original_event_id=record.original_event_id,
-        external_message_id=record.external_message_id,
-        external_conversation_id=record.external_conversation_id,
-        external_emitted_at=record.external_emitted_at,
-        received_at=record.received_at,
-        started_at=record.started_at,
-        ended_at=record.ended_at,
-        latency_ms=record.latency_ms,
-        correlation_id=record.correlation_id,
-        request_id=record.request_id,
-        canonical_payload=dict(record.canonical_payload),
-        error=record.error,
-        metadata_json=dict(record.metadata),
-    )
+    return BoundaryIngressRow(**_ingress_record_to_values(record))
+
+
+def _ingress_record_to_values(
+    record: BoundaryIngressRecord,
+) -> dict[str, Any]:
+    return {
+        "ingress_id": record.ingress_id,
+        "direction": record.direction.value,
+        "runtime_instance_id": record.runtime_instance_id,
+        "sequence": record.sequence,
+        "source_type": record.source_type.value,
+        "source_id": record.source_id,
+        "tenant_id": record.tenant_id,
+        "adapter_name": record.adapter_name,
+        "normalization_status": record.normalization_status.value,
+        "message_type": record.message_type.value,
+        "replay_disposition": record.replay_disposition.value,
+        "replay_key": record.replay_key,
+        "event_id": record.event_id,
+        "original_event_id": record.original_event_id,
+        "external_message_id": record.external_message_id,
+        "external_conversation_id": record.external_conversation_id,
+        "external_emitted_at": record.external_emitted_at,
+        "received_at": record.received_at,
+        "started_at": record.started_at,
+        "ended_at": record.ended_at,
+        "latency_ms": record.latency_ms,
+        "correlation_id": record.correlation_id,
+        "request_id": record.request_id,
+        "canonical_payload": dict(record.canonical_payload),
+        "error": record.error,
+        "metadata_json": dict(record.metadata),
+    }
 
 
 def _ingress_row_to_record(

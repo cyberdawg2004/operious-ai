@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -44,6 +45,18 @@ class BoundaryPersistenceProtocol(Protocol):
     async def save_ingress(
         self, record: BoundaryIngressRecord
     ) -> BoundaryIngressRecord: ...
+
+    async def get_existing_ingress_ids(
+        self,
+        ingress_ids: Sequence[BoundaryIngressId],
+        *,
+        expected_tenant_id: str,
+    ) -> set[BoundaryIngressId]: ...
+
+    async def bulk_insert_ingress_records(
+        self,
+        records: Sequence[BoundaryIngressRecord],
+    ) -> set[BoundaryIngressId]: ...
 
     async def save_egress(
         self, record: BoundaryEgressRecord

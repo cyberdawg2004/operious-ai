@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 
 from app.boundary.exceptions import (
@@ -73,6 +74,42 @@ class InMemoryBoundaryPersistence:
                     record.ingress_id
                 )
             return record
+
+    async def get_existing_ingress_ids(
+        self,
+        ingress_ids: Sequence[BoundaryIngressId],
+        *,
+        expected_tenant_id: str,
+    ) -> set[BoundaryIngressId]:
+        ids = set(ingress_ids)
+        async with self._lock:
+            return {
+                ingress_id
+                for ingress_id, record in self._ingress.items()
+                if ingress_id in ids
+                and record.tenant_id == expected_tenant_id
+            }
+
+    async def bulk_insert_ingress_records(
+        self,
+        records: Sequence[BoundaryIngressRecord],
+    ) -> set[BoundaryIngressId]:
+        inserted: set[BoundaryIngressId] = set()
+        async with self._lock:
+            for record in records:
+                if self._resolve_duplicate_ingress(record) is not None:
+                    continue
+                self._ingress[record.ingress_id] = record
+                if record.replay_key is not None:
+                    self._ingress_by_replay_key[record.replay_key] = (
+                        record.ingress_id
+                    )
+                if record.event_id is not None:
+                    self._ingress_by_event_id[record.event_id] = (
+                        record.ingress_id
+                    )
+                inserted.add(record.ingress_id)
+        return inserted
 
     async def save_egress(
         self, record: BoundaryEgressRecord

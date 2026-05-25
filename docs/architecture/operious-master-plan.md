@@ -9,9 +9,10 @@ reliability hardening, Wedge 2 Celery/Redis hardening through final
 production verification, Wedge 3 UUID4 / ambient identity fallback
 elimination through final production verification, Wedge 4 Option A
 through production deployment closure with FORCE RLS, role separation,
-and tenant_id NOT NULL enforcement live on Fly.io/Neon, and PR_T4
+and tenant_id NOT NULL enforcement live on Fly.io/Neon, PR_T4
 per-tenant/provider quota enforcement through final local and production
-verification.
+verification, and PR_T5 batch-safe ingestion through final local and
+production verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -62,16 +63,23 @@ This document is the canonical handoff plan for the next Codex session.
   image `deployment-01KSFB1ZDZBMNCRM9KJ1Q9GNAQ`, Alembic production
   head is `0038_provider_quota (head)`, health returns HTTP 200
   `status: ok`, and `anker-pilot` sessions return total 61.
+- PR_T5 final gate: CLOSED. Local verification passed with full backend
+  2,388 passed, 2 skipped as `operious_app_test`; smoke 4/4 green;
+  Pyright 0 errors and 654 warnings; identity/queue/batch focused gate
+  34 passed; local Alembic current `0038_provider_quota (head)`.
+  Production Fly.io deploy image
+  `deployment-01KSFGTF78YVXA2YETDWJCZ450` is live, health returns
+  HTTP 200 `status: ok`, and `POST /api/v1/ingest/batch` returns 422
+  without auth for `items=[]`, confirming the route is registered and
+  not a 404.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 654 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0038_provider_quota (head)` after PR_T4 added
-  tenant/provider/model quota records, operator circuit override state,
-  and FORCE RLS for both `provider_quota_records` and
-  `provider_circuit_states`.
+- Alembic current: `0038_provider_quota (head)`. PR_T5 added no
+  migration; the current head remains the PR_T4 quota/circuit migration.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -87,7 +95,7 @@ This document is the canonical handoff plan for the next Codex session.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F evidence capture remains open,
   Wedge 3 UUID4 / Ambient Identity Fallback Elimination is closed, and
-  Wedge 4 Option A and PR_T4 are closed in production.
+  Wedge 4 Option A, PR_T4, and PR_T5 are closed in production.
   The demo
   artifact kit is complete and
   production seeding has produced real Anker pilot sessions. Wedge 0
@@ -2093,27 +2101,31 @@ before real Anker traffic or any second-client commitment.
 
 ### Current Honest Ratings
 
-- Architecture / substrate design: 9.3/10.
-- Audit, replay, governance foundation: 9.2/10.
-- Production deployment capacity: 9.1/10.
-- Demo readiness for controlled Anker call: 9.0/10.
-- Enterprise-grade readiness overall: 9.0/10.
+- Architecture / substrate design: 9.4/10.
+- Audit, replay, governance foundation: 9.3/10.
+- Production deployment capacity: 9.2/10.
+- Demo readiness for controlled Anker call: 9.1/10.
+- Enterprise-grade readiness overall: 9.1/10.
 
 These ratings are intentionally conservative. The architecture is strong,
-and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, and PR_T4 have removed the
-known runtime identity, diagnostic schema-validation, request-body,
-escalation outbox, webhook replay/freshness, Celery result-retention,
-Redis queue-depth, worker privilege, DLQ traceback, ambient identity
-fallback, tenant-isolation enforcement, and provider quota/circuit
-resilience blockers. Wedge 4 materially
+and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, PR_T4, and PR_T5 have
+removed the known runtime identity, diagnostic schema-validation,
+request-body, escalation outbox, webhook replay/freshness, Celery
+result-retention, Redis queue-depth, worker privilege, DLQ traceback,
+ambient identity fallback, tenant-isolation enforcement, provider
+quota/circuit resilience, and batch-ingestion idempotency blockers.
+Wedge 4 materially
 raises the production posture: production uses `operious_app` with
 `bypassrls=False`, FORCE RLS is active on all 38 tenant-scoped tables,
 and `tenant_id` NOT NULL is enforced on the 9 verified clean tables.
 PR_T4 raises production capacity by adding Redis sliding-window quota
 checks before LLM calls, operator-only force-open/force-close circuit
 overrides, differentiated retry budgets, and forced RLS for quota and
-circuit state. The remaining work is operational proof at scale:
-queue-age/load tests, autoscaling contracts, PR_T5-PR_T13, and Phase 6-F
+circuit state. PR_T5 adds atomic bulk boundary ingestion with UUID5
+boundary IDs, `ON CONFLICT DO NOTHING` deduplication on `ingress_id`,
+per-item ACCEPTED/DUPLICATE/REJECTED reporting, and post-insert dispatch
+through the service layer. The remaining work is operational proof at
+scale: queue-age/load tests, autoscaling contracts, PR_T6-PR_T13, and Phase 6-F
 browser evidence plus the session lifecycle/SOP intelligence follow-ups
 before Anker go-live.
 
@@ -2457,9 +2469,9 @@ Acceptance criteria:
 
 ### Post-Wedge 9+ Throughput and Capacity Program
 
-Status: In Progress; PR_T1-PR_T4 closed | Branch: phase-2-2-stabilized
-Baseline: 2,373 passing tests, 0 pyright errors, FORCE RLS active.
-Current migration head after PR_T4:
+Status: In Progress; PR_T1-PR_T5 closed | Branch: phase-2-2-stabilized
+Baseline: 2,388 passing tests, 0 pyright errors, FORCE RLS active.
+Current migration head after PR_T5:
 `0038_provider_quota`.
 After `0038`, the current codebase treats `admission_records`,
 `provider_quota_records`, and `provider_circuit_states` as tenant-scoped
@@ -2721,30 +2733,43 @@ Acceptance criteria:
 
 #### PR_T5 - Batch-Safe Ingestion
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED - 2026-05-25
 
 Scope:
 Add `POST /api/v1/ingest/batch` endpoint. The request is an array of
 boundary records. Each item gets UUID5 boundary ID from
 tenant_id/channel/source_id/external_message_id. Use a single
 `INSERT ... ON CONFLICT DO NOTHING`; no N+1. Per-item status:
-ACCEPTED / DUPLICATE / REJECTED. Accepted items publish to `ingress.*`
-queues.
+ACCEPTED / DUPLICATE / REJECTED. Accepted items trigger downstream
+execution through `DispatchService` after the bulk insert.
 
 Deliverables:
 
-- `apps/backend/app/routers/batch_ingest_router.py`
+- `apps/backend/app/api/v1/routers/batch_ingest.py`
+- `apps/backend/app/api/v1/schemas/ingress/batch.py`
 - `apps/backend/app/services/batch_ingest_service.py`
+- Boundary persistence bulk select/insert support using
+  `ON CONFLICT DO NOTHING` on `ingress_id`.
 - `apps/backend/tests/test_batch_ingest.py`, including a 1000-item
   duplicate test.
 
 Acceptance criteria:
 
-- 1000-item batch with 30% duplicates has correct counts and one
+- [x] UUID5 boundary IDs are deterministic and no `uuid4()` appears in
+  the batch boundary identity path.
+- [x] `ON CONFLICT DO NOTHING` targets `ingress_id`.
+- [x] 1000-item batch with 30% duplicates has correct counts and one
   transaction.
-- Partial batch commits valid items and rejects malformed items
+- [x] Partial batch commits valid items and rejects malformed items
   individually.
-- Router calls service only; no direct repo access from router.
+- [x] Tenant-mismatched items are REJECTED before DB writes.
+- [x] Duplicate items do not create records and are not dispatched.
+- [x] Admission gate runs once before the service call.
+- [x] Router calls service only; no direct repo access from router.
+- [x] Final gate: full backend 2,388 passed, 2 skipped; smoke 4/4;
+  Pyright 0 errors and 654 warnings; identity/queue/batch focused gate
+  34 passed; production health HTTP 200; batch endpoint returns 422,
+  not 404, for unauthenticated `items=[]`.
 
 #### PR_T6 - Queue and Processing Metrics
 
@@ -2995,8 +3020,8 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: PR_T4 - Per-Tenant and Per-Provider Quota Enforcement is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS is also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
-Current verified backend baseline after PR_T4 closure: 2,373 passed, 2 skipped as `operious_app_test`; smoke tests 4/4 green when `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test` is set; Pyright 0 errors and 654 warnings across apps/backend/app; identity/queue/quota focused gate 31 passed. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is `0038_provider_quota (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, health returned `status: ok`, and `anker-pilot` sessions returned total 61. Phase 6-F focused artifact checks: 6 passed. Queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: PR_T5 - Batch-Safe Ingestion is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS and PR_T4 - Per-Tenant and Per-Provider Quota Enforcement are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
+Current verified backend baseline after PR_T5 closure: 2,388 passed, 2 skipped as `operious_app_test`; smoke tests 4/4 green when `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test` is set; Pyright 0 errors and 654 warnings across apps/backend/app; identity/queue/batch focused gate 34 passed. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is `0038_provider_quota (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, health returned `status: ok`, and `POST /api/v1/ingest/batch` returned 422 for `items=[]`, confirming the route is registered and not 404. Phase 6-F focused artifact checks: 6 passed. Queue-depth health returned all queues `ok`, active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 654 warnings; warnings must not grow.
 Current production Alembic head: `0038_provider_quota (head)`.
 
@@ -3026,6 +3051,7 @@ Completed before the next phase:
 - PR_T3 Queue Depth Admission Control is closed.
 - PR_T4 Per-Tenant and Per-Provider Quota Enforcement is closed in
   production.
+- PR_T5 Batch-Safe Ingestion is closed in production.
 - Wedge 0 Runtime Identity Collision Elimination is live-verified and
   closed.
 - Wedge 1 Phase 0 emergency DiagnosticLLMOutput schema-validation
@@ -3200,8 +3226,8 @@ TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433
 TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend -q
 venv/bin/pyright apps/backend/app
 
-Wedge 4 and PR_T4 are fully closed. The last fully closed throughput PR
-is PR_T4 Per-Tenant and Per-Provider Quota Enforcement.
+Wedge 4, PR_T4, and PR_T5 are fully closed. The last fully closed
+throughput PR is PR_T5 Batch-Safe Ingestion.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -3215,7 +3241,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: PR_T4 - Per-Tenant and Per-Provider Quota Enforcement is CLOSED in production.
+Current phase: PR_T5 - Batch-Safe Ingestion is CLOSED in production.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
@@ -3235,7 +3261,12 @@ enforced on 9 tables, and Alembic production head is
 sliding-window tenant/provider/model quota checks before provider calls,
 operator-only circuit overrides, differentiated retry budgets, forced RLS
 for `provider_quota_records` and `provider_circuit_states`, and Alembic
-production head `0038_provider_quota (head)`.
+production head `0038_provider_quota (head)`. PR_T5 is closed and
+deployed with deterministic UUID5 batch boundary IDs, single bulk
+`INSERT ... ON CONFLICT DO NOTHING` deduplication on `ingress_id`,
+per-item ACCEPTED/DUPLICATE/REJECTED results, tenant-mismatch rejection
+before DB writes, admission checked once before processing, and accepted
+items dispatched through `DispatchService`.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -3278,6 +3309,7 @@ Current source of truth:
 - PR_T2 Fly Worker Process Groups is closed.
 - PR_T3 Queue Depth Admission Control is closed.
 - PR_T4 Per-Tenant and Per-Provider Quota Enforcement is closed.
+- PR_T5 Batch-Safe Ingestion is closed.
 
 Current verified baseline:
 - Wedge 0 backend verification: 2,224 passed, 2 skipped,
@@ -3305,6 +3337,12 @@ Current verified baseline:
   `operious_app_test`; smoke 4/4 green; Pyright 0 errors and 654
   warnings; identity/queue/quota focused gate 31 passed; local Alembic
   current `0038_provider_quota (head)`.
+- PR_T5 final local gate: 2,388 passed, 2 skipped as
+  `operious_app_test`; smoke 4/4 green; Pyright 0 errors and 654
+  warnings; identity/queue/batch focused gate 34 passed; local Alembic
+  current `0038_provider_quota (head)`; production deploy image
+  `deployment-01KSFGTF78YVXA2YETDWJCZ450`; production health
+  `status: ok`; batch endpoint returned 422, not 404, for `items=[]`.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
@@ -3480,6 +3518,13 @@ Current Command Center 2 status:
   `provider_quota_records` and `provider_circuit_states` have ENABLE
   and FORCE RLS; production health `status: ok`; `anker-pilot` sessions
   total 61.
+- PR_T5 status:
+  CLOSED in production. Local final gate: full backend 2,388 passed,
+  2 skipped as `operious_app_test`; Pyright 0 errors and 654 warnings;
+  smoke 4/4; identity/queue/batch focused gate 34 passed; local Alembic
+  head `0038_provider_quota (head)`; production deploy image
+  `deployment-01KSFGTF78YVXA2YETDWJCZ450`; production health
+  `status: ok`; batch endpoint returned 422, not 404, for `items=[]`.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.

@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import sentry_sdk
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -206,7 +207,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
             detail=str(detail_value) if detail_value else "",
             request=request,
         )
-        return problem_details_response(problem)
+        return problem_details_response(
+            problem,
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(  # pyright: ignore[reportUnusedFunction]
@@ -220,7 +224,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
         # Attach the structured errors as an extension member.
         payload = problem.model_dump(exclude_none=True)
-        payload["errors"] = exc.errors()
+        payload["errors"] = jsonable_encoder(exc.errors())
         from fastapi.responses import JSONResponse
 
         return JSONResponse(
