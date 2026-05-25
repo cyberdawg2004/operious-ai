@@ -54,7 +54,7 @@ from app.workers.queue_admission import (
     clear_worker_queue_age,
     record_worker_queue_age,
 )
-from app.workers.queues import (
+from app.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_SUPERVISOR,
 )

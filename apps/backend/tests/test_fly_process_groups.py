@@ -58,7 +58,9 @@ def test_fly_worker_processes_consume_only_declared_queues() -> None:
 
     for process_name, expected_queues in EXPECTED_PROCESS_QUEUES.items():
         command = processes[process_name]
-        assert command.startswith("celery -A app.workers.celery_app worker ")
+        assert _worker_command(command).startswith(
+            "celery -A app.workers.celery_app worker "
+        )
         assert _command_queues(command) == expected_queues
 
 
@@ -100,3 +102,16 @@ def _command_concurrency(command: str) -> int:
     match = re.search(r"--concurrency=(\d+)", command)
     assert match is not None, f"missing --concurrency flag in {command}"
     return int(match.group(1))
+
+
+def _worker_command(command: str) -> str:
+    return command.removeprefix("env DB_USE_NULLPOOL=true ").strip()
+
+
+def test_fly_workers_use_nullpool() -> None:
+    processes = _fly_config()["processes"]
+
+    for process_name in EXPECTED_PROCESS_QUEUES:
+        assert processes[process_name].startswith("env DB_USE_NULLPOOL=true "), (
+            f"{process_name} must run workers with DB_USE_NULLPOOL=true"
+        )

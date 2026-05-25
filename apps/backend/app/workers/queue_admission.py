@@ -12,7 +12,7 @@ from app.core.admission import (
 from app.core.config import get_settings
 from app.core.queue_admission import RedisQueueDepthAdmission
 from app.core.redis import get_redis_client
-from app.workers.queues import (
+from app.queues import (
     QUEUE_QA,
     QUEUE_SOP_INTELLIGENCE,
     QUEUE_SUPERVISOR,

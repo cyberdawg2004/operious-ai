@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -39,15 +39,19 @@ class AdmissionService(BaseService):
     async def evaluate_and_persist(
         self,
         *,
-        queue_name: str,
+        queue_name: str | None = None,
+        queue_names: Sequence[str] | None = None,
         tenant_id: str | None = None,
         channel: str | None = None,
+        request_correlation_id: str | None = None,
     ) -> AdmissionDecision:
         db_pool_wait_ms = await self._measure_db_pool_wait()
         decision = await self._gate.evaluate(
             queue_name=queue_name,
+            queue_names=queue_names,
             tenant_id=tenant_id,
             channel=channel,
+            request_correlation_id=request_correlation_id,
             db_pool_wait_ms=db_pool_wait_ms,
         )
         if decision.outcome is AdmissionOutcome.ADMIT:

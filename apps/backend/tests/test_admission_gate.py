@@ -37,7 +37,7 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
-from app.workers.queues import QUEUE_DIAGNOSTIC_NORMAL, QUEUE_INGRESS_EMAIL
+from app.queues import DIAGNOSTIC_QUEUE_PRIORITY, QUEUE_DIAGNOSTIC_NORMAL
 
 
 TENANT_ID = "tenant-admission-alpha"
@@ -112,7 +112,7 @@ async def _decision(redis: _AdmissionRedis) -> AdmissionDecision:
     return await AdmissionGate(
         redis_client=redis,
         thresholds=_thresholds(),
-    ).evaluate(queue_name=QUEUE_INGRESS_EMAIL, tenant_id=TENANT_ID)
+    ).evaluate(queue_name=QUEUE_DIAGNOSTIC_NORMAL, tenant_id=TENANT_ID)
 
 
 @pytest.mark.asyncio
@@ -169,12 +169,35 @@ async def test_reject_on_redis_memory_pressure_reject() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admission_decision_id_is_deterministic_for_request_scope() -> None:
+    gate = AdmissionGate(
+        redis_client=_AdmissionRedis(depth=20),
+        thresholds=_thresholds(),
+    )
+
+    first = await gate.evaluate(
+        queue_names=DIAGNOSTIC_QUEUE_PRIORITY,
+        tenant_id=TENANT_ID,
+        channel="email",
+        request_correlation_id="request-admission-1",
+    )
+    second = await gate.evaluate(
+        queue_names=DIAGNOSTIC_QUEUE_PRIORITY,
+        tenant_id=TENANT_ID,
+        channel="email",
+        request_correlation_id="request-admission-1",
+    )
+
+    assert first.decision_id == second.decision_id
+
+
+@pytest.mark.asyncio
 async def test_defer_on_db_pool_wait_warn() -> None:
     decision = await AdmissionGate(
         redis_client=_AdmissionRedis(depth=0),
         thresholds=_thresholds(),
     ).evaluate(
-        queue_name=QUEUE_INGRESS_EMAIL,
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         tenant_id=TENANT_ID,
         db_pool_wait_ms=250,
     )
@@ -189,7 +212,7 @@ async def test_reject_on_db_pool_wait_reject() -> None:
         redis_client=_AdmissionRedis(depth=0),
         thresholds=_thresholds(),
     ).evaluate(
-        queue_name=QUEUE_INGRESS_EMAIL,
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         tenant_id=TENANT_ID,
         db_pool_wait_ms=1000,
     )
@@ -226,7 +249,7 @@ async def test_non_admit_decision_is_persisted() -> None:
     )
 
     decision = await service.evaluate_and_persist(
-        queue_name=QUEUE_INGRESS_EMAIL,
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         tenant_id=TENANT_ID,
         channel="email",
     )
@@ -252,7 +275,7 @@ async def test_admit_decision_is_not_persisted() -> None:
     )
 
     decision = await service.evaluate_and_persist(
-        queue_name=QUEUE_INGRESS_EMAIL,
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         tenant_id=TENANT_ID,
         channel="email",
     )
@@ -273,7 +296,7 @@ async def test_persistence_failure_is_non_fatal() -> None:
     )
 
     decision = await service.evaluate_and_persist(
-        queue_name=QUEUE_INGRESS_EMAIL,
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         tenant_id=TENANT_ID,
         channel="email",
     )
@@ -568,18 +591,26 @@ class _FakeAdmissionService:
     async def evaluate_and_persist(
         self,
         *,
-        queue_name: str,
+        queue_name: str | None = None,
+        queue_names: tuple[str, ...] | None = None,
         tenant_id: str | None = None,
         channel: str | None = None,
+        request_correlation_id: str | None = None,
     ) -> AdmissionDecision:
+        queue_identity = ",".join(queue_names or ((queue_name,) if queue_name else ()))
         self.calls.append(
             {
-                "queue_name": queue_name,
+                "queue_name": queue_identity,
+                "queue_names": queue_names,
                 "tenant_id": tenant_id,
                 "channel": channel,
+                "request_correlation_id": request_correlation_id,
             }
         )
-        return _admission_decision(outcome=self.outcome, queue_name=queue_name)
+        return _admission_decision(
+            outcome=self.outcome,
+            queue_name=queue_identity,
+        )
 
 
 class _MutableAdmissionService(_FakeAdmissionService):
@@ -646,7 +677,7 @@ async def _webhook_service(
         tenant_configuration_runtime=tenant_runtime,
         admission_service=admission_service,  # type: ignore[arg-type]
         webhook_queue_by_channel={
-            TenantChannelType.EMAIL: QUEUE_INGRESS_EMAIL,
+            TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,
         },
     )
 

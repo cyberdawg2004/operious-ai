@@ -58,7 +58,7 @@ from app.governance.persistence import (
 from app.runtime import ExecutionGovernanceEvaluation, ExecutionGovernanceRuntime
 from app.services.dispatch_service import DispatchService
 from app.session.persistence import InMemorySessionPersistence
-from app.workers.queues import QUEUE_DIAGNOSTIC_NORMAL
+from app.queues import QUEUE_DIAGNOSTIC_NORMAL
 from app.session.persistence import SessionQuery
 from app.tenant.enums import (
     TenantExecutionCircuitState,

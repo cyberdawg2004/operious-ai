@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Awaitable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from inspect import isawaitable
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from app.hardening.admission.models import (
     AdmissionDecision,
@@ -71,27 +71,31 @@ class AdmissionGate:
     async def evaluate(
         self,
         *,
-        queue_name: str,
+        queue_name: str | None = None,
+        queue_names: Sequence[str] | None = None,
         tenant_id: str | None = None,
         channel: str | None = None,
+        request_correlation_id: str | None = None,
         db_pool_wait_ms: float | None = None,
     ) -> AdmissionDecision:
         now = datetime.now(timezone.utc)
+        targets = _queue_targets(queue_name=queue_name, queue_names=queue_names)
+        queue_identity = ",".join(targets)
         decision_id = uuid.uuid5(
             uuid.NAMESPACE_URL,
             "|".join(
                 (
                     "operious-admission",
-                    queue_name,
+                    queue_identity,
                     tenant_id or "",
                     channel or "",
-                    str(time.time_ns()),
+                    request_correlation_id or "",
                 )
             ),
         )
-        redis_memory_pct = await self._redis_memory_pct(queue_name=queue_name)
-        queue_depth = await self._queue_depth(queue_name=queue_name)
-        queue_age_seconds = await self._queue_age_seconds(queue_name=queue_name)
+        redis_memory_pct = await self._redis_memory_pct(queue_name=queue_identity)
+        queue_depth = await self._queue_depth(queue_names=targets)
+        queue_age_seconds = await self._queue_age_seconds(queue_names=targets)
 
         if (
             redis_memory_pct is not None
@@ -101,7 +105,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.REDIS_MEMORY_PRESSURE,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -118,7 +122,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.DB_POOL_PRESSURE,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -134,7 +138,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.DEFER,
                 reason=AdmissionReason.DB_POOL_PRESSURE,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -148,7 +152,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.QUEUE_DEPTH_EXCEEDED,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -161,7 +165,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.DEFER,
                 reason=AdmissionReason.QUEUE_DEPTH_EXCEEDED,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -178,7 +182,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.QUEUE_AGE_EXCEEDED,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -194,7 +198,7 @@ class AdmissionGate:
                 decision_id=decision_id,
                 outcome=AdmissionOutcome.DEFER,
                 reason=AdmissionReason.QUEUE_AGE_EXCEEDED,
-                queue_name=queue_name,
+                queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
@@ -207,7 +211,7 @@ class AdmissionGate:
             decision_id=decision_id,
             outcome=AdmissionOutcome.ADMIT,
             reason=None,
-            queue_name=queue_name,
+            queue_name=queue_identity,
             queue_depth=queue_depth,
             queue_age_seconds=queue_age_seconds,
             redis_memory_pct=redis_memory_pct,
@@ -224,7 +228,7 @@ class AdmissionGate:
     async def queue_age_seconds(self, *, queue_name: str) -> float | None:
         """Return oldest message age for a queue, if the sentinel exists."""
 
-        return await self._queue_age_seconds(queue_name=queue_name)
+        return await self._queue_age_seconds(queue_names=(queue_name,))
 
     async def _redis_memory_pct(self, *, queue_name: str | None) -> float | None:
         try:
@@ -241,7 +245,13 @@ class AdmissionGate:
             )
             return None
 
-    async def _queue_depth(self, *, queue_name: str) -> int:
+    async def _queue_depth(self, *, queue_names: Sequence[str]) -> int:
+        depth = 0
+        for queue_name in queue_names:
+            depth += await self._single_queue_depth(queue_name=queue_name)
+        return depth
+
+    async def _single_queue_depth(self, *, queue_name: str) -> int:
         try:
             value = await _resolve(self._redis.llen(queue_name))
             return int(value or 0)
@@ -252,7 +262,17 @@ class AdmissionGate:
             )
             return 0
 
-    async def _queue_age_seconds(self, *, queue_name: str) -> float | None:
+    async def _queue_age_seconds(self, *, queue_names: Sequence[str]) -> float | None:
+        ages: list[float] = []
+        for queue_name in queue_names:
+            age = await self._single_queue_age_seconds(queue_name=queue_name)
+            if age is not None:
+                ages.append(age)
+        if not ages:
+            return None
+        return max(ages)
+
+    async def _single_queue_age_seconds(self, *, queue_name: str) -> float | None:
         try:
             key = QUEUE_AGE_ZSET_KEY.format(queue_name=queue_name)
             result = await _resolve(
@@ -261,9 +281,15 @@ class AdmissionGate:
             if not result:
                 return None
             first = result[0]
-            if not isinstance(first, tuple) or len(first) < 2:
+            if not isinstance(first, tuple):
                 return None
-            return round(max(0.0, time.time() - float(first[1])), 2)
+            queue_age_entry = cast(tuple[object, ...], first)
+            if len(queue_age_entry) < 2:
+                return None
+            score = queue_age_entry[1]
+            if not isinstance(score, int | float | str):
+                return None
+            return round(max(0.0, time.time() - float(score)), 2)
         except Exception:  # noqa: BLE001 - admission must fail open here.
             logger.warning(
                 "admission_queue_age_check_failed",
@@ -303,6 +329,28 @@ async def _resolve(value: Awaitable[Any] | Any) -> Any:
     if isawaitable(value):
         return await value
     return value
+
+
+def _queue_targets(
+    *,
+    queue_name: str | None,
+    queue_names: Sequence[str] | None,
+) -> tuple[str, ...]:
+    targets = tuple(_non_empty_names(queue_names or ()))
+    if queue_name is not None:
+        targets = (queue_name, *targets)
+    deduped = tuple(dict.fromkeys(targets))
+    if not deduped:
+        raise ValueError("AdmissionGate requires at least one queue name")
+    return deduped
+
+
+def _non_empty_names(values: Iterable[str]) -> Iterable[str]:
+    for value in values:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("queue names must be non-empty")
+        yield stripped
 
 
 __all__ = [

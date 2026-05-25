@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from app.workers.queues import (
+from app.queues import (
     ALL_QUEUES,
     DIAGNOSTIC_QUEUE_PRIORITY,
     QUEUE_DEAD_LETTER,
@@ -48,6 +48,11 @@ BACKEND_ROOT = Path(__file__).parent.parent
 APP_DIR = BACKEND_ROOT / "app"
 WORKER_DIR = APP_DIR / "workers"
 BOUNDARY_DIR = APP_DIR / "boundary"
+
+
+def test_queue_constants_live_in_neutral_app_module() -> None:
+    assert (APP_DIR / "queues.py").is_file()
+    assert not (WORKER_DIR / "queues.py").exists()
 
 
 def test_all_queues_contains_expected_set() -> None:

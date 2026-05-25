@@ -59,8 +59,7 @@ def upgrade() -> None:
         "admission_records",
         ["outcome"],
     )
-    # Intentionally no RLS: this is an operational capacity log with no
-    # tenant-facing read API in PR_T3.
+    # RLS is enabled in 0037_admission_records_rls after the table exists.
 
 
 def downgrade() -> None:

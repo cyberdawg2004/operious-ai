@@ -19,6 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 _FORCED_RLS_TABLES = (
     "approval_records",
+    "admission_records",
     "arbitration_evaluations",
     "boundary_egress",
     "boundary_ingress",
@@ -61,9 +62,25 @@ _FORCED_RLS_TABLES = (
 
 def upgrade() -> None:
     for table_name in _FORCED_RLS_TABLES:
-        op.execute(f'ALTER TABLE public."{table_name}" FORCE ROW LEVEL SECURITY')
+        _alter_force_rls_if_exists(table_name, force=True)
 
 
 def downgrade() -> None:
     for table_name in reversed(_FORCED_RLS_TABLES):
-        op.execute(f'ALTER TABLE public."{table_name}" NO FORCE ROW LEVEL SECURITY')
+        _alter_force_rls_if_exists(table_name, force=False)
+
+
+def _alter_force_rls_if_exists(table_name: str, *, force: bool) -> None:
+    escaped_table = table_name.replace('"', '""')
+    command = "FORCE" if force else "NO FORCE"
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF to_regclass('public."{escaped_table}"') IS NOT NULL THEN
+                EXECUTE 'ALTER TABLE public."{escaped_table}" {command} ROW LEVEL SECURITY';
+            END IF;
+        END
+        $$;
+        """
+    )

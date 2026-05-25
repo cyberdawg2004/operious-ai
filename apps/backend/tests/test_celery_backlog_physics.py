@@ -34,7 +34,7 @@ from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_out
 from app.workers.escalation_tasks import create_governance_escalation
 from app.workers.execution_recovery_tasks import reconcile_stale_execution_outbox
 from app.workers.qa_tasks import score_supervisor_inspection
-from app.workers.queues import (
+from app.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
     QUEUE_QA,

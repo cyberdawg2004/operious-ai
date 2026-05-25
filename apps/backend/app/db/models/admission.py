@@ -16,7 +16,7 @@ class AdmissionRecordRow(Base):
     """Persisted non-ADMIT admission decision.
 
     This is an operational capacity log with no tenant-facing read API in
-    PR_T3. It intentionally does not inherit TenantScopedMixin.
+    PR_T3, but it still carries tenant context and is protected by RLS.
     """
 
     __tablename__ = "admission_records"

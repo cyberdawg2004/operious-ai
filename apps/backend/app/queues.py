@@ -1,8 +1,9 @@
-"""Queue name constants for Operious AI Celery workers.
+"""Queue name constants for Operious AI queue topology.
 
 This is the single source of truth for all queue names.
-No bare string queue names are permitted anywhere in the worker package.
-All task declarations and all publishers must import from this module.
+No bare string queue names are permitted in queue publishers or worker
+tasks. All task declarations and publishers must import from this
+neutral module.
 """
 
 # Ingress queues -- one per channel

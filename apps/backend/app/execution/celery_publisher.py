@@ -15,7 +15,7 @@ from app.workers.agent_tasks import (
     execute_diagnostic_agent,
     execute_diagnostic_agent_runtime,
 )
-from app.workers.queues import QUEUE_DIAGNOSTIC_NORMAL
+from app.queues import QUEUE_DIAGNOSTIC_NORMAL
 
 
 class QueueDepthClient(Protocol):

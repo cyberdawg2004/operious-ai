@@ -13,22 +13,68 @@ else:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.queue_admission import QueueDepthReport
-from app.services.health_service import (
-    AdmissionPressureReport,
-    DependencyReport,
-    HealthReport,
-)
 
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
 DependencyStatus = Literal["ok", "unavailable"]
 QueueStatus = Literal["ok", "degraded", "saturated", "unavailable"]
 AdmissionPressure = Literal["ok", "warn", "critical"]
+
+
+class DependencyReportLike(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def status(self) -> DependencyStatus: ...
+
+    @property
+    def latency_ms(self) -> float: ...
+
+    @property
+    def error(self) -> str | None: ...
+
+
+class AdmissionPressureReportLike(Protocol):
+    @property
+    def redis_memory_pct(self) -> float | None: ...
+
+    @property
+    def pressure(self) -> AdmissionPressure: ...
+
+
+class HealthReportLike(Protocol):
+    @property
+    def status(self) -> ProbeStatus: ...
+
+    @property
+    def check(self) -> CheckName: ...
+
+    @property
+    def app(self) -> str: ...
+
+    @property
+    def version(self) -> str: ...
+
+    @property
+    def environment(self) -> str: ...
+
+    @property
+    def timestamp(self) -> datetime: ...
+
+    @property
+    def dependencies(self) -> tuple[DependencyReportLike, ...]: ...
+
+    @property
+    def queues(self) -> dict[str, QueueDepthReport]: ...
+
+    @property
+    def admission(self) -> AdmissionPressureReportLike | None: ...
 
 
 class DependencyResultSchema(BaseModel):
@@ -42,7 +88,7 @@ class DependencyResultSchema(BaseModel):
     error: str | None = Field(None, description="Exception class name on failure.")
 
     @classmethod
-    def from_domain(cls, dep: DependencyReport) -> "DependencyResultSchema":
+    def from_domain(cls, dep: DependencyReportLike) -> "DependencyResultSchema":
         return cls(
             name=dep.name,
             status=dep.status,
@@ -92,7 +138,7 @@ class AdmissionPressureSchema(BaseModel):
     @classmethod
     def from_domain(
         cls,
-        admission: AdmissionPressureReport,
+        admission: AdmissionPressureReportLike,
     ) -> "AdmissionPressureSchema":
         return cls(
             redis_memory_pct=admission.redis_memory_pct,
@@ -133,7 +179,7 @@ class HealthResponse(BaseModel):
     )
 
     @classmethod
-    def from_report(cls, report: HealthReport) -> "HealthResponse":
+    def from_report(cls, report: HealthReportLike) -> "HealthResponse":
         return cls(
             status=report.status,
             check=report.check,

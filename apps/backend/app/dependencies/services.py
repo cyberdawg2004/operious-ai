@@ -130,6 +130,7 @@ from app.services.operational_observability_service import (
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.ticket_ingress_service import TicketIngressService
 from app.qa.persistence import PostgresQAPersistence
+from app.queues import DIAGNOSTIC_QUEUE_PRIORITY
 from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
@@ -228,10 +229,10 @@ def get_ticket_ingress_service(
         tenant_configuration_runtime=tenant_runtime,
         admission_service=admission_service,
         webhook_queue_by_channel={
-            TenantChannelType.EMAIL: settings.INGRESS_EMAIL_QUEUE_NAME,
-            TenantChannelType.LARK: settings.INGRESS_EMAIL_QUEUE_NAME,
-            TenantChannelType.SHULEX: settings.INGRESS_SHOPIFY_QUEUE_NAME,
-            TenantChannelType.WHATSAPP: settings.INGRESS_WHATSAPP_QUEUE_NAME,
+            TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,
+            TenantChannelType.LARK: DIAGNOSTIC_QUEUE_PRIORITY,
+            TenantChannelType.SHULEX: DIAGNOSTIC_QUEUE_PRIORITY,
+            TenantChannelType.WHATSAPP: DIAGNOSTIC_QUEUE_PRIORITY,
         },
     )
 

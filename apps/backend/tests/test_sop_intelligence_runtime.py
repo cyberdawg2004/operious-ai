@@ -40,7 +40,7 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentRecord,
 )
 from app.workers import qa_tasks
-from app.workers.queues import QUEUE_SOP_INTELLIGENCE
+from app.queues import QUEUE_SOP_INTELLIGENCE
 
 _NOW = datetime(2026, 5, 22, 14, tzinfo=timezone.utc)
 _TENANT_ID = "tenant-acme"

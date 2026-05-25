@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
@@ -47,16 +48,27 @@ def _build_engine(settings: Settings) -> AsyncEngine:
         connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
     )
 
+    engine_kwargs: dict[str, Any] = {
+        "echo": settings.DB_ECHO,
+        "pool_pre_ping": True,
+        "connect_args": engine_config.connect_args,
+        "future": True,
+    }
+    if settings.DB_USE_NULLPOOL:
+        engine_kwargs["poolclass"] = NullPool
+    else:
+        engine_kwargs.update(
+            {
+                "pool_size": settings.DB_POOL_SIZE,
+                "max_overflow": settings.DB_MAX_OVERFLOW,
+                "pool_timeout": settings.DB_POOL_TIMEOUT,
+                "pool_recycle": settings.DB_POOL_RECYCLE,
+            }
+        )
+
     engine = create_async_engine(
         engine_config.async_url,
-        echo=settings.DB_ECHO,
-        pool_size=settings.DB_POOL_SIZE,
-        max_overflow=settings.DB_MAX_OVERFLOW,
-        pool_timeout=settings.DB_POOL_TIMEOUT,
-        pool_recycle=settings.DB_POOL_RECYCLE,
-        pool_pre_ping=True,
-        connect_args=engine_config.connect_args,
-        future=True,
+        **engine_kwargs,
     )
     _install_tenant_context_listener(engine)
     return engine

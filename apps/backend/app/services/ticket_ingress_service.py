@@ -6,7 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping, cast
@@ -81,13 +81,18 @@ class TicketIngressService:
         session: AsyncSession,
         tenant_configuration_runtime: TenantConfigurationRuntime | None = None,
         admission_service: AdmissionService | None = None,
-        webhook_queue_by_channel: Mapping[TenantChannelType, str] | None = None,
+        webhook_queue_by_channel: (
+            Mapping[TenantChannelType, Sequence[str]] | None
+        ) = None,
     ) -> None:
         self._persistence = persistence
         self._session = session
         self._tenant_configuration_runtime = tenant_configuration_runtime
         self._admission_service = admission_service
-        self._webhook_queue_by_channel = dict(webhook_queue_by_channel or {})
+        self._webhook_queue_by_channel = {
+            channel_type: tuple(queue_names)
+            for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
+        }
 
     async def process(
         self,
@@ -218,6 +223,12 @@ class TicketIngressService:
         await self._enforce_admission(
             tenant_id=channel_config.tenant_id,
             channel_type=tenant_channel_type,
+            request_correlation_id=_webhook_request_id(
+                channel=tenant_channel_type.value,
+                routing_address=channel_config.routing_address,
+                body=body,
+                raw_body=raw_body,
+            ),
         )
         nonce_recorded = await self._record_webhook_freshness_nonce(
             tenant_id=channel_config.tenant_id,
@@ -428,17 +439,19 @@ class TicketIngressService:
         *,
         tenant_id: str,
         channel_type: TenantChannelType,
+        request_correlation_id: str,
     ) -> None:
         if self._admission_service is None:
             return
-        queue_name = _admission_queue_for_channel(
+        queue_names = _admission_queues_for_channel(
             channel_type=channel_type,
             queue_by_channel=self._webhook_queue_by_channel,
         )
         decision = await self._admission_service.evaluate_and_persist(
-            queue_name=queue_name,
+            queue_names=queue_names,
             tenant_id=tenant_id,
             channel=channel_type.value,
+            request_correlation_id=request_correlation_id,
         )
         if decision.outcome is AdmissionOutcome.ADMIT:
             return
@@ -612,14 +625,14 @@ def _tenant_channel_type(channel_type: str) -> TenantChannelType:
     return parsed
 
 
-def _admission_queue_for_channel(
+def _admission_queues_for_channel(
     *,
     channel_type: TenantChannelType,
-    queue_by_channel: Mapping[TenantChannelType, str],
-) -> str:
-    queue_name = queue_by_channel.get(channel_type)
-    if queue_name is not None:
-        return queue_name
+    queue_by_channel: Mapping[TenantChannelType, Sequence[str]],
+) -> tuple[str, ...]:
+    queue_names = queue_by_channel.get(channel_type)
+    if queue_names is not None:
+        return tuple(queue_names)
     raise TicketIngressServiceError(
         f"admission queue map is not configured for {channel_type.value}"
     )

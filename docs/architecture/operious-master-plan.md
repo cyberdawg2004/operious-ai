@@ -57,8 +57,9 @@ This document is the canonical handoff plan for the next Codex session.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 654 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0035_tenant_not_null (head)` after Wedge 4 local and
-  production migration verification.
+- Alembic current: `0037_admission_records_rls (head)` after the
+  PR_T1-T3 correction sprint added RLS enforcement for
+  `admission_records`.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -2440,6 +2441,11 @@ Acceptance criteria:
 
 Status: In Progress | Branch: phase-2-2-stabilized
 Baseline: 2,305 passing tests, 0 pyright errors, FORCE RLS active.
+Current migration head after PR_T1-T3 corrections:
+`0037_admission_records_rls`.
+After `0037`, the current codebase treats `admission_records` as a
+tenant-scoped RLS table, bringing the current forced-RLS table set to
+39 once the correction migration is applied.
 
 This program hardens Operious AI for enterprise pilot load before the
 Anker Innovations engagement. It runs after Wedges 0-4 and before real
@@ -2537,8 +2543,8 @@ Queues to define:
 
 Deliverables:
 
-- `apps/backend/app/worker/queues.py` or the active worker package
-  equivalent: all queue name constants.
+- `apps/backend/app/queues.py`: all queue name constants in a neutral
+  top-level app module.
 - `apps/backend/app/worker/celery_app.py` or active worker equivalent:
   `task_queues` declaration.
 - Active Celery publisher files updated to use constants.
@@ -2622,6 +2628,7 @@ Deliverables:
 - `apps/backend/app/db/models/admission.py`
 - `apps/backend/app/services/admission_service.py`
 - `apps/backend/migrations/versions/0036_admission_records.py`
+- `apps/backend/migrations/versions/0037_admission_records_rls.py`
 - Channel webhook handlers updated to call admission service.
 - `apps/backend/tests/test_admission_gate.py`
 

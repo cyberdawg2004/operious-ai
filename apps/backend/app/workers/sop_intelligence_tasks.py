@@ -24,7 +24,7 @@ from app.supervisor.persistence import PostgresSupervisorRepository
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
 from app.workers.queue_admission import clear_worker_queue_age
-from app.workers.queues import QUEUE_SOP_INTELLIGENCE
+from app.queues import QUEUE_SOP_INTELLIGENCE
 
 _T = TypeVar("_T")
 

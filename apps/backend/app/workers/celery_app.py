@@ -6,7 +6,7 @@ from celery import Celery
 from kombu import Queue
 
 from app.core.config import get_settings
-from app.workers.queues import (
+from app.queues import (
     ALL_QUEUES,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,

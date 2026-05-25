@@ -20,7 +20,7 @@ from app.governance.persistence import PostgresGovernanceRepository
 from app.session.persistence import PostgresSessionPersistence
 from app.workers.celery_app import celery_app
 from app.workers.queue_admission import clear_worker_queue_age
-from app.workers.queues import QUEUE_ESCALATION
+from app.queues import QUEUE_ESCALATION
 
 _T = TypeVar("_T")
 

@@ -15,7 +15,7 @@ from app.workers.escalation_tasks import (
     create_governance_escalation,
     create_governance_escalation_runtime,
 )
-from app.workers.queues import QUEUE_ESCALATION
+from app.queues import QUEUE_ESCALATION
 
 
 class CeleryEscalationPublisher(EscalationPublisher):

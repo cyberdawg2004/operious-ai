@@ -27,7 +27,7 @@ from app.workers.queue_admission import (
     clear_worker_queue_age,
     record_worker_queue_age,
 )
-from app.workers.queues import QUEUE_QA, QUEUE_SUPERVISOR
+from app.queues import QUEUE_QA, QUEUE_SUPERVISOR
 from app.workers.qa_tasks import score_supervisor_inspection
 
 _T = TypeVar("_T")

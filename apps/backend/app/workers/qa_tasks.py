@@ -24,7 +24,7 @@ from app.workers.queue_admission import (
     clear_worker_queue_age,
     record_worker_queue_age,
 )
-from app.workers.queues import QUEUE_QA, QUEUE_SOP_INTELLIGENCE
+from app.queues import QUEUE_QA, QUEUE_SOP_INTELLIGENCE
 from app.workers.sop_intelligence_tasks import (
     propose_sop_intelligence_change,
 )

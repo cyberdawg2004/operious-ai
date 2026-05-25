@@ -16,7 +16,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.workers.queues import (
+from app.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
     QUEUE_INGRESS_EMAIL,
@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE: int = 1800
     DB_ECHO: bool = False
     DB_CONNECT_TIMEOUT_SECONDS: float = 30.0
+    DB_USE_NULLPOOL: bool = False
 
     # ─── Redis ───────────────────────────────────────────────────────
     REDIS_HOST: str = "localhost"

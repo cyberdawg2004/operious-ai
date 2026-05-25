@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from inspect import isawaitable
 from typing import Any, Literal, Protocol
 
-from app.workers.queues import (
+from app.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
     QUEUE_QA,

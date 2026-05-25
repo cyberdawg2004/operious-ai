@@ -16,7 +16,7 @@ from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.persistence import PostgresGovernanceRepository
 from app.session.persistence import PostgresSessionPersistence
 from app.workers.celery_app import celery_app
-from app.workers.queues import QUEUE_WEBHOOK_MAINTENANCE
+from app.queues import QUEUE_WEBHOOK_MAINTENANCE
 
 _T = TypeVar("_T")
 
