@@ -41,6 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
+from typing import cast
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +64,7 @@ from app.coordination.runtime import CoordinationRuntime
 from app.cognition import CognitionRuntime
 from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.core.config import get_settings
+from app.core.admission import admission_thresholds_from_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
@@ -113,7 +115,13 @@ from app.services.dispatch_service import (
     DispatchService,
 )
 from app.services.escalation_service import EscalationService
+from app.hardening.admission import AdmissionGate
+from app.hardening.admission.gate import AdmissionRedisClient
 from app.services.health_service import HealthService
+from app.services.admission_service import (
+    AdmissionService,
+    measure_db_pool_wait_ms,
+)
 from app.services.knowledge_service import KnowledgeService
 from app.services.operational_event_service import OperationalEventService
 from app.services.operational_observability_service import (
@@ -136,6 +144,7 @@ from app.services.tenant_configuration_service import (
     TenantConfigurationService,
 )
 from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
 
@@ -204,10 +213,26 @@ def get_ticket_ingress_service(
                 platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
             ),
         )
+    session_factory = get_session_factory()
+    admission_service = AdmissionService(
+        gate=AdmissionGate(
+            redis_client=cast(AdmissionRedisClient, get_redis_client()),
+            thresholds=admission_thresholds_from_settings(settings),
+        ),
+        session_factory=session_factory,
+        db_pool_wait_provider=lambda: measure_db_pool_wait_ms(session_factory),
+    )
     return TicketIngressService(
         persistence=PostgresBoundaryPersistence(session),
         session=session,
         tenant_configuration_runtime=tenant_runtime,
+        admission_service=admission_service,
+        webhook_queue_by_channel={
+            TenantChannelType.EMAIL: settings.INGRESS_EMAIL_QUEUE_NAME,
+            TenantChannelType.LARK: settings.INGRESS_EMAIL_QUEUE_NAME,
+            TenantChannelType.SHULEX: settings.INGRESS_SHOPIFY_QUEUE_NAME,
+            TenantChannelType.WHATSAPP: settings.INGRESS_WHATSAPP_QUEUE_NAME,
+        },
     )
 
 

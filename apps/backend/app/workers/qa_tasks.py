@@ -19,7 +19,11 @@ from app.qa.persistence.records import QAScoreRecord
 from app.qa.runtime import QAAgentRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.workers.celery_app import celery_app
-from app.workers.queue_admission import admit_sop_intelligence_publish
+from app.workers.queue_admission import (
+    admit_sop_intelligence_publish,
+    clear_worker_queue_age,
+    record_worker_queue_age,
+)
 from app.workers.queues import QUEUE_QA, QUEUE_SOP_INTELLIGENCE
 from app.workers.sop_intelligence_tasks import (
     propose_sop_intelligence_change,
@@ -64,6 +68,10 @@ async def score_supervisor_inspection_runtime(
 ) -> dict[str, object]:
     set_current_tenant(tenant_id)
     try:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_QA,
+            member_id=inspection_id,
+        )
         session_factory = get_session_factory()
         async with session_factory() as session:
             runtime = QAAgentRuntime(
@@ -104,6 +112,10 @@ async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
         args=(str(session_id), score.tenant_id, score.inspection_id),
         queue=QUEUE_SOP_INTELLIGENCE,
         priority=9,
+    )
+    await record_worker_queue_age(
+        queue_name=QUEUE_SOP_INTELLIGENCE,
+        member_id=str(session_id),
     )
     return True
 

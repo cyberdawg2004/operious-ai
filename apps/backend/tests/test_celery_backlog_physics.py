@@ -211,6 +211,7 @@ async def test_health_report_includes_queue_depth_statuses() -> None:
         "limit": 100,
         "status": "ok",
         "queue_name": QUEUE_DIAGNOSTIC_NORMAL,
+        "age_seconds": None,
         "error": None,
     }
     assert response.queues["escalation"].status == "degraded"

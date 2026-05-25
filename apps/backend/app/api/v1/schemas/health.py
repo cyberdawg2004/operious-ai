@@ -18,12 +18,17 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.queue_admission import QueueDepthReport
-from app.services.health_service import DependencyReport, HealthReport
+from app.services.health_service import (
+    AdmissionPressureReport,
+    DependencyReport,
+    HealthReport,
+)
 
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
 DependencyStatus = Literal["ok", "unavailable"]
 QueueStatus = Literal["ok", "degraded", "saturated", "unavailable"]
+AdmissionPressure = Literal["ok", "warn", "critical"]
 
 
 class DependencyResultSchema(BaseModel):
@@ -55,6 +60,10 @@ class QueueDepthSchema(BaseModel):
     limit: int = Field(..., description="Configured queue depth admission limit.")
     status: QueueStatus = Field(..., description="Queue pressure status.")
     queue_name: str | None = Field(None, description="Physical Redis queue name.")
+    age_seconds: float | None = Field(
+        None,
+        description="Oldest message age in seconds when available.",
+    )
     error: str | None = Field(None, description="Exception class name on failure.")
 
     @classmethod
@@ -64,7 +73,30 @@ class QueueDepthSchema(BaseModel):
             limit=queue.limit,
             status=queue.status,
             queue_name=queue.queue_name,
+            age_seconds=queue.age_seconds,
             error=queue.error,
+        )
+
+
+class AdmissionPressureSchema(BaseModel):
+    """Admission pressure summary for capacity-aware health checks."""
+
+    model_config = ConfigDict(frozen=True)
+
+    redis_memory_pct: float | None = Field(
+        None,
+        description="Redis used memory percentage, when maxmemory is set.",
+    )
+    pressure: AdmissionPressure = Field(..., description="Admission pressure.")
+
+    @classmethod
+    def from_domain(
+        cls,
+        admission: AdmissionPressureReport,
+    ) -> "AdmissionPressureSchema":
+        return cls(
+            redis_memory_pct=admission.redis_memory_pct,
+            pressure=admission.pressure,
         )
 
 
@@ -95,6 +127,10 @@ class HealthResponse(BaseModel):
         default_factory=_empty_queues,
         description="Per-Celery-queue depth reports.",
     )
+    admission: AdmissionPressureSchema | None = Field(
+        None,
+        description="Read-only admission pressure snapshot.",
+    )
 
     @classmethod
     def from_report(cls, report: HealthReport) -> "HealthResponse":
@@ -112,6 +148,11 @@ class HealthResponse(BaseModel):
                 name: QueueDepthSchema.from_domain(queue)
                 for name, queue in report.queues.items()
             },
+            admission=(
+                AdmissionPressureSchema.from_domain(report.admission)
+                if report.admission is not None
+                else None
+            ),
         )
 
 
@@ -119,6 +160,8 @@ __all__ = [
     "CheckName",
     "ProbeStatus",
     "DependencyStatus",
+    "AdmissionPressure",
+    "AdmissionPressureSchema",
     "QueueStatus",
     "DependencyResultSchema",
     "QueueDepthSchema",

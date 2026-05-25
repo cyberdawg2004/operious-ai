@@ -24,11 +24,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Literal, Sequence
+from typing import Literal, Sequence, cast
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.admission import admission_thresholds_from_settings
 from app.core.config import Settings
 from app.core.health import (
     DependencyCheck,
@@ -42,11 +43,14 @@ from app.core.queue_admission import (
     celery_queue_depth_limits,
     collect_queue_depth_reports,
 )
+from app.hardening.admission import AdmissionGate
+from app.hardening.admission.gate import AdmissionRedisClient
 from app.repositories.system_health_repository import SystemHealthRepository
 from app.services.base import BaseService
 
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
+AdmissionPressure = Literal["ok", "warn", "critical"]
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +72,14 @@ class DependencyReport:
             latency_ms=check.latency_ms,
             error=check.error,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AdmissionPressureReport:
+    """Read-only admission pressure snapshot for health responses."""
+
+    redis_memory_pct: float | None
+    pressure: AdmissionPressure
 
 
 def _empty_queues() -> dict[str, QueueDepthReport]:
@@ -92,6 +104,7 @@ class HealthReport:
     timestamp: datetime
     dependencies: tuple[DependencyReport, ...] = field(default_factory=tuple)
     queues: dict[str, QueueDepthReport] = field(default_factory=_empty_queues)
+    admission: AdmissionPressureReport | None = None
 
 
 class HealthService(BaseService):
@@ -133,11 +146,13 @@ class HealthService(BaseService):
         """Health snapshot including Redis-backed queue depth pressure."""
 
         queues = await self._probe_queue_depths()
+        admission = await self._probe_admission_pressure()
         return self._build_report(
             check="health",
             status=aggregate_queue_status(queues),
             dependencies=(),
             queues=queues,
+            admission=admission,
         )
 
     async def liveness(self) -> HealthReport:
@@ -242,13 +257,14 @@ class HealthService(BaseService):
         limits = celery_queue_depth_limits(self._settings)
         timeout = self._settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS
         try:
-            return await asyncio.wait_for(
+            reports = await asyncio.wait_for(
                 collect_queue_depth_reports(
                     redis_client=self._redis_provider(),
                     limits=limits,
                 ),
                 timeout=timeout,
             )
+            return await self._with_queue_ages(reports)
         except TimeoutError:
             return {
                 limit.logical_name: QueueDepthReport(
@@ -261,6 +277,48 @@ class HealthService(BaseService):
                 for limit in limits
             }
 
+    async def _with_queue_ages(
+        self,
+        reports: dict[str, QueueDepthReport],
+    ) -> dict[str, QueueDepthReport]:
+        gate = AdmissionGate(
+            redis_client=cast(AdmissionRedisClient, self._redis_provider()),
+            thresholds=admission_thresholds_from_settings(self._settings),
+        )
+        enriched: dict[str, QueueDepthReport] = {}
+        for name, report in reports.items():
+            age_seconds = (
+                await gate.queue_age_seconds(queue_name=report.queue_name)
+                if report.queue_name is not None
+                else None
+            )
+            enriched[name] = QueueDepthReport(
+                depth=report.depth,
+                limit=report.limit,
+                status=report.status,
+                queue_name=report.queue_name,
+                age_seconds=age_seconds,
+                error=report.error,
+            )
+        return enriched
+
+    async def _probe_admission_pressure(self) -> AdmissionPressureReport:
+        gate = AdmissionGate(
+            redis_client=cast(AdmissionRedisClient, self._redis_provider()),
+            thresholds=admission_thresholds_from_settings(self._settings),
+        )
+        redis_memory_pct = await gate.redis_memory_pct()
+        pressure: AdmissionPressure = "ok"
+        if redis_memory_pct is not None:
+            if redis_memory_pct >= self._settings.ADMISSION_REDIS_MEMORY_PCT_REJECT:
+                pressure = "critical"
+            elif redis_memory_pct >= self._settings.ADMISSION_REDIS_MEMORY_PCT_WARN:
+                pressure = "warn"
+        return AdmissionPressureReport(
+            redis_memory_pct=redis_memory_pct,
+            pressure=pressure,
+        )
+
     def _build_report(
         self,
         *,
@@ -268,6 +326,7 @@ class HealthService(BaseService):
         status: ProbeStatus,
         dependencies: tuple[DependencyReport, ...],
         queues: dict[str, QueueDepthReport] | None = None,
+        admission: AdmissionPressureReport | None = None,
     ) -> HealthReport:
         return HealthReport(
             check=check,
@@ -278,10 +337,12 @@ class HealthService(BaseService):
             timestamp=datetime.now(timezone.utc),
             dependencies=dependencies,
             queues=queues or {},
+            admission=admission,
         )
 
 
 __all__ = [
+    "AdmissionPressureReport",
     "DependencyReport",
     "HealthReport",
     "HealthService",

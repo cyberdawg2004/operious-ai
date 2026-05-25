@@ -286,6 +286,27 @@ class PostgresBoundaryPersistence(BaseRepository):
                 "webhook nonce has already been accepted"
             ) from exc
 
+    async def webhook_nonce_exists(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: str,
+        nonce: str,
+        now: datetime,
+    ) -> bool:
+        stmt = (
+            select(WebhookNonceRecordRow.nonce)
+            .where(
+                WebhookNonceRecordRow.tenant_id == tenant_id,
+                WebhookNonceRecordRow.channel_type
+                == channel_type.strip().lower(),
+                WebhookNonceRecordRow.nonce == nonce,
+                WebhookNonceRecordRow.expires_at > now,
+            )
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
+
     async def delete_expired_webhook_nonces(
         self,
         *,

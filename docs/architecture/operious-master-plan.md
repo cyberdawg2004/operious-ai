@@ -2595,13 +2595,13 @@ Acceptance criteria:
 
 #### PR_T3 - Queue Depth Admission Control
 
-STATUS: [ ] Not started
+STATUS: [x] Complete - 2026-05-25
 
 Scope:
 Implement AdmissionGate service. Evaluates queue depth, queue age, DB
 pool wait, and Redis memory pressure. Returns ADMIT / DEFER / REJECT.
 Channel webhook handlers call the gate via a service method. Admission
-decisions are persisted as OperationalEvent records. DEFER returns 503
+decisions are persisted as `admission_records` operational rows. DEFER returns 503
 plus `Retry-After`. REJECT returns 429. Both responses include
 `X-Operious-Admission-Decision-Id`.
 
@@ -2618,7 +2618,10 @@ Deliverables:
 
 - `apps/backend/app/hardening/admission/gate.py`
 - `apps/backend/app/hardening/admission/models.py`
+- `apps/backend/app/core/admission.py`
+- `apps/backend/app/db/models/admission.py`
 - `apps/backend/app/services/admission_service.py`
+- `apps/backend/migrations/versions/0036_admission_records.py`
 - Channel webhook handlers updated to call admission service.
 - `apps/backend/tests/test_admission_gate.py`
 
@@ -2633,7 +2636,7 @@ Acceptance criteria:
 - Pyright 0 errors.
 - 4/4 smoke tests green.
 - Queue depth above REJECT threshold makes ingress webhook return 429.
-- Admission decision is persisted as OperationalEvent in DB.
+- Admission decision is persisted as an `admission_records` row in DB.
 
 #### PR_T4 - Per-Tenant and Per-Provider Quota Enforcement
 
@@ -2660,7 +2663,7 @@ Deliverables:
 
 - `apps/backend/app/agents/runtime/quota_runtime.py`
 - `apps/backend/app/agents/runtime/circuit_runtime.py`
-- `migrations/versions/0036_provider_quota_records.py`
+- `migrations/versions/0037_provider_quota_records.py`
 - `apps/backend/tests/test_quota_runtime.py`
 
 Acceptance criteria:

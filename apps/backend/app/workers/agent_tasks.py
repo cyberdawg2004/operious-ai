@@ -49,7 +49,11 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import record_dead_letter_task
-from app.workers.queue_admission import admit_supervisor_publish
+from app.workers.queue_admission import (
+    admit_supervisor_publish,
+    clear_worker_queue_age,
+    record_worker_queue_age,
+)
 from app.workers.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_SUPERVISOR,
@@ -122,6 +126,10 @@ async def execute_diagnostic_agent_runtime(
     previous_tenant = get_current_tenant()
     set_current_tenant(tenant_id)
     try:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+            member_id=execution_id,
+        )
         session_factory = get_session_factory()
         prepared = await _prepare_diagnostic_execution(
             session_factory=session_factory,
@@ -559,6 +567,10 @@ async def _queue_supervisor_if_closed(
     cast(Any, evaluate_session_supervisor).apply_async(
         args=(session_id, tenant_id),
         queue=QUEUE_SUPERVISOR,
+    )
+    await record_worker_queue_age(
+        queue_name=QUEUE_SUPERVISOR,
+        member_id=session_id,
     )
     return True
 

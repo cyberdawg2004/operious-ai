@@ -47,8 +47,10 @@ Phase 2.1 quarantine + PR-A1 cleanup:
 # to bind the classes on ``Base.metadata`` — registration is a
 # class-definition side effect, NOT a module-import side effect.
 
+from app.db.models.admission import AdmissionRecordRow
 from app.db.models.system_health import SystemHealthCheck
 
 __all__ = [
+    "AdmissionRecordRow",
     "SystemHealthCheck",
 ]

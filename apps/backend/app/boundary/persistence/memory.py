@@ -241,6 +241,23 @@ class InMemoryBoundaryPersistence:
                 )
             self._webhook_nonces[key] = record
 
+    async def webhook_nonce_exists(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: str,
+        nonce: str,
+        now: datetime,
+    ) -> bool:
+        key = _webhook_nonce_key_from_parts(
+            tenant_id=tenant_id,
+            channel_type=channel_type,
+            nonce=nonce,
+        )
+        async with self._lock:
+            self._delete_expired_webhook_nonces_locked(now=now)
+            return key in self._webhook_nonces
+
     async def delete_expired_webhook_nonces(
         self,
         *,
@@ -299,10 +316,23 @@ class InMemoryBoundaryPersistence:
 def _webhook_nonce_key(
     record: WebhookNonceRecord,
 ) -> tuple[str, str, str]:
+    return _webhook_nonce_key_from_parts(
+        tenant_id=record.tenant_id,
+        channel_type=record.channel_type,
+        nonce=record.nonce,
+    )
+
+
+def _webhook_nonce_key_from_parts(
+    *,
+    tenant_id: str,
+    channel_type: str,
+    nonce: str,
+) -> tuple[str, str, str]:
     return (
-        record.tenant_id,
-        record.channel_type.strip().lower(),
-        record.nonce,
+        tenant_id,
+        channel_type.strip().lower(),
+        nonce,
     )
 
 

@@ -23,6 +23,7 @@ from app.sop_intelligence.runtime import SOPIntelligenceRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
+from app.workers.queue_admission import clear_worker_queue_age
 from app.workers.queues import QUEUE_SOP_INTELLIGENCE
 
 _T = TypeVar("_T")
@@ -66,6 +67,10 @@ async def propose_sop_intelligence_change_runtime(
 ) -> dict[str, object]:
     set_current_tenant(tenant_id)
     try:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_SOP_INTELLIGENCE,
+            member_id=session_id,
+        )
         session_factory = get_session_factory()
         async with session_factory() as session:
             approval_persistence = PostgresSOPApprovalPersistence(session)

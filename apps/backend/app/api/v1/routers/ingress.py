@@ -6,6 +6,7 @@ import json
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app.api.v1.schemas.ingress import (
     TicketIngressRequest,
@@ -60,7 +61,7 @@ async def create_channel_webhook_ingress(
     request: Request,
     expected_tenant_id: str | None = Depends(request_tenant_scope_opt),
     service: TicketIngressService = Depends(get_ticket_ingress_service),
-) -> TicketIngressWebhookResponse:
+) -> TicketIngressWebhookResponse | JSONResponse:
     raw_body = await request.body()
     content_type = request.headers.get("content-type")
     try:
@@ -77,9 +78,16 @@ async def create_channel_webhook_ingress(
             tenant_hint=expected_tenant_id,
         )
     except TicketIngressRejected as exc:
+        if exc.response_body is not None:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=exc.response_body,
+                headers=exc.headers,
+            )
         raise HTTPException(
             status_code=exc.status_code,
             detail={"code": exc.code, "reason": exc.reason},
+            headers=exc.headers,
         ) from exc
     except TicketIngressServiceError as exc:
         raise HTTPException(

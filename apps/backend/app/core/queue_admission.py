@@ -66,6 +66,7 @@ class QueueDepthReport:
     limit: int
     status: QueueHealthStatus
     queue_name: str | None = None
+    age_seconds: float | None = None
     error: str | None = None
 
 

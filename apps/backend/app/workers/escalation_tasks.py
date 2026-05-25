@@ -19,6 +19,7 @@ from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.persistence import PostgresGovernanceRepository
 from app.session.persistence import PostgresSessionPersistence
 from app.workers.celery_app import celery_app
+from app.workers.queue_admission import clear_worker_queue_age
 from app.workers.queues import QUEUE_ESCALATION
 
 _T = TypeVar("_T")
@@ -62,6 +63,10 @@ async def create_governance_escalation_runtime(
 ) -> dict[str, object]:
     set_current_tenant(tenant_id)
     try:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_ESCALATION,
+            member_id=governance_decision_id,
+        )
         session_factory = get_session_factory()
         async with session_factory() as session:
             runtime = EscalationAgentRuntime(

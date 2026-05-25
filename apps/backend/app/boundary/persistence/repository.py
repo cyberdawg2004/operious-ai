@@ -82,6 +82,15 @@ class BoundaryPersistenceProtocol(Protocol):
         record: WebhookNonceRecord,
     ) -> None: ...
 
+    async def webhook_nonce_exists(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: str,
+        nonce: str,
+        now: datetime,
+    ) -> bool: ...
+
     async def delete_expired_webhook_nonces(
         self,
         *,

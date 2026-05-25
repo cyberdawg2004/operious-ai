@@ -6,6 +6,7 @@ import os
 import sys
 from typing import Any, Protocol, cast
 
+from app.core.admission import QueueAgeSentinelClient, record_queue_age_sentinel
 from app.core.config import get_settings
 from app.core.queue_admission import RedisQueueDepthAdmission
 from app.core.redis import get_redis_client
@@ -91,6 +92,15 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                     "tenant_id": tenant_id,
                 },
                 queue=self._queue_name,
+            )
+            client = self._redis_client
+            if client is None:
+                client = cast(QueueDepthClient, get_redis_client())
+                self._redis_client = client
+            await record_queue_age_sentinel(
+                redis_client=cast(QueueAgeSentinelClient, client),
+                queue_name=self._queue_name,
+                member_id=execution_id,
             )
 
 

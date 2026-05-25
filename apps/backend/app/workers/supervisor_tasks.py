@@ -22,7 +22,11 @@ from app.supervisor.evaluators.builtin import build_default_evaluator_registry
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.supervisor.runtime import SupervisorRuntime
 from app.workers.celery_app import celery_app
-from app.workers.queue_admission import admit_qa_publish
+from app.workers.queue_admission import (
+    admit_qa_publish,
+    clear_worker_queue_age,
+    record_worker_queue_age,
+)
 from app.workers.queues import QUEUE_QA, QUEUE_SUPERVISOR
 from app.workers.qa_tasks import score_supervisor_inspection
 
@@ -64,6 +68,10 @@ async def evaluate_session_supervisor_runtime(
 ) -> dict[str, object]:
     set_current_tenant(tenant_id)
     try:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_SUPERVISOR,
+            member_id=session_id,
+        )
         session_factory = get_session_factory()
         async with session_factory() as session:
             supervisor_repository = PostgresSupervisorRepository(session)
@@ -101,6 +109,10 @@ async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
     cast(Any, score_supervisor_inspection).apply_async(
         args=(inspection_id, tenant_id),
         queue=QUEUE_QA,
+    )
+    await record_worker_queue_age(
+        queue_name=QUEUE_QA,
+        member_id=inspection_id,
     )
     return True
 

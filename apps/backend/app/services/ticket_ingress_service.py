@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.boundary.adapters import (
     BaseIngressAdapter,
+    ChannelWebhookSecurityContext,
     EmailWebhookAdapter,
     LarkWebhookAdapter,
     ShulexWebhookAdapter,
@@ -41,7 +42,12 @@ from app.boundary.persistence import BoundaryPersistenceProtocol
 from app.boundary.persistence.records import WebhookNonceRecord
 from app.boundary.registry import BoundaryAdapterRegistry
 from app.db.tenant_context import set_current_tenant
+from app.hardening.admission import (
+    AdmissionDecision,
+    AdmissionOutcome,
+)
 from app.identity import AuthorityContext
+from app.services.admission_service import AdmissionService
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
 from app.tenant.runtime import TenantConfigurationRuntime
@@ -74,10 +80,14 @@ class TicketIngressService:
         persistence: BoundaryPersistenceProtocol,
         session: AsyncSession,
         tenant_configuration_runtime: TenantConfigurationRuntime | None = None,
+        admission_service: AdmissionService | None = None,
+        webhook_queue_by_channel: Mapping[TenantChannelType, str] | None = None,
     ) -> None:
         self._persistence = persistence
         self._session = session
         self._tenant_configuration_runtime = tenant_configuration_runtime
+        self._admission_service = admission_service
+        self._webhook_queue_by_channel = dict(webhook_queue_by_channel or {})
 
     async def process(
         self,
@@ -194,11 +204,27 @@ class TicketIngressService:
                 reason="invalid_signature",
                 status_code=401,
             )
+        security_context = self._validated_webhook_security_context(
+            channel_type=tenant_channel_type.value,
+            body=body,
+            headers=headers,
+        )
+        if await self._webhook_nonce_exists(
+            tenant_id=channel_config.tenant_id,
+            channel_type=tenant_channel_type.value,
+            nonce=security_context.nonce,
+        ):
+            return WebhookDuplicateDeliveryResult()
+        await self._enforce_admission(
+            tenant_id=channel_config.tenant_id,
+            channel_type=tenant_channel_type,
+        )
         nonce_recorded = await self._record_webhook_freshness_nonce(
             tenant_id=channel_config.tenant_id,
             channel_type=tenant_channel_type.value,
             body=body,
             headers=headers,
+            security_context=security_context,
         )
         if not nonce_recorded:
             return WebhookDuplicateDeliveryResult()
@@ -301,18 +327,19 @@ class TicketIngressService:
         channel_type: str,
         body: Any,
         headers: Mapping[str, str],
+        security_context: ChannelWebhookSecurityContext | None = None,
     ) -> bool:
         try:
-            context = extract_webhook_security_context(
-                channel_type=channel_type,
-                body=body,
-                headers=headers,
+            context = (
+                security_context
+                if security_context is not None
+                else self._validated_webhook_security_context(
+                    channel_type=channel_type,
+                    body=body,
+                    headers=headers,
+                )
             )
             received_at = datetime.now(timezone.utc)
-            _enforce_webhook_freshness(
-                timestamp=context.timestamp,
-                received_at=received_at,
-            )
             await self._persistence.record_webhook_nonce(
                 WebhookNonceRecord(
                     tenant_id=tenant_id,
@@ -345,6 +372,78 @@ class TicketIngressService:
         except WebhookReplayError:
             return False
 
+    async def _webhook_nonce_exists(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: str,
+        nonce: str,
+    ) -> bool:
+        return await self._persistence.webhook_nonce_exists(
+            tenant_id=tenant_id,
+            channel_type=channel_type,
+            nonce=nonce,
+            now=datetime.now(timezone.utc),
+        )
+
+    def _validated_webhook_security_context(
+        self,
+        *,
+        channel_type: str,
+        body: Any,
+        headers: Mapping[str, str],
+    ) -> ChannelWebhookSecurityContext:
+        try:
+            context = extract_webhook_security_context(
+                channel_type=channel_type,
+                body=body,
+                headers=headers,
+            )
+            _enforce_webhook_freshness(
+                timestamp=context.timestamp,
+                received_at=datetime.now(timezone.utc),
+            )
+            return context
+        except ValueError as exc:
+            reason = str(exc)
+            code = (
+                "webhook_nonce_missing"
+                if "nonce" in reason
+                else "stale_webhook_timestamp"
+            )
+            raise TicketIngressRejected(
+                code=code,
+                reason=reason,
+                status_code=400 if code == "webhook_nonce_missing" else 401,
+            ) from exc
+        except WebhookFreshnessError as exc:
+            raise TicketIngressRejected(
+                code="stale_webhook_timestamp",
+                reason=str(exc),
+                status_code=401,
+            ) from exc
+
+    async def _enforce_admission(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: TenantChannelType,
+    ) -> None:
+        if self._admission_service is None:
+            return
+        queue_name = _admission_queue_for_channel(
+            channel_type=channel_type,
+            queue_by_channel=self._webhook_queue_by_channel,
+        )
+        decision = await self._admission_service.evaluate_and_persist(
+            queue_name=queue_name,
+            tenant_id=tenant_id,
+            channel=channel_type.value,
+        )
+        if decision.outcome is AdmissionOutcome.ADMIT:
+            return
+        raise _admission_rejection(decision)
+
 
 async def _end_read_only_routing_transaction(session: object) -> None:
     """End anonymous routing lookups before tenant-scoped RLS work begins."""
@@ -368,11 +467,15 @@ class TicketIngressRejected(TicketIngressServiceError):
         code: str,
         reason: str,
         status_code: int = 400,
+        headers: Mapping[str, str] | None = None,
+        response_body: Mapping[str, object] | None = None,
     ) -> None:
         super().__init__(reason)
         self.code = code
         self.reason = reason
         self.status_code = status_code
+        self.headers = dict(headers or {})
+        self.response_body = dict(response_body) if response_body is not None else None
 
 
 def _adapter_registry() -> BoundaryAdapterRegistry:
@@ -507,6 +610,53 @@ def _tenant_channel_type(channel_type: str) -> TenantChannelType:
             reason="channel type is not supported for webhooks",
         )
     return parsed
+
+
+def _admission_queue_for_channel(
+    *,
+    channel_type: TenantChannelType,
+    queue_by_channel: Mapping[TenantChannelType, str],
+) -> str:
+    queue_name = queue_by_channel.get(channel_type)
+    if queue_name is not None:
+        return queue_name
+    raise TicketIngressServiceError(
+        f"admission queue map is not configured for {channel_type.value}"
+    )
+
+
+def _admission_rejection(decision: AdmissionDecision) -> TicketIngressRejected:
+    reason = decision.reason.value if decision.reason is not None else "UNKNOWN"
+    headers = {
+        "X-Operious-Admission-Decision-Id": str(decision.decision_id),
+    }
+    if decision.outcome is AdmissionOutcome.DEFER:
+        headers["Retry-After"] = str(decision.retry_after_seconds)
+        return TicketIngressRejected(
+            code="admission_deferred",
+            reason=reason,
+            status_code=503,
+            headers=headers,
+            response_body={
+                "error": "admission_deferred",
+                "reason": reason,
+                "decision_id": str(decision.decision_id),
+                "retry_after_seconds": decision.retry_after_seconds,
+                "message": "Platform under pressure. Retry after delay.",
+            },
+        )
+    return TicketIngressRejected(
+        code="admission_rejected",
+        reason=reason,
+        status_code=429,
+        headers=headers,
+        response_body={
+            "error": "admission_rejected",
+            "reason": reason,
+            "decision_id": str(decision.decision_id),
+            "message": "Platform capacity exceeded. Request rejected.",
+        },
+    )
 
 
 def _routing_address_for_webhook(
