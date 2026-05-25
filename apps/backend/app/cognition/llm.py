@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol, cast, runtime_checkable
 
 import httpx
@@ -12,6 +14,8 @@ import httpx
 from app.cognition.exceptions import (
     CognitionLLMConfigurationError,
     CognitionLLMProviderError,
+    ProviderRateLimitError,
+    ProviderTransientError,
 )
 from app.cognition.models import DiagnosticLLMCompletion, DiagnosticLLMUsage
 from app.core.http import get_shared_http_client
@@ -136,16 +140,30 @@ class AnthropicMessagesClient:
                     provider_name=self.provider_name,
                 )
         except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
             if breaker is not None:
                 await breaker.record_http_status(
                     tenant_id=effective_tenant_id,
                     provider_name=self.provider_name,
-                    status_code=exc.response.status_code,
+                    status_code=status_code,
                     retry_after=exc.response.headers.get("retry-after"),
                 )
+            if status_code == 429:
+                retry_after = _retry_after_seconds(
+                    exc.response.headers.get("retry-after")
+                )
+                raise ProviderRateLimitError(
+                    "Anthropic diagnostic request failed: HTTPStatusError:429",
+                    retry_after_seconds=retry_after,
+                ) from exc
+            if status_code in {500, 503, 504, 408}:
+                raise ProviderTransientError(
+                    "Anthropic diagnostic request failed: "
+                    f"HTTPStatusError:{status_code}"
+                ) from exc
             raise CognitionLLMProviderError(
                 "Anthropic diagnostic request failed: "
-                f"HTTPStatusError:{exc.response.status_code}"
+                f"HTTPStatusError:{status_code}"
             ) from exc
         except httpx.TimeoutException as exc:
             if breaker is not None:
@@ -154,7 +172,7 @@ class AnthropicMessagesClient:
                     provider_name=self.provider_name,
                     reason="timeout",
                 )
-            raise CognitionLLMProviderError(
+            raise ProviderTransientError(
                 "Anthropic diagnostic request failed: TimeoutException"
             ) from exc
         except httpx.HTTPError as exc:
@@ -296,6 +314,22 @@ def _deterministic_confidence(category: str) -> float:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
+
+
+def _retry_after_seconds(retry_after: str | None) -> int:
+    if retry_after is None or not retry_after.strip():
+        return 60
+    stripped = retry_after.strip()
+    try:
+        return max(0, int(stripped))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(stripped)
+        except (TypeError, ValueError):
+            return 60
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0, int((parsed - datetime.now(timezone.utc)).total_seconds()))
 
 
 __all__ = [

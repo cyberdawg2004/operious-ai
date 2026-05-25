@@ -27,12 +27,103 @@ class CognitionLLMProviderError(CognitionError):
     """Raised when an LLM provider call fails or returns invalid data."""
 
 
+class ProviderQuotaExceededError(CognitionError):
+    """
+    Tenant or provider quota exhausted.
+
+    Retryable on diagnostic.retry queue with backoff.
+    """
+
+    def __init__(
+        self,
+        tenant_id: str,
+        provider: str,
+        model: str,
+        quota_type: str,
+        retry_after_seconds: int = 60,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self.provider = provider
+        self.model = model
+        self.quota_type = quota_type
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            "provider quota exhausted: "
+            f"{tenant_id}/{provider}/{model}/{quota_type}"
+        )
+
+
+class ProviderRateLimitError(CognitionLLMProviderError):
+    """
+    Provider returned 429. Retryable with Retry-After respect.
+
+    Maps to error class PROVIDER_429.
+    """
+
+    retry_after_seconds: int
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after_seconds: int = 60,
+    ) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(message)
+
+
+class ProviderTransientError(CognitionLLMProviderError):
+    """
+    Provider returned 5xx. Retryable with exponential backoff.
+
+    Maps to error class PROVIDER_5XX.
+    """
+
+
 class CognitionSemanticValidationError(CognitionError):
     """Raised when model output drifts governance-significant meaning."""
 
 
+class CognitionParsingFailureError(CognitionSemanticValidationError):
+    """
+    LLM output failed DiagnosticLLMOutput schema validation.
+
+    Retryable once with tightened prompt. Then DLQ.
+    Maps to error class PARSING_FAILURE.
+    """
+
+
+class CognitionSemanticRejectionError(CognitionSemanticValidationError):
+    """
+    Valid JSON but category not in DiagnosticCategory enum.
+
+    Not retryable - semantic issue will not resolve.
+    Goes directly to DLQ.
+    Maps to error class SEMANTIC_REJECTION.
+    """
+
+
 class CognitionGovernanceRejectionError(CognitionError):
     """Raised when governance rejects model output before completion."""
+
+
+class GovernanceDenyError(CognitionError):
+    """
+    Governance denied the proposed action.
+
+    Not retryable - deterministic decision.
+    Goes directly to DLQ.
+    Maps to error class GOVERNANCE_DENY.
+    """
+
+
+class CognitionPersistenceFailureError(CognitionError):
+    """
+    DB write failed after successful LLM cognition.
+
+    Retryable - DB may recover.
+    Maps to error class PERSISTENCE_FAILURE.
+    """
 
 
 __all__ = [
@@ -42,6 +133,13 @@ __all__ = [
     "CognitionLLMProviderError",
     "CognitionLifecycleError",
     "CognitionNotFoundError",
+    "CognitionParsingFailureError",
     "CognitionPersistenceError",
+    "CognitionPersistenceFailureError",
+    "CognitionSemanticRejectionError",
     "CognitionSemanticValidationError",
+    "GovernanceDenyError",
+    "ProviderQuotaExceededError",
+    "ProviderRateLimitError",
+    "ProviderTransientError",
 ]

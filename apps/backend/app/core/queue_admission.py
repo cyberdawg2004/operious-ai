@@ -91,7 +91,20 @@ class RedisQueueDepthAdmission:
         tenant_id: str | None = None,
         dispatch_id: str | None = None,
     ) -> None:
-        depth = await _resolve_depth(self._redis_client.llen(queue_name))
+        try:
+            depth = await _resolve_depth(self._redis_client.llen(queue_name))
+        except Exception as exc:  # noqa: BLE001 - admission must fail open here.
+            self._logger.warning(
+                "queue_depth_check_failed",
+                extra={
+                    "logical_queue": logical_queue,
+                    "queue_name": queue_name,
+                    "tenant_id": tenant_id,
+                    "dispatch_id": dispatch_id,
+                    "error": exc.__class__.__name__,
+                },
+            )
+            depth = 0
         if depth <= max_queue_depth:
             return
         self._logger.warning(
