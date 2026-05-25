@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from app.coordination.enums import (
     CoordinationDirection,
@@ -33,7 +33,6 @@ from app.coordination.topology.models.node import CoordinationNode
 from app.coordination.topology.models.path import CoordinationPath
 from app.coordination.topology.models.topology import CoordinationTopology
 from app.tenant.credentials import TenantCredentialEncryptor
-from app.sop_intelligence import ApprovalRecord
 from app.tenant.chronology import ChronologyVerificationResult, canonical_sha256
 from app.tenant.enums import (
     TenantChannelStatus,
@@ -88,6 +87,9 @@ from app.tenant.persistence import (
     TenantTopologyConfigurationQuery,
     TenantTopologyConfigurationRecord,
 )
+
+if TYPE_CHECKING:
+    from app.sop_intelligence import ApprovalRecord
 
 
 class TenantConfigurationRuntime:

@@ -32,6 +32,7 @@ class DeadLetterTaskRecord:
     task_name: str
     task_id: str
     execution_id: uuid.UUID | None
+    queue: str | None
     reason: str
     retry_count: int
     created_at: datetime
@@ -54,6 +55,7 @@ class PostgresDeadLetterTaskPersistence(BaseRepository):
                 task_name=record.task_name,
                 task_id=record.task_id,
                 execution_id=record.execution_id,
+                queue=record.queue,
                 reason=record.reason,
                 retry_count=record.retry_count,
                 created_at=record.created_at,
@@ -116,6 +118,7 @@ async def record_dead_letter_task(
     attempt_count: int,
     reason: str,
     retry_count: int,
+    queue: str | None = None,
     created_at: datetime | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> DeadLetterTaskRecord:
@@ -133,6 +136,7 @@ async def record_dead_letter_task(
         task_name=task_name,
         task_id=task_id,
         execution_id=parsed_execution_id,
+        queue=queue,
         reason=reason,
         retry_count=retry_count,
         created_at=created_at or datetime.now(timezone.utc),
@@ -185,6 +189,7 @@ def _row_to_record(row: DeadLetterTaskRow) -> DeadLetterTaskRecord:
         task_name=row.task_name,
         task_id=row.task_id,
         execution_id=row.execution_id,
+        queue=row.queue,
         reason=row.reason,
         retry_count=row.retry_count,
         created_at=row.created_at,

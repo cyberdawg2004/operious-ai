@@ -135,6 +135,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
     "get_knowledge_service",
     "get_operational_event_service",
     "get_operational_observability_service",
+    "get_queue_operations_service",
     "get_quota_operations_service",
     "get_quota_runtime",
     "get_session_repository",

@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,13 +128,13 @@ from app.services.admission_service import (
     AdmissionService,
     measure_db_pool_wait_ms,
 )
-from app.services.batch_ingest_service import BatchIngestService
 from app.services.knowledge_service import KnowledgeService
 from app.services.operational_event_service import OperationalEventService
 from app.services.operational_observability_service import (
     OperationalObservabilityService,
 )
 from app.services.quota_operations_service import QuotaOperationsService
+from app.services.queue_operations_service import QueueOperationsService
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.ticket_ingress_service import TicketIngressService
 from app.qa.persistence import PostgresQAPersistence
@@ -156,6 +156,9 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
+
+if TYPE_CHECKING:
+    from app.services.batch_ingest_service import BatchIngestService
 
 
 async def get_health_service() -> HealthService:
@@ -385,6 +388,8 @@ def get_batch_ingest_service(
     dispatch_service: DispatchService = Depends(get_dispatch_service),
 ) -> BatchIngestService:
     """Return the batch-ingest service for this request."""
+    from app.services.batch_ingest_service import BatchIngestService
+
     return BatchIngestService(
         boundary_repository=boundary_repository,
         dispatch_service=dispatch_service,
@@ -526,6 +531,14 @@ def get_quota_operations_service(
         quota_runtime=quota_runtime,
         session=session,
     )
+
+
+def get_queue_operations_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> QueueOperationsService:
+    """Return the queue operations service."""
+
+    return QueueOperationsService(session=session)
 
 
 def _dispatch_coordination_registry() -> CoordinationRegistry:
@@ -787,6 +800,7 @@ __all__ = [
     "get_knowledge_service",
     "get_operational_event_service",
     "get_operational_observability_service",
+    "get_queue_operations_service",
     "get_quota_operations_service",
     "get_quota_runtime",
     "get_session_repository",

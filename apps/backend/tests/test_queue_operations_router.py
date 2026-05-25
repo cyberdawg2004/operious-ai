@@ -1,0 +1,547 @@
+"""Queue operations router tests."""
+
+from __future__ import annotations
+
+import ast
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies.authority import require_operator_authority
+from app.identity import AuthorityContext
+from app.main import create_app
+from app.dependencies.database import get_db_session
+from app.dependencies.services import get_queue_operations_service
+from app.queues import (
+    ALL_QUEUES,
+    QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_QA,
+)
+from app.runtime.db.models import DeadLetterTaskRow
+from app.services.queue_operations_service import QueueOperationsService
+from app.tenant.db.models import TenantRow
+from tests.conftest import requires_postgres, set_pg_rls_tenant
+
+pytestmark = [requires_postgres]
+
+_NOW = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
+_TENANT = "tenant-acme"
+_OTHER_TENANT = "tenant-other"
+
+
+@pytest.fixture
+def pg_tenant_id() -> str:
+    return _TENANT
+
+
+@pytest_asyncio.fixture
+async def queue_client(
+    pg_session: AsyncSession,
+) -> AsyncIterator[tuple[httpx.AsyncClient, Any]]:
+    app = create_app()
+
+    async def _db_override() -> AsyncIterator[AsyncSession]:
+        yield pg_session
+
+    app.dependency_overrides[get_db_session] = _db_override
+    app.dependency_overrides[require_operator_authority] = (
+        _operator_authority_override
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        yield client, app
+
+
+@pytest.mark.asyncio
+async def test_queue_status_returns_all_14_queues(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, app = queue_client
+    redis = _QueueRedis(depth=7, oldest_age_seconds=12.5)
+    app.dependency_overrides[get_queue_operations_service] = _service_override(
+        QueueOperationsService(
+            session=pg_session,
+            redis_provider=lambda: redis,  # type: ignore[arg-type]
+        )
+    )
+
+    response = await client.get(
+        "/api/v1/operations/queue-status",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["queues"]) == set(ALL_QUEUES)
+    assert len(body["queues"]) == 14
+    assert body["queues"][QUEUE_DIAGNOSTIC_NORMAL]["depth"] == 7
+    assert body["queues"][QUEUE_DIAGNOSTIC_NORMAL]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_queue_status_returns_unknown_when_redis_down(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, app = queue_client
+    app.dependency_overrides[get_queue_operations_service] = _service_override(
+        QueueOperationsService(
+            session=pg_session,
+            redis_provider=lambda: _DownRedis(),  # type: ignore[arg-type]
+        )
+    )
+
+    response = await client.get(
+        "/api/v1/operations/queue-status",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    queues = response.json()["queues"]
+    assert set(queues) == set(ALL_QUEUES)
+    assert all(item["status"] == "unknown" for item in queues.values())
+    assert all(item["error"] == "redis_unavailable" for item in queues.values())
+
+
+@pytest.mark.asyncio
+async def test_queue_status_requires_auth(
+    queue_client: tuple[httpx.AsyncClient, Any],
+) -> None:
+    client, _app = queue_client
+
+    response = await client.get("/api/v1/operations/queue-status")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_dead_letters_returns_tenant_records(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    await _seed_dlq(pg_session, tenant_id=_TENANT, seed="own")
+
+    response = await client.get(
+        "/api/v1/operations/dead-letters",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["tenant_id"] == _TENANT
+    assert body["items"][0]["queue"] == QUEUE_DIAGNOSTIC_NORMAL
+
+
+@pytest.mark.asyncio
+async def test_list_dead_letters_respects_rls(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    await _seed_dlq(pg_seed_session, tenant_id=_OTHER_TENANT, seed="other")
+    await set_pg_rls_tenant(pg_session, _TENANT)
+
+    response = await client.get(
+        "/api/v1/operations/dead-letters",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_list_dead_letters_filters_by_queue(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    await _seed_dlq(pg_session, tenant_id=_TENANT, seed="normal")
+    await _seed_dlq(
+        pg_session,
+        tenant_id=_TENANT,
+        seed="qa",
+        task_name="score_supervisor_inspection",
+        queue=QUEUE_QA,
+        metadata={
+            "error_class": "QAError",
+            "error_message": "qa failed",
+            "task_payload": {"inspection_id": "inspection-1", "tenant_id": _TENANT},
+            "celery_kwargs": {"inspection_id": "inspection-1", "tenant_id": _TENANT},
+            "attempt_count": 1,
+        },
+    )
+
+    response = await client.get(
+        "/api/v1/operations/dead-letters",
+        headers=_headers(),
+        params={"queue": QUEUE_QA},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["task_name"] == "score_supervisor_inspection"
+
+
+@pytest.mark.asyncio
+async def test_list_dead_letters_filters_by_error_class(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    await _seed_dlq(pg_session, tenant_id=_TENANT, seed="one")
+    await _seed_dlq(
+        pg_session,
+        tenant_id=_TENANT,
+        seed="two",
+        metadata=_metadata(error_class="SpecificError"),
+    )
+
+    response = await client.get(
+        "/api/v1/operations/dead-letters",
+        headers=_headers(),
+        params={"error_class": "SpecificError"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["error_class"] == "SpecificError"
+
+
+@pytest.mark.asyncio
+async def test_list_dead_letters_paginates(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    await _seed_dlq(pg_session, tenant_id=_TENANT, seed="one", created_at=_at(1))
+    await _seed_dlq(pg_session, tenant_id=_TENANT, seed="two", created_at=_at(2))
+    await _seed_dlq(pg_session, tenant_id=_TENANT, seed="three", created_at=_at(3))
+
+    response = await client.get(
+        "/api/v1/operations/dead-letters",
+        headers=_headers(),
+        params={"limit": 1, "offset": 1},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 3
+    assert body["limit"] == 1
+    assert body["offset"] == 1
+    assert len(body["items"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_dead_letters_requires_auth(
+    queue_client: tuple[httpx.AsyncClient, Any],
+) -> None:
+    client, _app = queue_client
+
+    response = await client.get("/api/v1/operations/dead-letters")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_replay_marks_record_as_replayed(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, app = queue_client
+    row = await _seed_dlq(pg_session, tenant_id=_TENANT, seed="replay")
+    sent = _SentTasks()
+    app.dependency_overrides[get_queue_operations_service] = _service_override(
+        QueueOperationsService(
+            session=pg_session,
+            replay_publisher=sent,
+        )
+    )
+
+    response = await client.post(
+        f"/api/v1/operations/dead-letters/{row.dead_letter_task_id}/replay",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "replayed"
+    assert sent.calls == [
+        (
+            "execute_diagnostic_agent",
+            {"execution_id": "execution-replay", "tenant_id": _TENANT},
+            QUEUE_DIAGNOSTIC_NORMAL,
+        )
+    ]
+    await pg_session.refresh(row)
+    assert row.replayed is True
+    assert row.replayed_by == "operator-principal"
+    assert row.replayed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_replay_returns_404_for_missing(
+    queue_client: tuple[httpx.AsyncClient, Any],
+) -> None:
+    client, _app = queue_client
+
+    response = await client.post(
+        f"/api/v1/operations/dead-letters/{uuid.uuid4()}/replay",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_replay_returns_404_for_wrong_tenant(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+    pg_seed_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    row = await _seed_dlq(
+        pg_seed_session,
+        tenant_id=_OTHER_TENANT,
+        seed="wrong",
+    )
+    await set_pg_rls_tenant(pg_session, _TENANT)
+
+    response = await client.post(
+        f"/api/v1/operations/dead-letters/{row.dead_letter_task_id}/replay",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_replay_returns_409_if_already_replayed(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, _app = queue_client
+    row = await _seed_dlq(
+        pg_session,
+        tenant_id=_TENANT,
+        seed="already",
+        replayed=True,
+    )
+
+    response = await client.post(
+        f"/api/v1/operations/dead-letters/{row.dead_letter_task_id}/replay",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_replay_requires_auth(
+    queue_client: tuple[httpx.AsyncClient, Any],
+) -> None:
+    client, _app = queue_client
+
+    response = await client.post(
+        f"/api/v1/operations/dead-letters/{uuid.uuid4()}/replay",
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_replay_requires_operator_authority(
+    pg_session: AsyncSession,
+) -> None:
+    app = create_app()
+
+    async def _db_override() -> AsyncIterator[AsyncSession]:
+        yield pg_session
+
+    app.dependency_overrides[get_db_session] = _db_override
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            f"/api/v1/operations/dead-letters/{uuid.uuid4()}/replay",
+            headers=_headers(),
+        )
+
+    assert response.status_code == 403
+
+
+def test_queue_operations_router_uses_service_boundary() -> None:
+    router_path = (
+        Path(__file__).parent.parent
+        / "app"
+        / "api"
+        / "v1"
+        / "routers"
+        / "queue_operations.py"
+    )
+    tree = ast.parse(router_path.read_text(encoding="utf-8"))
+    imported_modules = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    text = router_path.read_text(encoding="utf-8")
+
+    assert "app.runtime.db.models" not in imported_modules
+    assert "app.core.redis" not in imported_modules
+    assert "DeadLetterTaskRow" not in text
+    assert "get_redis_client" not in text
+    assert "get_queue_operations_service" in text
+
+
+def _headers(tenant: str = _TENANT) -> dict[str, str]:
+    return {"X-Tenant-ID": tenant, "X-Principal-ID": "principal-test"}
+
+
+async def _operator_authority_override() -> AuthorityContext:
+    return AuthorityContext.from_raw(
+        tenant_id=_TENANT,
+        principal_id="operator-principal",
+        capabilities=frozenset({"operator"}),
+    )
+
+
+def _service_override(
+    service: QueueOperationsService,
+) -> Callable[[], Awaitable[QueueOperationsService]]:
+    async def override() -> QueueOperationsService:
+        return service
+
+    return override
+
+
+async def _seed_dlq(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    seed: str,
+    task_name: str = "execute_diagnostic_agent",
+    queue: str | None = QUEUE_DIAGNOSTIC_NORMAL,
+    metadata: Mapping[str, Any] | None = None,
+    replayed: bool = False,
+    created_at: datetime | None = None,
+) -> DeadLetterTaskRow:
+    await session.merge(TenantRow(tenant_id=tenant_id))
+    await session.flush()
+    row = DeadLetterTaskRow(
+        dead_letter_task_id=uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"queue-operations-dlq:{tenant_id}:{seed}",
+        ),
+        tenant_id=tenant_id,
+        task_name=task_name,
+        task_id=f"task-{seed}",
+        execution_id=None,
+        queue=queue,
+        reason="retry budget exhausted",
+        retry_count=3,
+        created_at=created_at or _NOW,
+        replayed=replayed,
+        replayed_at=_NOW if replayed else None,
+        replayed_by="operator-principal" if replayed else None,
+        metadata_json=dict(
+            metadata or _metadata(seed=seed, tenant_id=tenant_id)
+        ),
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+def _metadata(
+    *,
+    seed: str = "default",
+    tenant_id: str = _TENANT,
+    error_class: str = "ProviderError",
+) -> dict[str, Any]:
+    execution_id = f"execution-{seed}"
+    return {
+        "execution_id": execution_id,
+        "session_id": f"session-{seed}",
+        "tenant_id": tenant_id,
+        "attempt_count": 3,
+        "attempt_id": f"attempt-{seed}",
+        "dispatch_id": f"dispatch-{seed}",
+        "error_type": error_class,
+        "error_class": error_class,
+        "error_message": f"{error_class} happened",
+        "last_traceback": "traceback",
+        "attempt_number": 3,
+        "task_payload": {
+            "execution_id": execution_id,
+            "attempt_id": f"attempt-{seed}",
+            "attempt_number": 3,
+            "dispatch_id": f"dispatch-{seed}",
+            "session_id": f"session-{seed}",
+            "tenant_id": tenant_id,
+        },
+        "celery_kwargs": {
+            "execution_id": execution_id,
+            "tenant_id": tenant_id,
+        },
+    }
+
+
+def _at(second: int) -> datetime:
+    return datetime(2026, 5, 25, 12, 0, second, tzinfo=timezone.utc)
+
+
+class _QueueRedis:
+    def __init__(self, *, depth: int, oldest_age_seconds: float) -> None:
+        self.depth = depth
+        self.oldest_age_seconds = oldest_age_seconds
+
+    async def llen(self, _name: str) -> int:
+        return self.depth
+
+    async def zrange(
+        self,
+        _name: str,
+        _start: int,
+        _end: int,
+        *,
+        withscores: bool = False,
+    ) -> list[tuple[str, float]]:
+        assert withscores is True
+        return [("member", datetime.now().timestamp() - self.oldest_age_seconds)]
+
+
+class _DownRedis:
+    async def llen(self, _name: str) -> int:
+        raise ConnectionError("redis down")
+
+
+class _SentTasks:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any], str]] = []
+
+    def publish(
+        self,
+        *,
+        task_name: str,
+        kwargs: Mapping[str, Any],
+        queue: str,
+    ) -> None:
+        self.calls.append((task_name, dict(kwargs), queue))

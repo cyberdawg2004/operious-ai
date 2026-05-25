@@ -28,6 +28,9 @@ from app.api.v1.routers.operational_events import (
 from app.api.v1.routers.quota_operations import (
     router as quota_operations_router,
 )
+from app.api.v1.routers.queue_operations import (
+    router as queue_operations_router,
+)
 from app.api.v1.routers.session import router as session_router
 from app.api.v1.routers.sop_intelligence import (
     router as sop_intelligence_router,
@@ -61,5 +64,6 @@ api_router_v1.include_router(
     operational_events_router, prefix="/operational-events"
 )
 api_router_v1.include_router(quota_operations_router, prefix="/quota")
+api_router_v1.include_router(queue_operations_router)
 
 __all__ = ["api_router_v1"]

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -132,11 +133,19 @@ class DeadLetterTaskRow(Base):
         nullable=True,
         index=True,
     )
+    queue: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    replayed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    replayed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    replayed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
@@ -160,6 +169,11 @@ class DeadLetterTaskRow(Base):
             "ix_dead_letter_tasks_tenant_created",
             "tenant_id",
             "created_at",
+        ),
+        Index(
+            "ix_dead_letter_tasks_replayed",
+            "replayed",
+            "tenant_id",
         ),
     )
 

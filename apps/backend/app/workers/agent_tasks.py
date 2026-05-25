@@ -497,7 +497,12 @@ async def _persist_diagnostic_failure(
                 dispatch_id=work_item.dispatch_id,
                 session_id=work_item.session_id,
                 retry_count=retry_count,
+                queue=QUEUE_DIAGNOSTIC_NORMAL,
                 task_payload=_dead_letter_task_payload(work_item),
+                celery_kwargs={
+                    "execution_id": work_item.execution_id,
+                    "tenant_id": work_item.tenant_id,
+                },
                 failure=failure,
             )
             status = "dead_lettered"
@@ -723,7 +728,9 @@ async def _record_dead_letter_task(
     dispatch_id: str,
     session_id: str,
     retry_count: int,
+    queue: str,
     task_payload: Mapping[str, object],
+    celery_kwargs: Mapping[str, object],
     failure: Mapping[str, object],
 ) -> bool:
     try:
@@ -737,6 +744,7 @@ async def _record_dead_letter_task(
             attempt_count=retry_count,
             reason=str(failure.get("message") or failure),
             retry_count=retry_count,
+            queue=queue,
             metadata={
                 "execution_id": execution_id,
                 "attempt_id": attempt_id,
@@ -750,6 +758,7 @@ async def _record_dead_letter_task(
                 "last_traceback": failure.get("last_traceback"),
                 "attempt_number": failure.get("attempt_number"),
                 "task_payload": dict(task_payload),
+                "celery_kwargs": dict(celery_kwargs),
             },
         )
         await session.commit()
