@@ -14,11 +14,28 @@ from typing import Any, TypeVar, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.diagnostic_agent import DiagnosticAgent, DiagnosticResult
+from app.agents.runtime.quota_runtime import (
+    get_quota_runtime as get_initialized_quota_runtime,
+)
+from app.agents.runtime.retry_policy import RetryPolicy, get_policy
 from app.cognition import (
     AnthropicMessagesClient,
     DeterministicDiagnosticLLMClient,
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
+)
+from app.cognition.exceptions import (
+    CognitionGovernanceRejectionError,
+    CognitionLLMProviderError,
+    CognitionParsingFailureError,
+    CognitionPersistenceError,
+    CognitionPersistenceFailureError,
+    CognitionSemanticRejectionError,
+    CognitionSemanticValidationError,
+    GovernanceDenyError,
+    ProviderQuotaExceededError,
+    ProviderRateLimitError,
+    ProviderTransientError,
 )
 from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.coordination.persistence import (
@@ -55,7 +72,9 @@ from app.workers.queue_admission import (
     record_worker_queue_age,
 )
 from app.queues import (
+    QUEUE_DEAD_LETTER,
     QUEUE_DIAGNOSTIC_NORMAL,
+    QUEUE_DIAGNOSTIC_RETRY,
     QUEUE_SUPERVISOR,
 )
 from app.workers.supervisor_tasks import evaluate_session_supervisor
@@ -64,7 +83,7 @@ _T = TypeVar("_T")
 _STARTED = "diagnostic_execution_started"
 _COMPLETED = "diagnostic_analysis_completed"
 _FAILED = "diagnostic_execution_failed"
-_MAX_EXECUTION_ATTEMPTS = 4
+_MAX_EXECUTION_ATTEMPTS = 5
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 
 
@@ -72,7 +91,7 @@ _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
     name="execute_diagnostic_agent",
     queue=QUEUE_DIAGNOSTIC_NORMAL,
     bind=True,
-    max_retries=3,
+    max_retries=4,
     default_retry_delay=_DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS,
     ignore_result=True,
 )
@@ -102,7 +121,8 @@ def execute_diagnostic_agent(
         if result.get("status") == "retry_requested":
             raise self.retry(
                 exc=DiagnosticExecutionRetry(str(result.get("message") or result)),
-                countdown=_retry_countdown(self),
+                countdown=_retry_countdown_from_result(self, result),
+                queue=_retry_queue_from_result(result),
             )
         if result.get("status") == "dead_lettered":
             raise DiagnosticExecutionDeadLettered(
@@ -157,12 +177,28 @@ async def execute_diagnostic_agent_runtime(
                 last_traceback=traceback.format_exc(),
             )
 
-        return await _persist_diagnostic_success(
-            session_factory=session_factory,
-            work_item=prepared,
-            worker_id=worker_id,
-            result=result,
-        )
+        try:
+            return await _persist_diagnostic_success(
+                session_factory=session_factory,
+                work_item=prepared,
+                worker_id=worker_id,
+                result=result,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return await _persist_diagnostic_failure(
+                session_factory=session_factory,
+                work_item=prepared,
+                worker_id=worker_id,
+                max_attempts=max_attempts,
+                task_name=task_name,
+                task_id=task_id,
+                retry_count=retry_count,
+                exc=CognitionPersistenceFailureError(
+                    "diagnostic success persistence failed: "
+                    f"{exc.__class__.__name__}: {_bounded_exception_message(exc)}"
+                ),
+                last_traceback=traceback.format_exc(),
+            )
     finally:
         try:
             if not _running_under_pytest():
@@ -180,6 +216,16 @@ class _DiagnosticExecutionWorkItem:
     session_id: str
     tenant_id: str
     content: str
+
+
+@dataclass(frozen=True, slots=True)
+class _DiagnosticRetryDecision:
+    error_class: str
+    policy: RetryPolicy
+    terminal: bool
+    retry_requested: bool
+    countdown_seconds: int
+    queue: str
 
 
 async def _prepare_diagnostic_execution(
@@ -378,18 +424,27 @@ async def _persist_diagnostic_failure(
         )
         session_repo = PostgresSessionPersistence(session)
         timeline = TimelineRuntime(persistence=session_repo)
-        terminal = _diagnostic_failure_is_terminal(
+        retry_decision = _diagnostic_retry_decision(
+            exc,
+            retry_count=retry_count,
+        )
+        terminal = retry_decision.terminal or _diagnostic_failure_is_terminal(
             exc,
             attempt_number=work_item.attempt_number,
             max_attempts=max_attempts,
         )
-        retry_requested = _is_retryable_diagnostic_error(exc) and not terminal
+        retry_requested = retry_decision.retry_requested and not terminal
+        retry_queue = QUEUE_DEAD_LETTER if terminal else retry_decision.queue
+        retry_countdown_seconds = 0 if terminal else retry_decision.countdown_seconds
         failure = _bounded_failure_metadata(
             exc,
             execution_id=work_item.execution_id,
             attempt_id=work_item.attempt_id,
             attempt_number=work_item.attempt_number,
+            error_class=retry_decision.error_class,
             retry_requested=retry_requested,
+            retry_queue=retry_queue,
+            retry_countdown_seconds=retry_countdown_seconds,
             last_traceback=last_traceback,
         )
         claim_lost = await _claim_lost_payload(
@@ -467,6 +522,8 @@ async def _persist_diagnostic_failure(
             "failure_event_persisted": failure_event_persisted,
             "execution_failed": execution_failed,
             "dead_letter_task_recorded": dead_letter_task_recorded,
+            "retry_queue": retry_queue,
+            "retry_countdown_seconds": retry_countdown_seconds,
             **failure,
         }
 
@@ -705,7 +762,10 @@ def _bounded_failure_metadata(
     execution_id: str,
     attempt_id: str,
     attempt_number: int,
+    error_class: str | None = None,
     retry_requested: bool,
+    retry_queue: str | None = None,
+    retry_countdown_seconds: int | None = None,
     last_traceback: str,
 ) -> dict[str, object]:
     error_message = str(exc)
@@ -714,19 +774,24 @@ def _bounded_failure_metadata(
         if len(error_message) <= 240
         else f"{error_message[:237]}..."
     )
-    error_class = exc.__class__.__name__
-    return {
+    error_type = exc.__class__.__name__
+    failure: dict[str, object] = {
         "execution_id": execution_id,
         "attempt_id": attempt_id,
         "attempt_number": attempt_number,
         "attempt_count": attempt_number,
-        "error_type": error_class,
-        "error_class": error_class,
+        "error_type": error_type,
+        "error_class": error_class or error_type,
         "error_message": error_message,
         "last_traceback": last_traceback,
         "message": message,
         "retry_requested": retry_requested,
     }
+    if retry_queue is not None:
+        failure["retry_queue"] = retry_queue
+    if retry_countdown_seconds is not None:
+        failure["retry_countdown_seconds"] = retry_countdown_seconds
+    return failure
 
 
 def _dead_letter_task_payload(
@@ -793,6 +858,72 @@ def _retry_countdown(
     return base_seconds * (2 ** _task_retries(task_self))
 
 
+def _retry_countdown_from_result(
+    task_self: Any,
+    result: Mapping[str, object],
+) -> int:
+    countdown = result.get("retry_countdown_seconds")
+    if isinstance(countdown, int) and countdown >= 0:
+        return countdown
+    return _retry_countdown(task_self)
+
+
+def _retry_queue_from_result(result: Mapping[str, object]) -> str:
+    queue = result.get("retry_queue")
+    return queue if isinstance(queue, str) and queue else QUEUE_DIAGNOSTIC_RETRY
+
+
+def _diagnostic_retry_decision(
+    exc: BaseException,
+    *,
+    retry_count: int,
+) -> _DiagnosticRetryDecision:
+    error_class = _classify_diagnostic_exception(exc)
+    policy = get_policy(error_class)
+    exhausted = retry_count >= policy.max_retries
+    terminal = (
+        policy.terminal
+        or exhausted
+        or isinstance(exc, (DiagnosticExecutionError, DiagnosticNonRetryableError))
+    )
+    retry_requested = not terminal
+    countdown_seconds = (
+        0
+        if terminal
+        else _retry_countdown_for_policy(
+            exc,
+            policy=policy,
+            retry_count=retry_count,
+        )
+    )
+    return _DiagnosticRetryDecision(
+        error_class=error_class,
+        policy=policy,
+        terminal=terminal,
+        retry_requested=retry_requested,
+        countdown_seconds=countdown_seconds,
+        queue=QUEUE_DEAD_LETTER if terminal else policy.queue,
+    )
+
+
+def _retry_countdown_for_policy(
+    exc: BaseException | None,
+    *,
+    policy: RetryPolicy,
+    retry_count: int,
+) -> int:
+    retry_after = _retry_after_seconds(exc)
+    base_seconds = retry_after if retry_after is not None else policy.base_delay_seconds
+    return int(base_seconds * (policy.backoff_multiplier ** retry_count))
+
+
+def _retry_after_seconds(exc: BaseException | None) -> int | None:
+    retry_after = getattr(exc, "retry_after_seconds", None)
+    if isinstance(retry_after, int) and retry_after > 0:
+        return retry_after
+    return None
+
+
 def _fallback_task_id(
     *,
     task_name: str,
@@ -815,20 +946,51 @@ def _diagnostic_failure_is_terminal(
     attempt_number: int,
     max_attempts: int,
 ) -> bool:
+    if not _is_retryable_diagnostic_error(exc):
+        return True
+    policy = get_policy(_classify_diagnostic_exception(exc))
     return (
-        not _is_retryable_diagnostic_error(exc)
+        policy.terminal
         or attempt_number >= max(1, max_attempts)
     )
 
 
 def _is_retryable_diagnostic_error(exc: BaseException) -> bool:
-    return not isinstance(
-        exc,
-        (
-            DiagnosticExecutionError,
-            DiagnosticNonRetryableError,
-        ),
-    )
+    if isinstance(exc, (DiagnosticExecutionError, DiagnosticNonRetryableError)):
+        return False
+    return not get_policy(_classify_diagnostic_exception(exc)).terminal
+
+
+def _classify_diagnostic_exception(exc: BaseException) -> str:
+    if isinstance(exc, ProviderQuotaExceededError):
+        return "QUOTA_EXCEEDED"
+    if isinstance(exc, ProviderRateLimitError):
+        return "PROVIDER_429"
+    if isinstance(exc, ProviderTransientError):
+        return "PROVIDER_5XX"
+    if isinstance(exc, CognitionParsingFailureError):
+        return "PARSING_FAILURE"
+    if isinstance(exc, CognitionSemanticRejectionError):
+        return "SEMANTIC_REJECTION"
+    if isinstance(exc, GovernanceDenyError):
+        return "GOVERNANCE_DENY"
+    if isinstance(exc, CognitionPersistenceFailureError):
+        return "PERSISTENCE_FAILURE"
+    if isinstance(exc, CognitionPersistenceError):
+        return "PERSISTENCE_FAILURE"
+    if isinstance(exc, CognitionGovernanceRejectionError):
+        return "GOVERNANCE_DENY"
+    if isinstance(exc, CognitionSemanticValidationError):
+        return "SEMANTIC_REJECTION"
+    if isinstance(exc, CognitionLLMProviderError):
+        message = str(exc).casefold()
+        if (
+            "invalid json" in message
+            or "non-object json" in message
+            or "schema validation" in message
+        ):
+            return "PARSING_FAILURE"
+    return "PROVIDER_5XX"
 
 
 def _diagnostic_cognition_runtime(
@@ -870,6 +1032,7 @@ def _diagnostic_cognition_runtime(
             audit_encryptor=_cognition_audit_encryptor(),
         ),
         governance_repository=PostgresGovernanceRepository(session),
+        quota_runtime=get_initialized_quota_runtime(),
         config=DiagnosticCognitionRuntimeConfig(
             max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,
             temperature=settings.ANTHROPIC_TEMPERATURE,
@@ -889,6 +1052,13 @@ def _cognition_audit_encryptor() -> TenantCredentialEncryptor:
     if _running_under_pytest():
         return TenantCredentialEncryptor(platform_master_key=b"0" * 32)
     raise RuntimeError("TENANT_CREDENTIAL_MASTER_KEY must be configured")
+
+
+def _bounded_exception_message(exc: BaseException) -> str:
+    message = str(exc)
+    if len(message) <= 180:
+        return message
+    return f"{message[:177]}..."
 
 
 def _running_under_pytest() -> bool:

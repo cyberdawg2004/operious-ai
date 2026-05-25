@@ -20,7 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.agents.runtime.quota_runtime import TenantQuotaRuntime
+from app.agents.runtime.quota_runtime import (
+    TenantQuotaRuntime,
+    initialize_quota_runtime,
+)
 from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import JWKSAuthProvider
@@ -308,13 +311,15 @@ def create_app(
     logger.info("fastapi_instance_create_complete")
 
     logger.info("quota_runtime_register_begin")
-    app.state.quota_runtime = TenantQuotaRuntime(
+    quota_runtime = TenantQuotaRuntime(
         redis_url=settings.quota_redis_url,
         session_factory=get_session_factory(),
         request_per_minute_limit=settings.QUOTA_REQUESTS_PER_MINUTE_DEFAULT,
         tokens_per_minute_limit=settings.QUOTA_TOKENS_PER_MINUTE_DEFAULT,
         requests_per_hour_limit=settings.QUOTA_REQUESTS_PER_HOUR_DEFAULT,
     )
+    app.state.quota_runtime = quota_runtime
+    initialize_quota_runtime(quota_runtime)
     logger.info("quota_runtime_register_complete")
 
     logger.info("exception_handlers_register_begin")

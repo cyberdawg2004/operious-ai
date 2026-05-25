@@ -18,6 +18,7 @@ from app.cognition.exceptions import ProviderQuotaExceededError
 logger = logging.getLogger(__name__)
 
 OperatorCircuitState = Literal["force_open", "force_close"]
+_quota_runtime: TenantQuotaRuntime | None = None
 
 
 class _QuotaRedisPipeline(Protocol):
@@ -451,7 +452,18 @@ class TenantQuotaRuntime:
         raise TypeError(f"Redis counter is not an integer: {type(value).__name__}")
 
 
+def initialize_quota_runtime(runtime: TenantQuotaRuntime) -> None:
+    global _quota_runtime
+    _quota_runtime = runtime
+
+
+def get_quota_runtime() -> TenantQuotaRuntime | None:
+    return _quota_runtime
+
+
 __all__ = [
+    "get_quota_runtime",
+    "initialize_quota_runtime",
     "OperatorCircuitState",
     "QuotaStatus",
     "TenantQuotaRuntime",

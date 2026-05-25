@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from pydantic import ValidationError
 
@@ -53,6 +53,9 @@ from app.governance.subjects.execution import ExecutionGovernanceSubject
 from app.identity import coerce_tenant_id
 from app.knowledge.models import KnowledgeRetrievalResult
 from app.knowledge.runtime import KnowledgeRuntime
+
+if TYPE_CHECKING:
+    from app.agents.runtime.quota_runtime import TenantQuotaRuntime
 
 _SYSTEM_PROMPT = """You are Operious diagnostic cognition.
 Classify the support ticket using only the ticket text and cited tenant SOP
@@ -104,10 +107,12 @@ class DiagnosticCognitionRuntime:
         usage_persistence: CognitionUsagePersistenceProtocol,
         governance_repository: BaseGovernanceRepository | None = None,
         config: DiagnosticCognitionRuntimeConfig | None = None,
+        quota_runtime: TenantQuotaRuntime | None = None,
     ) -> None:
         self._knowledge_runtime = knowledge_runtime
         self._llm_client = llm_client
         self._usage_persistence = usage_persistence
+        self._quota_runtime = quota_runtime
         self._governance = _governance_runtime(
             governance_repository=governance_repository,
             require_citations=(
@@ -147,6 +152,12 @@ class DiagnosticCognitionRuntime:
         completion: DiagnosticLLMCompletion | None = None
         audit_id: str | None = None
         messages = (DiagnosticLLMMessage(role="user", content=prompt),)
+        if self._quota_runtime is not None:
+            await self._quota_runtime.check_and_increment(
+                tenant_id=tenant_id,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+            )
         try:
             completion = await self._complete_llm(
                 system_prompt=_SYSTEM_PROMPT,

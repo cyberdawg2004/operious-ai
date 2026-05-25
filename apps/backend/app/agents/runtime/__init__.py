@@ -16,6 +16,7 @@ Three pieces:
 from app.agents.runtime.base_agent import BaseAgent
 from app.agents.runtime.quota_runtime import QuotaStatus, TenantQuotaRuntime
 from app.agents.runtime.registry import AgentRegistry
+from app.agents.runtime.retry_policy import RetryPolicy, get_policy
 from app.agents.runtime.runtime import AgentRuntime
 
 __all__ = [
@@ -23,5 +24,7 @@ __all__ = [
     "AgentRegistry",
     "AgentRuntime",
     "QuotaStatus",
+    "RetryPolicy",
     "TenantQuotaRuntime",
+    "get_policy",
 ]

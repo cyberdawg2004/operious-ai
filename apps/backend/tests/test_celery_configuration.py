@@ -55,7 +55,7 @@ _FIRE_AND_FORGET_TASKS = {
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
 }
 _TASK_RETRY_BUDGETS = {
-    "execute_diagnostic_agent": 3,
+    "execute_diagnostic_agent": 4,
     "create_governance_escalation": 2,
     "evaluate_session_supervisor": 1,
     "score_supervisor_inspection": 1,
