@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.agents.runtime.quota_runtime import TenantQuotaRuntime
 from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import JWKSAuthProvider
@@ -28,7 +29,7 @@ from app.core.http import close_shared_http_client, init_shared_http_client
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
-from app.db.session import dispose_engine
+from app.db.session import dispose_engine, get_session_factory
 from app.middleware.authority_context import (
     AUTHORITY_HEADERS,
     AuthorityContextMiddleware,
@@ -163,6 +164,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # only live infra we still own is the SQLAlchemy engine, Redis
         # connection, and shared outbound HTTP client (all lazy / no-op
         # when not configured).
+        quota_runtime = getattr(app.state, "quota_runtime", None)
+        if isinstance(quota_runtime, TenantQuotaRuntime):
+            await quota_runtime.close()
         await close_shared_http_client()
         await dispose_engine()
         await close_redis()
@@ -302,6 +306,16 @@ def create_app(
         lifespan=lifespan,
     )
     logger.info("fastapi_instance_create_complete")
+
+    logger.info("quota_runtime_register_begin")
+    app.state.quota_runtime = TenantQuotaRuntime(
+        redis_url=settings.quota_redis_url,
+        session_factory=get_session_factory(),
+        request_per_minute_limit=settings.QUOTA_REQUESTS_PER_MINUTE_DEFAULT,
+        tokens_per_minute_limit=settings.QUOTA_TOKENS_PER_MINUTE_DEFAULT,
+        requests_per_hour_limit=settings.QUOTA_REQUESTS_PER_HOUR_DEFAULT,
+    )
+    logger.info("quota_runtime_register_complete")
 
     logger.info("exception_handlers_register_begin")
     _register_exception_handlers(app)

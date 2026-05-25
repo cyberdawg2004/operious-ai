@@ -140,6 +140,7 @@ class Settings(BaseSettings):
     REDIS_RESULT_DB: int = 1
     REDIS_PASSWORD: str | None = None
     REDIS_URL: str | None = None
+    QUOTA_REDIS_URL: str | None = None
     CELERY_RESULT_BACKEND_URL: str | None = None
     CELERY_RESULT_EXPIRES_SECONDS: int = 3600
     CELERY_TASK_SOFT_TIME_LIMIT_SECONDS: int = 300
@@ -168,6 +169,9 @@ class Settings(BaseSettings):
     ADMISSION_REDIS_MEMORY_PCT_REJECT: float = 90.0
     ADMISSION_DB_POOL_WAIT_WARN_MS: float = 250.0
     ADMISSION_DB_POOL_WAIT_REJECT_MS: float = 1000.0
+    QUOTA_REQUESTS_PER_MINUTE_DEFAULT: int = 60
+    QUOTA_TOKENS_PER_MINUTE_DEFAULT: int = 100_000
+    QUOTA_REQUESTS_PER_HOUR_DEFAULT: int = 1_000
 
     # ─── AI providers (gateway-level) ────────────────────────────────
     AI_DEFAULT_PROVIDER: str = "openai"
@@ -330,6 +334,13 @@ class Settings(BaseSettings):
             return _normalize_redis_url(self.REDIS_URL)
         auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def quota_redis_url(self) -> str:
+        if self.QUOTA_REDIS_URL:
+            return _normalize_redis_url(self.QUOTA_REDIS_URL)
+        return self.redis_url
 
     @computed_field  # type: ignore[prop-decorator]
     @property

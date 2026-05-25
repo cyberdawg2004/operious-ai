@@ -43,9 +43,10 @@ from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import cast
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.runtime.quota_runtime import TenantQuotaRuntime
 from app.arbitration.persistence import (
     ArbitrationPersistenceProtocol,
     PostgresArbitrationPersistence,
@@ -157,6 +158,12 @@ async def get_health_service() -> HealthService:
         session_factory_provider=get_session_factory,
         redis_provider=get_redis_client,
     )
+
+
+def get_quota_runtime(request: Request) -> TenantQuotaRuntime:
+    """Return the application-scoped tenant quota runtime."""
+
+    return cast(TenantQuotaRuntime, request.app.state.quota_runtime)
 
 
 # ─── Phase 3.2 substrate repository factories ───────────────────────────
@@ -694,6 +701,7 @@ __all__ = [
     "get_knowledge_service",
     "get_operational_event_service",
     "get_operational_observability_service",
+    "get_quota_runtime",
     "get_session_repository",
     "get_sop_intelligence_service",
     "get_supervisor_repository",

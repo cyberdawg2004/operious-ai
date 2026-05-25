@@ -14,6 +14,7 @@ Three pieces:
 """
 
 from app.agents.runtime.base_agent import BaseAgent
+from app.agents.runtime.quota_runtime import QuotaStatus, TenantQuotaRuntime
 from app.agents.runtime.registry import AgentRegistry
 from app.agents.runtime.runtime import AgentRuntime
 
@@ -21,4 +22,6 @@ __all__ = [
     "BaseAgent",
     "AgentRegistry",
     "AgentRuntime",
+    "QuotaStatus",
+    "TenantQuotaRuntime",
 ]
