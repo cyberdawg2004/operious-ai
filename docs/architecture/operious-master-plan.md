@@ -16,7 +16,8 @@ production verification, PR_T6 queue/processing metrics plus
 all-queue health observability through final local and production
 verification, PR_T7 Command Center queue status plus DLQ inspector
 through backend/frontend production verification, and PR_T8 alerting
-wiring through local verification and production deployment.
+wiring through local verification and production deployment, and PR_T9
+burst/chaos correctness proof through local test verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -105,6 +106,14 @@ This document is the canonical handoff plan for the next Codex session.
   `0039_dlq_replay_cols (head)`. Production Fly.io deploy image
   `deployment-01KSGB53CFMT13PMG98FCW8G6R` is live and public health
   returns `status: ok`.
+- PR_T9 final gate: CLOSED. Burst and chaos invariants are proven with
+  zero application code changes. Local verification passed with full
+  backend 2,453 passed, 2 skipped as `operious_app_test`; combined
+  load/chaos gate 10/10 passed; Pyright remains 0 errors and 654
+  warnings. Burst_100 completed 100/100 with P95 3,558ms against a
+  30,000ms SLO; burst_1000 completed 1,000/1,000 across three tenants
+  with tenant isolation proven; burst_10000 activated admission control
+  with zero phantom records; all 6 chaos cases passed.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
@@ -2136,22 +2145,23 @@ before real Anker traffic or any second-client commitment.
 
 ### Current Honest Ratings
 
-- Architecture / substrate design: 9.4/10.
+- Architecture / substrate design: 9.5/10.
 - Audit, replay, governance foundation: 9.5/10.
 - Production deployment capacity: 9.5/10.
-- Demo readiness for controlled Anker call: 9.4/10.
-- Enterprise-grade readiness overall: 9.4/10.
+- Demo readiness for controlled Anker call: 9.5/10.
+- Enterprise-grade readiness overall: 9.5/10.
 
 These ratings are intentionally conservative. The architecture is strong,
 and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, PR_T4, PR_T5, PR_T6,
-PR_T7, and PR_T8 have
+PR_T7, PR_T8, and PR_T9 have
 removed the known runtime identity, diagnostic schema-validation,
 request-body, escalation outbox, webhook replay/freshness, Celery
 result-retention, Redis queue-depth, worker privilege, DLQ traceback,
 ambient identity fallback, tenant-isolation enforcement, provider
 quota/circuit resilience, batch-ingestion idempotency blockers, and the
 missing queue/processing observability, DLQ operating surface, and
-alerting/deduplication layers.
+alerting/deduplication layers, plus the previously unproven
+burst/chaos correctness surface.
 Wedge 4 materially
 raises the production posture: production uses `operious_app` with
 `bypassrls=False`, FORCE RLS is active on all 38 tenant-scoped tables,
@@ -2170,10 +2180,13 @@ status and tenant-scoped dead-letter inspection/replay to Command Center,
 with replay constrained by operator authority and the publisher boundary.
 PR_T8 adds scheduled alert evaluation for queue age, DLQ spikes,
 provider circuits, Redis memory, DB pool pressure, and replay mismatch,
-with Sentry emission and Redis cooldown deduplication. The remaining
-work is operational proof at scale: queue-age/load tests, autoscaling
-contracts, PR_T9-PR_T13, and Phase 6-F evidence plus the session
-lifecycle/SOP intelligence follow-ups before Anker go-live.
+with Sentry emission and Redis cooldown deduplication. PR_T9 proves
+100/1000/10000 burst behavior, tenant isolation under load, admission
+control correctness, and six chaos recovery cases with zero application
+code changes. The remaining work is operational runbooks, reset/demo
+separation, autoscaling contracts, PR_T10-PR_T13, and Phase 6-F
+evidence plus the session lifecycle/SOP intelligence follow-ups before
+Anker go-live.
 
 ### Rating Targets Before Pilot Launch
 
@@ -2937,7 +2950,7 @@ Acceptance criteria:
 
 #### PR_T9 - Burst and Chaos Test Suite
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED - 2026-05-26
 
 Scope:
 Three load test scenarios using mock LLM responses with realistic
@@ -2975,6 +2988,22 @@ Deliverables:
 - `apps/backend/tests/load/test_burst_1000.py`
 - `apps/backend/tests/load/test_burst_10000.py`
 - `apps/backend/tests/chaos/test_chaos_cases.py`
+
+Closure evidence:
+
+- Burst_100: 100/100 completed, zero DLQ, P95 3,558ms against the
+  30,000ms SLO, and cross-tenant isolation verified.
+- Burst_1000: 1,000/1,000 completed across three tenants, with
+  tenant A/B/C isolation proven at the DB level.
+- Burst_10000: admission control activated after the first admitted
+  batch, deferred 9,500 items, and produced zero phantom boundary
+  records.
+- Chaos: provider 429, duplicate webhook, stale signature, partial
+  batch, worker restart idempotency, and Redis unavailable cases all
+  passed.
+- Final local gate: combined load/chaos 10 passed; full backend
+  2,453 passed, 2 skipped as `operious_app_test`; Pyright remains
+  0 errors and 654 warnings; zero application code changes.
 
 #### PR_T10 - Operational Runbooks
 
@@ -3127,8 +3156,8 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: PR_T8 - Alerting Wiring is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS, PR_T4 - Per-Tenant and Per-Provider Quota Enforcement, PR_T5 - Batch-Safe Ingestion, PR_T6 - Queue and Processing Metrics, and PR_T7 - Command Center Queue and DLQ View are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
-Current verified baseline after PR_T8 closure: full backend 2,440 passed, 2 skipped as `operious_app_test`; PR_T8 alert/identity/queue focused gate 40 passed; smoke 4/4 green; Pyright 0 errors and 654 warnings. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is unchanged at `0039_dlq_replay_cols (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, `/api/v1/operations/queue-status` returns all 14 named queues, `/api/v1/operations/dead-letters` returns tenant-scoped records, and PR_T8 alert evaluation is deployed on `webhook_maintenance` with Sentry `capture_message`, structured `alert.fired` logging, and Redis cooldown deduplication. Command Center production verification: `https://app.operious.com` serves the deployed Queue Status and DLQ Inspector views behind Auth0. Phase 6-F focused artifact checks: 6 passed. Active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: PR_T9 - Burst and Chaos Test Suite is CLOSED locally with zero application code changes. PR_T8 - Alerting Wiring is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS, PR_T4 - Per-Tenant and Per-Provider Quota Enforcement, PR_T5 - Batch-Safe Ingestion, PR_T6 - Queue and Processing Metrics, and PR_T7 - Command Center Queue and DLQ View are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
+Current verified baseline after PR_T9 closure: full backend 2,453 passed, 2 skipped as `operious_app_test`; combined load/chaos gate 10 passed; burst_100 P95 3,558ms against 30,000ms SLO; burst_1000 1,000/1,000 completed with three-tenant isolation proven; burst_10000 admission control activated with zero phantom records; six chaos cases passed; Pyright 0 errors and 654 warnings. Production Fly.io/Neon verification remains from PR_T8: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is unchanged at `0039_dlq_replay_cols (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, `/api/v1/operations/queue-status` returns all 14 named queues, `/api/v1/operations/dead-letters` returns tenant-scoped records, and PR_T8 alert evaluation is deployed on `webhook_maintenance` with Sentry `capture_message`, structured `alert.fired` logging, and Redis cooldown deduplication. Command Center production verification: `https://app.operious.com` serves the deployed Queue Status and DLQ Inspector views behind Auth0. Phase 6-F focused artifact checks: 6 passed. Active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 654 warnings; warnings must not grow.
 Current production Alembic head: `0039_dlq_replay_cols (head)`.
 
@@ -3695,9 +3724,18 @@ Current Command Center 2 status:
   alert/identity/queue focused gate 40 passed. Production deploy image
   `deployment-01KSGB53CFMT13PMG98FCW8G6R`; production health
   `status: ok`; Alembic head remains `0039_dlq_replay_cols (head)`.
+- PR_T9 status:
+  CLOSED locally with zero application code changes. Burst_100 completed
+  100/100 with P95 3,558ms against a 30,000ms SLO; burst_1000 completed
+  1,000/1,000 across three tenants with isolation proven; burst_10000
+  activated admission control and left zero phantom records; all 6 chaos
+  cases passed. Final local gate: combined load/chaos 10 passed, full
+  backend 2,453 passed and 2 skipped as `operious_app_test`, Pyright
+  0 errors and 654 warnings.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.
+- PR_T10 Operational Runbooks.
 - Vector Retrieval SQL-native.
 - Post-wedge 9+ Throughput and Capacity Program.
 - 9+ Final Gate.
