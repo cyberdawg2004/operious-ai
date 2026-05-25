@@ -3007,7 +3007,7 @@ Closure evidence:
 
 #### PR_T10 - Operational Runbooks
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED - 2026-05-26
 
 Deliverables:
 
@@ -3017,6 +3017,14 @@ Deliverables:
 - `docs/runbooks/dlq-replay.md`
 - `docs/runbooks/fly-deploy-rollback.md`
 - `docs/runbooks/neon-migration-rollback.md`
+
+Closure evidence:
+
+- Six production runbooks created with Operious production service names,
+  Fly app `operious-ai-imad`, Auth0 domain `operious-dev.uk.auth0.com`,
+  Neon roles `operious_app` and `neondb_owner`, Alembic head
+  `0039_dlq_replay_cols`, named queues, operator endpoints, and concrete
+  recovery commands.
 
 #### PR_T11 - Demo Data Reset and Tenant Separation
 
