@@ -263,7 +263,7 @@ class _FakeQuotaOperationsService:
             requests_per_minute_limit=60,
             requests_per_hour_count=120,
             requests_per_hour_limit=1_000,
-            tokens_per_minute_count=0,
+            tokens_per_minute_count=None,
             tokens_per_minute_limit=100_000,
             operator_circuit_state="force_open",
             redis_available=True,

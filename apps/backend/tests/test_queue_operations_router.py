@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ast
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -9,10 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from fastapi import Depends
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.dependencies.authority import require_operator_authority
 from app.identity import AuthorityContext
@@ -32,8 +35,8 @@ from tests.conftest import requires_postgres, set_pg_rls_tenant
 pytestmark = [requires_postgres]
 
 _NOW = datetime(2026, 5, 25, 12, 0, tzinfo=timezone.utc)
-_TENANT = "tenant-acme"
-_OTHER_TENANT = "tenant-other"
+_TENANT = f"tenant-acme-{uuid.uuid4()}"
+_OTHER_TENANT = f"tenant-other-{uuid.uuid4()}"
 
 
 @pytest.fixture
@@ -260,6 +263,29 @@ async def test_list_dead_letters_requires_auth(
 
 
 @pytest.mark.asyncio
+async def test_list_dead_letters_requires_operator_authority(
+    pg_session: AsyncSession,
+) -> None:
+    app = create_app()
+
+    async def _db_override() -> AsyncIterator[AsyncSession]:
+        yield pg_session
+
+    app.dependency_overrides[get_db_session] = _db_override
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/api/v1/operations/dead-letters",
+            headers=_headers(),
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_replay_marks_record_as_replayed(
     queue_client: tuple[httpx.AsyncClient, Any],
     pg_session: AsyncSession,
@@ -349,6 +375,84 @@ async def test_replay_returns_409_if_already_replayed(
     )
 
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_concurrent_replay_returns_409_for_second_caller(
+    pg_engine: AsyncEngine,
+    pg_seed_engine: AsyncEngine | None,
+) -> None:
+    if pg_seed_engine is None:
+        pytest.skip("requires owner seed engine for committed DLQ fixture")
+
+    seed = f"concurrent-{uuid.uuid4()}"
+    async with pg_seed_engine.begin() as connection:
+        seed_session = AsyncSession(bind=connection, expire_on_commit=False)
+        try:
+            row = await _seed_dlq(
+                seed_session,
+                tenant_id=_TENANT,
+                seed=seed,
+            )
+            dlq_id = row.dead_letter_task_id
+        finally:
+            await seed_session.close()
+
+    app = create_app()
+    sent = _SentTasks()
+
+    async def _db_override() -> AsyncIterator[AsyncSession]:
+        connection = await pg_engine.connect()
+        transaction = await connection.begin()
+        await connection.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, true)"),
+            {"t": _TENANT},
+        )
+        session = AsyncSession(bind=connection, expire_on_commit=False)
+        try:
+            yield session
+        finally:
+            await session.close()
+            if transaction.is_active:
+                await transaction.rollback()
+            await connection.close()
+
+    async def _service_override_for_request(
+        session: AsyncSession = Depends(get_db_session),
+    ) -> QueueOperationsService:
+        return QueueOperationsService(session=session, replay_publisher=sent)
+
+    app.dependency_overrides[get_db_session] = _db_override
+    app.dependency_overrides[require_operator_authority] = (
+        _operator_authority_override
+    )
+    app.dependency_overrides[get_queue_operations_service] = (
+        _service_override_for_request
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        responses = await asyncio.gather(
+            client.post(
+                f"/api/v1/operations/dead-letters/{dlq_id}/replay",
+                headers=_headers(),
+            ),
+            client.post(
+                f"/api/v1/operations/dead-letters/{dlq_id}/replay",
+                headers=_headers(),
+            ),
+        )
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    assert sent.calls == [
+        (
+            "execute_diagnostic_agent",
+            {"execution_id": f"execution-{seed}", "tenant_id": _TENANT},
+            QUEUE_DIAGNOSTIC_NORMAL,
+        )
+    ]
 
 
 @pytest.mark.asyncio

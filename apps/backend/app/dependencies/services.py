@@ -39,9 +39,11 @@ to widen its surface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
+import uuid
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -273,11 +275,18 @@ async def check_batch_ingest_admission(
     admission_service: AdmissionService = Depends(get_admission_service),
 ) -> AdmissionDecision:
     """Fail closed before batch-ingest service processing begins."""
+    evaluated_second = datetime.now(timezone.utc).replace(microsecond=0)
+    correlation_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"batch:{expected_tenant_id}:{evaluated_second.isoformat()}",
+        )
+    )
     decision = await admission_service.evaluate_and_persist(
         queue_names=DIAGNOSTIC_QUEUE_PRIORITY,
         tenant_id=expected_tenant_id,
         channel="batch_ingest",
-        request_correlation_id=None,
+        request_correlation_id=correlation_id,
     )
     if decision.outcome is AdmissionOutcome.ADMIT:
         return decision

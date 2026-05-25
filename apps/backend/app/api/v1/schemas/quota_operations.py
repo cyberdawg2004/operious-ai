@@ -33,7 +33,7 @@ class QuotaStatusResponse(BaseModel):
     requests_per_minute_limit: int
     requests_per_hour_count: int
     requests_per_hour_limit: int
-    tokens_per_minute_count: int
+    tokens_per_minute_count: int | None
     tokens_per_minute_limit: int
     operator_circuit_state: QuotaCircuitStateValue | None
     redis_available: bool

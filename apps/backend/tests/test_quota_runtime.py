@@ -193,6 +193,7 @@ async def test_quota_allows_within_limit() -> None:
     )
     assert status.requests_per_minute_count == 1
     assert status.requests_per_minute_limit == 2
+    assert status.tokens_per_minute_count is None
     assert status.redis_available is True
 
 

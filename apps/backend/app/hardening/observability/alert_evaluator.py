@@ -12,7 +12,7 @@ from inspect import isawaitable
 from typing import Any, Protocol, cast
 
 import sentry_sdk
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -363,22 +363,32 @@ class AlertEvaluator:
                 ).scalars()
             )
             results: list[AlertResult] = []
+            rows_with_execution_id: list[tuple[Any, str, uuid.UUID]] = []
             for row in rows:
                 execution_id = _execution_id_from_metadata(row.metadata_json)
                 execution_uuid = _uuid_or_none(execution_id)
-                found = False
-                if execution_uuid is not None:
-                    found = (
-                        (
-                            await owner_session.execute(
-                                select(func.count(execution_row.execution_id)).where(
-                                    execution_row.execution_id == execution_uuid
-                                )
-                            )
-                        ).scalar_one()
-                        or 0
-                    ) > 0
-                if found:
+                if execution_id is not None and execution_uuid is not None:
+                    rows_with_execution_id.append((row, execution_id, execution_uuid))
+            if not rows_with_execution_id:
+                return []
+
+            execution_ids = [
+                execution_uuid
+                for _row, _execution_id, execution_uuid in rows_with_execution_id
+            ]
+            existing_ids = {
+                str(value)
+                for value in (
+                    await owner_session.execute(
+                        select(execution_row.execution_id).where(
+                            execution_row.execution_id.in_(execution_ids)
+                        )
+                    )
+                ).scalars()
+            }
+
+            for row, execution_id, execution_uuid in rows_with_execution_id:
+                if str(execution_uuid) in existing_ids:
                     continue
                 dlq_id = str(row.dead_letter_task_id)
                 results.append(

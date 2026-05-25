@@ -47,6 +47,7 @@ async def list_dead_letters(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _authority: AuthorityContext = Depends(require_operator_authority),
     service: QueueOperationsService = Depends(get_queue_operations_service),
 ) -> DeadLetterListResponse:
     return DeadLetterListResponse.from_page(

@@ -188,40 +188,57 @@ class QueueOperationsService:
         previous_tenant = get_current_tenant()
         set_current_tenant(tenant_id)
         try:
-            row = (
-                await self._session.execute(
-                    select(DeadLetterTaskRow).where(
-                        DeadLetterTaskRow.dead_letter_task_id == parsed_id,
-                        DeadLetterTaskRow.tenant_id == tenant_id,
+            try:
+                existing = (
+                    await self._session.execute(
+                        select(DeadLetterTaskRow).where(
+                            DeadLetterTaskRow.dead_letter_task_id == parsed_id,
+                            DeadLetterTaskRow.tenant_id == tenant_id,
+                        )
                     )
-                )
-            ).scalar_one_or_none()
-            if row is None:
-                raise DeadLetterNotFoundError("dead-letter record not found")
-            if row.replayed:
-                raise DeadLetterAlreadyReplayedError(
-                    "dead-letter record already replayed"
-                )
-            queue_name = _queue_for_row(row)
-            kwargs = _replay_kwargs_for_row(row)
+                ).scalar_one_or_none()
+                if existing is None:
+                    raise DeadLetterNotFoundError("dead-letter record not found")
+                row = (
+                    await self._session.execute(
+                        select(DeadLetterTaskRow)
+                        .where(
+                            DeadLetterTaskRow.dead_letter_task_id == parsed_id,
+                            DeadLetterTaskRow.tenant_id == tenant_id,
+                        )
+                        .with_for_update(skip_locked=True)
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    raise DeadLetterAlreadyReplayedError(
+                        "dead-letter replay already in progress"
+                    )
+                if row.replayed:
+                    raise DeadLetterAlreadyReplayedError(
+                        "dead-letter record already replayed"
+                    )
+                queue_name = _queue_for_row(row)
+                kwargs = _replay_kwargs_for_row(row)
+                task_name = row.task_name
+                replayed_at = datetime.now(timezone.utc)
+                row.replayed = True
+                row.replayed_at = replayed_at
+                row.replayed_by = replayed_by
+                await self._session.commit()
+            except Exception:
+                await self._session.rollback()
+                raise
+
             self._replay_publisher.publish(
-                task_name=row.task_name,
+                task_name=task_name,
                 kwargs=kwargs,
                 queue=queue_name,
             )
-            replayed_at = datetime.now(timezone.utc)
-            row.replayed = True
-            row.replayed_at = replayed_at
-            row.replayed_by = replayed_by
-            await self._session.commit()
             return DeadLetterReplayRecord(
-                id=str(row.dead_letter_task_id),
+                id=str(parsed_id),
                 status="replayed",
                 replayed_at=replayed_at,
             )
-        except Exception:
-            await self._session.rollback()
-            raise
         finally:
             set_current_tenant(previous_tenant)
 

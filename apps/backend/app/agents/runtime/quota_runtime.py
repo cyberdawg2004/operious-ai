@@ -46,7 +46,7 @@ class QuotaStatus:
     requests_per_minute_limit: int
     requests_per_hour_count: int
     requests_per_hour_limit: int
-    tokens_per_minute_count: int
+    tokens_per_minute_count: int | None
     tokens_per_minute_limit: int
     operator_circuit_state: OperatorCircuitState | None
     redis_available: bool
@@ -132,6 +132,10 @@ class TenantQuotaRuntime:
         if operator_state == "force_close":
             return
 
+        # TODO PR_T4_FOLLOWUP: tokens_per_minute quota is accepted
+        # in configuration but not enforced. The counter always
+        # returns None. Implement sliding window token tracking
+        # in a future PR when token usage is instrumented.
         now = self._time()
         minute_key = self._minute_key(
             tenant_id=tenant_id,
@@ -208,7 +212,7 @@ class TenantQuotaRuntime:
             requests_per_minute_limit=self._requests_per_minute_limit,
             requests_per_hour_count=hour_count.count,
             requests_per_hour_limit=self._requests_per_hour_limit,
-            tokens_per_minute_count=0,
+            tokens_per_minute_count=None,
             tokens_per_minute_limit=self._tokens_per_minute_limit,
             operator_circuit_state=operator_state,
             redis_available=minute_count.available and hour_count.available,

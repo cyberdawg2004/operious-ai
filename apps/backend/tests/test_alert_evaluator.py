@@ -384,6 +384,26 @@ async def test_replay_mismatch_fires_when_execution_missing(
     assert results[0].dedup_key == f"replay_mismatch:{row.dead_letter_task_id}"
 
 
+@requires_postgres
+@pytest.mark.asyncio
+async def test_replay_mismatch_ignores_rows_without_execution_id(
+    pg_seed_session: Any,
+) -> None:
+    await _seed_dead_letter(
+        pg_seed_session,
+        tenant_id=f"{TENANT_ID}-replay-no-execution",
+        seed=f"replay-no-execution-{uuid.uuid4()}",
+        replayed=True,
+        metadata={"celery_kwargs": {"tenant_id": TENANT_ID}},
+    )
+
+    results = await _evaluator(owner_session=pg_seed_session)._check_replay_mismatch(
+        pg_seed_session
+    )
+
+    assert results == []
+
+
 def _settings(**overrides: Any) -> Settings:
     return Settings(
         DATABASE_URL="sqlite+aiosqlite:///:memory:",
