@@ -128,6 +128,7 @@ from app.services.operational_event_service import OperationalEventService
 from app.services.operational_observability_service import (
     OperationalObservabilityService,
 )
+from app.services.quota_operations_service import QuotaOperationsService
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.ticket_ingress_service import TicketIngressService
 from app.qa.persistence import PostgresQAPersistence
@@ -442,6 +443,18 @@ def get_operational_event_service(
     )
 
 
+def get_quota_operations_service(
+    session: AsyncSession = Depends(get_db_session),
+    quota_runtime: TenantQuotaRuntime = Depends(get_quota_runtime),
+) -> QuotaOperationsService:
+    """Return the operator quota operations service."""
+
+    return QuotaOperationsService(
+        quota_runtime=quota_runtime,
+        session=session,
+    )
+
+
 def _dispatch_coordination_registry() -> CoordinationRegistry:
     registry = CoordinationRegistry()
     registry.register(
@@ -701,6 +714,7 @@ __all__ = [
     "get_knowledge_service",
     "get_operational_event_service",
     "get_operational_observability_service",
+    "get_quota_operations_service",
     "get_quota_runtime",
     "get_session_repository",
     "get_sop_intelligence_service",

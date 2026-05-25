@@ -24,6 +24,9 @@ from app.api.v1.routers.observability import router as observability_router
 from app.api.v1.routers.operational_events import (
     router as operational_events_router,
 )
+from app.api.v1.routers.quota_operations import (
+    router as quota_operations_router,
+)
 from app.api.v1.routers.session import router as session_router
 from app.api.v1.routers.sop_intelligence import (
     router as sop_intelligence_router,
@@ -55,5 +58,6 @@ api_router_v1.include_router(observability_router, prefix="/observability")
 api_router_v1.include_router(
     operational_events_router, prefix="/operational-events"
 )
+api_router_v1.include_router(quota_operations_router, prefix="/quota")
 
 __all__ = ["api_router_v1"]

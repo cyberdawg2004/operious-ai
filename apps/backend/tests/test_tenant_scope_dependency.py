@@ -31,10 +31,13 @@ from starlette.requests import Request
 
 from app.dependencies.authority import (
     ERROR_CODE_AUTHORITY_REQUIRED,
+    ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED,
     ERROR_CODE_TENANT_AXIS_MISSING,
+    OPERATOR_CAPABILITY,
     request_authority_opt,
     request_tenant_scope_opt,
     require_authority,
+    require_operator_authority,
     require_tenant_scope,
 )
 from app.identity.authority import AuthorityContext
@@ -212,10 +215,13 @@ def test_module_exports_stable_contract() -> None:
 
     assert sorted(mod.__all__) == [
         "ERROR_CODE_AUTHORITY_REQUIRED",
+        "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
         "ERROR_CODE_TENANT_AXIS_MISSING",
+        "OPERATOR_CAPABILITY",
         "request_authority_opt",
         "request_tenant_scope_opt",
         "require_authority",
+        "require_operator_authority",
         "require_tenant_scope",
     ]
 
@@ -228,5 +234,11 @@ def test_package_re_exports_helpers() -> None:
 
     assert deps.require_tenant_scope is require_tenant_scope
     assert deps.require_authority is require_authority
+    assert deps.require_operator_authority is require_operator_authority
+    assert deps.OPERATOR_CAPABILITY == OPERATOR_CAPABILITY
+    assert (
+        deps.ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED
+        == ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED
+    )
     assert deps.request_tenant_scope_opt is request_tenant_scope_opt
     assert deps.request_authority_opt is request_authority_opt

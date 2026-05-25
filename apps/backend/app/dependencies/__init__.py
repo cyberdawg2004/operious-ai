@@ -36,18 +36,24 @@ at the HTTP boundary.
 
 from app.dependencies.authority import (
     ERROR_CODE_AUTHORITY_REQUIRED,
+    ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED,
     ERROR_CODE_TENANT_AXIS_MISSING,
+    OPERATOR_CAPABILITY,
     request_authority_opt,
     request_tenant_scope_opt,
     require_authority,
+    require_operator_authority,
     require_tenant_scope,
 )
 
 __all__ = [
     "ERROR_CODE_AUTHORITY_REQUIRED",
+    "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
     "ERROR_CODE_TENANT_AXIS_MISSING",
+    "OPERATOR_CAPABILITY",
     "request_authority_opt",
     "request_tenant_scope_opt",
     "require_authority",
+    "require_operator_authority",
     "require_tenant_scope",
 ]

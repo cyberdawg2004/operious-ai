@@ -92,6 +92,8 @@ ERROR_CODE_AUTHORITY_REQUIRED: Final[str] = "authority_required"
 #: from ``authority_required`` lets ops triage misconfigured
 #: providers separately from un-authed requests.
 ERROR_CODE_TENANT_AXIS_MISSING: Final[str] = "tenant_axis_missing"
+ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED: Final[str] = "operator_authority_required"
+OPERATOR_CAPABILITY: Final[str] = "operator"
 
 
 def request_authority_opt(request: Request) -> AuthorityContext | None:
@@ -179,6 +181,18 @@ def require_tenant_scope(request: Request) -> str:
     return str(authority.tenant_id)
 
 
+def require_operator_authority(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require an operator-level authority claim."""
+
+    authority = require_authority(request)
+    if OPERATOR_CAPABILITY not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED},
+        )
+    return authority
+
+
 def request_tenant_scope_opt(request: Request) -> str | None:
     """FastAPI dependency: return the request's tenant scope or
     ``None`` (unconstrained).
@@ -206,9 +220,12 @@ def request_tenant_scope_opt(request: Request) -> str | None:
 
 __all__ = [
     "ERROR_CODE_AUTHORITY_REQUIRED",
+    "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
     "ERROR_CODE_TENANT_AXIS_MISSING",
+    "OPERATOR_CAPABILITY",
     "request_authority_opt",
     "request_tenant_scope_opt",
     "require_authority",
+    "require_operator_authority",
     "require_tenant_scope",
 ]
