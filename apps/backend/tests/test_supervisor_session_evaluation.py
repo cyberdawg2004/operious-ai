@@ -364,7 +364,7 @@ async def test_transport_trigger_queues_only_after_session_close(
     monkeypatch.setattr(
         evaluate_session_supervisor,
         "apply_async",
-        lambda *, args, queue: queued.append(args[0]),
+        lambda *, args, queue, kwargs=None: queued.append(args[0]),
     )
 
     assert await agent_tasks._queue_supervisor_if_closed(

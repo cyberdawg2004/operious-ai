@@ -64,7 +64,7 @@ from app.session.persistence import (
 )
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.persistence import PostgresTenantConfigurationRepository
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import celery_app, enqueued_at_iso
 from app.workers.dead_letter_persistence import record_dead_letter_task
 from app.workers.queue_admission import (
     admit_supervisor_publish,
@@ -99,8 +99,10 @@ def execute_diagnostic_agent(
     self: Any,
     execution_id: str,
     tenant_id: str,
+    _enqueued_at: str | None = None,
 ) -> dict[str, object]:
     """Run one bounded DiagnosticAgent execution."""
+    del _enqueued_at
     previous_tenant = get_current_tenant()
     set_current_tenant(tenant_id)
     try:
@@ -623,6 +625,7 @@ async def _queue_supervisor_if_closed(
     await admit_supervisor_publish(tenant_id=tenant_id, dispatch_id=dispatch_id)
     cast(Any, evaluate_session_supervisor).apply_async(
         args=(session_id, tenant_id),
+        kwargs={"_enqueued_at": enqueued_at_iso()},
         queue=QUEUE_SUPERVISOR,
     )
     await record_worker_queue_age(

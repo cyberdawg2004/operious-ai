@@ -34,6 +34,10 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine, get_session_factory
+from app.hardening.observability import (
+    OperationalMetricsCollector,
+    initialize_metrics_collector,
+)
 from app.middleware.authority_context import (
     AUTHORITY_HEADERS,
     AuthorityContextMiddleware,
@@ -325,6 +329,12 @@ def create_app(
     app.state.quota_runtime = quota_runtime
     initialize_quota_runtime(quota_runtime)
     logger.info("quota_runtime_register_complete")
+
+    logger.info("metrics_collector_register_begin")
+    metrics_collector = OperationalMetricsCollector()
+    initialize_metrics_collector(metrics_collector)
+    app.state.metrics_collector = metrics_collector
+    logger.info("metrics_collector_register_complete")
 
     logger.info("exception_handlers_register_begin")
     _register_exception_handlers(app)

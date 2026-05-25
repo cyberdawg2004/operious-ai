@@ -21,7 +21,7 @@ from app.session.persistence import PostgresSessionPersistence
 from app.supervisor.evaluators.builtin import build_default_evaluator_registry
 from app.supervisor.persistence import PostgresSupervisorRepository
 from app.supervisor.runtime import SupervisorRuntime
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import celery_app, enqueued_at_iso
 from app.workers.queue_admission import (
     admit_qa_publish,
     clear_worker_queue_age,
@@ -45,8 +45,10 @@ def evaluate_session_supervisor(
     _self: Any,
     session_id: str,
     tenant_id: str,
+    _enqueued_at: str | None = None,
 ) -> dict[str, object]:
     """Evaluate one closed session through supervisor persistence."""
+    del _enqueued_at
 
     set_current_tenant(tenant_id)
     try:
@@ -108,6 +110,7 @@ async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
     await admit_qa_publish(tenant_id=tenant_id)
     cast(Any, score_supervisor_inspection).apply_async(
         args=(inspection_id, tenant_id),
+        kwargs={"_enqueued_at": enqueued_at_iso()},
         queue=QUEUE_QA,
     )
     await record_worker_queue_age(

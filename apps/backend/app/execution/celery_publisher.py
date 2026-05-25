@@ -15,6 +15,7 @@ from app.workers.agent_tasks import (
     execute_diagnostic_agent,
     execute_diagnostic_agent_runtime,
 )
+from app.workers.celery_app import enqueued_at_iso
 from app.queues import QUEUE_DIAGNOSTIC_NORMAL
 
 
@@ -90,6 +91,7 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                 kwargs={
                     "execution_id": execution_id,
                     "tenant_id": tenant_id,
+                    "_enqueued_at": enqueued_at_iso(),
                 },
                 queue=self._queue_name,
             )

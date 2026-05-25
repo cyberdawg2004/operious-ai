@@ -337,8 +337,14 @@ async def test_supervisor_task_queues_qa_after_inspection_commit(
     calls: list[tuple[str, str]] = []
 
     class _FakeTask:
-        def apply_async(self, *, args: tuple[str, str], queue: str) -> None:
-            del queue
+        def apply_async(
+            self,
+            *,
+            args: tuple[str, str],
+            queue: str,
+            kwargs: dict[str, str] | None = None,
+        ) -> None:
+            del queue, kwargs
             calls.append(args)
 
     monkeypatch.setattr(

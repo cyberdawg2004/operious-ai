@@ -38,8 +38,10 @@ def create_governance_escalation(
     governance_decision_id: str,
     tenant_id: str,
     session_id: str | None = None,
+    _enqueued_at: str | None = None,
 ) -> dict[str, object]:
     """Create a pending escalation for one governance DENY decision."""
+    del _enqueued_at
 
     set_current_tenant(tenant_id)
     try:

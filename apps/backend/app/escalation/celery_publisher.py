@@ -15,6 +15,7 @@ from app.workers.escalation_tasks import (
     create_governance_escalation,
     create_governance_escalation_runtime,
 )
+from app.workers.celery_app import enqueued_at_iso
 from app.queues import QUEUE_ESCALATION
 
 
@@ -78,6 +79,7 @@ class CeleryEscalationPublisher(EscalationPublisher):
                     "governance_decision_id": governance_decision_id,
                     "tenant_id": tenant_id,
                     "session_id": session_id,
+                    "_enqueued_at": enqueued_at_iso(),
                 },
                 queue=self._queue_name,
             )

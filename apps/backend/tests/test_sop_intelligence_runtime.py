@@ -309,13 +309,11 @@ async def test_qa_task_queues_sop_intelligence(
     )
 
     assert await qa_tasks._queue_sop_intelligence(_score())  # pyright: ignore[reportPrivateUsage]
-    assert calls == [
-        {
-            "args": (_SESSION_ID, _TENANT_ID, _INSPECTION_ID),
-            "queue": QUEUE_SOP_INTELLIGENCE,
-            "priority": 9,
-        }
-    ]
+    assert calls[0]["args"] == (_SESSION_ID, _TENANT_ID, _INSPECTION_ID)
+    assert calls[0]["queue"] == QUEUE_SOP_INTELLIGENCE
+    assert calls[0]["priority"] == 9
+    assert isinstance(calls[0]["kwargs"], dict)
+    assert "_enqueued_at" in calls[0]["kwargs"]
     calls.clear()
     assert not await qa_tasks._queue_sop_intelligence(  # pyright: ignore[reportPrivateUsage]
         _score(overall=0.5)

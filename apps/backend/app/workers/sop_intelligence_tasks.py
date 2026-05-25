@@ -42,8 +42,10 @@ def propose_sop_intelligence_change(
     session_id: str,
     tenant_id: str,
     inspection_id: str | None = None,
+    _enqueued_at: str | None = None,
 ) -> dict[str, object]:
     """Create a pending SOP approval proposal for one session."""
+    del _enqueued_at
 
     set_current_tenant(tenant_id)
     try:

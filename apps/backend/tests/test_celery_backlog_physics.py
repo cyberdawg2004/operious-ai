@@ -65,7 +65,7 @@ class _QueueDepthRedis:
         self.checked_queue = name
         self.checked_queues.append(name)
         if isinstance(self.depth, Mapping):
-            return self.depth[name]
+            return self.depth.get(name, 0)
         return self.depth
 
 
@@ -191,8 +191,8 @@ async def test_health_report_includes_queue_depth_statuses() -> None:
     redis = _QueueDepthRedis(
         {
             QUEUE_DIAGNOSTIC_NORMAL: 0,
-            QUEUE_ESCALATION: 41,
-            QUEUE_SUPERVISOR: 51,
+            QUEUE_ESCALATION: 600,
+            QUEUE_SUPERVISOR: 2500,
             QUEUE_QA: 1,
             QUEUE_SOP_INTELLIGENCE: 2,
         }
@@ -208,14 +208,14 @@ async def test_health_report_includes_queue_depth_statuses() -> None:
     assert response.status == "degraded"
     assert response.queues["diagnostic"].model_dump() == {
         "depth": 0,
-        "limit": 100,
+        "limit": 2000,
         "status": "ok",
         "queue_name": QUEUE_DIAGNOSTIC_NORMAL,
         "age_seconds": None,
         "error": None,
     }
-    assert response.queues["escalation"].status == "degraded"
-    assert response.queues["supervisor"].status == "saturated"
+    assert response.queues["escalation"].status == "warn"
+    assert response.queues["supervisor"].status == "critical"
 
 
 def test_task_results_expire_within_ttl() -> None:

@@ -16,6 +16,7 @@ from app.hardening.admission import (
     AdmissionGate,
     AdmissionOutcome,
 )
+from app.hardening.observability import get_metrics_collector
 from app.services.base import BaseService
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,11 @@ class AdmissionService(BaseService):
         )
         if decision.outcome is AdmissionOutcome.ADMIT:
             return decision
+        self._emit_admission_decision(
+            decision=decision,
+            tenant_id=tenant_id,
+            channel=channel,
+        )
         await self._persist_decision(
             decision=decision,
             tenant_id=tenant_id,
@@ -96,6 +102,34 @@ class AdmissionService(BaseService):
         except Exception:  # noqa: BLE001 - enforcement must not depend on audit.
             logger.exception(
                 "admission_decision_persist_failed",
+                extra={"decision_id": str(decision.decision_id)},
+            )
+
+    def _emit_admission_decision(
+        self,
+        *,
+        decision: AdmissionDecision,
+        tenant_id: str | None,
+        channel: str | None,
+    ) -> None:
+        try:
+            collector = get_metrics_collector()
+            if collector is None:
+                return
+            collector.emit_admission_decision(
+                tenant_id=tenant_id,
+                channel=channel,
+                decision=decision.outcome.value,
+                queue_name=decision.queue_name,
+                reason=(
+                    decision.reason.value
+                    if decision.reason is not None
+                    else None
+                ),
+            )
+        except Exception:  # noqa: BLE001 - metrics must not affect admission.
+            logger.warning(
+                "admission_metrics_emit_failed",
                 extra={"decision_id": str(decision.decision_id)},
             )
 

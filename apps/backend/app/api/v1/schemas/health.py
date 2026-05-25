@@ -22,7 +22,7 @@ from app.core.queue_admission import QueueDepthReport
 CheckName = Literal["health", "live", "ready"]
 ProbeStatus = Literal["ok", "degraded", "unavailable"]
 DependencyStatus = Literal["ok", "unavailable"]
-QueueStatus = Literal["ok", "degraded", "saturated", "unavailable"]
+QueueStatus = Literal["ok", "warn", "critical", "unknown"]
 AdmissionPressure = Literal["ok", "warn", "critical"]
 
 

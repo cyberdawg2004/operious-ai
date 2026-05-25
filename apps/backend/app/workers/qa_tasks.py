@@ -18,7 +18,7 @@ from app.qa.persistence import PostgresQAPersistence
 from app.qa.persistence.records import QAScoreRecord
 from app.qa.runtime import QAAgentRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import celery_app, enqueued_at_iso
 from app.workers.queue_admission import (
     admit_sop_intelligence_publish,
     clear_worker_queue_age,
@@ -45,8 +45,10 @@ def score_supervisor_inspection(
     _self: Any,
     inspection_id: str,
     tenant_id: str,
+    _enqueued_at: str | None = None,
 ) -> dict[str, object]:
     """Score one persisted supervisor inspection through QA."""
+    del _enqueued_at
 
     set_current_tenant(tenant_id)
     try:
@@ -110,6 +112,7 @@ async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
     await admit_sop_intelligence_publish(tenant_id=score.tenant_id)
     cast(Any, propose_sop_intelligence_change).apply_async(
         args=(str(session_id), score.tenant_id, score.inspection_id),
+        kwargs={"_enqueued_at": enqueued_at_iso()},
         queue=QUEUE_SOP_INTELLIGENCE,
         priority=9,
     )

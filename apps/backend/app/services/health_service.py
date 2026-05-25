@@ -53,6 +53,9 @@ ProbeStatus = Literal["ok", "degraded", "unavailable"]
 AdmissionPressure = Literal["ok", "warn", "critical"]
 
 logger = logging.getLogger(__name__)
+QUEUE_DEPTH_HEALTH_TIMEOUT_SECONDS = 2.0
+QUEUE_AGE_HEALTH_TIMEOUT_SECONDS = 0.25
+ADMISSION_PRESSURE_HEALTH_TIMEOUT_SECONDS = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,24 +258,31 @@ class HealthService(BaseService):
         """Return bounded Celery queue depth health reports."""
 
         limits = celery_queue_depth_limits(self._settings)
-        timeout = self._settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS
+        timeout = min(
+            QUEUE_DEPTH_HEALTH_TIMEOUT_SECONDS,
+            self._settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS,
+        )
         try:
             reports = await asyncio.wait_for(
                 collect_queue_depth_reports(
                     redis_client=self._redis_provider(),
                     limits=limits,
+                    operation_timeout=timeout,
                 ),
                 timeout=timeout,
             )
-            return await self._with_queue_ages(reports)
+            return await self._with_queue_ages(
+                reports,
+                timeout=QUEUE_AGE_HEALTH_TIMEOUT_SECONDS,
+            )
         except TimeoutError:
             return {
                 limit.logical_name: QueueDepthReport(
-                    depth=-1,
+                    depth=0,
                     limit=limit.max_depth,
-                    status="unavailable",
+                    status="unknown",
                     queue_name=limit.queue_name,
-                    error="TimeoutError",
+                    error="redis_unavailable",
                 )
                 for limit in limits
             }
@@ -280,18 +290,28 @@ class HealthService(BaseService):
     async def _with_queue_ages(
         self,
         reports: dict[str, QueueDepthReport],
+        *,
+        timeout: float,
     ) -> dict[str, QueueDepthReport]:
         gate = AdmissionGate(
             redis_client=cast(AdmissionRedisClient, self._redis_provider()),
             thresholds=admission_thresholds_from_settings(self._settings),
         )
         enriched: dict[str, QueueDepthReport] = {}
+        deadline = asyncio.get_running_loop().time() + timeout
+        per_queue_timeout = min(0.1, timeout / max(len(reports), 1))
         for name, report in reports.items():
-            age_seconds = (
-                await gate.queue_age_seconds(queue_name=report.queue_name)
-                if report.queue_name is not None
-                else None
-            )
+            age_seconds: float | None = None
+            if report.queue_name is not None and report.status != "unknown":
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining > 0:
+                    try:
+                        age_seconds = await asyncio.wait_for(
+                            gate.queue_age_seconds(queue_name=report.queue_name),
+                            timeout=min(per_queue_timeout, remaining),
+                        )
+                    except TimeoutError:
+                        age_seconds = None
             enriched[name] = QueueDepthReport(
                 depth=report.depth,
                 limit=report.limit,
@@ -307,7 +327,16 @@ class HealthService(BaseService):
             redis_client=cast(AdmissionRedisClient, self._redis_provider()),
             thresholds=admission_thresholds_from_settings(self._settings),
         )
-        redis_memory_pct = await gate.redis_memory_pct()
+        try:
+            redis_memory_pct = await asyncio.wait_for(
+                gate.redis_memory_pct(),
+                timeout=min(
+                    ADMISSION_PRESSURE_HEALTH_TIMEOUT_SECONDS,
+                    self._settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS,
+                ),
+            )
+        except TimeoutError:
+            redis_memory_pct = None
         pressure: AdmissionPressure = "ok"
         if redis_memory_pct is not None:
             if redis_memory_pct >= self._settings.ADMISSION_REDIS_MEMORY_PCT_REJECT:
