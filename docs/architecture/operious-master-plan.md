@@ -12,9 +12,10 @@ through production deployment closure with FORCE RLS, role separation,
 and tenant_id NOT NULL enforcement live on Fly.io/Neon, PR_T4
 per-tenant/provider quota enforcement through final local and production
 verification, and PR_T5 batch-safe ingestion through final local and
-production verification, and PR_T6 queue/processing metrics plus
+production verification, PR_T6 queue/processing metrics plus
 all-queue health observability through final local and production
-verification.
+verification, and PR_T7 Command Center queue status plus DLQ inspector
+through backend/frontend production verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -84,14 +85,23 @@ This document is the canonical handoff plan for the next Codex session.
   public `/api/v1/health` returns HTTP 200 `status: ok` with all 14
   `ALL_QUEUES` entries plus the existing `diagnostic` alias at depth 0
   and status `ok`.
+- PR_T7 final gate: CLOSED. Backend queue operations are deployed and
+  verified in production: `/api/v1/operations/queue-status` returns all
+  14 queues, `/api/v1/operations/dead-letters` returns tenant-scoped DLQ
+  task records, replay is operator-only and publishes through the replay
+  publisher boundary, and production Alembic head is
+  `0039_dlq_replay_cols (head)`. Frontend Command Center production
+  deployment is live at `https://app.operious.com` with Queue Status and
+  DLQ Inspector views verified in browser. Local frontend build completed
+  with 0 TypeScript errors.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors, 654 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0038_provider_quota (head)`. PR_T6 added no
-  migration; the current head remains the PR_T4 quota/circuit migration.
+- Alembic current: `0039_dlq_replay_cols (head)`. PR_T7 added DLQ queue
+  and replay tracking columns on `dead_letter_tasks`.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -107,7 +117,8 @@ This document is the canonical handoff plan for the next Codex session.
   Phases A-E are closed and pushed to `phase-2-2-stabilized`.
 - Current backend/demo gate: Phase 6-F evidence capture remains open,
   Wedge 3 UUID4 / Ambient Identity Fallback Elimination is closed, and
-  Wedge 4 Option A, PR_T4, PR_T5, and PR_T6 are closed in production.
+  Wedge 4 Option A, PR_T4, PR_T5, PR_T6, and PR_T7 are closed in
+  production.
   The demo
   artifact kit is complete and
   production seeding has produced real Anker pilot sessions. Wedge 0
@@ -2114,20 +2125,20 @@ before real Anker traffic or any second-client commitment.
 ### Current Honest Ratings
 
 - Architecture / substrate design: 9.4/10.
-- Audit, replay, governance foundation: 9.4/10.
-- Production deployment capacity: 9.3/10.
-- Demo readiness for controlled Anker call: 9.2/10.
-- Enterprise-grade readiness overall: 9.2/10.
+- Audit, replay, governance foundation: 9.5/10.
+- Production deployment capacity: 9.4/10.
+- Demo readiness for controlled Anker call: 9.3/10.
+- Enterprise-grade readiness overall: 9.3/10.
 
 These ratings are intentionally conservative. The architecture is strong,
-and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, PR_T4, PR_T5, and
-PR_T6 have
+and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, PR_T4, PR_T5, PR_T6,
+and PR_T7 have
 removed the known runtime identity, diagnostic schema-validation,
 request-body, escalation outbox, webhook replay/freshness, Celery
 result-retention, Redis queue-depth, worker privilege, DLQ traceback,
 ambient identity fallback, tenant-isolation enforcement, provider
 quota/circuit resilience, batch-ingestion idempotency blockers, and the
-missing queue/processing observability layer.
+missing queue/processing observability and DLQ operating surface layers.
 Wedge 4 materially
 raises the production posture: production uses `operious_app` with
 `bypassrls=False`, FORCE RLS is active on all 38 tenant-scoped tables,
@@ -2141,10 +2152,12 @@ per-item ACCEPTED/DUPLICATE/REJECTED reporting, and post-insert dispatch
 through the service layer. PR_T6 adds structured operational metrics,
 Celery signal instrumentation, enqueue timestamps, scheduled queue-depth
 snapshots, and health coverage for all 14 named queues without placing
-metrics on governance or LLM hot paths. The remaining work is operational
-proof at scale: queue-age/load tests, autoscaling contracts, PR_T7-PR_T13,
-and Phase 6-F browser evidence plus the session lifecycle/SOP intelligence
-follow-ups before Anker go-live.
+metrics on governance or LLM hot paths. PR_T7 adds production queue
+status and tenant-scoped dead-letter inspection/replay to Command Center,
+with replay constrained by operator authority and the publisher boundary.
+The remaining work is operational proof at scale: queue-age/load tests,
+autoscaling contracts, PR_T8-PR_T13, and Phase 6-F evidence plus the
+session lifecycle/SOP intelligence follow-ups before Anker go-live.
 
 ### Rating Targets Before Pilot Launch
 
@@ -2486,13 +2499,15 @@ Acceptance criteria:
 
 ### Post-Wedge 9+ Throughput and Capacity Program
 
-Status: In Progress; PR_T1-PR_T6 closed | Branch: phase-2-2-stabilized
+Status: In Progress; PR_T1-PR_T7 closed | Branch: phase-2-2-stabilized
 Baseline: 2,403 passing tests, 0 pyright errors, FORCE RLS active.
-Current migration head after PR_T6:
-`0038_provider_quota`.
+Current migration head after PR_T7:
+`0039_dlq_replay_cols`.
 After `0038`, the current codebase treats `admission_records`,
 `provider_quota_records`, and `provider_circuit_states` as tenant-scoped
 RLS tables, bringing the current forced-RLS table set to 41.
+After `0039`, `dead_letter_tasks` carries queue and replay tracking
+columns for Command Center DLQ inspection and replay.
 
 This program hardens Operious AI for enterprise pilot load before the
 Anker Innovations engagement. It runs after Wedges 0-4 and before real
@@ -2832,7 +2847,7 @@ Acceptance criteria:
 
 #### PR_T7 - Command Center Queue and DLQ View
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED - 2026-05-26
 
 Scope:
 Add `GET /api/v1/operations/queue-status` for depth and oldest age per
@@ -2844,15 +2859,27 @@ views.
 
 Deliverables:
 
-- Backend: `queue_operations_router.py`.
-- Frontend: QueueStatusView and DLQInspector components.
-- `apps/backend/tests/test_queue_operations_router.py`
+- [x] Backend: `queue_operations_router.py` and
+  `queue_operations_service.py`.
+- [x] Backend: `0039_dlq_replay_cols` migration adding DLQ queue and
+  replay tracking columns.
+- [x] Frontend: Queue Status and DLQ Inspector views in Command Center.
+- [x] `apps/backend/tests/test_queue_operations_router.py`
 
 Acceptance criteria:
 
-- Operator sees DLQ records across tenants.
-- Tenant user cannot see other tenants' DLQ records; RLS enforced.
-- Replay marks DLQ record as replayed and republishes to correct queue.
+- [x] Queue status returns all 14 named queues with depth, status, and
+  oldest age; Redis failure degrades to `unknown`, not HTTP 500.
+- [x] DLQ list returns tenant-scoped records only; cross-tenant records
+  are hidden by RLS.
+- [x] Replay requires operator authority, returns 404 for wrong tenant,
+  returns 409 if already replayed, marks the DLQ row replayed, and
+  republishes to the correct queue through the replay publisher boundary.
+- [x] Command Center shows Queue Status and DLQ Inspector views with
+  filtering, pagination, expandable error details, confirmation before
+  replay, and production browser verification.
+- [x] Production backend endpoints and `https://app.operious.com` are
+  verified; Alembic production head is `0039_dlq_replay_cols (head)`.
 
 #### PR_T8 - Alerting Wiring
 
@@ -3021,6 +3048,13 @@ The 9+ final gate cannot close until:
   circuit overrides are operator-only, differentiated retry budgets are
   active, Alembic production head is `0038_provider_quota (head)`, and
   quota/circuit state tables have forced RLS.
+- PR_T5 - Batch-Safe Ingestion is closed in production.
+- PR_T6 - Queue and Processing Metrics is closed in production.
+- PR_T7 - Command Center Queue and DLQ View is closed in production:
+  queue-status and dead-letter operations endpoints are live, DLQ replay
+  is operator-only and publisher-bound, Alembic production head is
+  `0039_dlq_replay_cols (head)`, and Command Center Queue Status plus
+  DLQ Inspector are verified at `https://app.operious.com`.
 - Vector retrieval SQL-native:
   push `LIMIT`, tenant filter, and ranking to Postgres instead of
   Python-side slicing on the full knowledge corpus. Low priority until
@@ -3056,10 +3090,10 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: PR_T6 - Queue and Processing Metrics is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS, PR_T4 - Per-Tenant and Per-Provider Quota Enforcement, and PR_T5 - Batch-Safe Ingestion are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
-Current verified backend baseline after PR_T6 closure: 2,403 passed, 2 skipped as `operious_app_test`; smoke tests 4/4 green when `TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test` is set; Pyright 0 errors and 654 warnings across apps/backend/app; metrics/identity/queue focused gate 39 passed; metrics/backlog focused gate 24 passed. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is `0038_provider_quota (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, PR_T6 production image is `deployment-01KSFMXCZDQTQRPN57FT9SP2HH`, both web machines are version 75 with health checks passing, and public `/api/v1/health` returned HTTP 200 `status: ok` with all 14 named queues at depth 0 and status `ok` plus the existing `diagnostic` alias. Phase 6-F focused artifact checks: 6 passed. Active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: PR_T7 - Command Center Queue and DLQ View is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS, PR_T4 - Per-Tenant and Per-Provider Quota Enforcement, PR_T5 - Batch-Safe Ingestion, and PR_T6 - Queue and Processing Metrics are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
+Current verified baseline after PR_T7 closure: PR_T6 backend baseline was 2,403 passed, 2 skipped as `operious_app_test`; PR_T7 backend focused gate and smoke gate were accepted clean, backend endpoints are deployed, and Command Center frontend build completed with 0 TypeScript errors. Production Fly.io/Neon verification: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is `0039_dlq_replay_cols (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, `/api/v1/operations/queue-status` returns all 14 named queues, and `/api/v1/operations/dead-letters` returns tenant-scoped records. Command Center production verification: `https://app.operious.com` serves the deployed Queue Status and DLQ Inspector views behind Auth0. Phase 6-F focused artifact checks: 6 passed. Active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 654 warnings; warnings must not grow.
-Current production Alembic head: `0038_provider_quota (head)`.
+Current production Alembic head: `0039_dlq_replay_cols (head)`.
 
 Completed before the next phase:
 - Phase 6-A through Phase 6-E are closed.
@@ -3089,6 +3123,7 @@ Completed before the next phase:
   production.
 - PR_T5 Batch-Safe Ingestion is closed in production.
 - PR_T6 Queue and Processing Metrics is closed in production.
+- PR_T7 Command Center Queue and DLQ View is closed in production.
 - Wedge 0 Runtime Identity Collision Elimination is live-verified and
   closed.
 - Wedge 1 Phase 0 emergency DiagnosticLLMOutput schema-validation
@@ -3263,8 +3298,8 @@ TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433
 TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend -q
 venv/bin/pyright apps/backend/app
 
-Wedge 4, PR_T4, PR_T5, and PR_T6 are fully closed. The last fully closed
-throughput PR is PR_T6 Queue and Processing Metrics.
+Wedge 4, PR_T4, PR_T5, PR_T6, and PR_T7 are fully closed. The last fully
+closed throughput PR is PR_T7 Command Center Queue and DLQ View.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -3278,7 +3313,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: PR_T6 - Queue and Processing Metrics is CLOSED in production.
+Current phase: PR_T7 - Command Center Queue and DLQ View is CLOSED in production.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
@@ -3308,6 +3343,11 @@ with `OperationalMetricsCollector`, Celery task signal instrumentation,
 enqueue timestamps on publisher kwargs, scheduled queue-depth snapshots,
 bounded/parallel health queue-depth probes, and public `/api/v1/health`
 coverage for all 14 named queues.
+PR_T7 is closed and deployed with `/api/v1/operations/queue-status`,
+tenant-scoped `/api/v1/operations/dead-letters`, operator-only DLQ replay
+through the replay publisher boundary, Alembic production head
+`0039_dlq_replay_cols (head)`, and Command Center Queue Status plus DLQ
+Inspector views live at `https://app.operious.com`.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -3352,6 +3392,7 @@ Current source of truth:
 - PR_T4 Per-Tenant and Per-Provider Quota Enforcement is closed.
 - PR_T5 Batch-Safe Ingestion is closed.
 - PR_T6 Queue and Processing Metrics is closed.
+- PR_T7 Command Center Queue and DLQ View is closed.
 
 Current verified baseline:
 - Wedge 0 backend verification: 2,224 passed, 2 skipped,
@@ -3392,13 +3433,19 @@ Current verified baseline:
   `0038_provider_quota (head)`; production deploy image
   `deployment-01KSFMXCZDQTQRPN57FT9SP2HH`; production health
   `status: ok` with all 14 named queues at depth 0 and status `ok`.
+- PR_T7 final gate: backend endpoints are production-verified;
+  `/api/v1/operations/queue-status` returns all 14 queues,
+  `/api/v1/operations/dead-letters` returns tenant-scoped records,
+  replay is operator-only and publisher-bound, local frontend build has
+  0 TypeScript errors, and `https://app.operious.com` is browser-verified
+  with Queue Status and DLQ Inspector views.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
 - Smoke tests: 4/4 green.
 - Pyright: 0 errors across the backend surface.
 - Pyright warnings: 654; warnings must not grow phase over phase.
-- Current production Alembic head: `0038_provider_quota (head)`.
+- Current production Alembic head: `0039_dlq_replay_cols (head)`.
 - Phases complete: Phase 1 (Executional Sovereignty, 1-A through 1-G)
   and Phase 2 (Canonical Operational Event Fabric, 2-A through 2-J).
 - Phase 2.5-A complete: Tenant Configuration Surface -
@@ -3582,6 +3629,12 @@ Current Command Center 2 status:
   `0038_provider_quota (head)`; production deploy image
   `deployment-01KSFMXCZDQTQRPN57FT9SP2HH`; production health
   `status: ok` with all 14 named queues at depth 0 and status `ok`.
+- PR_T7 status:
+  CLOSED in production. Backend operations endpoints are live and
+  verified, production Alembic head is `0039_dlq_replay_cols (head)`,
+  DLQ replay is operator-only and publisher-bound, Command Center
+  frontend build has 0 TypeScript errors, and `https://app.operious.com`
+  is browser-verified with Queue Status and DLQ Inspector.
 
 Queued next:
 - Phase 6-F Command Center evidence capture.

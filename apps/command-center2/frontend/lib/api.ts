@@ -277,6 +277,47 @@ export type DeadLetterExecution = {
   metadata: Record<string, unknown>;
 };
 
+export type QueueDepthItem = {
+  queue_name: string;
+  depth: number;
+  oldest_age_seconds: number | null;
+  status: "ok" | "warn" | "critical" | "unknown";
+  error: string | null;
+};
+
+export type QueueStatusResponse = {
+  queues: Record<string, QueueDepthItem>;
+  snapshot_at: string;
+};
+
+export type DeadLetterItem = {
+  id: string;
+  tenant_id: string;
+  task_name: string;
+  queue: string | null;
+  error_class: string;
+  error_message: string;
+  attempt_count: number;
+  task_payload: Record<string, unknown>;
+  created_at: string;
+  replayed: boolean;
+  replayed_at: string | null;
+  replayed_by: string | null;
+};
+
+export type DeadLetterListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  items: DeadLetterItem[];
+};
+
+export type DeadLetterReplayResponse = {
+  id: string;
+  status: "replayed";
+  replayed_at: string;
+};
+
 export type TenantKnowledgeCreateRequest = {
   title: string;
   content: string;
@@ -666,6 +707,26 @@ export function listDeadLetterExecutions() {
   return apiRequest<ApiPage<DeadLetterExecution>>("/observability/dlq", {
     query: { limit: 100, offset: 0 },
   });
+}
+
+export function getQueueStatus() {
+  return apiRequest<QueueStatusResponse>("/operations/queue-status");
+}
+
+export function listDeadLetters(query: {
+  queue?: string | null;
+  error_class?: string | null;
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<DeadLetterListResponse>("/operations/dead-letters", { query });
+}
+
+export function replayDeadLetter(id: string) {
+  return apiRequest<DeadLetterReplayResponse>(
+    `/operations/dead-letters/${encodeURIComponent(id)}/replay`,
+    { method: "POST" }
+  );
 }
 
 export function formatApiError(error: unknown): string {

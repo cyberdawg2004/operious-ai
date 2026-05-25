@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { OperationsQueue } from "@/components/operations-queue";
+import { QueueStatusView } from "@/components/queue-status-view";
+import { DlqInspectorView } from "@/components/dlq-inspector-view";
 import { TraceInspector, type TraceLookup } from "@/components/trace-inspector";
 import { CognitionHub } from "@/components/cognition-hub";
 import { KnowledgeBase } from "@/components/knowledge-base";
@@ -35,6 +37,16 @@ const viewMeta: Record<string, { eyebrow: string; title: string; description: st
     eyebrow: "Operations",
     title: "Operations Queue",
     description: "Live execution sessions, lifecycle state, latency, and governance outcomes.",
+  },
+  "queue-status": {
+    eyebrow: "Operations",
+    title: "Queue Status",
+    description: "Global queue depth, oldest age, and health across all worker queues.",
+  },
+  "dlq-inspector": {
+    eyebrow: "Operations",
+    title: "DLQ Inspector",
+    description: "Tenant-scoped dead-letter task records with replay controls.",
   },
   trace: {
     eyebrow: "Observability",
@@ -138,6 +150,10 @@ export default function Home() {
     switch (activeItem) {
       case "operations":
         return <OperationsQueue onOpenTrace={openTrace} />;
+      case "queue-status":
+        return <QueueStatusView />;
+      case "dlq-inspector":
+        return <DlqInspectorView />;
       case "trace":
         return (
           <TraceInspector

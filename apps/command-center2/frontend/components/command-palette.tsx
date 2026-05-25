@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
+  Activity,
+  AlertTriangle,
   Search,
   LayoutList,
   Network,
@@ -46,6 +48,18 @@ const categories: CommandCategory[] = [
         icon: LayoutList,
         label: "Open Operations Queue",
         shortcut: ["G", "O"],
+      },
+      {
+        id: "open-queue-status",
+        icon: Activity,
+        label: "Open Queue Status",
+        shortcut: ["G", "Q"],
+      },
+      {
+        id: "open-dlq-inspector",
+        icon: AlertTriangle,
+        label: "Open DLQ Inspector",
+        shortcut: ["G", "D"],
       },
       {
         id: "open-trace",
@@ -165,6 +179,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
   function executeItem(item: CommandItem) {
     const routeMap: Record<string, string> = {
       "open-operations": "operations",
+      "open-queue-status": "queue-status",
+      "open-dlq-inspector": "dlq-inspector",
       "open-trace": "trace",
       "nav-cognition": "cognition",
       "nav-knowledge": "knowledge",

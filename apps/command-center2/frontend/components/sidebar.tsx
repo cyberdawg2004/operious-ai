@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
 import { useTheme } from "./theme-provider";
 import {
+  Activity,
+  AlertTriangle,
   Building2,
   ChevronDown,
   LayoutList,
@@ -32,6 +34,8 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: "operations", label: "Operations Queue", icon: LayoutList },
+  { id: "queue-status", label: "Queue Status", icon: Activity },
+  { id: "dlq-inspector", label: "DLQ Inspector", icon: AlertTriangle },
   { id: "trace", label: "Trace Inspector", icon: Network },
   { id: "cognition", label: "Cognition Hub", icon: Brain },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen },
