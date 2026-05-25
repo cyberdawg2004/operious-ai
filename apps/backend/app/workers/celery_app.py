@@ -16,6 +16,11 @@ from kombu import Queue
 
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
+from app.db.session import get_owner_session_factory
+from app.hardening.observability.alert_evaluator import (
+    get_alert_evaluator,
+    initialize_alert_evaluator,
+)
 from app.hardening.observability.metrics_collector import (
     OperationalMetricsCollector,
     get_metrics_collector,
@@ -30,6 +35,7 @@ from app.queues import (
     QUEUE_SUPERVISOR,
     QUEUE_WEBHOOK_MAINTENANCE,
 )
+from app.services.alert_evaluator_factory import create_alert_evaluator
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -76,6 +82,9 @@ celery_app.conf.update(
         "cleanup_expired_webhook_nonces": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
+        "operious.workers.evaluate_alert_conditions": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
     },
     task_acks_late=True,
     task_ignore_result=True,
@@ -105,6 +114,11 @@ celery_app.conf.update(
             "schedule": 60.0,
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
+        "alert-condition-evaluation": {
+            "task": "operious.workers.evaluate_alert_conditions",
+            "schedule": 60.0,
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
     },
 )
 
@@ -124,6 +138,23 @@ def _initialize_worker_metrics_collector() -> None:
 
 
 _initialize_worker_metrics_collector()
+
+
+def _initialize_worker_alert_evaluator() -> None:
+    try:
+        if get_alert_evaluator() is None:
+            initialize_alert_evaluator(create_alert_evaluator())
+    except Exception as exc:  # noqa: BLE001 - worker alerts are best-effort.
+        try:
+            logger.warning(
+                "worker_alert_evaluator_init_failed",
+                extra={"error": exc.__class__.__name__},
+            )
+        except Exception:
+            return
+
+
+_initialize_worker_alert_evaluator()
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -147,6 +178,42 @@ def emit_queue_depth_snapshot() -> None:
         _log_signal_failure(
             "queue_depth_snapshot_failed",
             error_class=exc.__class__.__name__,
+        )
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="operious.workers.evaluate_alert_conditions",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
+    ignore_result=True,
+)
+def evaluate_alert_conditions() -> None:
+    """Evaluate all alert conditions without crashing maintenance workers."""
+
+    evaluator = get_alert_evaluator()
+    if evaluator is None:
+        logger.warning("alert_evaluator_not_initialized")
+        return
+
+    async def _run() -> None:
+        # PRIVILEGED_PATH: alert evaluation reads cross-tenant maintenance state.
+        async with get_owner_session_factory()() as session:
+            fired = await evaluator.evaluate_all(session)
+            for result in fired:
+                await evaluator.fire_alert(result, session)
+            logger.info(
+                "alert_evaluation_complete",
+                extra={
+                    "conditions_evaluated": len(evaluator.CONDITIONS),
+                    "alerts_fired": len(fired),
+                },
+            )
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:  # noqa: BLE001 - alert task is best-effort.
+        logger.warning(
+            "alert_evaluation_failed",
+            extra={"error": str(exc)},
         )
 
 

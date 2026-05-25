@@ -36,6 +36,7 @@ from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine, get_session_factory
 from app.hardening.observability import (
     OperationalMetricsCollector,
+    initialize_alert_evaluator,
     initialize_metrics_collector,
 )
 from app.middleware.authority_context import (
@@ -49,6 +50,7 @@ from app.middleware.trusted_ingress import (
     TrustedIngressMiddleware,
 )
 from app.observability.context import get_request_id
+from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.survivability import (
     PROBLEM_DETAILS_MEDIA_TYPE,
     ProblemDetails,
@@ -335,6 +337,12 @@ def create_app(
     initialize_metrics_collector(metrics_collector)
     app.state.metrics_collector = metrics_collector
     logger.info("metrics_collector_register_complete")
+
+    logger.info("alert_evaluator_register_begin")
+    alert_evaluator = create_alert_evaluator()
+    initialize_alert_evaluator(alert_evaluator)
+    app.state.alert_evaluator = alert_evaluator
+    logger.info("alert_evaluator_register_complete")
 
     logger.info("exception_handlers_register_begin")
     _register_exception_handlers(app)
