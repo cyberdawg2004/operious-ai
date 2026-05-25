@@ -2438,83 +2438,437 @@ Acceptance criteria:
 
 ### Post-Wedge 9+ Throughput and Capacity Program
 
-These land after Wedges 0-4 and before real enterprise load.
+Status: In Progress | Branch: phase-2-2-stabilized
+Baseline: 2,305 passing tests, 0 pyright errors, FORCE RLS active.
 
-- Worker pool and autoscaling:
-  - Run separate Fly worker process groups for diagnostic, escalation,
-    supervisor, SOP intelligence, webhook nonce cleanup, and indexing.
-  - Set explicit Celery concurrency per worker group.
-  - Use non-shared CPU and memory profiles sized for provider latency and
-    database connection limits.
-  - Autoscale worker counts by queue depth and queue age, not only CPU.
-- Separate queues by task type, channel, and priority:
-  - `ingress.email`, `ingress.whatsapp`, `ingress.shopify`,
-    `ingress.voice`.
-  - `diagnostic.high`, `diagnostic.normal`, `diagnostic.retry`.
-  - `escalation`, `supervisor`, `qa`, `sop_intelligence`,
-    `knowledge_indexing`, `webhook_maintenance`, and `dead_letter`.
-  - Route live tickets ahead of retries and maintenance jobs.
-- Backpressure and admission control:
-  - Reject, defer, or shed work when queue age, queue depth, tenant quota,
-    provider quota, or DB pool pressure exceeds configured thresholds.
-  - Return explicit 429/503 admission responses for channel webhooks when
-    the platform cannot safely accept more work.
-  - Persist admission decisions and replay them as operational events.
-- Batch-safe ingestion:
-  - Add bulk ingress APIs or batch worker paths that create idempotent
-    boundary records without N+1 database round trips.
-  - Use tenant/channel/source replay keys for every item in a batch.
-  - Add burst tests for 100, 1,000, and 10,000 tickets with duplicate and
-    replay cases mixed in.
-- Provider quotas and model budget controls:
-  - Per-tenant/provider/model request-per-minute and token-per-minute
-    budgets.
-  - Retry budgets that distinguish provider 429/5xx, parsing failure,
-    semantic rejection, governance denial, and persistence failures.
-  - Circuit breaker dashboards and operator overrides.
-- Queue and failure observability:
-  - Metrics: queue depth, oldest message age, publish latency, claim
-    latency, processing duration, success rate, retry rate, dead-letter
-    rate, provider latency, provider error class, DB pool wait, and
-    tenant admission denials.
-  - Command Center operational view for queue age and DLQ inspection.
-  - Alerts: queue age SLO breach, dead-letter spike, provider circuit
-    open, Redis memory pressure, DB pool exhaustion, and replay mismatch.
-- Load and chaos testing:
-  - 100-ticket smoke burst: must complete without dead letters.
-  - 1,000-ticket pilot burst: must respect tenant quotas and finish
-    within published SLOs.
-  - 10,000-ticket stress burst: may use controlled backpressure, but must
-    not lose data, cross tenants, corrupt replay, or silently drop
-    governance decisions.
-  - Chaos cases: Redis restart, provider 429/503, Fly worker restart,
-    DB reconnect, duplicate webhooks, stale signatures, and partial
-    batch failure.
-- Runbooks and rollback:
-  - Queue backlog runbook.
-  - Provider outage runbook.
-  - Tenant isolation incident runbook.
-  - DLQ replay/recover runbook.
-  - Fly deploy rollback runbook.
-  - Neon migration rollback/forward-fix runbook.
-- Product/demo hardening:
-  - Demo data reset/seed/replay script with a single command and dry-run
-    preview.
-  - Pre-call proof checklist with session IDs, timelines, governance
-    decisions, cognition audit records, and screenshots/recording notes.
-  - Public demo tenant separated from production pilot tenant.
-- Security and compliance hardening:
-  - Tenant-scoped audit export with immutable hashes.
-  - Auth0 role/permission mapping into tenant/principal context.
-  - Secret rotation drills for channel credentials and platform provider
-    keys.
-  - Webhook signing conformance tests for every channel adapter.
-- Data and retrieval hardening:
-  - SQL-native vector retrieval with tenant filter, ranking, and limit in
-    Postgres.
-  - Index freshness and stale-document indicators.
-  - Knowledge ingestion queue separation and retry/DLQ discipline.
-  - SOP provenance and approval status surfaced in diagnostic citations.
+This program hardens Operious AI for enterprise pilot load before the
+Anker Innovations engagement. It runs after Wedges 0-4 and before real
+production traffic. No item in this program is optional. Every PR must
+leave all quality gates green.
+
+Quality floor - non-negotiable:
+
+- Architecture / substrate design: 9.0+ / 10.
+- Audit / replay / governance: 9.0+ / 10.
+- Production deployment capacity: 9.0+ / 10.
+- Production readiness: 9.0+ / 10.
+- Enterprise-grade overall: 9.0+ / 10.
+- Test coverage: >= 2,305 passing, 0 failures.
+- Type safety: 0 pyright errors.
+- Smoke tests: 4/4 green.
+- Constitutional violations: 0.
+
+#### Throughput Constitutional Rules
+
+1. Router -> service -> runtime layering is mandatory. Routers never
+   directly access repositories, runtimes, or Celery primitives.
+2. DispatchService has zero Celery imports and zero `.delay()` calls.
+   Celery isolation lives only in ExecutionPublisher and worker tasks.
+3. Tenant isolation is row-level enforced. Every DB read passes
+   `expected_tenant_id`. Cross-tenant access returns 404, not 403.
+4. `create_app()` is the only composition root. No middleware
+   registration outside it.
+5. Governance fail-closed. Empty policy chains return DENY, not ALLOW.
+6. AuthorityContext uses XOR rule: exactly one authority source per
+   request. Authorization header XOR X-Tenant-ID XOR anonymous.
+7. SessionTimelineEvent is append-only. No `.replace()`, mutation, or
+   `dataclasses.replace()` on events.
+8. UUID5 deterministic identity throughout. No `uuid4()` in lineage
+   paths. All `uuid4()` calls in active app paths must carry an
+   AST-enforced approved annotation or they fail CI.
+9. The `_deprecated` directory is forbidden. AST scans enforce this on
+   every backend change.
+10. Substrate isolation: governance, identity, events, hardening,
+    coordination, boundary, session, supervisor,
+    organizational_intelligence, and arbitration are isolated. No sibling
+    imports.
+11. LLM proposes. ToolInvoker enforces. Governance cannot be overridden
+    by LLM output under any condition.
+12. Channel adapters never import governance, session, execution, or
+    coordination substrates.
+13. Tenant credentials are fetched at runtime. Never hardcoded. Never
+    returned via API response.
+14. `set_current_tenant()` must be called before any DB operation in
+    Celery workers. It must be called inside `_run_async()` helpers, not
+    only the outer wrapper, because ContextVar does not cross thread
+    boundaries.
+15. Cross-tenant maintenance tasks use `get_owner_session_factory()` with
+    a `PRIVILEGED_PATH: cross-tenant maintenance` comment on the call
+    site.
+16. All queue names are constants defined in a single module. No bare
+    string queue names anywhere in the codebase.
+17. AdmissionGate is a service-layer component. Channel routers call a
+    service method. Routers never instantiate or call the gate directly.
+18. Quota enforcement happens at task entry before any LLM call. The LLM
+    is never invoked when quota is exceeded.
+19. Burst tests run against local Redis, never against Upstash, to avoid
+    uncontrolled cost.
+20. `PRIVILEGED_PATH` marker must appear in every file that calls
+    `get_owner_session_factory()`. The identity invariant test enforces
+    this.
+
+#### PR_T1 - Queue Topology and Celery Routing
+
+STATUS: [x] Complete - 2026-05-25
+
+Scope:
+Define all named queues as constants in a single module. Update all task
+declarations and all publishers to reference constants. Add priority
+routing so `diagnostic.high` processes before `diagnostic.normal` before
+`diagnostic.retry`. Eliminate all bare string queue names from the
+codebase.
+
+Queues to define:
+
+- `ingress.email`
+- `ingress.whatsapp`
+- `ingress.shopify`
+- `ingress.voice`
+- `diagnostic.high`
+- `diagnostic.normal`
+- `diagnostic.retry`
+- `escalation`
+- `supervisor`
+- `qa`
+- `sop_intelligence`
+- `knowledge_indexing`
+- `webhook_maintenance`
+- `dead_letter`
+
+Deliverables:
+
+- `apps/backend/app/worker/queues.py` or the active worker package
+  equivalent: all queue name constants.
+- `apps/backend/app/worker/celery_app.py` or active worker equivalent:
+  `task_queues` declaration.
+- Active Celery publisher files updated to use constants.
+- All task files updated to use constants.
+- `apps/backend/tests/test_queue_topology.py`: routing verification
+  tests.
+
+Acceptance criteria:
+
+- Pytest >= 2,305 passing, 0 failures.
+- Pyright 0 errors.
+- 4/4 smoke tests green.
+- No bare string `queue=` declarations in the worker package or boundary
+  substrate.
+- No routing to the default `celery` queue.
+- All constitutional rules satisfied.
+
+#### PR_T2 - Fly Worker Process Groups
+
+STATUS: [x] Complete - 2026-05-25
+
+Scope:
+Update `fly.toml` to define separate `[processes]` groups: `web`,
+`worker_diagnostic`, `worker_escalation`, `worker_supervisor`,
+`worker_sop`, and `worker_maintenance`. Each group consumes only its
+declared queues. Explicit Celery concurrency per group. CPU/memory
+profiles sized for provider latency and DB connection limits.
+
+Process groups:
+
+- `web`: FastAPI ASGI server.
+- `worker_diagnostic`: `diagnostic.high`, `diagnostic.normal`,
+  `diagnostic.retry`; concurrency 12; shared-cpu-2x; 512MB.
+- `worker_escalation`: `escalation`; concurrency 4; shared-cpu-1x;
+  256MB.
+- `worker_supervisor`: `supervisor`, `qa`; concurrency 4;
+  shared-cpu-1x; 256MB.
+- `worker_sop`: `sop_intelligence`, `knowledge_indexing`;
+  concurrency 4; shared-cpu-1x; 256MB.
+- `worker_maintenance`: `webhook_maintenance`, `dead_letter`;
+  concurrency 2; shared-cpu-1x; 256MB.
+
+Deliverables:
+
+- `fly.toml`: process group definitions.
+- `docs/runbooks/fly-process-groups.md`: group purpose and sizing notes.
+
+Acceptance criteria:
+
+- `fly deploy` succeeds.
+- `fly scale show` returns all process groups.
+- 4/4 smoke tests pass post-deploy.
+- Each group declared concurrency matches `celery -Q` flags.
+
+#### PR_T3 - Queue Depth Admission Control
+
+STATUS: [ ] Not started
+
+Scope:
+Implement AdmissionGate service. Evaluates queue depth, queue age, DB
+pool wait, and Redis memory pressure. Returns ADMIT / DEFER / REJECT.
+Channel webhook handlers call the gate via a service method. Admission
+decisions are persisted as OperationalEvent records. DEFER returns 503
+plus `Retry-After`. REJECT returns 429. Both responses include
+`X-Operious-Admission-Decision-Id`.
+
+Thresholds, env-configurable:
+
+- `ADMISSION_QUEUE_DEPTH_WARN=500`
+- `ADMISSION_QUEUE_DEPTH_REJECT=2000`
+- `ADMISSION_QUEUE_AGE_WARN_SECONDS=120`
+- `ADMISSION_QUEUE_AGE_REJECT_SECONDS=600`
+- `ADMISSION_REDIS_MEMORY_PCT_WARN=70`
+- `ADMISSION_REDIS_MEMORY_PCT_REJECT=90`
+
+Deliverables:
+
+- `apps/backend/app/hardening/admission/gate.py`
+- `apps/backend/app/hardening/admission/models.py`
+- `apps/backend/app/services/admission_service.py`
+- Channel webhook handlers updated to call admission service.
+- `apps/backend/tests/test_admission_gate.py`
+
+Constitutional note:
+Signature validation runs before admission check. A valid but rejected
+webhook returns 429. An invalid signature returns 401 regardless of
+admission state.
+
+Acceptance criteria:
+
+- Pytest >= 2,305 plus new tests passing.
+- Pyright 0 errors.
+- 4/4 smoke tests green.
+- Queue depth above REJECT threshold makes ingress webhook return 429.
+- Admission decision is persisted as OperationalEvent in DB.
+
+#### PR_T4 - Per-Tenant and Per-Provider Quota Enforcement
+
+STATUS: [ ] Not started
+
+Scope:
+TenantQuotaRuntime with Redis sliding-window counters per
+tenant/provider/model. Operator circuit breaker override with force-open
+and force-close. Diagnostic Agent task checks quota before LLM call.
+Quota exceeded raises `ProviderQuotaExceededError`, then retries on
+`diagnostic.retry` with backoff. Separate retry budgets per error class.
+Add `provider_quota_records` for quota state snapshots and overrides.
+
+Retry budget error classes:
+
+- `PROVIDER_429`
+- `PROVIDER_5XX`
+- `PARSING_FAILURE`
+- `SEMANTIC_REJECTION`
+- `GOVERNANCE_DENY`
+- `PERSISTENCE_FAILURE`
+
+Deliverables:
+
+- `apps/backend/app/agents/runtime/quota_runtime.py`
+- `apps/backend/app/agents/runtime/circuit_runtime.py`
+- `migrations/versions/0036_provider_quota_records.py`
+- `apps/backend/tests/test_quota_runtime.py`
+
+Acceptance criteria:
+
+- Quota exhaustion for tenant A does not affect tenant B.
+- Force-close circuit makes all requests to that provider fail
+  immediately.
+- `PROVIDER_429` retries N times on `diagnostic.retry`, then DLQ.
+- Migration applies cleanly.
+
+#### PR_T5 - Batch-Safe Ingestion
+
+STATUS: [ ] Not started
+
+Scope:
+Add `POST /api/v1/ingest/batch` endpoint. The request is an array of
+boundary records. Each item gets UUID5 boundary ID from
+tenant_id/channel/source_id/external_message_id. Use a single
+`INSERT ... ON CONFLICT DO NOTHING`; no N+1. Per-item status:
+ACCEPTED / DUPLICATE / REJECTED. Accepted items publish to `ingress.*`
+queues.
+
+Deliverables:
+
+- `apps/backend/app/routers/batch_ingest_router.py`
+- `apps/backend/app/services/batch_ingest_service.py`
+- `apps/backend/tests/test_batch_ingest.py`, including a 1000-item
+  duplicate test.
+
+Acceptance criteria:
+
+- 1000-item batch with 30% duplicates has correct counts and one
+  transaction.
+- Partial batch commits valid items and rejects malformed items
+  individually.
+- Router calls service only; no direct repo access from router.
+
+#### PR_T6 - Queue and Processing Metrics
+
+STATUS: [ ] Not started
+
+Scope:
+OperationalMetricsCollector emits structured log events for queue depth,
+message age, publish latency, claim latency, processing duration,
+success/retry/DLQ rates, provider latency, DB pool wait, and tenant
+admission denials. Celery task signals wired to collector. Health
+endpoint extended with queue depth per queue.
+
+Deliverables:
+
+- `apps/backend/app/hardening/observability/metrics_collector.py`
+- Health endpoint `/api/v1/health` extended.
+- `apps/backend/tests/test_metrics_collector.py`
+
+Acceptance criteria:
+
+- Health endpoint returns queue depth for all 14 named queues.
+- Processing duration emitted on every `task_postrun`.
+- No metric collection on governance or LLM hot path.
+
+#### PR_T7 - Command Center Queue and DLQ View
+
+STATUS: [ ] Not started
+
+Scope:
+Add `GET /api/v1/operations/queue-status` for depth and oldest age per
+queue. Add `GET /api/v1/operations/dead-letters` for recent
+tenant-scoped DLQ records. Add
+`POST /api/v1/operations/dead-letters/{id}/replay` for operator-only
+replay. Wire Command Center frontend to Queue Status and DLQ Inspector
+views.
+
+Deliverables:
+
+- Backend: `queue_operations_router.py`.
+- Frontend: QueueStatusView and DLQInspector components.
+- `apps/backend/tests/test_queue_operations_router.py`
+
+Acceptance criteria:
+
+- Operator sees DLQ records across tenants.
+- Tenant user cannot see other tenants' DLQ records; RLS enforced.
+- Replay marks DLQ record as replayed and republishes to correct queue.
+
+#### PR_T8 - Alerting Wiring
+
+STATUS: [ ] Not started
+
+Scope:
+Alert conditions as first-class config evaluated by scheduled task on
+`webhook_maintenance` queue every 60s. Sentry integration for queue age
+SLO breach, DLQ spike, provider circuit open, Redis memory pressure, DB
+pool exhaustion, and replay mismatch. Each alert persisted as
+OperationalEvent with deduplication key.
+
+Deliverables:
+
+- `apps/backend/app/hardening/observability/alert_evaluator.py`
+- Scheduled Celery beat task on `webhook_maintenance` queue.
+- `apps/backend/tests/test_alert_evaluator.py`
+
+#### PR_T9 - Burst and Chaos Test Suite
+
+STATUS: [ ] Not started
+
+Scope:
+Three load test scenarios using mock LLM responses with realistic
+latency. All tests run against test DB with RLS enforced. Local Redis
+only.
+
+Scenarios:
+
+- 100-ticket smoke burst: zero DLQ records, P95 < 30s per ticket, no
+  cross-tenant contamination.
+- 1000-ticket pilot burst: 3 tenants with 70/20/10 split, tenant quotas
+  respected, all complete or reach DLQ with recoverable error, DLQ
+  replay recovers all failures.
+- 10000-ticket stress burst: admission control activates, no data loss
+  for admitted tickets, no governance decision silently dropped, no
+  cross-tenant row visible.
+
+Chaos cases:
+
+- Redis restart: tasks survive, worker reconnects, no duplicate
+  processing.
+- Provider 429: retries on `diagnostic.retry`, respects backoff, DLQ on
+  exhaustion.
+- Worker restart mid-task: visibility timeout expires, re-claimed
+  idempotently.
+- Duplicate webhook: second delivery returns 200, no new session
+  created.
+- Stale signature: rejected at boundary before session creation.
+- Partial batch failure: valid items committed, invalid rejected, no
+  rollback.
+
+Deliverables:
+
+- `apps/backend/tests/load/test_burst_100.py`
+- `apps/backend/tests/load/test_burst_1000.py`
+- `apps/backend/tests/load/test_burst_10000.py`
+- `apps/backend/tests/chaos/test_chaos_cases.py`
+
+#### PR_T10 - Operational Runbooks
+
+STATUS: [ ] Not started
+
+Deliverables:
+
+- `docs/runbooks/queue-backlog.md`
+- `docs/runbooks/provider-outage.md`
+- `docs/runbooks/tenant-isolation-incident.md`
+- `docs/runbooks/dlq-replay.md`
+- `docs/runbooks/fly-deploy-rollback.md`
+- `docs/runbooks/neon-migration-rollback.md`
+
+#### PR_T11 - Demo Data Reset and Tenant Separation
+
+STATUS: [ ] Not started
+
+Scope:
+`scripts/demo_seed.py` provides a single command with dry-run preview,
+resets demo tenant to five canonical Anker sessions with exact session
+IDs, isolates public demo tenant from pilot tenant at DB level, provides
+read-only operator token for demo tenant, and is idempotent on reruns.
+
+Canonical demo session IDs:
+
+- `charging_allow`: `df6139ba-81fa-5f1d-9b3e-ceba6e7bb135` (0.93)
+- `refund_over_limit`: `5bb139de-079b-5c20-a2da-3660b203a576` (0.97)
+- `arabic_language`: `79b38add-3086-55f1-9820-db820697fb13` (0.82)
+- `product_defect`: `2432a590-f7bc-5d5d-97f9-94a7d0039851` (0.91)
+- `ambiguous_review`: `2e16bdcc-c518-504e-952c-b4e3d11cad41` (0.82)
+
+#### PR_T12 - Security Hardening
+
+STATUS: [ ] Not started
+
+Scope:
+Tenant-scoped audit export with HMAC-SHA256 hash over exported events.
+Auth0 role/permission claims mapped into AuthorityContext principal
+roles. Webhook signing conformance tests for all four channel adapters.
+Secret rotation drill documented and scripted.
+
+#### PR_T13 - SQL-Native Vector Retrieval
+
+STATUS: [ ] Not started
+
+Scope:
+Push LIMIT, tenant filter, and ranking into Postgres query. Eliminate
+Python-side re-ranking and post-filter. Index freshness column on
+knowledge records. SOP provenance, including source title, approval
+status, and confidence, surfaced in Diagnostic Agent output and visible
+in Trace Inspector citation view.
+
+#### Verification Gate - Every Throughput PR
+
+Run these commands. Every throughput PR must pass before commit:
+
+```bash
+TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test \
+  venv/bin/python -m pytest apps/backend -q 2>&1 | tail -5
+
+venv/bin/pyright apps/backend/app 2>&1 | tail -5
+
+venv/bin/python -m pytest apps/backend/tests/test_system_smoke.py -v
+
+venv/bin/python -m pytest apps/backend/tests/test_identity_invariants.py -v
+```
 
 ### 9+ Final Gate
 
