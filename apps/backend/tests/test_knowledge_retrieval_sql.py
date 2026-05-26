@@ -205,6 +205,39 @@ async def test_sql_native_retrieval_uses_cosine_order(
 
 @pytest.mark.asyncio
 @requires_postgres
+async def test_vector_retrieval_total_reflects_unfiltered_count(
+    pg_seed_session: AsyncSession,
+) -> None:
+    await _seed_vectors(
+        pg_seed_session,
+        tenant_id=_TENANT_A,
+        title="SQL Native Total SOP",
+        vectors=(
+            _embedding(x=1.0),
+            _embedding(x=0.9, y=0.1),
+            _embedding(x=0.8, y=0.2),
+            _embedding(x=0.7, y=0.3),
+            _embedding(x=0.6, y=0.4),
+        ),
+    )
+
+    page = await PostgresKnowledgeRepository(pg_seed_session).list_vector_entries(
+        KnowledgeVectorQuery(
+            vector_index_name=_INDEX,
+            provider=_PROVIDER,
+            model=_MODEL,
+            limit=2,
+        ),
+        expected_tenant_id=_TENANT_A,
+        query_embedding=list(_embedding(x=1.0)),
+    )
+
+    assert len(page.items) == 2
+    assert page.total == 5
+
+
+@pytest.mark.asyncio
+@requires_postgres
 async def test_retrieval_tenant_isolation(
     pg_seed_session: AsyncSession,
     pg_session: AsyncSession,

@@ -233,7 +233,8 @@ class PostgresKnowledgeRepository(BaseRepository):
                 tkd.document_type,
                 tkd.status AS document_status,
                 (1 - (tkv.embedding <=> CAST(:query_vector AS vector)))
-                    AS cosine_score
+                    AS cosine_score,
+                COUNT(*) OVER () AS total_count
             FROM tenant_knowledge_vectors tkv
             JOIN tenant_knowledge_chunks tkc
                 ON tkc.chunk_id = tkv.chunk_id
@@ -275,9 +276,10 @@ class PostgresKnowledgeRepository(BaseRepository):
             },
         )
         rows = tuple(result.mappings().all())  # bounded-load-ok
+        total = int(rows[0]["total_count"]) if rows else 0
         return KnowledgeVectorPage(
             items=tuple(_sql_row_to_entry(row) for row in rows),
-            total=len(rows),
+            total=total,
             limit=page_limit,
             offset=page_offset,
         )

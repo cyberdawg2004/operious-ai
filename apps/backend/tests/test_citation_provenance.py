@@ -114,6 +114,10 @@ async def worker_database(
         pytest.skip(skip_reason or f"requires {TEST_DATABASE_URL_ENV}")
     monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.setenv("ALEMBIC_DATABASE_URL", _owner_database_url_for_test(dsn))
+    monkeypatch.setattr(
+        "app.workers.agent_tasks.get_initialized_quota_runtime",
+        lambda: None,
+    )
     get_settings.cache_clear()
     reset_engine_state()
     try:

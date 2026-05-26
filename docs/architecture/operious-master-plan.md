@@ -3182,7 +3182,7 @@ The 9+ final gate cannot close until:
 - Wedge 4 - Multi-Tenant Security Before Second Client is closed in
   production: `operious_app` runs with `bypassrls=False`, FORCE RLS is
   active on 38 tenant-scoped tables, `tenant_id` NOT NULL is enforced on
-  9 tables, and Alembic production head is `0035_tenant_not_null`.
+  9 tables, and Alembic production head is `0040_pgvector`.
 - PR_T4 - Per-Tenant and Per-Provider Quota Enforcement is closed in
   production: Redis quota checks run before provider calls, operator
   circuit overrides are operator-only, differentiated retry budgets are

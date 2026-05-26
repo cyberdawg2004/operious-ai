@@ -56,6 +56,11 @@ async def verify_audit_export(
     _tenant_scope: str | None = Depends(request_tenant_scope_opt),
     service: AuditExportService = Depends(get_audit_export_service),
 ) -> AuditExportVerifyResponse:
+    # POST /api/v1/audit/verify is intentionally unauthenticated. Anyone who
+    # holds a signed audit export should be able to verify its authenticity
+    # without requiring a session. The endpoint recomputes the HMAC and compares
+    # signatures; it does not return tenant data beyond what is already present
+    # in the provided export.
     try:
         result = service.verify_export(export=request.export)
     except AuditExportNotConfiguredError as exc:
