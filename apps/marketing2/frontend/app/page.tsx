@@ -15,6 +15,7 @@ import { AnimatedHeadline } from "@/components/animated-headline";
 import { ContainmentLayer } from "@/components/containment-layer";
 import { FeatureCard } from "@/components/feature-card";
 import { HeroVisual } from "@/components/hero-visual";
+import { LiveEvidence } from "@/components/live-evidence";
 import { ProofMarquee } from "@/components/proof-marquee";
 import { Reveal, RevealGroup } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
@@ -198,6 +199,10 @@ export default function Home() {
       <section className="relative overflow-hidden bg-[#05080F] px-4 pb-16 pt-32 text-[#D8E4F4] sm:px-8 sm:pb-20 sm:pt-40 lg:px-16 lg:pb-24">
         {/* Background radial gradient */}
         <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(ellipse_100%_60%_at_50%_0%,rgba(42,92,170,0.10)_0%,transparent_70%)]" />
+        {/* TODO: Add Spline scene when prod URL is available
+            Usage: <SplineHeroBg scene="https://prod.spline.design/..." />
+            Current candidate: ee34a16c-7c74-489a-9a9b-5064542ec97b
+            Must be published from Spline editor first */}
         <div
           className="pointer-events-none absolute inset-0 z-[1] opacity-[0.07]"
           style={{
@@ -230,8 +235,8 @@ export default function Home() {
             </Reveal>
             <Reveal>
               <p className="mt-4 text-base text-[#7A90B4] leading-relaxed">
-                The governance infrastructure that makes powerful AI safe for enterprise
-                deployment. Any model. Any action. Fully auditable.
+                The layer between what AI proposes and what your business executes.
+                Governed. Audited. Immutable.
               </p>
             </Reveal>
             <Reveal>
@@ -404,6 +409,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <LiveEvidence />
 
       <section className="bg-canvas px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
         <RevealGroup className="mx-auto max-w-[1280px]">

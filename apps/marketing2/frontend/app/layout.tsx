@@ -17,7 +17,23 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://www.operious.com"),
   title: "Operious AI — Governed Execution Infrastructure",
   description:
-    "Operious AI — governed AI execution infrastructure for enterprise operations. The containment layer between AI models and your business.",
+    "The layer between what AI proposes and what your " +
+    "business executes. Governed. Audited. Immutable.",
+  openGraph: {
+    title: "Operious AI",
+    description:
+      "Governed AI execution infrastructure. " +
+      "The containment layer between AI models and your business.",
+    url: "https://www.operious.com",
+    siteName: "Operious AI",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Operious AI — Governed Execution Infrastructure",
+    description:
+      "The containment layer between AI models and your business.",
+  },
 };
 
 export default function RootLayout({
