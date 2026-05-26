@@ -1,10 +1,10 @@
-import { getAccessToken } from "@auth0/nextjs-auth0";
+import { auth0 } from "@/lib/auth0";
 import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const { accessToken } = await getAccessToken();
-    if (!accessToken) {
+    const { token } = await auth0.getAccessToken();
+    if (!token) {
       return NextResponse.json(
         { error: "Auth0 access token unavailable" },
         { status: 401 }
@@ -12,7 +12,7 @@ export async function GET() {
     }
 
     const response = NextResponse.json(
-      { accessToken },
+      { accessToken: token },
       {
         headers: {
           "Cache-Control": "no-store",
