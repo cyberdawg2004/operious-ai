@@ -30,6 +30,7 @@ class _StubWebhookService:
             raise TicketIngressRejected(
                 code="channel_webhook_verification_failed",
                 reason="bad signature",
+                status_code=401,
             )
         if self.duplicate:
             return WebhookDuplicateDeliveryResult()
@@ -76,7 +77,7 @@ async def test_channel_webhook_router_hands_off_to_service() -> None:
 
 
 @pytest.mark.asyncio
-async def test_channel_webhook_router_maps_rejection_to_400() -> None:
+async def test_channel_webhook_router_maps_rejection_to_401() -> None:
     service = _StubWebhookService(reject=True)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -90,7 +91,7 @@ async def test_channel_webhook_router_maps_rejection_to_400() -> None:
             service=service,  # type: ignore[arg-type]
         )
 
-    assert exc_info.value.status_code == 400
+    assert exc_info.value.status_code == 401
     assert exc_info.value.detail == {
         "code": "channel_webhook_verification_failed",
         "reason": "bad signature",

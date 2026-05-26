@@ -188,7 +188,7 @@ class TicketIngressService:
             raise TicketIngressRejected(
                 code="missing_signature",
                 reason="webhook signature header is required",
-                status_code=400,
+                status_code=401,
             )
         webhook_secret = _select_webhook_secret(
             channel_type=tenant_channel_type,

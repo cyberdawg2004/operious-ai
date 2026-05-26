@@ -179,7 +179,7 @@ async def test_channel_webhook_invalid_signature_returns_401(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("channel_type", "routing_address"), CHANNEL_CASES)
-async def test_channel_webhook_missing_signature_returns_400(
+async def test_channel_webhook_missing_signature_returns_401(
     channel_type: TenantChannelType,
     routing_address: str,
 ) -> None:
@@ -211,7 +211,7 @@ async def test_channel_webhook_missing_signature_returns_400(
         )
 
     assert exc_info.value.code == "missing_signature"
-    assert exc_info.value.status_code == 400
+    assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(BoundaryIngressQuery())
     assert page.total == 0
 
