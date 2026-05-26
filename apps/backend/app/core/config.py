@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     AUTH0_ISSUER: str | None = None
     AUTH0_AUDIENCE: str | None = None
     AUTH0_JWKS_URL: str | None = None
+    AUTH0_NAMESPACE: str = Field(
+        default="https://operious.com",
+        description=(
+            "Namespace prefix for Auth0 custom claims. "
+            "Used to build namespaced claim keys like "
+            "https://operious.com/roles"
+        ),
+    )
 
     AUDIT_EXPORT_HMAC_SECRET: str | None = Field(
         default=None,

@@ -70,6 +70,7 @@ from app.auth.identity import VerifiedIdentity
 from app.auth.providers.jwt import (
     DEFAULT_CLAIM_MAPPING,
     ClaimMapping,
+    extract_capabilities_from_claims,
 )
 
 
@@ -356,27 +357,9 @@ class JWKSAuthProvider:
     def _extract_capabilities(
         self, claims: dict[str, Any]
     ) -> frozenset[str]:
-        claim_name = self._claim_mapping.capabilities
-        if claim_name is None:
-            return frozenset()
-        raw = claims.get(claim_name)
-        if raw is None:
-            return frozenset()
-        if isinstance(raw, str):
-            # OAuth2 ``scope`` style — space-separated.
-            return frozenset(token for token in raw.split() if token)
-        if isinstance(raw, (list, tuple)):
-            for item in raw:
-                if not isinstance(item, str):
-                    raise AuthenticationError(
-                        f"capabilities claim {claim_name!r} must be "
-                        f"a string or array of strings (got element "
-                        f"of type {type(item).__name__})"
-                    )
-            return frozenset(raw)
-        raise AuthenticationError(
-            f"capabilities claim {claim_name!r} must be a string or "
-            f"array of strings (got {type(raw).__name__})"
+        return extract_capabilities_from_claims(
+            claims=claims,
+            claim_mapping=self._claim_mapping,
         )
 
 

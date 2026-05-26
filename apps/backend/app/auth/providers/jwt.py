@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, cast
 
 import jwt
 from jwt import (
@@ -53,7 +53,8 @@ class ClaimMapping:
     extraction for that axis (the verified identity carries
     ``None`` / empty on that axis).
 
-    The ``capabilities`` claim accepts:
+    The ``capabilities``, ``permissions_claim``, and ``roles_claim``
+    claims accept:
 
     * a JSON array of strings (preferred — RFC 8693 ``scopes``
       style),
@@ -67,9 +68,23 @@ class ClaimMapping:
     organization_id: str | None = "org_id"
     environment_id: str | None = "env"
     capabilities: str | None = "capabilities"
+    permissions_claim: str | None = "permissions"
+    roles_claim: str | None = "roles"
 
 
 DEFAULT_CLAIM_MAPPING: Final[ClaimMapping] = ClaimMapping()
+
+PERMISSION_CAPABILITY_MAP: Final[dict[str, str]] = {
+    "operator:access": "operator",
+    "read:tenant_data": "tenant_read",
+    "write:tenant_data": "tenant_write",
+}
+
+ROLE_CAPABILITY_MAP: Final[dict[str, str]] = {
+    "Operator": "operator",
+    "TenantAdmin": "tenant_admin",
+    "TenantViewer": "tenant_read",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,32 +215,85 @@ class JWTProvider:
     def _extract_capabilities(
         self, claims: dict[str, Any]
     ) -> frozenset[str]:
-        claim_name = self._claim_mapping.capabilities
-        if claim_name is None:
-            return frozenset()
-        raw = claims.get(claim_name)
-        if raw is None:
-            return frozenset()
-        if isinstance(raw, str):
-            # OAuth2 ``scope`` style — space-separated.
-            return frozenset(token for token in raw.split() if token)
-        if isinstance(raw, (list, tuple)):
-            for item in raw:
-                if not isinstance(item, str):
-                    raise AuthenticationError(
-                        f"capabilities claim {claim_name!r} must be "
-                        f"a string or array of strings (got element "
-                        f"of type {type(item).__name__})"
-                    )
-            return frozenset(raw)
-        raise AuthenticationError(
-            f"capabilities claim {claim_name!r} must be a string or "
-            f"array of strings (got {type(raw).__name__})"
+        return extract_capabilities_from_claims(
+            claims=claims,
+            claim_mapping=self._claim_mapping,
         )
+
+
+def extract_capabilities_from_claims(
+    *,
+    claims: dict[str, Any],
+    claim_mapping: ClaimMapping,
+) -> frozenset[str]:
+    capabilities: list[str] = []
+    for capability in _claim_values(
+        claims=claims,
+        claim_name=claim_mapping.capabilities,
+        claim_label="capabilities",
+    ):
+        _append_unique(capabilities, capability)
+    for permission in _claim_values(
+        claims=claims,
+        claim_name=claim_mapping.permissions_claim,
+        claim_label="permissions",
+    ):
+        mapped = PERMISSION_CAPABILITY_MAP.get(permission)
+        if mapped is not None:
+            _append_unique(capabilities, mapped)
+    for role in _claim_values(
+        claims=claims,
+        claim_name=claim_mapping.roles_claim,
+        claim_label="roles",
+    ):
+        mapped = ROLE_CAPABILITY_MAP.get(role)
+        if mapped is not None:
+            _append_unique(capabilities, mapped)
+    return frozenset(capabilities)
+
+
+def _claim_values(
+    *,
+    claims: dict[str, Any],
+    claim_name: str | None,
+    claim_label: str,
+) -> tuple[str, ...]:
+    if claim_name is None:
+        return ()
+    raw = claims.get(claim_name)
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        # OAuth2 ``scope`` style — space-separated.
+        return tuple(token for token in raw.split() if token)
+    if isinstance(raw, (list, tuple)):
+        values: list[str] = []
+        raw_items = cast(list[object] | tuple[object, ...], raw)
+        for item in raw_items:
+            if not isinstance(item, str):
+                raise AuthenticationError(
+                    f"{claim_label} claim {claim_name!r} must be "
+                    f"a string or array of strings (got element "
+                    f"of type {type(item).__name__})"
+                )
+            values.append(item)
+        return tuple(values)
+    raise AuthenticationError(
+        f"{claim_label} claim {claim_name!r} must be a string or "
+        f"array of strings (got {type(raw).__name__})"
+    )
+
+
+def _append_unique(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
 
 
 __all__ = [
     "ClaimMapping",
     "DEFAULT_CLAIM_MAPPING",
     "JWTProvider",
+    "PERMISSION_CAPABILITY_MAP",
+    "ROLE_CAPABILITY_MAP",
+    "extract_capabilities_from_claims",
 ]

@@ -27,7 +27,7 @@ from app.agents.runtime.quota_runtime import (
 )
 from app.api.router import build_api_router
 from app.auth import AuthProvider
-from app.auth.providers import JWKSAuthProvider
+from app.auth.providers import ClaimMapping, JWKSAuthProvider
 from app.core.config import Settings, get_settings
 from app.core.http import close_shared_http_client, init_shared_http_client
 from app.core.logging import configure_logging, get_logger
@@ -486,6 +486,9 @@ def select_auth_provider(settings: Settings) -> AuthProvider | None:
             issuer=settings.AUTH0_ISSUER,
             algorithms=("RS256",),
             name="auth0",
+            claim_mapping=ClaimMapping(
+                roles_claim=f"{settings.AUTH0_NAMESPACE}/roles",
+            ),
         )
     raise RuntimeError(
         f"unsupported AUTH_PROVIDER={settings.AUTH_PROVIDER!r}. "

@@ -103,8 +103,17 @@ def _encode(payload: dict[str, Any]) -> str:
     return jwt.encode(payload, HS_KEY, algorithm="HS256")
 
 
+def _authority_from_payload(payload: dict[str, Any]) -> AuthorityContext:
+    token = _encode(payload)
+    provider = JWTProvider(key=HS_KEY, algorithms=("HS256",), name="auth0")
+    return verified_identity_to_authority(_verify(provider, token))
+
+
 def test_jwt_provider_default_claim_pinned() -> None:
-    assert ClaimMapping().capabilities == "capabilities"
+    mapping = ClaimMapping()
+    assert mapping.capabilities == "capabilities"
+    assert mapping.permissions_claim == "permissions"
+    assert mapping.roles_claim == "roles"
 
 
 def test_jwt_provider_array_capabilities() -> None:
@@ -145,6 +154,71 @@ def test_jwt_provider_custom_capabilities_claim() -> None:
     )
     vi = _verify(provider, token)
     assert vi.capabilities == frozenset({"x", "y"})
+
+
+def test_auth0_operator_permission_grants_operator_capability() -> None:
+    auth = _authority_from_payload(
+        {"sub": "alice", "permissions": "operator:access"}
+    )
+
+    assert "operator" in auth.capabilities
+
+
+def test_auth0_operator_role_grants_operator_capability() -> None:
+    auth = _authority_from_payload({"sub": "alice", "roles": "Operator"})
+
+    assert "operator" in auth.capabilities
+
+
+def test_auth0_tenant_viewer_role_grants_tenant_read() -> None:
+    auth = _authority_from_payload(
+        {"sub": "alice", "roles": ["TenantViewer"]}
+    )
+
+    assert "tenant_read" in auth.capabilities
+
+
+def test_unknown_permission_does_not_grant_capability() -> None:
+    auth = _authority_from_payload(
+        {"sub": "alice", "permissions": ["billing:admin"]}
+    )
+
+    assert auth.capabilities == frozenset()
+
+
+def test_unknown_role_does_not_grant_capability() -> None:
+    auth = _authority_from_payload(
+        {"sub": "alice", "roles": ["BillingAdmin"]}
+    )
+
+    assert auth.capabilities == frozenset()
+
+
+def test_capabilities_not_duplicated_when_both_permission_and_role_match() -> None:
+    auth = _authority_from_payload(
+        {
+            "sub": "alice",
+            "capabilities": ["operator"],
+            "permissions": ["operator:access"],
+            "roles": ["Operator"],
+        }
+    )
+
+    assert auth.capabilities == frozenset({"operator"})
+
+
+def test_existing_capabilities_preserved_after_mapping() -> None:
+    auth = _authority_from_payload(
+        {
+            "sub": "alice",
+            "capabilities": ["operator", "custom:capability"],
+            "permissions": ["read:tenant_data"],
+        }
+    )
+
+    assert auth.capabilities == frozenset(
+        {"operator", "custom:capability", "tenant_read"}
+    )
 
 
 def test_jwt_provider_disabled_capabilities_claim() -> None:
