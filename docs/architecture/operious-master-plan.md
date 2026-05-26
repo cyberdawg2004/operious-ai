@@ -3028,13 +3028,14 @@ Closure evidence:
 
 #### PR_T11 - Demo Data Reset and Tenant Separation
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED - 2026-05-26
 
 Scope:
 `scripts/demo_seed.py` provides a single command with dry-run preview,
 resets demo tenant to five canonical Anker sessions with exact session
-IDs, isolates public demo tenant from pilot tenant at DB level, provides
-read-only operator token for demo tenant, and is idempotent on reruns.
+IDs, isolates public demo tenant from pilot tenant at DB level, documents
+read-only Auth0 demo access without the `operator` capability, and is
+idempotent on reruns.
 
 Canonical demo session IDs:
 
@@ -3043,6 +3044,18 @@ Canonical demo session IDs:
 - `arabic_language`: `79b38add-3086-55f1-9820-db820697fb13` (0.82)
 - `product_defect`: `2432a590-f7bc-5d5d-97f9-94a7d0039851` (0.91)
 - `ambiguous_review`: `2e16bdcc-c518-504e-952c-b4e3d11cad41` (0.82)
+
+Closure evidence:
+
+- `scripts/demo_seed.py` verifies the five canonical `anker-pilot`
+  sessions against production schema columns `lifecycle_phase` and
+  `opened_at`, derives event counts from `session_events`, reads
+  `ALEMBIC_DATABASE_URL` before `DATABASE_URL`, and never deletes or
+  archives data.
+- `docs/demo-tenant-separation.md` documents `anker-pilot` demo access,
+  reserved `anker-production` pilot separation, RLS isolation, and
+  read-only Auth0 access without `operator` capability.
+- README documents the live demo URL and verification command.
 
 #### PR_T12 - Security Hardening
 

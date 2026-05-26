@@ -63,3 +63,20 @@ python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ./venv/bin/pytest
 ```
+
+## Demo Environment
+
+Live demo: https://app.operious.com
+Backend: https://operious-ai-imad.fly.dev
+
+Five Anker proof sessions are live in tenant `anker-pilot` with real AI
+classifications.
+
+To verify demo state:
+
+```bash
+python scripts/demo_seed.py --verify-only
+```
+
+To view the demo, open https://app.operious.com, log in through Auth0 with an
+`anker-pilot`-scoped account, and inspect the five Anker proof sessions.
