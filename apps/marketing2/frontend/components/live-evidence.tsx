@@ -37,25 +37,25 @@ const evidenceRows = [
 
 export function LiveEvidence() {
   return (
-    <section className="border-t border-[#1A2744] px-6 py-24">
+    <section className="border-t border-[#1A2744] bg-[#05080F] px-4 py-16 sm:px-6 sm:py-24">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-12">
+        <div className="mb-10 sm:mb-12">
           <p className="mb-4 font-mono text-xs uppercase tracking-[0.25em] text-[#7A90B4]">
             Live evidence
           </p>
-          <h2 className="text-3xl font-light text-[#D8E4F4]">
+          <h2 className="text-2xl font-light text-[#D8E4F4] sm:text-3xl">
             Every decision, permanently auditable.
           </h2>
         </div>
 
-        <div className="border border-[#1A2744] bg-[#0B1120] p-8 font-mono text-sm">
-          <div className="mb-6 flex items-center gap-2 border-b border-[#1A2744] pb-4">
+        <div className="overflow-hidden rounded-md border border-[#1A2744] bg-[#0B1120] p-5 font-mono text-sm sm:p-8">
+          <div className="mb-6 flex flex-wrap items-center gap-2 border-b border-[#1A2744] pb-4">
             <motion.div
               animate={{ opacity: [1, 0.3, 1] }}
               transition={{ duration: 2, repeat: Infinity }}
               className="h-2 w-2 rounded-full bg-green-400/70"
             />
-            <span className="text-xs text-[#7A90B4]">
+            <span className="break-all text-[11px] text-[#7A90B4] sm:text-xs">
               anker-pilot · Session df6139ba · 2026-05-24T03:10:28Z · LIVE
             </span>
           </div>
@@ -67,13 +67,13 @@ export function LiveEvidence() {
                 whileInView={{ opacity: 1, x: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: i * 0.06 }}
-                className="flex gap-6 items-baseline"
+                className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-6"
               >
-                <span className="w-36 shrink-0 text-xs tracking-wider text-[#2A5CAA]">
+                <span className="w-full text-xs tracking-wider text-[#2A5CAA] sm:w-36 sm:shrink-0">
                   {row.label}
                 </span>
-                <span className={row.color}>{row.value}</span>
-                <span className="text-xs text-[#7A90B4]/60">{row.accent}</span>
+                <span className={`${row.color} break-words`}>{row.value}</span>
+                <span className="break-words text-xs text-[#7A90B4]/60">{row.accent}</span>
               </motion.div>
             ))}
           </div>

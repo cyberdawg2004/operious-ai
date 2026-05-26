@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Mail } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { OperioussLogo } from "./logo";
 import { footerGroups } from "@/lib/site-links";
 
@@ -43,20 +43,13 @@ export function Footer() {
         </div>
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <a
-            href="mailto:hello@operious.com"
-            className="flex min-h-11 items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
+          <Link
+            href="/company/contact"
+            className="group inline-flex min-h-11 items-center gap-2 rounded-md border border-white/10 bg-white/[0.02] px-4 text-[13px] font-medium text-[#D8E4F4] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#C9A84C]/40 hover:bg-white/[0.04] hover:text-[#C9A84C]"
           >
-            <Mail className="h-3 w-3" />
-            hello@operious.com
-          </a>
-          <a
-            href="mailto:security@operious.com"
-            className="flex min-h-11 items-center gap-2 text-[13px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C]"
-          >
-            <Mail className="h-3 w-3" />
-            security@operious.com
-          </a>
+            Reach out to our sales team
+            <ArrowRight className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </Link>
         </div>
 
         <div className="mt-16 border-t border-[#1A2744] pt-6 sm:mt-20 sm:pt-8 lg:mt-24">

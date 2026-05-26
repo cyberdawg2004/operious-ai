@@ -46,16 +46,17 @@
 
 /* ═══════════════════════════════════════════
    DARK MODE — BLOOMBERG/LINEAR OPERATIONAL STYLE
+   Strict enterprise terminal aesthetic.
    Default for Command Center operators
 ═══════════════════════════════════════════ */
 :root.dark,
 .dark {
-  --canvas: #0A0A0C;
-  --surface: #131316;
-  --surface-raised: #1A1A1E;
-  --surface-sunken: #08080A;
-  --border-subtle: #2A2A2E;
-  --border-defined: #3A3A3F;
+  --canvas: #050505;
+  --surface: #0A0A0B;
+  --surface-raised: #0F0F11;
+  --surface-sunken: #020203;
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-defined: rgba(255, 255, 255, 0.10);
 
   /* INK SYSTEM (DARK MODE) */
   --ink-primary: #F2F0EA;
@@ -64,7 +65,7 @@
   --ink-tertiary: #5C5953;
 
   /* Gold adjustments for dark mode */
-  --gold-bg: rgba(168,136,44,0.12);
+  --gold-bg: rgba(201,168,76,0.10);
 
   /* Semantic tokens */
   --background: var(--canvas);
@@ -108,6 +109,38 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--type-geometric);
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* ═══════════════════════════════════════════
+   ENTERPRISE TERMINAL DENSITY
+   Mono-first data surfaces for the dark theme
+═══════════════════════════════════════════ */
+.dark table,
+.dark .data-grid,
+.dark .data-cell,
+.dark .data-row,
+.dark code,
+.dark pre,
+.dark kbd {
+  font-family: var(--type-technical);
+  font-feature-settings: "tnum", "zero";
+}
+
+.dark .data-table {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dark .data-table th,
+.dark .data-table td {
+  padding: 8px 12px;
+  border-color: var(--border-subtle);
+}
+
+.dark .panel-tight {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
 }
 
 /* ═══════════════════════════════════════════

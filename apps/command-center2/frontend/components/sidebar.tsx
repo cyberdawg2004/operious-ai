@@ -98,10 +98,11 @@ export function Sidebar({
     <aside
       className={cn(
         "fixed inset-y-0 left-0 z-50 flex h-dvh w-[280px] shrink-0 flex-col",
-        "bg-[var(--surface-raised)] border-r border-[var(--border-subtle)]",
+        "bg-[var(--surface)] border-r border-[var(--border-subtle)]",
+        "shadow-[0_0_0_1px_var(--border-subtle)_inset]",
         "overscroll-contain transition-[transform,width] duration-200 ease-out will-change-transform",
         mobileOpen ? "translate-x-0" : "-translate-x-full",
-        collapsed ? "lg:w-[76px]" : "lg:w-[248px]",
+        collapsed ? "lg:w-[72px]" : "lg:w-[236px]",
         "lg:sticky lg:top-0 lg:z-30 lg:h-screen lg:translate-x-0",
         className
       )}

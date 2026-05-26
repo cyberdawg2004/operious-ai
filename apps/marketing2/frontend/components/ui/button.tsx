@@ -22,13 +22,18 @@ export function Button({
   const base =
     "relative inline-flex items-center gap-3 px-7 py-3 " +
     "text-sm font-medium tracking-wider " +
-    "transition-all duration-300 rounded-none overflow-hidden group";
+    "transition-all duration-300 rounded-md overflow-hidden group " +
+    "hover:-translate-y-0.5 hover:scale-[1.02] active:scale-[0.98]";
 
   const variants = {
-    primary: "bg-[#A8882C] text-[#05080F] hover:bg-[#C9A84C]",
+    primary:
+      "bg-[#C9A84C] text-[#05080F] " +
+      "shadow-[0_10px_28px_rgba(201,168,76,0.18)] " +
+      "hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.40)]",
     ghost:
       "border border-[#1A2744] text-[#D8E4F4] " +
-      "hover:border-[#2A5CAA] hover:text-white",
+      "hover:border-[#2A5CAA] hover:text-white " +
+      "hover:shadow-[0_14px_32px_rgba(42,107,204,0.22)]",
   };
 
   const classes = cn(base, variants[variant], className);

@@ -14,10 +14,10 @@ import {
 import { AnimatedHeadline } from "@/components/animated-headline";
 import { ContainmentLayer } from "@/components/containment-layer";
 import { FeatureCard } from "@/components/feature-card";
-import { HeroVisual } from "@/components/hero-visual";
 import { LiveEvidence } from "@/components/live-evidence";
 import { ProofMarquee } from "@/components/proof-marquee";
 import { Reveal, RevealGroup } from "@/components/reveal";
+import { SplineHeroBg } from "@/components/spline-hero-bg";
 import { Button } from "@/components/ui/button";
 
 const pillars = [
@@ -197,12 +197,9 @@ export default function Home() {
   return (
     <main className="flex-1 overflow-x-hidden">
       <section className="relative overflow-hidden bg-[#05080F] px-4 pb-16 pt-32 text-[#D8E4F4] sm:px-8 sm:pb-20 sm:pt-40 lg:px-16 lg:pb-24">
+        <SplineHeroBg />
         {/* Background radial gradient */}
-        <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(ellipse_100%_60%_at_50%_0%,rgba(42,92,170,0.10)_0%,transparent_70%)]" />
-        {/* TODO: Add Spline scene when prod URL is available
-            Usage: <SplineHeroBg scene="https://prod.spline.design/..." />
-            Current candidate: ee34a16c-7c74-489a-9a9b-5064542ec97b
-            Must be published from Spline editor first */}
+        <div className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_100%_60%_at_50%_0%,rgba(42,92,170,0.10)_0%,transparent_70%)]" />
         <div
           className="pointer-events-none absolute inset-0 z-[1] opacity-[0.07]"
           style={{
@@ -212,39 +209,33 @@ export default function Home() {
           }}
         />
         <RevealGroup
-          className="relative z-10 mx-auto grid max-w-[1320px] gap-14 lg:min-h-[calc(100vh-160px)] lg:grid-cols-[1.12fr_0.88fr] lg:items-center"
+          className="relative z-10 mx-auto flex max-w-[1320px] flex-col items-start gap-12 lg:min-h-[calc(100vh-160px)] lg:justify-center"
           mode="load"
         >
-          <div className="relative z-10">
+          <div className="relative z-10 w-full max-w-[960px]">
             <Reveal>
               <SectionLabel>Operious AI</SectionLabel>
             </Reveal>
             <Reveal>
               <AnimatedHeadline
-                className="mt-6 max-w-[930px] text-[44px] font-bold leading-[0.98] sm:text-[68px] lg:text-[86px]"
+                className="relative z-10 mt-6 text-[44px] font-bold leading-[0.98] sm:text-[68px] lg:text-[86px]"
               >
                 Governed execution infrastructure for regulated enterprise operations.
               </AnimatedHeadline>
             </Reveal>
             <Reveal>
-              <p className="mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#A9B8CE] sm:text-[21px]">
+              <p className="relative z-10 mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#A9B8CE] sm:text-[21px]">
                 Operious is a deterministic multi-agent system that runs Tier 1 and Tier 2
                 operational workflows with forensic auditability. Every decision is governed.
                 Every action is reconstructible. Every byte of state is tenant-isolated.
               </p>
             </Reveal>
             <Reveal>
-              <p className="mt-4 text-base text-[#7A90B4] leading-relaxed">
-                The layer between what AI proposes and what your business executes.
-                Governed. Audited. Immutable.
-              </p>
-            </Reveal>
-            <Reveal>
-              <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+              <div className="relative z-10 mt-10 flex flex-col gap-3 sm:flex-row">
                 <Button
                   href="/company/contact"
                   variant="primary"
-                  className="shadow-[0_12px_34px_rgba(201,168,76,0.22)] hover:shadow-[0_18px_44px_rgba(201,168,76,0.3)]"
+                  className="shadow-[0_12px_34px_rgba(201,168,76,0.22)] hover:shadow-[0_18px_44px_rgba(201,168,76,0.34)]"
                 >
                   Request enterprise access
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -252,7 +243,7 @@ export default function Home() {
                 <Button
                   href="/platform"
                   variant="ghost"
-                  className="bg-[#0B1120]/60 hover:shadow-[0_16px_36px_rgba(42,107,204,0.18)]"
+                  className="bg-[#0B1120]/60 hover:shadow-[0_16px_36px_rgba(42,107,204,0.22)]"
                 >
                   Read the architecture
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -260,9 +251,6 @@ export default function Home() {
               </div>
             </Reveal>
           </div>
-          <Reveal>
-            <HeroVisual />
-          </Reveal>
         </RevealGroup>
       </section>
 

@@ -52,22 +52,18 @@ export default async function ContactPage({ searchParams }: ContactPageProps) {
               you want Operious to review. The next step is an architecture conversation,
               not a generic product demo.
             </p>
-            <div className="mt-8 grid gap-2 text-[14px] text-ink-body">
-              <a className="transition-colors hover:text-gold" href="mailto:hello@operious.com">
-                hello@operious.com
-              </a>
-              <a className="transition-colors hover:text-gold" href="mailto:info@operious.com">
-                info@operious.com
-              </a>
-              <a className="transition-colors hover:text-gold" href="mailto:ops@operious.com">
-                ops@operious.com
-              </a>
-              <a className="transition-colors hover:text-gold" href="mailto:security@operious.com">
-                security@operious.com
-              </a>
-              <a className="transition-colors hover:text-gold" href="mailto:careers@operious.com">
-                careers@operious.com
-              </a>
+            <div className="mt-8 rounded-md border border-border-subtle bg-white p-5">
+              <p
+                className="text-[10px] uppercase tracking-[0.18em] text-gold"
+                style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
+              >
+                Enterprise sales
+              </p>
+              <p className="mt-2 text-[15px] leading-relaxed text-ink-body">
+                Reach out to our sales team using the secure form on this page.
+                A solutions architect will respond within one business day to schedule
+                the architecture review.
+              </p>
             </div>
             {context && (
               <p

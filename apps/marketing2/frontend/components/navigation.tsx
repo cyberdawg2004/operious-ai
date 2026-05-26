@@ -20,7 +20,7 @@ function NavDropdown({
     <div className="relative">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 text-[14px] font-medium text-ink-primary hover:text-gold transition-colors duration-[160ms]"
+        className="flex items-center gap-1 text-[14px] font-medium text-[#D8E4F4]/85 transition-colors duration-200 hover:text-[#C9A84C]"
         aria-expanded={isOpen}
         aria-haspopup="true"
       >
@@ -38,8 +38,8 @@ function NavDropdown({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="absolute left-1/2 top-[calc(100%+12px)] min-w-[520px] -translate-x-1/2 rounded-lg border border-border-subtle bg-surface/95 p-6 shadow-[var(--shadow-dropdown)] backdrop-blur-[16px]"
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="absolute left-0 top-[calc(100%+14px)] min-w-[520px] rounded-lg border border-white/10 bg-black/80 p-6 shadow-[0_24px_64px_rgba(0,0,0,0.6)] backdrop-blur-xl"
             role="menu"
           >
             <div className="grid grid-cols-2 gap-4">
@@ -47,13 +47,13 @@ function NavDropdown({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="group -m-3 block rounded-md p-3 transition-colors duration-[160ms] hover:bg-surface-raised"
+                  className="group -m-3 block rounded-md p-3 transition-colors duration-200 hover:bg-white/[0.04]"
                   role="menuitem"
                 >
-                  <div className="text-[14px] font-semibold text-ink-primary transition-colors duration-[160ms] group-hover:text-gold">
+                  <div className="text-[14px] font-semibold text-[#F2F0EA] transition-colors duration-200 group-hover:text-[#C9A84C]">
                     {item.label}
                   </div>
-                  <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+                  <div className="mt-0.5 text-[12px] leading-relaxed text-[#9FB0CA]">
                     {item.description}
                   </div>
                 </Link>
@@ -84,7 +84,7 @@ function MobileNav({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
             onClick={onClose}
             aria-hidden="true"
           />
@@ -94,7 +94,7 @@ function MobileNav({
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 32, stiffness: 360 }}
-            className="fixed bottom-0 right-0 top-0 z-50 w-full max-w-[400px] overflow-y-auto overscroll-contain bg-surface will-change-transform lg:hidden"
+            className="fixed bottom-0 right-0 top-0 z-50 w-full max-w-[400px] overflow-y-auto overscroll-contain border-l border-white/10 bg-[#05080F] will-change-transform md:hidden"
           >
             <div className="p-6">
               <div className="mb-8 flex items-center justify-between">
@@ -103,7 +103,7 @@ function MobileNav({
                 </Link>
                 <button
                   onClick={onClose}
-                  className="flex h-11 w-11 items-center justify-center rounded text-ink-tertiary transition-colors hover:bg-surface-raised hover:text-ink-primary"
+                  className="flex h-11 w-11 items-center justify-center rounded text-[#9FB0CA] transition-colors hover:bg-white/[0.05] hover:text-white"
                   aria-label="Close menu"
                 >
                   <X className="h-6 w-6" />
@@ -112,18 +112,18 @@ function MobileNav({
 
               <nav className="space-y-2">
                 {headerGroups.map((group) => (
-                  <div key={group.label} className="border-b border-border-subtle">
+                  <div key={group.label} className="border-b border-white/10">
                     <button
                       onClick={() =>
                         setExpandedSection(
                           expandedSection === group.label ? null : group.label
                         )
                       }
-                      className="flex w-full items-center justify-between py-4 text-[16px] font-medium text-ink-primary"
+                      className="flex w-full items-center justify-between py-4 text-[16px] font-medium text-[#F2F0EA]"
                     >
                       {group.label}
                       <ChevronDown
-                        className={`h-5 w-5 text-ink-tertiary transition-transform duration-200 ${
+                        className={`h-5 w-5 text-[#7A90B4] transition-transform duration-200 ${
                           expandedSection === group.label ? "rotate-180" : ""
                         }`}
                       />
@@ -142,13 +142,13 @@ function MobileNav({
                               <Link
                                 key={item.href}
                                 href={item.href}
-                                className="block border-l-2 border-border-subtle py-2 pl-4 transition-colors hover:border-gold"
+                                className="block border-l-2 border-white/10 py-2 pl-4 transition-colors hover:border-[#C9A84C]"
                                 onClick={onClose}
                               >
-                                <div className="text-[14px] font-medium text-ink-body">
+                                <div className="text-[14px] font-medium text-[#D8E4F4]">
                                   {item.label}
                                 </div>
-                                <div className="mt-0.5 text-[12px] text-ink-tertiary">
+                                <div className="mt-0.5 text-[12px] text-[#7A90B4]">
                                   {item.description}
                                 </div>
                               </Link>
@@ -167,14 +167,14 @@ function MobileNav({
                   target="_blank"
                   rel="noreferrer"
                   onClick={onClose}
-                  className="block w-full rounded-md border border-border-defined py-3 text-center text-[15px] font-medium text-ink-primary transition-colors hover:bg-surface-raised"
+                  className="block w-full rounded-md border border-white/10 py-3 text-center text-[15px] font-medium text-[#D8E4F4] transition-colors hover:bg-white/[0.05]"
                 >
                   Sign In
                 </a>
                 <Link
                   href="/company/contact"
                   onClick={onClose}
-                  className="block w-full rounded-md bg-ink-primary py-3 text-center text-[15px] font-medium text-white transition-colors hover:bg-ink-body"
+                  className="block w-full rounded-md bg-[#C9A84C] py-3 text-center text-[15px] font-semibold text-[#05080F] transition-colors hover:bg-[#D4B85A]"
                 >
                   Request Access
                 </Link>
@@ -216,49 +216,59 @@ export function Navigation() {
     <>
       <motion.nav
         ref={navRef}
-        className="fixed left-0 right-0 top-0 z-50 border-b border-[#1A2744] bg-[#05080F]/90 backdrop-blur-md"
+        initial={{ y: -24, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="fixed inset-x-0 top-0 z-[60] border-b border-white/10 bg-black/50 backdrop-blur-md"
         role="navigation"
         aria-label="Main navigation"
       >
-        <div className="mx-auto grid h-[72px] max-w-7xl grid-cols-3 items-center px-4 sm:px-6 lg:px-8">
-          <div className="hidden items-center gap-8 lg:flex">
-            {headerGroups.map((group) => (
-              <NavDropdown
-                key={group.label}
-                group={group}
-                isOpen={openDropdown === group.label}
-                onToggle={() =>
-                  setOpenDropdown((prev) => (prev === group.label ? null : group.label))
-                }
-              />
-            ))}
-          </div>
-
-          <div className="flex justify-center">
-            <Link href="/" aria-label="Operious home">
+        <div className="mx-auto flex h-[68px] max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
+          {/* Left: Logo + (desktop) primary nav */}
+          <div className="flex min-w-0 items-center gap-8">
+            <Link
+              href="/"
+              aria-label="Operious home"
+              className="shrink-0 transition-opacity duration-200 hover:opacity-90"
+            >
               <OperioussLogo size={28} showWordmark={true} />
             </Link>
+            <div className="hidden items-center gap-7 md:flex">
+              {headerGroups.map((group) => (
+                <NavDropdown
+                  key={group.label}
+                  group={group}
+                  isOpen={openDropdown === group.label}
+                  onToggle={() =>
+                    setOpenDropdown((prev) =>
+                      prev === group.label ? null : group.label
+                    )
+                  }
+                />
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center justify-end gap-4">
+          {/* Right: auth + CTA + mobile toggle */}
+          <div className="flex items-center gap-3">
             <a
               href={commandCenterUrl}
               target="_blank"
               rel="noreferrer"
-              className="hidden text-[14px] text-[#D8E4F4] transition-colors duration-[160ms] hover:text-gold lg:inline-flex"
+              className="hidden text-[14px] font-medium text-[#D8E4F4]/80 transition-colors duration-200 hover:text-[#C9A84C] md:inline-flex"
             >
               Sign In
             </a>
             <Link
               href="/company/contact"
-              className="hidden rounded bg-[#D8E4F4] px-4 py-2 text-[14px] font-medium text-[#05080F] transition-colors duration-[160ms] hover:bg-white lg:inline-flex"
+              className="group hidden items-center gap-2 rounded-md bg-[#C9A84C] px-4 py-2 text-[13px] font-semibold text-[#05080F] shadow-[0_6px_18px_rgba(201,168,76,0.25)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_10px_28px_rgba(201,168,76,0.45)] md:inline-flex"
             >
               Request Access
             </Link>
 
             <button
               onClick={() => setMobileMenuOpen(true)}
-              className="flex h-11 w-11 items-center justify-center rounded text-[#D8E4F4] transition-colors hover:bg-surface-raised hover:text-gold lg:hidden"
+              className="flex h-11 w-11 items-center justify-center rounded text-[#D8E4F4] transition-colors duration-200 hover:bg-white/[0.05] hover:text-[#C9A84C] md:hidden"
               aria-label="Open menu"
               aria-expanded={mobileMenuOpen}
             >
