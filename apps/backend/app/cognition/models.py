@@ -23,6 +23,10 @@ def _empty_metadata() -> dict[str, Any]:
     return {}
 
 
+def _empty_retrieved_citations() -> list[dict[str, Any]]:
+    return []
+
+
 @dataclass(frozen=True, slots=True)
 class ApprovalLifecycleResult:
     approval: ApprovalRecord
@@ -165,6 +169,9 @@ class DiagnosticReasoningResult:
     citations: tuple[int, ...]
     semantic_terms: tuple[str, ...]
     retrieval: KnowledgeRetrievalResult
+    retrieved_citations: list[dict[str, Any]] = field(
+        default_factory=_empty_retrieved_citations
+    )
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 

@@ -137,6 +137,21 @@ class DiagnosticCognitionRuntime:
             top_k=self._config.context_top_k,
             max_tokens=self._config.context_token_budget,
         )
+        retrieved_citations = [
+            {
+                "rank": item.citation_index,
+                "document_id": str(item.document_id),
+                "title": item.title,
+                "document_type": str(
+                    item.metadata.get("document_type", "unknown")
+                ),
+                "document_status": item.document_status or "unknown",
+                "score": round(float(item.score), 4),
+                "chunk_ordinal": item.ordinal,
+                "token_count": item.estimated_tokens,
+            }
+            for item in retrieval.items
+        ]
         prompt = _render_user_prompt(
             tenant_id=tenant_id,
             dispatch_id=dispatch_id,
@@ -219,6 +234,7 @@ class DiagnosticCognitionRuntime:
                     "cognition_audit_id": audit_id,
                     "cognition_audit_record_id": audit_id,
                     "citation_count": len(retrieval.citations),
+                    "retrieved_citations": retrieved_citations,
                     **({"attempt_id": attempt_id} if attempt_id is not None else {}),
                     "semantic_terms": list(semantic.output_terms),
                     "raw_completion_sha256": _raw_completion_sha256(completion),
@@ -240,6 +256,7 @@ class DiagnosticCognitionRuntime:
                 citations=tuple(citation.index for citation in retrieval.citations),
                 semantic_terms=semantic.output_terms,
                 retrieval=retrieval,
+                retrieved_citations=retrieved_citations,
                 metadata={
                     "raw": dict(completion.raw_metadata),
                     "cognition_audit_id": audit_id,

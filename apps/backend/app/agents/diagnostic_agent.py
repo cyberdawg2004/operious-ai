@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.cognition.diagnostic_runtime import DiagnosticCognitionRuntime
+
+
+def _empty_retrieved_citations() -> list[dict[str, Any]]:
+    return []
 
 
 class DiagnosticResult(BaseModel):
@@ -25,6 +29,9 @@ class DiagnosticResult(BaseModel):
     estimated_cost_micro_usd: int = 0
     governance_decision_id: str | None = None
     cognition_audit_id: str | None = None
+    retrieved_citations: list[dict[str, Any]] = Field(
+        default_factory=_empty_retrieved_citations
+    )
 
 
 class DiagnosticAgent:
@@ -78,6 +85,7 @@ class DiagnosticAgent:
                     result.metadata,
                     "cognition_audit_id",
                 ),
+                retrieved_citations=result.retrieved_citations,
             )
         normalized = content.casefold()
         category, confidence = _classify(normalized)
