@@ -7,8 +7,14 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://app.operious.com"),
-  title: "Operious AI - Command Center",
-  description: "Deterministic multi-agent operating system for enterprise governed execution infrastructure",
+  title: "Operious AI · Command Center",
+  description:
+    "Deterministic multi-agent operating system for enterprise governed execution infrastructure",
+  icons: {
+    icon: [{ url: "/icon", type: "image/png" }],
+    shortcut: [{ url: "/icon", type: "image/png" }],
+    apple: [{ url: "/icon", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

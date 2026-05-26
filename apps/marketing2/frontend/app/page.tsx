@@ -17,6 +17,7 @@ import { FeatureCard } from "@/components/feature-card";
 import { LiveEvidence } from "@/components/live-evidence";
 import { ProofMarquee } from "@/components/proof-marquee";
 import { Reveal, RevealGroup } from "@/components/reveal";
+import { ParallaxBlock, ScrollHighlight } from "@/components/scroll-fx";
 import { SplineHeroBg } from "@/components/spline-hero-bg";
 import { Button } from "@/components/ui/button";
 
@@ -328,12 +329,13 @@ export default function Home() {
             >
               A substrate diagram for governed execution.
             </h2>
-            <p className="mt-6 text-[16px] leading-relaxed text-[#9FB0CA]">
-              Operious does not place a chatbot over an enterprise queue. The runtime
-              separates authority into seven substrates so tenant boundaries, agent
-              coordination, policy admission, execution, supervision, and conflict
-              handling can be inspected independently.
-            </p>
+            <ScrollHighlight
+              className="mt-6 text-[16px] leading-relaxed"
+              text="Operious does not place a chatbot over an enterprise queue. The runtime separates authority into seven substrates so tenant boundaries, agent coordination, policy admission, execution, supervision, and conflict handling can be inspected independently."
+              baseColor="#5C6B85"
+              litColor="#D8E4F4"
+              accentColor="#C9A84C"
+            />
             <Link
               href="/platform"
               className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-5 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.26)]"
@@ -344,6 +346,7 @@ export default function Home() {
           </div>
           </Reveal>
           <Reveal>
+          <ParallaxBlock intensity={0.22}>
           <div className="rounded-md border border-[#1A2744] bg-[#0B1120] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.24)]">
             <div className="grid gap-3">
               {architectureLayers.map((layer, index) => (
@@ -369,6 +372,7 @@ export default function Home() {
               Supervisor -&gt; Arbitration
             </p>
           </div>
+          </ParallaxBlock>
           </Reveal>
         </RevealGroup>
       </section>

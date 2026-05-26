@@ -11,6 +11,11 @@ export const metadata: Metadata = {
   description:
     "The layer between what AI proposes and what your " +
     "business executes. Governed. Audited. Immutable.",
+  icons: {
+    icon: [{ url: "/icon", type: "image/png" }],
+    shortcut: [{ url: "/icon", type: "image/png" }],
+    apple: [{ url: "/icon", type: "image/png" }],
+  },
   openGraph: {
     title: "Operious AI",
     description:

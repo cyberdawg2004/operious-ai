@@ -171,7 +171,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         {mobileSidebarOpen && (
           <button
             aria-label="Close navigation overlay"
-            className="fixed inset-0 z-40 bg-black/55 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] lg:hidden"
             onClick={() => setMobileSidebarOpen(false)}
           />
         )}
@@ -187,72 +187,83 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         />
 
         <div className="min-w-0 flex-1 lg:flex lg:min-h-screen lg:flex-col">
-          <header className="sticky top-0 z-30 border-b border-border-subtle bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/88">
-            <div className="flex min-h-[68px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <header
+            className={cn(
+              "sticky top-0 z-30 border-b border-border-subtle",
+              "bg-[color-mix(in_oklab,var(--surface)_92%,transparent)] backdrop-blur-md"
+            )}
+          >
+            <div className="flex min-h-[56px] items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded border border-border-subtle bg-surface-raised text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary lg:hidden"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border-subtle bg-surface text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary lg:hidden"
                   onClick={() => setMobileSidebarOpen(true)}
                   aria-label="Open navigation"
                 >
-                  <Menu className="h-5 w-5" strokeWidth={1.7} />
+                  <Menu className="h-4 w-4" strokeWidth={1.8} />
                 </button>
                 <button
                   type="button"
-                  className="hidden h-9 w-9 shrink-0 items-center justify-center rounded border border-border-subtle bg-surface-raised text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary lg:flex"
+                  className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border-subtle bg-surface text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary lg:flex"
                   onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
                   aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
                 >
                   {sidebarCollapsed ? (
-                    <PanelLeftOpen className="h-4 w-4" strokeWidth={1.7} />
+                    <PanelLeftOpen className="h-3.5 w-3.5" strokeWidth={1.8} />
                   ) : (
-                    <PanelLeftClose className="h-4 w-4" strokeWidth={1.7} />
+                    <PanelLeftClose className="h-3.5 w-3.5" strokeWidth={1.8} />
                   )}
                 </button>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+                  <div className="flex items-center gap-1.5 font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
                     <span>Command Center</span>
                     <span className="text-border-defined">/</span>
                     <span className="truncate text-gold-primary">{activeMeta.eyebrow}</span>
                   </div>
-                  <h1 className="mt-1 truncate text-[18px] font-semibold text-ink-primary sm:text-[20px]">
+                  <h1 className="mt-0.5 truncate text-[15px] font-semibold tracking-[-0.005em] text-ink-primary sm:text-[16px]">
                     {activeMeta.title}
                   </h1>
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
-                  className="hidden h-9 items-center gap-2 rounded border border-border-subtle bg-surface-raised px-3 font-technical text-[11px] uppercase tracking-[0.12em] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary sm:flex"
+                  className="hidden h-8 items-center gap-2 rounded-md border border-border-subtle bg-surface px-2.5 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary sm:flex"
                   onClick={() => setCommandPaletteOpen(true)}
                 >
-                  <Command className="h-3.5 w-3.5" strokeWidth={1.7} />
-                  Command
+                  <Command className="h-3 w-3" strokeWidth={1.8} />
+                  <span>Command</span>
+                  <span className="ml-1.5 rounded border border-border-subtle bg-surface-raised px-1.5 py-px text-[10px] text-ink-tertiary">
+                    ⌘K
+                  </span>
                 </button>
                 <button
                   type="button"
                   className={cn(
-                    "flex h-11 w-11 items-center justify-center rounded border border-border-subtle bg-surface-raised text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary sm:h-9 sm:w-auto sm:gap-2 sm:px-3",
+                    "flex h-9 items-center justify-center rounded-md border border-border-subtle bg-surface text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary",
+                    "w-9 sm:h-8 sm:w-auto sm:gap-2 sm:px-2.5",
                     "focus-gold"
                   )}
                   onClick={() => navigateTo("settings")}
                   aria-label="Open operator settings"
                 >
-                  <UserCircle2 className="h-5 w-5 sm:h-4 sm:w-4" strokeWidth={1.7} />
-                  <span className="hidden max-w-[170px] truncate text-[12px] font-medium text-ink-primary sm:block">
+                  <UserCircle2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" strokeWidth={1.8} />
+                  <span className="hidden max-w-[180px] truncate text-[12px] font-medium text-ink-primary sm:block">
                     {operatorLabel}
                   </span>
                 </button>
               </div>
             </div>
-            <div className="hidden border-t border-border-subtle px-8 py-2 text-[12px] text-ink-secondary lg:block">
-              {activeMeta.description}
-            </div>
+            {activeMeta.description && (
+              <div className="hidden border-t border-border-subtle px-8 py-1.5 text-[11.5px] text-ink-secondary lg:block">
+                {activeMeta.description}
+              </div>
+            )}
           </header>
 
-          {children}
+          <div className="animate-cc-fade-in">{children}</div>
         </div>
 
         <CommandPalette
