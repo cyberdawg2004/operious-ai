@@ -3,7 +3,7 @@ import { hasAuth0Environment } from "@/lib/auth0-env";
 import { NextResponse } from "next/server";
 
 type Auth0RouteParams = { auth0: string | string[] };
-type Auth0RouteContext = { params: Auth0RouteParams | Promise<Auth0RouteParams> };
+type Auth0RouteContext = { params: Promise<Auth0RouteParams> };
 
 const authHandler = handleAuth();
 

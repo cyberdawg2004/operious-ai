@@ -27,6 +27,7 @@
   --status-success: #2A7A4C;
   --status-warning: #B8860B;
   --status-error: #8B2A2A;
+  --font-ibm-plex-mono: var(--font-geist-mono);
   --type-geometric: var(--font-geist-sans), "Geist", "Inter", system-ui, sans-serif;
   --type-technical: var(--font-ibm-plex-mono), var(--font-geist-mono), "IBM Plex Mono", ui-monospace, monospace;
   --font-cormorant-sc: var(--type-geometric);

@@ -34,6 +34,7 @@
   --red-alert: #DC2626;
   --green-success: #16A34A;
   --warning-amber: #B8821C;
+  --font-mono-technical: var(--font-geist-mono);
   --type-geometric: var(--font-geist-sans), "Geist", "Inter", system-ui, sans-serif;
   --type-technical: var(--font-mono-technical), var(--font-geist-mono), "IBM Plex Mono", ui-monospace, monospace;
   --font-cormorant-sc: var(--type-geometric);
