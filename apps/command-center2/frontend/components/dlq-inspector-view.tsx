@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -91,7 +90,10 @@ export function DlqInspectorView() {
   }, [errorClassFilter, offset, queueFilter]);
 
   useEffect(() => {
-    void fetchDeadLetters();
+    const timeout = window.setTimeout(() => {
+      void fetchDeadLetters();
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, [fetchDeadLetters]);
 
   const pageSummary = useMemo(() => {

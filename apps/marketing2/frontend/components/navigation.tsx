@@ -99,7 +99,7 @@ function MobileNav({
             <div className="p-6">
               <div className="mb-8 flex items-center justify-between">
                 <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-                  <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={148} />
+                  <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={164} />
                 </Link>
                 <button
                   onClick={onClose}
@@ -222,7 +222,7 @@ export function Navigation() {
       >
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-3">
-            <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={148} />
+            <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={164} />
           </Link>
 
           <div className="hidden items-center gap-8 lg:flex">

@@ -71,11 +71,13 @@ function KernelMark({ showPlate = false }: { showPlate?: boolean }) {
 
   return (
     <g>
-      {showPlate && <rect x="2" y="2" width="60" height="60" rx="12" fill="var(--logo-plate)" />}
-      <circle cx="32" cy="32" r="22" fill={palette.blueLo} opacity="0.16" />
-      <polygon points={outer} fill="none" stroke="var(--logo-stroke)" strokeWidth="2.8" />
-      <polygon points={middle} fill="none" stroke="var(--logo-stroke)" strokeWidth="1.8" opacity="0.72" />
-      <polygon points={inner} fill="none" stroke="var(--logo-stroke)" strokeWidth="1.2" opacity="0.56" />
+      {showPlate && <rect x="3" y="3" width="58" height="58" rx="5" fill="var(--logo-plate)" />}
+      <circle cx="32" cy="32" r="23" fill={palette.blueLo} opacity="0.12" />
+      <polygon points={outer} fill="none" stroke="var(--logo-stroke)" strokeWidth="2.4" />
+      <polygon points={middle} fill="none" stroke="var(--logo-stroke)" strokeWidth="1.5" opacity="0.76" />
+      <polygon points={inner} fill="none" stroke="var(--logo-stroke)" strokeWidth="1" opacity="0.6" />
+      <path d="M32 8 V18" stroke="url(#operious-logo-governance)" strokeLinecap="square" strokeWidth="1.4" opacity="0.8" />
+      <path d="M32 46 V56" stroke="url(#operious-logo-governance)" strokeLinecap="square" strokeWidth="1.4" opacity="0.6" />
       <path
         d="M13 18 L20 14 L27 18"
         fill="none"
@@ -103,6 +105,7 @@ function KernelMark({ showPlate = false }: { showPlate?: boolean }) {
       <rect x="27.5" y="26" width="9" height="1.8" rx="0.8" fill="url(#operious-logo-governance)" />
       <rect x="28.6" y="31.2" width="6.8" height="1.8" rx="0.8" fill="url(#operious-logo-governance)" opacity="0.82" />
       <rect x="29.7" y="36.4" width="4.6" height="1.8" rx="0.8" fill="url(#operious-logo-governance)" opacity="0.64" />
+      <circle cx="32" cy="32" r="2.2" fill="var(--logo-word)" opacity="0.9" />
     </g>
   );
 }
@@ -121,7 +124,7 @@ export function Logo({
   ...props
 }: LogoProps) {
   const isMark = variant === "mark";
-  const resolvedWidth = width ?? (isMark ? 40 : showTagline ? 220 : 164);
+  const resolvedWidth = width ?? (isMark ? 40 : showTagline ? 236 : 172);
   const resolvedHeight = height ?? (isMark ? 40 : showTagline ? 56 : 40);
   const viewBox = isMark ? "0 0 64 64" : "0 0 252 64";
   const yWord = showTagline ? 30 : 40;
@@ -158,26 +161,30 @@ export function Logo({
             dominantBaseline="middle"
             fill="var(--logo-word)"
             fontFamily="var(--font-geist-sans), Geist, Inter, system-ui, sans-serif"
-            fontSize="25"
-            fontWeight="650"
-            letterSpacing="1.4"
+            fontSize="21.5"
+            fontWeight="760"
+            letterSpacing="2.8"
             x="78"
             y={yWord}
           >
-            Operious
+            OPERIOUS
           </text>
+          {!showTagline && (
+            <path d="M79 48.5 H184" stroke="var(--logo-stroke)" strokeWidth="1" opacity="0.42" />
+          )}
           {showBadge && (
-            <g transform={`translate(194 ${showTagline ? 18 : 28})`}>
-              <rect width="28" height="18" rx="4" stroke="var(--logo-badge-border)" />
+            <g transform={`translate(198 ${showTagline ? 18 : 28})`}>
+              <rect width="32" height="18" rx="1.5" fill="transparent" stroke="var(--logo-badge-border)" />
+              <path d="M0 0 H32" stroke="url(#operious-logo-governance)" strokeWidth="1" />
               <text
                 dominantBaseline="middle"
                 fill="var(--logo-badge)"
                 fontFamily="var(--font-ibm-plex-mono), var(--font-geist-mono), monospace"
                 fontSize="9"
-                fontWeight="600"
-                letterSpacing="1.3"
+                fontWeight="700"
+                letterSpacing="1.5"
                 textAnchor="middle"
-                x="14"
+                x="16"
                 y="9.5"
               >
                 AI

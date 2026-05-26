@@ -108,11 +108,16 @@ export function QueueStatusView() {
   }, []);
 
   useEffect(() => {
-    void fetchQueueStatus();
+    const timeout = window.setTimeout(() => {
+      void fetchQueueStatus();
+    }, 0);
     const interval = window.setInterval(() => {
       void fetchQueueStatus();
     }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
   }, [fetchQueueStatus]);
 
   const rows = useMemo(

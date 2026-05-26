@@ -4,8 +4,8 @@
   "private": true,
   "description": "Operious AI — Governed Organizational Cognition Infrastructure",
   "workspaces": [
-    "apps/marketing",
-    "apps/command-center",
+    "apps/marketing2/frontend",
+    "apps/command-center2/frontend",
     "packages/*",
     "tests-frontend"
   ],

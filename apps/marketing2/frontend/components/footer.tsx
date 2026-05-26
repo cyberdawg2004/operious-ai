@@ -9,7 +9,7 @@ export function Footer() {
   return (
     <footer className="bg-[#05080F] px-4 pb-6 pt-16 sm:px-8 sm:pb-8 sm:pt-20 lg:px-16 lg:pt-24">
       <div className="mx-auto max-w-[1440px]">
-        <Logo className="h-12 w-auto text-[#D8E4F4]" height={48} tone="dark" width={180} />
+        <Logo className="h-12 w-auto text-[#D8E4F4]" height={48} tone="dark" width={196} />
         <p
           className="mt-4 text-[10px] uppercase tracking-[0.18em] text-[#C9A84C] sm:text-[11px]"
           style={{ fontFamily: "var(--font-ibm-plex-mono)" }}

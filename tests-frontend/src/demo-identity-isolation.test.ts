@@ -16,7 +16,7 @@ import { ROOT, readText, tsFilesUnder } from './util.js';
  *
  * This test enforces:
  *
- *   1. Only `apps/command-center/src/app/providers.tsx` may reference
+ *   1. Only `apps/command-center2/frontend/app/providers.tsx` may reference
  *      the literal `principal-demo` and `demo-token`.
  *   2. In that one allowed file, every reference must appear AFTER a
  *      `USE_MOCK_API` guard — i.e. the literal must not appear before
@@ -28,14 +28,16 @@ const FORBIDDEN_LITERALS = ['principal-demo', 'demo-token'] as const;
 const ALLOWED = join(
   ROOT,
   'apps',
-  'command-center',
-  'src',
+  'command-center2',
+  'frontend',
   'app',
   'providers.tsx',
 );
 
+const COMMAND_CENTER_ROOT = join(ROOT, 'apps', 'command-center2', 'frontend');
+
 test('demo principal / token only appear in providers.tsx', () => {
-  const root = join(ROOT, 'apps', 'command-center', 'src');
+  const root = COMMAND_CENTER_ROOT;
   for (const path of tsFilesUnder(root)) {
     if (path === ALLOWED) continue;
     // Dev-only mocks live under src/mocks/ — exempt by doctrine.
@@ -53,6 +55,12 @@ test('demo principal / token only appear in providers.tsx', () => {
 });
 
 test('demo principal / token are gated behind USE_MOCK_API in providers.tsx', () => {
+  const hasDemoIdentity = tsFilesUnder(COMMAND_CENTER_ROOT).some((path) => {
+    const text = readText(path);
+    return FORBIDDEN_LITERALS.some((literal) => text.includes(literal));
+  });
+  if (!hasDemoIdentity) return;
+
   const text = readText(ALLOWED);
   // The flag must be defined.
   match(

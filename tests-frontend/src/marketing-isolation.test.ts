@@ -30,9 +30,9 @@ const FORBIDDEN_FOR_MARKETING = [
 ];
 
 test('marketing site does not depend on operational substrate packages', () => {
-  const marketingRoot = join(ROOT, 'apps', 'marketing');
+  const marketingRoot = join(ROOT, 'apps', 'marketing2', 'frontend');
   const offences: string[] = [];
-  for (const file of tsFilesUnder(join(marketingRoot, 'src'))) {
+  for (const file of tsFilesUnder(marketingRoot)) {
     const text = readText(file);
     for (const forbidden of FORBIDDEN_FOR_MARKETING) {
       if (text.includes(`'${forbidden}'`) || text.includes(`"${forbidden}"`)) {
@@ -43,20 +43,20 @@ test('marketing site does not depend on operational substrate packages', () => {
   strictEqual(offences.length, 0, `marketing isolation violated:\n${offences.join('\n')}`);
 });
 
-test('marketing site lives only inside apps/marketing', () => {
-  const marketingRoot = join(ROOT, 'apps', 'marketing');
+test('marketing site lives only inside apps/marketing2/frontend', () => {
+  const marketingRoot = join(ROOT, 'apps', 'marketing2', 'frontend');
   // The Marketing site exists and is non-empty — sanity check the boundary.
-  const files = tsFilesUnder(join(marketingRoot, 'src'));
+  const files = tsFilesUnder(marketingRoot);
   strictEqual(
     files.length > 0,
     true,
-    'expected at least one TS file inside apps/marketing/src',
+    'expected at least one TS file inside apps/marketing2/frontend',
   );
   for (const file of files) {
     strictEqual(
       isInside(file, marketingRoot),
       true,
-      `file ${file} is outside apps/marketing`,
+      `file ${file} is outside apps/marketing2/frontend`,
     );
   }
 });

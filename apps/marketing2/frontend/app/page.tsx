@@ -11,8 +11,13 @@ import {
   Stethoscope,
   Truck,
 } from "lucide-react";
-import { KernelSeal } from "@/components/kernel-seal";
+import { AnimatedHeadline } from "@/components/animated-headline";
+import { ContainmentLayer } from "@/components/containment-layer";
+import { FeatureCard } from "@/components/feature-card";
+import { HeroVisual } from "@/components/hero-visual";
+import { ProofMarquee } from "@/components/proof-marquee";
 import { Reveal, RevealGroup } from "@/components/reveal";
+import { Button } from "@/components/ui/button";
 
 const pillars = [
   {
@@ -20,18 +25,74 @@ const pillars = [
     body: "Policies execute, not suggest. Decisions cannot bypass the governance layer.",
     href: "/platform/governance",
     icon: Scale,
+    iconName: "governance" as const,
   },
   {
     title: "Reconstructible Truth",
     body: "Replay any operational decision at any point in time with cryptographic certainty.",
     href: "/platform/replay",
     icon: FileSearch,
+    iconName: "replay" as const,
   },
   {
     title: "Multi-Agent Coordination",
     body: "Deterministic agent orchestration with structural guarantees against deadlock and conflict.",
     href: "/platform/agents",
     icon: Network,
+    iconName: "agents" as const,
+  },
+  {
+    title: "AGI-Ready Governance",
+    body:
+      "Enterprise AI models are becoming more powerful every month. " +
+      "Most companies are afraid to deploy them — there is no safety " +
+      "layer between what the model decides and what it executes. " +
+      "Operious is that layer. Any autonomous AI model. Any action. " +
+      "Governed. Audited. Replayable.",
+    href: "/platform/governance",
+    icon: ShieldCheck,
+    iconName: "agi" as const,
+  },
+];
+
+const containmentLayers = [
+  {
+    number: "01",
+    title: "ToolInvoker Enforcement",
+    description:
+      "LLM output is a proposal, not a command. Every action " +
+      "passes through ToolInvoker before execution. The model " +
+      "cannot bypass it.",
+  },
+  {
+    number: "02",
+    title: "Governance Substrate",
+    description:
+      "Policy chains evaluate every proposed action. Empty chains " +
+      "return DENY. There is no path to ALLOW without a passing policy.",
+  },
+  {
+    number: "03",
+    title: "Row-Level Security",
+    description:
+      "FORCE RLS on every tenant-scoped table. No query reaches " +
+      "data it is not authorized to see, regardless of what the " +
+      "AI model instructs.",
+  },
+  {
+    number: "04",
+    title: "UUID5 Identity",
+    description:
+      "Every decision, every agent, every execution is " +
+      "cryptographically fingerprinted. Deterministic. " +
+      "Replayable. Forensically reconstructible.",
+  },
+  {
+    number: "05",
+    title: "Append-Only Timelines",
+    description:
+      "No event can be modified after creation. The audit trail " +
+      "is immutable by architecture, not by policy.",
   },
 ];
 
@@ -135,8 +196,10 @@ export default function Home() {
   return (
     <main className="flex-1 overflow-x-hidden">
       <section className="relative overflow-hidden bg-[#05080F] px-4 pb-16 pt-32 text-[#D8E4F4] sm:px-8 sm:pb-20 sm:pt-40 lg:px-16 lg:pb-24">
+        {/* Background radial gradient */}
+        <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(ellipse_100%_60%_at_50%_0%,rgba(42,92,170,0.10)_0%,transparent_70%)]" />
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.07]"
+          className="pointer-events-none absolute inset-0 z-[1] opacity-[0.07]"
           style={{
             backgroundImage:
               "linear-gradient(#D8E4F4 1px, transparent 1px), linear-gradient(90deg, #D8E4F4 1px, transparent 1px)",
@@ -144,20 +207,19 @@ export default function Home() {
           }}
         />
         <RevealGroup
-          className="relative mx-auto grid max-w-[1320px] gap-14 lg:min-h-[calc(100vh-160px)] lg:grid-cols-[1.12fr_0.88fr] lg:items-center"
+          className="relative z-10 mx-auto grid max-w-[1320px] gap-14 lg:min-h-[calc(100vh-160px)] lg:grid-cols-[1.12fr_0.88fr] lg:items-center"
           mode="load"
         >
-          <div>
+          <div className="relative z-10">
             <Reveal>
               <SectionLabel>Operious AI</SectionLabel>
             </Reveal>
             <Reveal>
-              <h1
+              <AnimatedHeadline
                 className="mt-6 max-w-[930px] text-[44px] font-bold leading-[0.98] sm:text-[68px] lg:text-[86px]"
-                style={{ fontFamily: "var(--font-cormorant-sc)" }}
               >
                 Governed execution infrastructure for regulated enterprise operations.
-              </h1>
+              </AnimatedHeadline>
             </Reveal>
             <Reveal>
               <p className="mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#A9B8CE] sm:text-[21px]">
@@ -167,45 +229,39 @@ export default function Home() {
               </p>
             </Reveal>
             <Reveal>
+              <p className="mt-4 text-base text-[#7A90B4] leading-relaxed">
+                The governance infrastructure that makes powerful AI safe for enterprise
+                deployment. Any model. Any action. Fully auditable.
+              </p>
+            </Reveal>
+            <Reveal>
               <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-                <Link
+                <Button
                   href="/company/contact"
-                  className="inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.22)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.3)]"
+                  variant="primary"
+                  className="shadow-[0_12px_34px_rgba(201,168,76,0.22)] hover:shadow-[0_18px_44px_rgba(201,168,76,0.3)]"
                 >
                   Request enterprise access
                   <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-                <Link
+                </Button>
+                <Button
                   href="/platform"
-                  className="inline-flex h-12 items-center justify-center rounded-md border border-[#1A2744] bg-[#0B1120]/60 px-6 text-[14px] font-semibold text-[#D8E4F4] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C] hover:text-[#C9A84C] hover:shadow-[0_16px_36px_rgba(42,107,204,0.18)]"
+                  variant="ghost"
+                  className="bg-[#0B1120]/60 hover:shadow-[0_16px_36px_rgba(42,107,204,0.18)]"
                 >
                   Read the architecture
                   <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
+                </Button>
               </div>
             </Reveal>
           </div>
           <Reveal>
-            <div className="relative mx-auto flex w-full max-w-[480px] items-center justify-center py-6 lg:justify-end">
-              <div className="absolute inset-8 rounded-full border border-[#1A2744]" />
-              <div className="absolute inset-0 rounded-full bg-[#2A6BCC]/10 blur-3xl" />
-              <KernelSeal size={250} phase={3} />
-              <div className="absolute bottom-0 left-0 right-0 mx-auto grid max-w-[360px] grid-cols-3 gap-2 text-center">
-                {["Govern", "Replay", "Execute"].map((label) => (
-                  <div key={label} className="rounded border border-[#1A2744] bg-[#05080F]/88 px-3 py-2 backdrop-blur">
-                    <span
-                      className="text-[10px] uppercase tracking-[0.16em] text-[#C9A84C]"
-                      style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <HeroVisual />
           </Reveal>
         </RevealGroup>
       </section>
+
+      <ProofMarquee />
 
       <section className="border-y border-border-subtle bg-canvas px-4 py-8 sm:px-8 lg:px-16">
         <RevealGroup className="mx-auto max-w-[1320px]">
@@ -252,31 +308,17 @@ export default function Home() {
                 The control plane enterprise AI operations usually lacks.
               </h2>
             </Reveal>
-            <div className="mt-10 grid gap-5 lg:grid-cols-3">
-              {pillars.map((pillar) => {
-                const Icon = pillar.icon;
-                return (
-                  <Reveal key={pillar.href}>
-                    <Link
-                      href={pillar.href}
-                      className="group block h-full rounded-md border border-border-subtle bg-white p-7 transition-all duration-300 hover:-translate-y-1 hover:border-gold hover:shadow-[var(--shadow-card-hover)]"
-                    >
-                      <Icon className="h-8 w-8 text-gold" />
-                      <h2
-                        className="mt-6 text-[26px] font-semibold text-ink-primary"
-                        style={{ fontFamily: "var(--font-cormorant-sc)" }}
-                      >
-                        {pillar.title}
-                      </h2>
-                      <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{pillar.body}</p>
-                      <span className="mt-6 inline-flex items-center text-[13px] font-medium text-gold">
-                        Open pillar
-                        <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                      </span>
-                    </Link>
-                  </Reveal>
-                );
-              })}
+            <div className="mt-10 grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
+              {pillars.map((pillar, index) => (
+                <FeatureCard
+                  key={pillar.title}
+                  title={pillar.title}
+                  body={pillar.body}
+                  href={pillar.href}
+                  iconName={pillar.iconName}
+                  index={index}
+                />
+              ))}
             </div>
           </RevealGroup>
         </div>
@@ -336,6 +378,31 @@ export default function Home() {
           </div>
           </Reveal>
         </RevealGroup>
+      </section>
+
+      {/* Containment Vessel */}
+      <section className="border-t border-[#1A2744] bg-[#05080F] px-6 py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-16">
+            <p className="mb-4 font-mono text-xs uppercase tracking-[0.25em] text-[#7A90B4]">
+              Architecture
+            </p>
+            <h2 className="text-3xl font-light tracking-tight text-[#D8E4F4]">
+              The Containment Vessel
+            </h2>
+            <p className="mt-4 max-w-2xl leading-relaxed text-[#7A90B4]">
+              Five layers that no AI model can bypass. The separation between what the
+              model proposes and what it is permitted to execute is not policy — it is
+              architecture.
+            </p>
+          </div>
+
+          <div className="space-y-0">
+            {containmentLayers.map((layer, i) => (
+              <ContainmentLayer key={i} index={i} {...layer} />
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="bg-canvas px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
