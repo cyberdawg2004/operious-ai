@@ -36,6 +36,7 @@ class KnowledgeRepository(Protocol):
         query: KnowledgeVectorQuery,
         *,
         expected_tenant_id: str,
+        query_embedding: list[float] | None = None,
     ) -> KnowledgeVectorPage: ...
 
 

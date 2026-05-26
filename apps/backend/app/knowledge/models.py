@@ -49,6 +49,7 @@ class KnowledgeRetrievalItem:
     title: str
     estimated_tokens: int
     citation_index: int
+    document_status: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 

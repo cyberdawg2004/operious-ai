@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -37,11 +36,6 @@ from app.tenant.enums import (
 )
 from app.tenant.identity import TenantKnowledgeDocumentId
 from app.tenant.persistence import TenantConfigurationRepository
-
-_FALLBACK_CANDIDATE_MULTIPLIER = 4
-_FALLBACK_MIN_CANDIDATES = 32
-_FALLBACK_MAX_CANDIDATES = 200
-
 
 class KnowledgeRuntime:
     """Runtime authority for tenant-owned knowledge ingestion."""
@@ -218,31 +212,15 @@ class KnowledgeRuntime:
         page = await self._repository.list_vector_entries(
             KnowledgeVectorQuery(
                 vector_index_name=self._vector_index_name,
-                search_text=query,
                 provider=self._embedding_provider.provider_name,
                 model=self._embedding_provider.model_name,
                 current_only=True,
                 limit=top_k,
             ),
             expected_tenant_id=tenant_id,
+            query_embedding=list(query_vector),
         )
-        if not page.items:
-            page = await self._repository.list_vector_entries(
-                KnowledgeVectorQuery(
-                    vector_index_name=self._vector_index_name,
-                    provider=self._embedding_provider.provider_name,
-                    model=self._embedding_provider.model_name,
-                    current_only=True,
-                    limit=_fallback_candidate_limit(top_k),
-                ),
-                expected_tenant_id=tenant_id,
-            )
-        scored = [
-            (_cosine_similarity(query_vector, entry.vector.vector), entry)
-            for entry in page.items
-            if entry.vector.dimensions == len(query_vector)
-        ]
-        candidates = sorted(scored, key=lambda item: item[0], reverse=True)
+        candidates = [(_entry_score(entry), entry) for entry in page.items]
         decisions, included = _apply_budget(
             candidates,
             max_tokens=token_budget,
@@ -267,6 +245,7 @@ class KnowledgeRuntime:
                 title=_entry_title(entry),
                 estimated_tokens=entry.chunk.token_count,
                 citation_index=citation_index,
+                document_status=entry.document_status,
                 metadata=metadata,
             )
             items.append(item)
@@ -342,28 +321,6 @@ def _apply_budget(
     return decisions, included
 
 
-def _fallback_candidate_limit(top_k: int) -> int:
-    return min(
-        max(top_k * _FALLBACK_CANDIDATE_MULTIPLIER, _FALLBACK_MIN_CANDIDATES),
-        _FALLBACK_MAX_CANDIDATES,
-    )
-
-
-def _cosine_similarity(
-    query_vector: tuple[float, ...],
-    record_vector: tuple[float, ...],
-) -> float:
-    if len(query_vector) != len(record_vector):
-        return 0.0
-    query_norm = math.sqrt(sum(value * value for value in query_vector))
-    record_norm = math.sqrt(sum(value * value for value in record_vector))
-    if query_norm == 0.0 or record_norm == 0.0:
-        return 0.0
-    return sum(a * b for a, b in zip(query_vector, record_vector)) / (
-        query_norm * record_norm
-    )
-
-
 def _entry_title(entry: KnowledgeVectorEntry) -> str:
     if entry.title:
         return entry.title
@@ -371,11 +328,17 @@ def _entry_title(entry: KnowledgeVectorEntry) -> str:
     return str(value) if value is not None else ""
 
 
+def _entry_score(entry: KnowledgeVectorEntry) -> float:
+    return entry.cosine_score if entry.cosine_score is not None else 0.0
+
+
 def _entry_metadata(entry: KnowledgeVectorEntry) -> dict[str, Any]:
     metadata = dict(entry.chunk.metadata)
     metadata.update(dict(entry.vector.metadata))
     if entry.document_type:
         metadata["document_type"] = entry.document_type
+    if entry.document_status:
+        metadata["document_status"] = entry.document_status
     return metadata
 
 

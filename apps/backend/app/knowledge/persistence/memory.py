@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 from app.knowledge.exceptions import KnowledgePersistenceError
 from app.knowledge.identity import KnowledgeChunkId, KnowledgeVectorId
@@ -97,6 +98,7 @@ class InMemoryKnowledgeRepository:
         query: KnowledgeVectorQuery,
         *,
         expected_tenant_id: str,
+        query_embedding: list[float] | None = None,
     ) -> KnowledgeVectorPage:
         rows: list[KnowledgeVectorEntry] = []
         for vector in self._vectors.values():
@@ -130,15 +132,30 @@ class InMemoryKnowledgeRepository:
                     vector=vector,
                     title=title,
                     document_type=document_type,
+                    cosine_score=(
+                        _normalized_dot(query_embedding, vector.vector)
+                        if query_embedding is not None
+                        else None
+                    ),
                 )
             )
-        rows.sort(
-            key=lambda entry: (
-                str(entry.vector.document_id),
-                entry.chunk.ordinal,
-                str(entry.vector.vector_id),
+        if query_embedding is not None:
+            rows.sort(
+                key=lambda entry: (
+                    -(entry.cosine_score or 0.0),
+                    str(entry.vector.document_id),
+                    entry.chunk.ordinal,
+                    str(entry.vector.vector_id),
+                )
             )
-        )
+        else:
+            rows.sort(
+                key=lambda entry: (
+                    str(entry.vector.document_id),
+                    entry.chunk.ordinal,
+                    str(entry.vector.vector_id),
+                )
+            )
         total = len(rows)
         sliced = rows[query.offset :]
         if query.limit is not None:
@@ -170,6 +187,21 @@ def _assert_scope(record_tenant_id: str, expected_tenant_id: str) -> None:
         raise KnowledgePersistenceError(
             "record tenant_id does not match expected_tenant_id"
         )
+
+
+def _normalized_dot(
+    query_vector: list[float],
+    record_vector: tuple[float, ...],
+) -> float:
+    if len(query_vector) != len(record_vector):
+        return 0.0
+    query_norm = math.sqrt(sum(value * value for value in query_vector))
+    record_norm = math.sqrt(sum(value * value for value in record_vector))
+    if query_norm == 0.0 or record_norm == 0.0:
+        return 0.0
+    return sum(a * b for a, b in zip(query_vector, record_vector)) / (
+        query_norm * record_norm
+    )
 
 
 def _mark_chunk_current(

@@ -127,6 +127,11 @@ class KnowledgeVectorRow(Base):
         index=True,
     )
     vector: Mapped[list[float]] = mapped_column(JSONB, nullable=False)
+    embedding: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        server_default=text("NULL"),
+    )
     is_current: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

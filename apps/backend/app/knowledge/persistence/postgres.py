@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from app.knowledge.db.models import KnowledgeChunkRow, KnowledgeVectorRow
@@ -20,7 +20,7 @@ from app.knowledge.persistence.records import (
     KnowledgeVectorRecord,
 )
 from app.repositories.base import BaseRepository
-from app.repositories.pagination import fetch_row_page
+from app.repositories.pagination import fetch_row_page, normalize_page_bounds
 from app.tenant.db.models import TenantKnowledgeDocumentRow, TenantRow
 from app.tenant.identity import TenantKnowledgeDocumentId
 
@@ -86,6 +86,12 @@ class PostgresKnowledgeRepository(BaseRepository):
                         self.session.add(_vector_record_to_row(vector))
                     else:
                         _update_vector_row(existing_vector, vector)
+                await self.session.flush()
+                await self._refresh_native_embeddings(
+                    expected_tenant_id=expected_tenant_id,
+                    document_id=document_id,
+                    vector_index_name=vector_index_name,
+                )
         except IntegrityError as exc:
             raise KnowledgePersistenceError(
                 "knowledge document index could not be persisted"
@@ -96,13 +102,21 @@ class PostgresKnowledgeRepository(BaseRepository):
         query: KnowledgeVectorQuery,
         *,
         expected_tenant_id: str,
+        query_embedding: list[float] | None = None,
     ) -> KnowledgeVectorPage:
+        if query_embedding is not None:
+            return await self._list_vector_entries_by_embedding(
+                query,
+                expected_tenant_id=expected_tenant_id,
+                query_embedding=query_embedding,
+            )
         stmt = (
             select(
                 KnowledgeChunkRow,
                 KnowledgeVectorRow,
                 TenantKnowledgeDocumentRow.title,
                 TenantKnowledgeDocumentRow.document_type,
+                TenantKnowledgeDocumentRow.status,
             )
             .select_from(KnowledgeVectorRow)
             .join(
@@ -161,12 +175,111 @@ class PostgresKnowledgeRepository(BaseRepository):
                     vector=_vector_row_to_record(vector_row),
                     title=str(title),
                     document_type=str(document_type),
+                    document_status=str(document_status),
                 )
-                for chunk_row, vector_row, title, document_type in page.items
+                for (
+                    chunk_row,
+                    vector_row,
+                    title,
+                    document_type,
+                    document_status,
+                ) in page.items
             ),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
+        )
+
+    async def _list_vector_entries_by_embedding(
+        self,
+        query: KnowledgeVectorQuery,
+        *,
+        expected_tenant_id: str,
+        query_embedding: list[float],
+    ) -> KnowledgeVectorPage:
+        page_limit, page_offset = normalize_page_bounds(
+            limit=query.limit,
+            offset=query.offset,
+        )
+        query_vector = "[" + ",".join(
+            str(round(value, 8)) for value in query_embedding
+        ) + "]"
+        stmt = text(
+            """
+            SELECT
+                tkv.vector_id,
+                tkv.tenant_id,
+                tkv.chunk_id,
+                tkv.document_id,
+                tkv.document_version,
+                tkv.provider,
+                tkv.model,
+                tkv.dimensions,
+                tkv.vector_index_name,
+                tkv.vector,
+                tkv.is_current,
+                tkv.indexed_at AS vector_indexed_at,
+                tkv.metadata_json AS vector_metadata,
+                tkc.content,
+                tkc.ordinal,
+                tkc.content_hash,
+                tkc.token_count,
+                tkc.char_start,
+                tkc.char_end,
+                tkc.is_current AS chunk_is_current,
+                tkc.indexed_at AS chunk_indexed_at,
+                tkc.metadata_json AS chunk_metadata,
+                tkd.title,
+                tkd.document_type,
+                tkd.status AS document_status,
+                (1 - (tkv.embedding <=> CAST(:query_vector AS vector)))
+                    AS cosine_score
+            FROM tenant_knowledge_vectors tkv
+            JOIN tenant_knowledge_chunks tkc
+                ON tkc.chunk_id = tkv.chunk_id
+                AND tkc.tenant_id = :expected_tenant_id
+            JOIN tenant_knowledge_documents tkd
+                ON tkd.document_id = tkv.document_id
+                AND tkd.tenant_id = :expected_tenant_id
+            WHERE tkv.tenant_id = :expected_tenant_id
+              AND tkv.vector_index_name = :vector_index_name
+              AND (
+                  CAST(:document_id AS uuid) IS NULL
+                  OR tkv.document_id = CAST(:document_id AS uuid)
+              )
+              AND tkv.is_current IS TRUE
+              AND tkc.is_current IS TRUE
+              AND tkv.provider = :provider
+              AND tkv.model = :model
+              AND tkv.embedding IS NOT NULL
+            ORDER BY tkv.embedding <=> CAST(:query_vector AS vector) ASC
+            LIMIT :limit
+            OFFSET :offset
+            """
+        )
+        result = await self.session.execute(
+            stmt,
+            {
+                "expected_tenant_id": expected_tenant_id,
+                "vector_index_name": query.vector_index_name,
+                "document_id": (
+                    str(query.document_id)
+                    if query.document_id is not None
+                    else None
+                ),
+                "provider": query.provider,
+                "model": query.model,
+                "query_vector": query_vector,
+                "limit": page_limit,
+                "offset": page_offset,
+            },
+        )
+        rows = tuple(result.mappings().all())  # bounded-load-ok
+        return KnowledgeVectorPage(
+            items=tuple(_sql_row_to_entry(row) for row in rows),
+            total=len(rows),
+            limit=page_limit,
+            offset=page_offset,
         )
 
     async def _ensure_tenant(self, tenant_id: str) -> None:
@@ -195,6 +308,32 @@ class PostgresKnowledgeRepository(BaseRepository):
             KnowledgeVectorRow.tenant_id == expected_tenant_id,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def _refresh_native_embeddings(
+        self,
+        *,
+        expected_tenant_id: str,
+        document_id: TenantKnowledgeDocumentId,
+        vector_index_name: str,
+    ) -> None:
+        await self.session.execute(
+            text(
+                """
+                UPDATE tenant_knowledge_vectors
+                SET embedding = CAST(vector AS text)::vector(32)
+                WHERE tenant_id = :expected_tenant_id
+                  AND document_id = :document_id
+                  AND vector_index_name = :vector_index_name
+                  AND dimensions = 32
+                  AND vector IS NOT NULL
+                """
+            ),
+            {
+                "expected_tenant_id": expected_tenant_id,
+                "document_id": document_id,
+                "vector_index_name": vector_index_name,
+            },
+        )
 
 
 def _validate_batch(
@@ -346,6 +485,47 @@ def _vector_row_to_record(row: KnowledgeVectorRow) -> KnowledgeVectorRecord:
         is_current=row.is_current,
         indexed_at=row.indexed_at,
         metadata=_as_dict(row.metadata_json),
+    )
+
+
+def _sql_row_to_entry(row: Mapping[Any, Any]) -> KnowledgeVectorEntry:
+    chunk = KnowledgeChunkRecord(
+        chunk_id=KnowledgeChunkId(row["chunk_id"]),
+        tenant_id=str(row["tenant_id"]),
+        document_id=TenantKnowledgeDocumentId(row["document_id"]),
+        document_version=int(row["document_version"]),
+        ordinal=int(row["ordinal"]),
+        content=str(row["content"]),
+        content_hash=str(row["content_hash"]),
+        token_count=int(row["token_count"]),
+        char_start=int(row["char_start"]),
+        char_end=int(row["char_end"]),
+        is_current=bool(row["chunk_is_current"]),
+        indexed_at=row["chunk_indexed_at"],
+        metadata=_as_dict(row["chunk_metadata"]),
+    )
+    vector = KnowledgeVectorRecord(
+        vector_id=KnowledgeVectorId(row["vector_id"]),
+        tenant_id=str(row["tenant_id"]),
+        chunk_id=KnowledgeChunkId(row["chunk_id"]),
+        document_id=TenantKnowledgeDocumentId(row["document_id"]),
+        document_version=int(row["document_version"]),
+        provider=str(row["provider"]),
+        model=str(row["model"]),
+        dimensions=int(row["dimensions"]),
+        vector_index_name=str(row["vector_index_name"]),
+        vector=tuple(float(value) for value in row["vector"]),
+        is_current=bool(row["is_current"]),
+        indexed_at=row["vector_indexed_at"],
+        metadata=_as_dict(row["vector_metadata"]),
+    )
+    return KnowledgeVectorEntry(
+        chunk=chunk,
+        vector=vector,
+        title=str(row["title"]),
+        document_type=str(row["document_type"]),
+        document_status=str(row["document_status"]),
+        cosine_score=float(row["cosine_score"]),
     )
 
 

@@ -76,5 +76,8 @@ def test_knowledge_vector_retrieval_is_sql_ranked_and_bounded() -> None:
     assert "func.ts_rank" in postgres_source
     assert "func.plainto_tsquery" in postgres_source
     assert "fetch_row_page" in postgres_source
-    assert "search_text=query" in runtime_source
+    assert "tkv.embedding <=> CAST(:query_vector AS vector)" in postgres_source
+    assert "query_embedding=list(query_vector)" in runtime_source
     assert "limit=top_k" in runtime_source
+    assert "_fallback_candidate_limit" not in runtime_source
+    assert "_cosine_similarity" not in runtime_source

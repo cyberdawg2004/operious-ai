@@ -66,6 +66,7 @@ class _StrictSearchKnowledgeRepository(InMemoryKnowledgeRepository):
         query: KnowledgeVectorQuery,
         *,
         expected_tenant_id: str,
+        query_embedding: list[float] | None = None,
     ) -> KnowledgeVectorPage:
         self.queries.append(query)
         if query.search_text is not None:
@@ -78,6 +79,7 @@ class _StrictSearchKnowledgeRepository(InMemoryKnowledgeRepository):
         return await super().list_vector_entries(
             query,
             expected_tenant_id=expected_tenant_id,
+            query_embedding=query_embedding,
         )
 
 
@@ -290,7 +292,7 @@ async def test_retrieval_budgeting_is_deterministic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retrieval_falls_back_when_search_prefilter_is_too_strict() -> None:
+async def test_retrieval_uses_vector_query_without_text_prefilter() -> None:
     knowledge_repo = _StrictSearchKnowledgeRepository()
     runtime, tenant_repo, _knowledge_repo = await _runtime(
         knowledge_repo=knowledge_repo,
@@ -323,10 +325,9 @@ async def test_retrieval_falls_back_when_search_prefilter_is_too_strict() -> Non
         (item.score for item in result.items),
         reverse=True,
     )
-    assert knowledge_repo.queries[0].search_text is not None
-    assert knowledge_repo.queries[1].search_text is None
-    assert knowledge_repo.queries[1].limit is not None
-    assert knowledge_repo.queries[1].limit >= 32
+    assert len(knowledge_repo.queries) == 1
+    assert knowledge_repo.queries[0].search_text is None
+    assert knowledge_repo.queries[0].limit == 4
 
 
 @pytest.mark.asyncio
