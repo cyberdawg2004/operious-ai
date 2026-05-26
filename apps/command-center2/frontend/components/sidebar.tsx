@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useUser } from "@auth0/nextjs-auth0/client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { dashboardRoutes } from "@/lib/dashboard-routes";
 import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
 import { useTheme } from "./theme-provider";
@@ -28,29 +31,28 @@ import {
 
 interface NavItem {
   id: string;
+  href: string;
   label: string;
   icon: React.ElementType;
 }
 
 const navItems: NavItem[] = [
-  { id: "operations", label: "Operations Queue", icon: LayoutList },
-  { id: "queue-status", label: "Queue Status", icon: Activity },
-  { id: "dlq-inspector", label: "DLQ Inspector", icon: AlertTriangle },
-  { id: "trace", label: "Trace Inspector", icon: Network },
-  { id: "cognition", label: "Cognition Hub", icon: Brain },
-  { id: "knowledge", label: "Knowledge Base", icon: BookOpen },
-  { id: "governance", label: "Governance Policies", icon: Gavel },
-  { id: "topology", label: "Topology", icon: GitBranch },
-  { id: "channels", label: "Channels", icon: Radio },
-  { id: "team", label: "Team & Roles", icon: Users },
-  { id: "audit", label: "Audit & Exports", icon: FileSearch },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "operations", href: dashboardRoutes.operations, label: "Operations Queue", icon: LayoutList },
+  { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity },
+  { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "DLQ Inspector", icon: AlertTriangle },
+  { id: "trace", href: dashboardRoutes.trace, label: "Trace Inspector", icon: Network },
+  { id: "cognition", href: dashboardRoutes.cognition, label: "Cognition Hub", icon: Brain },
+  { id: "knowledge", href: dashboardRoutes.knowledge, label: "Knowledge Base", icon: BookOpen },
+  { id: "governance", href: dashboardRoutes.governance, label: "Governance Policies", icon: Gavel },
+  { id: "topology", href: dashboardRoutes.topology, label: "Topology", icon: GitBranch },
+  { id: "channels", href: dashboardRoutes.channels, label: "Channels", icon: Radio },
+  { id: "team", href: dashboardRoutes.team, label: "Team & Roles", icon: Users },
+  { id: "audit", href: dashboardRoutes.audit, label: "Audit & Exports", icon: FileSearch },
+  { id: "settings", href: dashboardRoutes.settings, label: "Settings", icon: Settings },
 ];
 
 interface SidebarProps {
-  activeItem?: string;
   collapsed?: boolean;
-  onNavigate?: (itemId: string) => void;
   tenantName?: string;
   userName?: string;
   userRole?: string;
@@ -61,9 +63,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  activeItem = "operations",
   collapsed = false,
-  onNavigate,
   tenantName = "Tenant scope not configured",
   userName = "Unverified operator",
   userRole = "Principal scope not configured",
@@ -73,6 +73,7 @@ export function Sidebar({
   className,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const { user, isLoading } = useUser();
   const resolvedUserName =
@@ -169,14 +170,15 @@ export function Sidebar({
       <nav className={cn("flex-1 overflow-y-auto px-4 py-3", collapsed && "lg:px-3")}>
         <ul className="space-y-1">
           {navItems.map((item) => {
-            const isActive = activeItem === item.id;
+            const isActive = pathname === item.href;
             const isHovered = hoveredItem === item.id;
             const Icon = item.icon;
 
             return (
               <li key={item.id}>
-                <button
-                  onClick={() => onNavigate?.(item.id)}
+                <Link
+                  href={item.href}
+                  onClick={onMobileClose}
                   onMouseEnter={() => setHoveredItem(item.id)}
                   onMouseLeave={() => setHoveredItem(null)}
                   className={cn(
@@ -208,7 +210,7 @@ export function Sidebar({
                   >
                     {item.label}
                   </span>
-                </button>
+                </Link>
               </li>
             );
           })}

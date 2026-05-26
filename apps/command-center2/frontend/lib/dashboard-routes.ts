@@ -1,0 +1,16 @@
+export const dashboardRoutes = {
+  operations: "/dashboard/queue",
+  "queue-status": "/dashboard/queue-status",
+  "dlq-inspector": "/dashboard/dlq",
+  trace: "/dashboard/traces",
+  cognition: "/dashboard/cognition",
+  knowledge: "/dashboard/knowledge",
+  governance: "/dashboard/governance",
+  topology: "/dashboard/topology",
+  channels: "/dashboard/channels",
+  team: "/dashboard/team",
+  audit: "/dashboard/audit",
+  settings: "/dashboard/settings",
+} as const;
+
+export type DashboardViewId = keyof typeof dashboardRoutes;
