@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, Menu, X } from "lucide-react";
 import Link from "next/link";
-import { Logo } from "./logo";
+import { OperioussLogo } from "./logo";
 import { commandCenterUrl, headerGroups, type LinkGroup } from "@/lib/site-links";
 
 function NavDropdown({
@@ -99,7 +99,7 @@ function MobileNav({
             <div className="p-6">
               <div className="mb-8 flex items-center justify-between">
                 <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-                  <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={164} />
+                  <OperioussLogo size={28} showWordmark={true} />
                 </Link>
                 <button
                   onClick={onClose}
@@ -216,15 +216,11 @@ export function Navigation() {
     <>
       <motion.nav
         ref={navRef}
-        className="fixed left-0 right-0 top-0 z-50 h-[72px] border-b border-border-subtle bg-canvas/95 backdrop-blur-[16px]"
+        className="fixed left-0 right-0 top-0 z-50 border-b border-[#1A2744] bg-[#05080F]/90 backdrop-blur-md"
         role="navigation"
         aria-label="Main navigation"
       >
-        <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <Logo className="h-9 w-auto text-ink-primary" height={36} tone="light" width={164} />
-          </Link>
-
+        <div className="mx-auto grid h-[72px] max-w-7xl grid-cols-3 items-center px-4 sm:px-6 lg:px-8">
           <div className="hidden items-center gap-8 lg:flex">
             {headerGroups.map((group) => (
               <NavDropdown
@@ -238,31 +234,37 @@ export function Navigation() {
             ))}
           </div>
 
-          <div className="hidden items-center gap-4 lg:flex">
+          <div className="flex justify-center">
+            <Link href="/" aria-label="Operious home">
+              <OperioussLogo size={28} showWordmark={true} />
+            </Link>
+          </div>
+
+          <div className="flex items-center justify-end gap-4">
             <a
               href={commandCenterUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-[14px] text-ink-primary transition-colors duration-[160ms] hover:text-gold"
+              className="hidden text-[14px] text-[#D8E4F4] transition-colors duration-[160ms] hover:text-gold lg:inline-flex"
             >
               Sign In
             </a>
             <Link
               href="/company/contact"
-              className="rounded bg-ink-primary px-4 py-2 text-[14px] font-medium text-white transition-colors duration-[160ms] hover:bg-ink-body"
+              className="hidden rounded bg-[#D8E4F4] px-4 py-2 text-[14px] font-medium text-[#05080F] transition-colors duration-[160ms] hover:bg-white lg:inline-flex"
             >
               Request Access
             </Link>
-          </div>
 
-          <button
-            onClick={() => setMobileMenuOpen(true)}
-            className="flex h-11 w-11 items-center justify-center rounded text-ink-primary transition-colors hover:bg-surface-raised hover:text-gold lg:hidden"
-            aria-label="Open menu"
-            aria-expanded={mobileMenuOpen}
-          >
-            <Menu className="h-6 w-6" />
-          </button>
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="flex h-11 w-11 items-center justify-center rounded text-[#D8E4F4] transition-colors hover:bg-surface-raised hover:text-gold lg:hidden"
+              aria-label="Open menu"
+              aria-expanded={mobileMenuOpen}
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+          </div>
         </div>
       </motion.nav>
 
