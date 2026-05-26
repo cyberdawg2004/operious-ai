@@ -75,6 +75,17 @@ type TimelineEventView = SessionTimelineEvent & {
   metadata: Record<string, unknown>;
 };
 
+interface RetrievedCitation {
+  rank: number;
+  document_id: string;
+  title: string;
+  document_type: string;
+  document_status: string;
+  score: number;
+  chunk_ordinal: number;
+  token_count: number;
+}
+
 type TraceInspectorProps = {
   initialTraceId?: string | null;
   initialLookup?: TraceLookup | null;
@@ -273,6 +284,7 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                 {events.map((event) => {
                   const isExpanded = expandedPayloads.has(event.timeline_event_id);
                   const eventColor = colorForEventType(event.event_type);
+                  const citations = citationsForEvent(event);
 
                   return (
                     <div key={event.timeline_event_id} className="relative">
@@ -355,6 +367,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                             <GitBranch className="h-3.5 w-3.5 text-ink-tertiary" strokeWidth={1.5} />
                             correlation {shortId(event.correlation_id)}
                           </div>
+                        )}
+
+                        {citations.length > 0 && (
+                          <KnowledgeSources citations={citations} />
                         )}
 
                         {isExpanded && (
@@ -479,6 +495,69 @@ function mergeTimelineEvents(trace: SessionTraceResponse): TimelineEventView[] {
       };
     })
     .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+}
+
+function citationsForEvent(event: TimelineEventView): RetrievedCitation[] {
+  if (event.event_type !== "diagnostic_analysis_completed") return [];
+  const citations = event.payload.retrieved_citations;
+  if (!Array.isArray(citations)) return [];
+  return citations.filter(isRetrievedCitation);
+}
+
+function isRetrievedCitation(value: unknown): value is RetrievedCitation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const citation = value as Record<string, unknown>;
+  return (
+    typeof citation.rank === "number" &&
+    typeof citation.document_id === "string" &&
+    typeof citation.title === "string" &&
+    typeof citation.document_type === "string" &&
+    typeof citation.document_status === "string" &&
+    typeof citation.score === "number" &&
+    typeof citation.chunk_ordinal === "number" &&
+    typeof citation.token_count === "number"
+  );
+}
+
+function KnowledgeSources({ citations }: { citations: RetrievedCitation[] }) {
+  return (
+    <div className="mt-3">
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+        Knowledge Sources
+      </div>
+      <div className="space-y-1">
+        {citations.map((citation) => {
+          const showStatus =
+            citation.document_status.trim() !== "" &&
+            citation.document_status.toLowerCase() !== "active";
+
+          return (
+            <div
+              key={`${citation.document_id}:${citation.chunk_ordinal}:${citation.rank}`}
+              className="flex items-start gap-2 text-[12px]"
+            >
+              <span className="w-4 shrink-0 font-mono text-[11px] text-ink-tertiary">
+                {citation.rank}.
+              </span>
+              <div className="min-w-0">
+                <span className="block truncate font-medium text-ink-primary">
+                  {citation.title}
+                </span>
+                <span className="font-technical text-[11px] text-ink-tertiary">
+                  {citation.document_type} · score {formatCitationScore(citation.score)}
+                  {showStatus && (
+                    <span className="ml-1 text-warning-amber">
+                      ({citation.document_status})
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function RawJsonModal({
@@ -700,4 +779,9 @@ function stringifyValue(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (value === null || value === undefined) return "null";
   return JSON.stringify(value);
+}
+
+function formatCitationScore(score: number): string {
+  if (!Number.isFinite(score)) return String(score);
+  return score.toFixed(4);
 }

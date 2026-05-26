@@ -3096,7 +3096,7 @@ Closure evidence:
 
 #### PR_T13 - SQL-Native Vector Retrieval
 
-STATUS: [ ] Not started
+STATUS: [x] CLOSED on 2026-05-26
 
 Scope:
 Push LIMIT, tenant filter, and ranking into Postgres query. Eliminate
@@ -3104,6 +3104,32 @@ Python-side re-ranking and post-filter. Index freshness column on
 knowledge records. SOP provenance, including source title, approval
 status, and confidence, surfaced in Diagnostic Agent output and visible
 in Trace Inspector citation view.
+
+Closure evidence:
+
+- Production Neon has `pgvector` installed at `0.8.0`.
+- `tenant_knowledge_vectors.embedding vector(32)` is added and backfilled:
+  production verification returned `total=13`, `with_embedding=13`,
+  `null=0`.
+- HNSW cosine index
+  `ix_tenant_knowledge_vectors_embedding_hnsw` exists on
+  `tenant_knowledge_vectors`.
+- `PostgresKnowledgeRepository` now orders vector retrieval in SQL with
+  tenant filtering, current-vector filtering, provider/model filters,
+  cosine distance ordering, and SQL `LIMIT`.
+- Python cosine reranking and 200-candidate vector fallback are removed
+  from the active retrieval path.
+- Diagnostic cognition captures `retrieved_citations` in usage metadata
+  and includes citation provenance in the
+  `diagnostic_analysis_completed` event payload.
+- Command Center Trace Inspector renders `Knowledge Sources` for new
+  diagnostic completion events that include `retrieved_citations`, while
+  older events without citations render unchanged.
+- Local final gate: backend `2,484 passed, 2 skipped`; Pyright remained
+  at `0 errors`; Command Center production build passed; backend health
+  returned `status: ok` after production deployment.
+- Production Fly deploy image:
+  `deployment-01KSJ4J6ZAKX9A1RR7MWB5QAHC`.
 
 #### Verification Gate - Every Throughput PR
 
@@ -3169,10 +3195,11 @@ The 9+ final gate cannot close until:
   is operator-only and publisher-bound, Alembic production head is
   `0039_dlq_replay_cols (head)`, and Command Center Queue Status plus
   DLQ Inspector are verified at `https://app.operious.com`.
-- Vector retrieval SQL-native:
-  push `LIMIT`, tenant filter, and ranking to Postgres instead of
-  Python-side slicing on the full knowledge corpus. Low priority until
-  Anker uploads significant SOP volume.
+- PR_T13 Vector retrieval SQL-native is closed in production:
+  `pgvector` is installed, `tenant_knowledge_vectors.embedding` is
+  native `vector(32)`, HNSW cosine indexing is present, SQL-native
+  retrieval replaced Python rerank, and diagnostic trace events carry
+  retrieved SOP citation provenance.
 - Post-wedge 9+ Throughput and Capacity Program.
 - 9+ Final Gate.
 - Pilot launch follows the above sequence only after every rating axis is
@@ -3204,10 +3231,10 @@ environment through Command Center.
 Copy this into every Codex session:
 
 ```text
-Current phase: PR_T12 - Security Hardening is CLOSED in production. PR_T9 - Burst and Chaos Test Suite is CLOSED locally with zero application code changes. PR_T8 - Alerting Wiring is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS, PR_T4 - Per-Tenant and Per-Provider Quota Enforcement, PR_T5 - Batch-Safe Ingestion, PR_T6 - Queue and Processing Metrics, and PR_T7 - Command Center Queue and DLQ View are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
-Current verified baseline after PR_T12 closure: full backend 2,478 passed, 2 skipped as `operious_app_test`; Pyright 0 errors and 648 warnings; webhook signing conformance 16 passed; production audit export for `anker-pilot` returned `event_count: 35`, `truncated: false`, and algorithm `HMAC-SHA256`; Fly deploy image `deployment-01KSH14ASQG689884W303WJJW9`. Earlier PR_T9 evidence remains: combined load/chaos gate 10 passed; burst_100 P95 3,558ms against 30,000ms SLO; burst_1000 1,000/1,000 completed with three-tenant isolation proven; burst_10000 admission control activated with zero phantom records; six chaos cases passed. Production Fly.io/Neon verification remains from PR_T8: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, Alembic production head is unchanged at `0039_dlq_replay_cols (head)`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, `/api/v1/operations/queue-status` returns all 14 named queues, `/api/v1/operations/dead-letters` returns tenant-scoped records, and PR_T8 alert evaluation is deployed on `webhook_maintenance` with Sentry `capture_message`, structured `alert.fired` logging, and Redis cooldown deduplication. Command Center production verification: `https://app.operious.com` serves the deployed Queue Status and DLQ Inspector views behind Auth0. Phase 6-F focused artifact checks: 6 passed. Active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
+Current phase: PR_T13 - SQL-Native Vector Retrieval is CLOSED in production. PR_T12 - Security Hardening is CLOSED in production. PR_T9 - Burst and Chaos Test Suite is CLOSED locally with zero application code changes. PR_T8 - Alerting Wiring is CLOSED in production. Wedge 4 Option A - Session Variable Wiring + FORCE RLS, PR_T4 - Per-Tenant and Per-Provider Quota Enforcement, PR_T5 - Batch-Safe Ingestion, PR_T6 - Queue and Processing Metrics, and PR_T7 - Command Center Queue and DLQ View are also CLOSED in production. Phase 6-F demo evidence capture remains open in parallel.
+Current verified baseline after PR_T13 closure: full backend 2,484 passed, 2 skipped as `operious_app_test`; Pyright 0 errors and 648 warnings; Command Center production build passed; production Neon has `pgvector 0.8.0`, `tenant_knowledge_vectors.embedding vector(32)`, HNSW cosine index `ix_tenant_knowledge_vectors_embedding_hnsw`, and `13/13` vectors backfilled with `0` NULL embeddings; Fly deploy image `deployment-01KSJ4J6ZAKX9A1RR7MWB5QAHC`. Earlier PR_T12 evidence remains: webhook signing conformance 16 passed; production audit export for `anker-pilot` returned `event_count: 35`, `truncated: false`, and algorithm `HMAC-SHA256`. Earlier PR_T9 evidence remains: combined load/chaos gate 10 passed; burst_100 P95 3,558ms against 30,000ms SLO; burst_1000 1,000/1,000 completed with three-tenant isolation proven; burst_10000 admission control activated with zero phantom records; six chaos cases passed. Production Fly.io/Neon verification remains from PR_T8: `DATABASE_URL` uses `operious_app`, `bypassrls=False`, `provider_quota_records` and `provider_circuit_states` have ENABLE and FORCE RLS, `/api/v1/operations/queue-status` returns all 14 named queues, `/api/v1/operations/dead-letters` returns tenant-scoped records, and PR_T8 alert evaluation is deployed on `webhook_maintenance` with Sentry `capture_message`, structured `alert.fired` logging, and Redis cooldown deduplication. Command Center production verification: `https://app.operious.com` serves the deployed Queue Status, DLQ Inspector, and Trace Inspector citation view behind Auth0. Phase 6-F focused artifact checks: 6 passed. Active-app UUID4 grep returned empty with the approved `_deprecated` quarantine exclusion, and fresh product-defect session `2432a590-f7bc-5d5d-97f9-94a7d0039851` completed.
 Current Pyright baseline: 0 errors, 648 warnings; warnings must not grow.
-Current production Alembic head: `0039_dlq_replay_cols (head)`.
+Current production Alembic head: `0040_pgvector (head)`.
 
 Completed before the next phase:
 - Phase 6-A through Phase 6-E are closed.
