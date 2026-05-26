@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import computed_field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.queues import (
@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     AUTH0_ISSUER: str | None = None
     AUTH0_AUDIENCE: str | None = None
     AUTH0_JWKS_URL: str | None = None
+
+    AUDIT_EXPORT_HMAC_SECRET: str | None = Field(
+        default=None,
+        description="HMAC-SHA256 key for audit export signing.",
+    )
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -313,6 +318,10 @@ class Settings(BaseSettings):
         if self.LOG_JSON is not None:
             return self.LOG_JSON
         return not self.is_local
+
+    @property
+    def audit_export_signing_key(self) -> str | None:
+        return self.AUDIT_EXPORT_HMAC_SECRET
 
     @computed_field  # type: ignore[prop-decorator]
     @property

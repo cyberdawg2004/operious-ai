@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.v1.routers.audit_export import router as audit_export_router
 from app.api.v1.routers.arbitration import router as arbitration_router
 from app.api.v1.routers.auth import router as auth_router
 from app.api.v1.routers.batch_ingest import router as batch_ingest_router
@@ -41,6 +42,7 @@ from app.api.v1.routers.tenant import router as tenant_router
 api_router_v1 = APIRouter()
 api_router_v1.include_router(health_router)
 api_router_v1.include_router(batch_ingest_router)
+api_router_v1.include_router(audit_export_router, prefix="/audit")
 api_router_v1.include_router(auth_router, prefix="/auth")
 api_router_v1.include_router(governance_router, prefix="/governance")
 api_router_v1.include_router(coordination_router, prefix="/coordination")

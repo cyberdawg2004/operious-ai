@@ -112,6 +112,10 @@ from app.runtime import (
     TenantCoordinationTopologyRuntimeProvider,
     make_postgres_dispatch_arbitration_runtime,
 )
+from app.runtime.tenant_production_hardening import (
+    TenantProductionHardeningRuntime,
+)
+from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
@@ -530,6 +534,32 @@ def get_operational_event_service(
     )
 
 
+def get_tenant_production_hardening_runtime(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> TenantProductionHardeningRuntime:
+    """Return the tenant hardening runtime bound to request storage."""
+
+    runtime = cast(
+        TenantProductionHardeningRuntime,
+        request.app.state.tenant_production_hardening_runtime,
+    )
+    return runtime.bind_persistence(
+        event_persistence=PostgresOperationalEventPersistence(session),
+        boundary_persistence=PostgresBoundaryPersistence(session),
+    )
+
+
+def get_audit_export_service(
+    runtime: TenantProductionHardeningRuntime = Depends(
+        get_tenant_production_hardening_runtime
+    ),
+) -> AuditExportService:
+    """Return the signed audit export service."""
+
+    return AuditExportService(runtime=runtime)
+
+
 def get_quota_operations_service(
     session: AsyncSession = Depends(get_db_session),
     quota_runtime: TenantQuotaRuntime = Depends(get_quota_runtime),
@@ -799,6 +829,7 @@ def _require_outbox_claim_id(claim_id: str | None) -> str:
 
 
 __all__ = [
+    "get_audit_export_service",
     "get_arbitration_repository",
     "get_boundary_repository",
     "get_cognition_service",

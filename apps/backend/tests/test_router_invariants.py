@@ -125,6 +125,7 @@ _PUBLIC_ROUTER_FILES: Final[frozenset[str]] = frozenset({
 # ─── DI surface pinning ──────────────────────────────────────────────────
 
 _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
+    "get_audit_export_service",
     "get_arbitration_repository",
     "get_boundary_repository",
     "get_cognition_service",

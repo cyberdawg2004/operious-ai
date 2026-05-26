@@ -194,6 +194,8 @@ async def test_signed_audit_export_is_tenant_scoped_and_verifiable() -> None:
 
     export = await runtime.create_audit_export(
         tenant_id="tenant-acme",
+        from_timestamp=datetime(2026, 5, 22, tzinfo=timezone.utc),
+        to_timestamp=datetime(2026, 5, 24, tzinfo=timezone.utc),
         limit=100,
     )
 

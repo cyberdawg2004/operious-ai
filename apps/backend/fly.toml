@@ -13,6 +13,7 @@ primary_region = "sin"
   worker_maintenance = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=2"
 
 [env]
+  # AUDIT_EXPORT_HMAC_SECRET is set through `fly secrets set`, never [env].
   PORT = "8000"
   ENVIRONMENT = "staging"
   AUTH_ENABLED = "true"

@@ -50,6 +50,10 @@ from app.middleware.trusted_ingress import (
     TrustedIngressMiddleware,
 )
 from app.observability.context import get_request_id
+from app.runtime.tenant_production_hardening import (
+    AUDIT_EXPORT_UNCONFIGURED_SIGNING_KEY,
+    TenantProductionHardeningRuntime,
+)
 from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.survivability import (
     PROBLEM_DETAILS_MEDIA_TYPE,
@@ -331,6 +335,24 @@ def create_app(
     app.state.quota_runtime = quota_runtime
     initialize_quota_runtime(quota_runtime)
     logger.info("quota_runtime_register_complete")
+
+    logger.info(
+        "tenant_hardening_runtime_register_begin",
+        extra={
+            "audit_export_signing_configured": bool(
+                settings.audit_export_signing_key
+            )
+        },
+    )
+    app.state.tenant_production_hardening_runtime = (
+        TenantProductionHardeningRuntime(
+            audit_export_signing_key=(
+                settings.audit_export_signing_key
+                or AUDIT_EXPORT_UNCONFIGURED_SIGNING_KEY
+            ),
+        )
+    )
+    logger.info("tenant_hardening_runtime_register_complete")
 
     logger.info("metrics_collector_register_begin")
     metrics_collector = OperationalMetricsCollector()
