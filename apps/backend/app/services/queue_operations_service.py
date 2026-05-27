@@ -187,60 +187,70 @@ class QueueOperationsService:
         parsed_id = _parse_dlq_id(dlq_id)
         previous_tenant = get_current_tenant()
         set_current_tenant(tenant_id)
+
+        async def claim_replay() -> tuple[str, dict[str, Any], str, datetime]:
+            row = (
+                await self._session.execute(
+                    select(DeadLetterTaskRow)
+                    .where(
+                        DeadLetterTaskRow.dead_letter_task_id == parsed_id,
+                        DeadLetterTaskRow.tenant_id == tenant_id,
+                        DeadLetterTaskRow.replayed.is_(False),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                existing_id = (
+                    await self._session.execute(
+                        select(DeadLetterTaskRow.dead_letter_task_id).where(
+                            DeadLetterTaskRow.dead_letter_task_id == parsed_id,
+                            DeadLetterTaskRow.tenant_id == tenant_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_id is None:
+                    raise DeadLetterNotFoundError("dead-letter record not found")
+                raise DeadLetterAlreadyReplayedError(
+                    "dead-letter replay already in progress"
+                )
+
+            queue_name = _queue_for_row(row)
+            kwargs = _replay_kwargs_for_row(row)
+            task_name = row.task_name
+            replayed_at = datetime.now(timezone.utc)
+            row.replayed = True
+            row.replayed_at = replayed_at
+            row.replayed_by = replayed_by
+            return queue_name, kwargs, task_name, replayed_at
+
         try:
             try:
-                existing = (
-                    await self._session.execute(
-                        select(DeadLetterTaskRow).where(
-                            DeadLetterTaskRow.dead_letter_task_id == parsed_id,
-                            DeadLetterTaskRow.tenant_id == tenant_id,
+                if self._session.in_transaction():
+                    queue_name, kwargs, task_name, replayed_at = await claim_replay()
+                    await self._session.commit()
+                else:
+                    async with self._session.begin():
+                        queue_name, kwargs, task_name, replayed_at = (
+                            await claim_replay()
                         )
-                    )
-                ).scalar_one_or_none()
-                if existing is None:
-                    raise DeadLetterNotFoundError("dead-letter record not found")
-                row = (
-                    await self._session.execute(
-                        select(DeadLetterTaskRow)
-                        .where(
-                            DeadLetterTaskRow.dead_letter_task_id == parsed_id,
-                            DeadLetterTaskRow.tenant_id == tenant_id,
-                        )
-                        .with_for_update(skip_locked=True)
-                    )
-                ).scalar_one_or_none()
-                if row is None:
-                    raise DeadLetterAlreadyReplayedError(
-                        "dead-letter replay already in progress"
-                    )
-                if row.replayed:
-                    raise DeadLetterAlreadyReplayedError(
-                        "dead-letter record already replayed"
-                    )
-                queue_name = _queue_for_row(row)
-                kwargs = _replay_kwargs_for_row(row)
-                task_name = row.task_name
-                replayed_at = datetime.now(timezone.utc)
-                row.replayed = True
-                row.replayed_at = replayed_at
-                row.replayed_by = replayed_by
-                await self._session.commit()
             except Exception:
-                await self._session.rollback()
+                if self._session.in_transaction():
+                    await self._session.rollback()
                 raise
-
-            self._replay_publisher.publish(
-                task_name=task_name,
-                kwargs=kwargs,
-                queue=queue_name,
-            )
-            return DeadLetterReplayRecord(
-                id=str(parsed_id),
-                status="replayed",
-                replayed_at=replayed_at,
-            )
         finally:
             set_current_tenant(previous_tenant)
+
+        self._replay_publisher.publish(
+            task_name=task_name,
+            kwargs=kwargs,
+            queue=queue_name,
+        )
+        return DeadLetterReplayRecord(
+            id=str(parsed_id),
+            status="replayed",
+            replayed_at=replayed_at,
+        )
 
     async def _queue_status_item(
         self,
