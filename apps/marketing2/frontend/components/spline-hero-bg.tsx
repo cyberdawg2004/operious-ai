@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
 
 /**
@@ -13,11 +13,6 @@ import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion
 export function SplineHeroBg() {
   const reducedMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const { scrollY } = useScroll();
   const parallaxY = useTransform(scrollY, [0, 800], [0, 140]);
@@ -33,7 +28,7 @@ export function SplineHeroBg() {
       <motion.div
         className="absolute inset-0"
         style={
-          reducedMotion || !mounted
+          reducedMotion
             ? undefined
             : { y: parallaxY, scale: parallaxScale }
         }
@@ -67,7 +62,7 @@ export function SplineHeroBg() {
       </motion.div>
       <motion.div
         className="absolute inset-0 bg-[#05080F]"
-        style={reducedMotion || !mounted ? { opacity: 0.75 } : { opacity: overlayOpacity }}
+        style={reducedMotion ? { opacity: 0.75 } : { opacity: overlayOpacity }}
       />
     </div>
   );
