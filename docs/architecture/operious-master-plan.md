@@ -246,8 +246,8 @@ Commit: `1b5ea8c`.
 
 ### What It Proves
 
-- Operious now creates customer-ready autonomous resolution proposals
-  after diagnostic completion.
+- Operious now creates customer-ready autonomous resolution proposal
+  drafts after diagnostic completion.
 - Safe Tier 1/Tier 2 cases can be marked internally as
   `auto_approved`/`send_eligible`.
 - Missing citations, low confidence, unsafe content, legal/fraud risk,
@@ -259,12 +259,39 @@ Commit: `1b5ea8c`.
 
 ### What It Does Not Yet Prove
 
+- SOP-content-grounded response composition from cited chunk excerpts.
+  PR_RT1 uses deterministic templates and citation metadata/titles; it
+  does not yet load cited SOP chunk text into the proposed reply.
+- Boundary egress draft/handoff persistence. PR_RT1 is proposal-only and
+  does not write a `boundary_egress` draft record.
+- Operations Queue proposal visibility. PR_RT1 surfaces proposal details
+  in Trace Inspector only.
+- Tenant foreign-key enforcement on `resolution_proposals.tenant_id`.
+  RLS/FORCE RLS and `tenant_id NOT NULL` are active, but tenant FK
+  enforcement remains a follow-up migration decision.
+- Negation-aware safety classification. PR_RT1 intentionally routes any
+  safety keyword mention such as smoke, fire, burn, or injury to human
+  approval, including benign negated forms.
 - Real external email, WhatsApp, Zendesk, or other customer delivery.
 - A manager approval inbox.
 - Warranty, refund, or replacement execution.
 - Realtime chat/no-queue behavior.
 - Realtime voice/no-customer-facing-queue behavior.
 - Full Tier 1/Tier 2 replacement under sustained production load.
+
+### Follow-Up Source Of Truth
+
+- PR_RT1.5: outbound draft/handoff surface for customer-safe egress,
+  including explicit non-delivery semantics until a channel-safe adapter
+  is approved.
+- PR_RT1.6: SOP-content-grounded response composition from cited
+  knowledge chunk excerpts, not citation metadata alone.
+- PR_RT1.7: resolution persistence hardening, including an explicit
+  tenant FK unless intentionally rejected by architecture review.
+- PR_RT2: Case Continuity, Reopen, And Merge.
+- PR_RT3: Realtime Chat Session Runtime.
+- PR_RT4/PR_RT5: Realtime Voice.
+- PR_RT7: Manager approval inbox.
 
 ## 2026-05-24 Frontend Final-Gate and Deployment Report
 
@@ -2253,13 +2280,15 @@ with Sentry emission and Redis cooldown deduplication. PR_T9 proves
 100/1000/10000 burst behavior, tenant isolation under load, admission
 control correctness, and six chaos recovery cases with zero application
 code changes. PR_RT1 proves autonomous, customer-ready resolution
-proposals after diagnostic completion, internal send eligibility for safe
-cases, and human approval routing for high-risk cases. It does not prove
-real external delivery, manager approval operations, warranty/refund/
+proposal drafts after diagnostic completion, internal send eligibility
+for safe cases, and human approval routing for high-risk cases. It does
+not prove SOP-content-grounded response composition, boundary egress
+draft/handoff persistence, Operations Queue proposal visibility, real
+external delivery, manager approval operations, warranty/refund/
 replacement execution, realtime chat, realtime voice, or 10,000
 concurrent no-customer-facing-queue behavior. The remaining work is
 operational runbooks, reset/demo separation, autoscaling contracts,
-PR_T10-PR_T13, PR_RT2-PR_RT7, and Phase 6-F evidence plus the session
+PR_T10-PR_T13, PR_RT1.5-PR_RT7, and Phase 6-F evidence plus the session
 lifecycle/SOP intelligence follow-ups before Anker go-live.
 
 ### Rating Targets Before Pilot Launch
@@ -3575,7 +3604,10 @@ PR_RT1 is closed locally with the isolated resolution substrate,
 identity, `ResolutionRuntime`, diagnostic worker hook,
 `resolution_proposal_created` timeline events, deterministic
 supervisor/governance/autonomy gating, and Trace Inspector proposal
-rendering. PR_RT1 does not send external customer messages.
+rendering. PR_RT1 is proposal-only: it does not load SOP chunk excerpts
+for response composition, does not persist a boundary egress draft, does
+not surface proposals in Operations Queue, and does not send external
+customer messages.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -3903,12 +3935,17 @@ Current Command Center 2 status:
   hook, `resolution_proposal_created` timeline events,
   supervisor/governance/autonomy gating, and Trace Inspector rendering.
   Safe cases can be marked internally `auto_approved`/`send_eligible`;
-  high-risk cases route to `pending_human_approval`; no external
-  customer send path exists yet.
+  high-risk cases route to `pending_human_approval`. PR_RT1 is
+  proposal-only: it does not load cited SOP chunk text, does not persist
+  a boundary egress draft/handoff, does not add Operations Queue proposal
+  visibility, and has no external customer send path.
 
 Queued next:
-- PR_RT2 customer-safe outbound draft/delivery adapter proof.
-- PR_RT3 realtime chat.
+- PR_RT1.5 customer-safe outbound draft/handoff surface.
+- PR_RT1.6 SOP-content-grounded reply composition.
+- PR_RT1.7 resolution persistence hardening, including tenant FK review.
+- PR_RT2 Case Continuity, Reopen, And Merge.
+- PR_RT3 Realtime Chat Session Runtime.
 - PR_RT4/PR_RT5 realtime voice.
 - PR_RT7 manager approval inbox.
 - Phase 6-F Command Center evidence capture.
