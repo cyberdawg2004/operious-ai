@@ -301,9 +301,12 @@ class PostgresSessionPersistence(BaseRepository):
             stmt = stmt.where(
                 SessionRow.lifecycle_phase == query.lifecycle_phase.value
             )
-        # Deterministic ordering — mirror in-memory: sort by stringified
-        # session_id. Postgres UUID comparison sorts the same.
-        stmt = stmt.order_by(SessionRow.session_id)
+        # Newest sessions first so operational dashboards surface fresh
+        # tickets on the first page. Session ID keeps ties deterministic.
+        stmt = stmt.order_by(
+            SessionRow.opened_at.desc(),
+            SessionRow.session_id.desc(),
+        )
         page = await fetch_scalar_page(
             self.session,
             stmt,

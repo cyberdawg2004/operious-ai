@@ -22,7 +22,7 @@ to ``TEST_DATABASE_URL`` before pytest collects these tests.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,17 +89,19 @@ def _session(
     tenant_id: str | None = "tenant-acme",
     revision: int = 1,
     sequence_head: int = 0,
+    opened_at: datetime | None = None,
 ) -> SessionRecord:
     sid = session_id or _new_session_id()
+    opened_at = opened_at or _at()
     return SessionRecord(
         session_id=sid,
         scope=SessionScope.TENANT,
         external_handle=f"handle-{sid}",
         tenant_id=tenant_id,
         principal_id="principal-test",
-        opened_at=_at(),
+        opened_at=opened_at,
         lifecycle_phase=SessionLifecyclePhase.ACTIVE,
-        lifecycle_recorded_at=_at(),
+        lifecycle_recorded_at=opened_at,
         lifecycle_reason=None,
         lineage_id=_new_lineage_id(),
         root_session_id=sid,
@@ -482,3 +484,26 @@ async def test_postgres_list_sessions_paginates(
     assert len(first.sessions) == 2
     assert len(second.sessions) == 2
     assert len(third.sessions) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_list_sessions_orders_newest_first(
+    pg_session: AsyncSession,
+) -> None:
+    repo = PostgresSessionPersistence(pg_session)
+    tenant_id = f"tenant-page-{uuid.uuid4()}"
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    older = _session(
+        tenant_id=tenant_id,
+        opened_at=_at() - timedelta(minutes=5),
+    )
+    newer = _session(tenant_id=tenant_id, opened_at=_at())
+    await repo.save_session(older)
+    await repo.save_session(newer)
+
+    page = await repo.list_sessions(
+        SessionQuery(tenant_id=tenant_id, limit=1)
+    )
+
+    assert page.total == 2
+    assert page.sessions[0].session_id == newer.session_id

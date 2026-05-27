@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -40,7 +40,7 @@ def _now() -> datetime:
 
 
 def _session_record(
-    *, revision: int = 1, sid=None
+    *, revision: int = 1, sid=None, opened_at: datetime | None = None
 ) -> SessionRecord:
     sid = sid or generate_session_id()
     return SessionRecord(
@@ -49,9 +49,9 @@ def _session_record(
         external_handle="x",
         tenant_id="t1",
         principal_id="p1",
-        opened_at=_now(),
+        opened_at=opened_at or _now(),
         lifecycle_phase=SessionLifecyclePhase.INITIATED,
-        lifecycle_recorded_at=_now(),
+        lifecycle_recorded_at=opened_at or _now(),
         lifecycle_reason=None,
         lineage_id=derive_lineage_id(root_session_id=sid),
         root_session_id=sid,
@@ -188,6 +188,20 @@ async def test_list_sessions_filters_and_pages() -> None:
     )
     assert page.total == 2
     assert len(page.sessions) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_orders_newest_first() -> None:
+    store = InMemorySessionPersistence()
+    older = _session_record(opened_at=_now() - timedelta(minutes=5))
+    newer = _session_record(opened_at=_now())
+    await store.save_session(older)
+    await store.save_session(newer)
+
+    page = await store.list_sessions(SessionQuery(tenant_id="t1", limit=1))
+
+    assert page.total == 2
+    assert page.sessions[0].session_id == newer.session_id
 
 
 @pytest.mark.asyncio

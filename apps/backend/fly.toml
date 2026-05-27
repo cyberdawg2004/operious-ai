@@ -6,7 +6,7 @@ primary_region = "sin"
 
 [processes]
   web = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
-  worker_diagnostic = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=12"
+  worker_diagnostic = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=4"
   worker_escalation = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q escalation --concurrency=4"
   worker_supervisor = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q supervisor,qa --concurrency=4"
   worker_sop = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=4"
@@ -53,7 +53,7 @@ primary_region = "sin"
 
 [[vm]]
   processes = ["worker_diagnostic"]
-  memory = "512mb"
+  memory = "1024mb"
   cpu_kind = "shared"
   cpus = 2
 

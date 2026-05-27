@@ -238,7 +238,10 @@ class InMemorySessionPersistence:
                 for r in rows
                 if r.lifecycle_phase == query.lifecycle_phase
             ]
-        rows.sort(key=lambda r: str(r.session_id))
+        rows.sort(
+            key=lambda r: (r.opened_at, str(r.session_id)),
+            reverse=True,
+        )
         total = len(rows)
         if query.offset:
             rows = rows[query.offset :]

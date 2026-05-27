@@ -21,7 +21,7 @@ EXPECTED_PROCESS_QUEUES = {
 }
 
 EXPECTED_CONCURRENCY = {
-    "worker_diagnostic": 12,
+    "worker_diagnostic": 4,
     "worker_escalation": 4,
     "worker_supervisor": 4,
     "worker_sop": 4,
@@ -30,7 +30,7 @@ EXPECTED_CONCURRENCY = {
 
 EXPECTED_VM_PROFILES = {
     "web": ("512mb", "shared", 1),
-    "worker_diagnostic": ("512mb", "shared", 2),
+    "worker_diagnostic": ("1024mb", "shared", 2),
     "worker_escalation": ("256mb", "shared", 1),
     "worker_supervisor": ("256mb", "shared", 1),
     "worker_sop": ("256mb", "shared", 1),
