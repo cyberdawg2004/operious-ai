@@ -17,7 +17,9 @@ all-queue health observability through final local and production
 verification, PR_T7 Command Center queue status plus DLQ inspector
 through backend/frontend production verification, and PR_T8 alerting
 wiring through local verification and production deployment, and PR_T9
-burst/chaos correctness proof through local test verification.
+burst/chaos correctness proof through local test verification, and
+PR_RT1 autonomous resolution proposals with supervisor/governance/autonomy
+gating through local verification.
 This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
@@ -114,15 +116,26 @@ This document is the canonical handoff plan for the next Codex session.
   30,000ms SLO; burst_1000 completed 1,000/1,000 across three tenants
   with tenant isolation proven; burst_10000 activated admission control
   with zero phantom records; all 6 chaos cases passed.
+- PR_RT1 final gate: CLOSED. Autonomous resolution proposal
+  infrastructure is implemented and pushed at commit `1b5ea8c`.
+  Local verification passed with Alembic current
+  `0041_resolution_proposals (head)`, full backend 2,508 passed,
+  2 skipped as `operious_app_test`, smoke 4/4 green, Pyright
+  0 errors and 651 warnings, and frontend architectural tests
+  63 passed. PR_RT1 added the isolated `app.resolution` substrate,
+  `resolution_proposals` with RLS/FORCE RLS, deterministic UUID5
+  proposal identity, `ResolutionRuntime`, the post-diagnostic worker
+  hook, `resolution_proposal_created` timeline events, deterministic
+  supervisor/governance/autonomy gating, and Trace Inspector rendering.
 - Pre-6-E Enterprise Trust status: Phase A, Phase B, Phase C, and
   Phase D, Phase E, Phase F, Phase G, Phase H, and the final gate are
   closed. Phase 6-E Frontend Hydration is closed.
 - Smoke tests: 4/4 green.
-- Pyright: 0 errors, 654 warnings across the backend surface.
+- Pyright: 0 errors, 651 warnings across the backend surface.
   Warnings should not grow beyond this current hardening ceiling.
-- Alembic current: `0039_dlq_replay_cols (head)`. PR_T7 added DLQ queue
-  and replay tracking columns on `dead_letter_tasks`; PR_T8 added no
-  migration.
+- Alembic current: `0041_resolution_proposals (head)`. PR_T7 added DLQ
+  queue and replay tracking columns on `dead_letter_tasks`; PR_T8 added
+  no migration; PR_RT1 added `resolution_proposals` with forced RLS.
 - Phases done: Phase 1 (1-A through 1-G), Phase 2 (2-A through 2-J),
   Phase 2.5-A, Phase 2.5-B, Phase 2.5-C, Phase 2.5-D,
   Phase 2.5-E, Phase 2.5-F, Phase 3-A, Phase 3-B, Phase 3-C,
@@ -204,6 +217,54 @@ This document is the canonical handoff plan for the next Codex session.
 - Official public inboxes: `ops@operious.com`, `info@operious.com`,
   `security@operious.com`, `hello@operious.com`, and
   `careers@operious.com`.
+
+## PR_RT1 / Realtime Resolution Track
+
+Status: CLOSED.
+
+Commit: `1b5ea8c`.
+
+### What Was Added
+
+- Isolated resolution substrate at `apps/backend/app/resolution/`.
+- Durable `resolution_proposals` table.
+- RLS and FORCE RLS for proposal rows, with the established
+  `operious_tenant_rls_allows(tenant_id)` tenant policy.
+- Deterministic UUID5 proposal identity derived from tenant, session,
+  execution, dispatch, diagnostic event, and diagnostic event type.
+- `ResolutionRuntime` in `apps/backend/app/runtime/resolution_runtime.py`.
+- Diagnostic worker hook after `diagnostic_analysis_completed`.
+- Append-only `resolution_proposal_created` timeline event.
+- Deterministic supervisor/governance/autonomy gate.
+- Command Center Trace Inspector rendering for proposed replies,
+  confidence, status, autonomy decision, supervisor/governance verdicts,
+  recommended actions, and citations.
+- Backend and frontend verification covering safe auto-approval,
+  citation blocking, low-confidence blocking, safety escalation,
+  tenant isolation, UUID4 invariants, no external send path, and old/new
+  timeline UI shapes.
+
+### What It Proves
+
+- Operious now creates customer-ready autonomous resolution proposals
+  after diagnostic completion.
+- Safe Tier 1/Tier 2 cases can be marked internally as
+  `auto_approved`/`send_eligible`.
+- Missing citations, low confidence, unsafe content, legal/fraud risk,
+  policy exceptions, high-value refund/replacement requests, conflicting
+  evidence, and unsupported categories route to human approval state.
+- Warranty, refund, and replacement outcomes are not promised by the
+  deterministic templates.
+- Proposal persistence is tenant-scoped and RLS-protected.
+
+### What It Does Not Yet Prove
+
+- Real external email, WhatsApp, Zendesk, or other customer delivery.
+- A manager approval inbox.
+- Warranty, refund, or replacement execution.
+- Realtime chat/no-queue behavior.
+- Realtime voice/no-customer-facing-queue behavior.
+- Full Tier 1/Tier 2 replacement under sustained production load.
 
 ## 2026-05-24 Frontend Final-Gate and Deployment Report
 
@@ -2145,15 +2206,21 @@ before real Anker traffic or any second-client commitment.
 
 ### Current Honest Ratings
 
-- Architecture / substrate design: 9.5/10.
-- Audit, replay, governance foundation: 9.6/10.
-- Production deployment capacity: 9.5/10.
-- Demo readiness for controlled Anker call: 9.5/10.
-- Enterprise-grade readiness overall: 9.6/10.
+- Backend foundation: 9.2/10.
+- Tenant isolation / RLS: 9.4/10.
+- Async ticket intelligence: 9.1/10.
+- Autonomous resolution proposal layer: 9.0/10.
+- Command Center operational visibility: 8.7/10.
+- Real customer delivery: 6.5/10.
+- Realtime chat: 5.5/10.
+- Realtime voice: 4.5/10.
+- Full Tier 1/Tier 2 replacement readiness: 7.2/10.
+- 10,000 concurrent no-customer-facing-queue readiness: 3.5/10.
+- Enterprise-grade readiness overall: 7.4/10.
 
 These ratings are intentionally conservative. The architecture is strong,
 and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, PR_T4, PR_T5, PR_T6,
-PR_T7, PR_T8, PR_T9, and PR_T12 have
+PR_T7, PR_T8, PR_T9, PR_RT1, and PR_T12 have
 removed the known runtime identity, diagnostic schema-validation,
 request-body, escalation outbox, webhook replay/freshness, Celery
 result-retention, Redis queue-depth, worker privilege, DLQ traceback,
@@ -2161,9 +2228,9 @@ ambient identity fallback, tenant-isolation enforcement, provider
 quota/circuit resilience, batch-ingestion idempotency blockers, and the
 missing queue/processing observability, DLQ operating surface, and
 alerting/deduplication layers, the previously unproven burst/chaos
-correctness surface, and the missing cryptographic audit export,
-Auth0 RBAC claim mapping, webhook signing conformance, and secret
-rotation operating procedure.
+correctness surface, the missing autonomous response proposal layer, and
+the missing cryptographic audit export, Auth0 RBAC claim mapping,
+webhook signing conformance, and secret rotation operating procedure.
 Wedge 4 materially
 raises the production posture: production uses `operious_app` with
 `bypassrls=False`, FORCE RLS is active on all 38 tenant-scoped tables,
@@ -2185,10 +2252,15 @@ provider circuits, Redis memory, DB pool pressure, and replay mismatch,
 with Sentry emission and Redis cooldown deduplication. PR_T9 proves
 100/1000/10000 burst behavior, tenant isolation under load, admission
 control correctness, and six chaos recovery cases with zero application
-code changes. The remaining work is operational runbooks, reset/demo
-separation, autoscaling contracts, PR_T10-PR_T13, and Phase 6-F
-evidence plus the session lifecycle/SOP intelligence follow-ups before
-Anker go-live.
+code changes. PR_RT1 proves autonomous, customer-ready resolution
+proposals after diagnostic completion, internal send eligibility for safe
+cases, and human approval routing for high-risk cases. It does not prove
+real external delivery, manager approval operations, warranty/refund/
+replacement execution, realtime chat, realtime voice, or 10,000
+concurrent no-customer-facing-queue behavior. The remaining work is
+operational runbooks, reset/demo separation, autoscaling contracts,
+PR_T10-PR_T13, PR_RT2-PR_RT7, and Phase 6-F evidence plus the session
+lifecycle/SOP intelligence follow-ups before Anker go-live.
 
 ### Rating Targets Before Pilot Launch
 
@@ -3440,8 +3512,9 @@ TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433
 TEST_DATABASE_URL=postgresql+asyncpg://operious_app_test:operious@localhost:5433/operious_test pytest apps/backend -q
 venv/bin/pyright apps/backend/app
 
-Wedge 4, PR_T4, PR_T5, PR_T6, PR_T7, and PR_T8 are fully closed. The
-last fully closed throughput PR is PR_T8 Alerting Wiring.
+Wedge 4, PR_T4, PR_T5, PR_T6, PR_T7, PR_T8, PR_T9, and PR_RT1 are fully
+closed. The last fully closed realtime-resolution PR is PR_RT1
+Autonomous Resolution Proposals.
 Phase 6-F demo evidence capture remains open in
 parallel: verify the selected sessions in Command Center/Trace Inspector
 and record the evidence package. The enterprise target is no rating axis
@@ -3455,7 +3528,7 @@ Use this prompt to continue in a fresh Codex chat:
 ```text
 You are the principal infrastructure continuation engineer for Operious AI.
 
-Current phase: PR_T8 - Alerting Wiring is CLOSED in production.
+Current phase: PR_RT1 - Autonomous Resolution Proposals is CLOSED locally.
 Wedge 0 Runtime Identity Collision Elimination is live-verified and
 closed. Wedge 1 Phase 0 DiagnosticLLMOutput schema-validation
 hardening, Phase 1 ASGI body-limit enforcement, Phase 2 escalation
@@ -3496,6 +3569,13 @@ exhaustion, and replay mismatch every 60 seconds on
 `webhook_maintenance`; alerts emit through Sentry `capture_message`,
 structured `alert.fired` logs, and Redis cooldown deduplication.
 Alembic production head remains `0039_dlq_replay_cols (head)`.
+PR_T9 is closed locally with burst/chaos correctness proof.
+PR_RT1 is closed locally with the isolated resolution substrate,
+`resolution_proposals` RLS/FORCE RLS table, deterministic UUID5 proposal
+identity, `ResolutionRuntime`, diagnostic worker hook,
+`resolution_proposal_created` timeline events, deterministic
+supervisor/governance/autonomy gating, and Trace Inspector proposal
+rendering. PR_RT1 does not send external customer messages.
 Phase 6-F demo evidence capture remains open in parallel.
 
 Current source of truth:
@@ -3542,6 +3622,8 @@ Current source of truth:
 - PR_T6 Queue and Processing Metrics is closed.
 - PR_T7 Command Center Queue and DLQ View is closed.
 - PR_T8 Alerting Wiring is closed.
+- PR_T9 Burst/Chaos Correctness Proof is closed.
+- PR_RT1 Autonomous Resolution Proposals is closed.
 
 Current verified baseline:
 - Wedge 0 backend verification: 2,224 passed, 2 skipped,
@@ -3594,6 +3676,13 @@ Current verified baseline:
   deploy image `deployment-01KSGB53CFMT13PMG98FCW8G6R`; production
   health `status: ok`; Alembic head unchanged at
   `0039_dlq_replay_cols (head)`.
+- PR_T9 final local gate: full backend 2,453 passed, 2 skipped as
+  `operious_app_test`; combined burst/chaos gate 10 passed; Pyright
+  0 errors and 654 warnings.
+- PR_RT1 final local gate: Alembic current
+  `0041_resolution_proposals (head)`; full backend 2,508 passed,
+  2 skipped as `operious_app_test`; smoke 4/4 green; Pyright
+  0 errors and 651 warnings; frontend tests 63 passed.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206 passed,
   2 skipped, 0 xfailed.
 - Phase 6-F focused artifact checks: 6 passed.
@@ -3807,8 +3896,21 @@ Current Command Center 2 status:
   cases passed. Final local gate: combined load/chaos 10 passed, full
   backend 2,453 passed and 2 skipped as `operious_app_test`, Pyright
   0 errors and 654 warnings.
+- PR_RT1 status:
+  CLOSED locally. Commit `1b5ea8c` adds the isolated resolution
+  substrate, `resolution_proposals` with RLS/FORCE RLS, deterministic
+  UUID5 proposal identity, `ResolutionRuntime`, the diagnostic worker
+  hook, `resolution_proposal_created` timeline events,
+  supervisor/governance/autonomy gating, and Trace Inspector rendering.
+  Safe cases can be marked internally `auto_approved`/`send_eligible`;
+  high-risk cases route to `pending_human_approval`; no external
+  customer send path exists yet.
 
 Queued next:
+- PR_RT2 customer-safe outbound draft/delivery adapter proof.
+- PR_RT3 realtime chat.
+- PR_RT4/PR_RT5 realtime voice.
+- PR_RT7 manager approval inbox.
 - Phase 6-F Command Center evidence capture.
 - PR_T10 Operational Runbooks.
 - Vector Retrieval SQL-native.
