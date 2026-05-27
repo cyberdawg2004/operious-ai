@@ -281,13 +281,8 @@ Commit: `1b5ea8c`.
 
 ### Follow-Up Source Of Truth
 
-- PR_RT1.5: outbound draft/handoff surface for customer-safe egress,
-  including explicit non-delivery semantics until a channel-safe adapter
-  is approved.
-- PR_RT1.6: SOP-content-grounded response composition from cited
-  knowledge chunk excerpts, not citation metadata alone.
-- PR_RT1.7: resolution persistence hardening, including an explicit
-  tenant FK unless intentionally rejected by architecture review.
+- PR_RT1.5: Resolution Grounding, Customer-Safe Draft Handoff, Tenant
+  FK, Safety Negation, And Plan Alignment.
 - PR_RT2: Case Continuity, Reopen, And Merge.
 - PR_RT3: Realtime Chat Session Runtime.
 - PR_RT4/PR_RT5: Realtime Voice.
@@ -3941,9 +3936,8 @@ Current Command Center 2 status:
   visibility, and has no external customer send path.
 
 Queued next:
-- PR_RT1.5 customer-safe outbound draft/handoff surface.
-- PR_RT1.6 SOP-content-grounded reply composition.
-- PR_RT1.7 resolution persistence hardening, including tenant FK review.
+- PR_RT1.5 Resolution Grounding, Customer-Safe Draft Handoff, Tenant
+  FK, Safety Negation, And Plan Alignment.
 - PR_RT2 Case Continuity, Reopen, And Merge.
 - PR_RT3 Realtime Chat Session Runtime.
 - PR_RT4/PR_RT5 realtime voice.
