@@ -1,0 +1,74 @@
+"""Persistable resolution proposal records."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Mapping
+
+from app.resolution.enums import (
+    ResolutionAutonomyDecision,
+    ResolutionGovernanceVerdict,
+    ResolutionProposalStatus,
+    ResolutionSupervisorVerdict,
+)
+from app.resolution.identity import ResolutionProposalId
+
+
+def _empty_json_list() -> tuple[Mapping[str, Any], ...]:
+    return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionProposalRecord:
+    """Durable customer-safe response proposal."""
+
+    proposal_id: ResolutionProposalId
+    tenant_id: str
+    session_id: str
+    execution_id: str
+    dispatch_id: str
+    diagnostic_event_id: str | None
+    proposed_customer_reply: str
+    resolution_category: str
+    confidence: float
+    supervisor_verdict: ResolutionSupervisorVerdict
+    governance_verdict: ResolutionGovernanceVerdict
+    autonomy_decision: ResolutionAutonomyDecision
+    status: ResolutionProposalStatus
+    created_at: datetime
+    updated_at: datetime
+    recommended_actions: tuple[Mapping[str, Any], ...] = field(
+        default_factory=_empty_json_list
+    )
+    evidence: tuple[Mapping[str, Any], ...] = field(
+        default_factory=_empty_json_list
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the API/timeline-safe representation."""
+
+        return {
+            "proposal_id": str(self.proposal_id),
+            "tenant_id": self.tenant_id,
+            "session_id": self.session_id,
+            "execution_id": self.execution_id,
+            "dispatch_id": self.dispatch_id,
+            "diagnostic_event_id": self.diagnostic_event_id,
+            "proposed_customer_reply": self.proposed_customer_reply,
+            "resolution_category": self.resolution_category,
+            "confidence": self.confidence,
+            "recommended_actions": [
+                dict(action) for action in self.recommended_actions
+            ],
+            "evidence": [dict(item) for item in self.evidence],
+            "supervisor_verdict": self.supervisor_verdict.value,
+            "governance_verdict": self.governance_verdict.value,
+            "autonomy_decision": self.autonomy_decision.value,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+__all__ = ["ResolutionProposalRecord"]

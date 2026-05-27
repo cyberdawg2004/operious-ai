@@ -54,6 +54,12 @@ from app.knowledge import (
     KnowledgeRuntime,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
+from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.runtime.resolution_runtime import (
+    ResolutionProposalRequest,
+    ResolutionRuntime,
+    resolution_proposal_timeline_payload,
+)
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.runtime.provider_circuit_breaker import ProviderCircuitBreaker
 from app.session.identity import as_session_id
@@ -83,6 +89,8 @@ _T = TypeVar("_T")
 _STARTED = "diagnostic_execution_started"
 _COMPLETED = "diagnostic_analysis_completed"
 _FAILED = "diagnostic_execution_failed"
+_RESOLUTION_CREATED = "resolution_proposal_created"
+_RESOLUTION_FAILED = "resolution_proposal_failed"
 _MAX_EXECUTION_ATTEMPTS = 5
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 
@@ -367,7 +375,7 @@ async def _persist_diagnostic_success(
                 "session_id": work_item.session_id,
                 "tenant_id": work_item.tenant_id,
             }
-        await timeline.append_event(
+        diagnostic_event = await timeline.append_event(
             dispatch_id=work_item.dispatch_id,
             session_id=work_item.session_id,
             tenant_id=work_item.tenant_id,
@@ -378,6 +386,13 @@ async def _persist_diagnostic_success(
                 attempt_id=work_item.attempt_id,
                 event_type=_COMPLETED,
             ),
+        )
+        await _append_resolution_proposal_after_diagnostic(
+            session=session,
+            timeline=timeline,
+            work_item=work_item,
+            result=result,
+            diagnostic_event_id=diagnostic_event.timeline_event_id,
         )
         completed_payload = result.model_dump()
         await execution_runtime.complete_execution(
@@ -612,6 +627,89 @@ async def _generate_diagnostic_reasoning_draft(
         execution_id=execution_id,
         attempt_id=attempt_id,
     )
+
+
+async def _append_resolution_proposal_after_diagnostic(
+    *,
+    session: AsyncSession,
+    timeline: TimelineRuntime,
+    work_item: _DiagnosticExecutionWorkItem,
+    result: DiagnosticResult,
+    diagnostic_event_id: str,
+) -> bool:
+    try:
+        async with session.begin_nested():
+            proposal = await ResolutionRuntime(
+                persistence=PostgresResolutionProposalPersistence(session)
+            ).create_proposal(
+                ResolutionProposalRequest(
+                    tenant_id=work_item.tenant_id,
+                    session_id=work_item.session_id,
+                    execution_id=work_item.execution_id,
+                    dispatch_id=work_item.dispatch_id,
+                    diagnostic_event_id=diagnostic_event_id,
+                    diagnostic_summary=result.summary,
+                    diagnostic_category=result.category,
+                    diagnostic_confidence=result.confidence,
+                    original_content=work_item.content,
+                    retrieved_citations=result.retrieved_citations,
+                )
+            )
+            await timeline.append_event(
+                dispatch_id=work_item.dispatch_id,
+                session_id=work_item.session_id,
+                tenant_id=work_item.tenant_id,
+                event_type=_RESOLUTION_CREATED,
+                payload=resolution_proposal_timeline_payload(proposal),
+                idempotency_key=_timeline_idempotency_key(
+                    execution_id=work_item.execution_id,
+                    attempt_id=work_item.attempt_id,
+                    event_type=_RESOLUTION_CREATED,
+                ),
+            )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        await _append_resolution_failure_event(
+            session=session,
+            timeline=timeline,
+            work_item=work_item,
+            diagnostic_event_id=diagnostic_event_id,
+            exc=exc,
+        )
+        return False
+
+
+async def _append_resolution_failure_event(
+    *,
+    session: AsyncSession,
+    timeline: TimelineRuntime,
+    work_item: _DiagnosticExecutionWorkItem,
+    diagnostic_event_id: str,
+    exc: BaseException,
+) -> bool:
+    try:
+        async with session.begin_nested():
+            await timeline.append_event(
+                dispatch_id=work_item.dispatch_id,
+                session_id=work_item.session_id,
+                tenant_id=work_item.tenant_id,
+                event_type=_RESOLUTION_FAILED,
+                payload={
+                    "execution_id": work_item.execution_id,
+                    "attempt_id": work_item.attempt_id,
+                    "diagnostic_event_id": diagnostic_event_id,
+                    "error_type": exc.__class__.__name__,
+                    "message": _bounded_exception_message(exc),
+                },
+                idempotency_key=_timeline_idempotency_key(
+                    execution_id=work_item.execution_id,
+                    attempt_id=work_item.attempt_id,
+                    event_type=_RESOLUTION_FAILED,
+                ),
+            )
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 async def _queue_supervisor_if_closed(

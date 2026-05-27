@@ -14,6 +14,7 @@ LINEAGE_ROOTS = (
     Path("apps/backend/app/execution"),
     Path("apps/backend/app/arbitration"),
     Path("apps/backend/app/supervisor"),
+    Path("apps/backend/app/resolution"),
     Path("apps/backend/app/runtime"),
 )
 

@@ -86,6 +86,24 @@ interface RetrievedCitation {
   token_count: number;
 }
 
+interface RecommendedResolutionAction {
+  type: string;
+  label: string;
+  requires_execution: boolean;
+}
+
+interface ResolutionProposalPayload {
+  proposed_customer_reply: string;
+  resolution_category: string;
+  confidence: number;
+  autonomy_decision: string;
+  status: string;
+  supervisor_verdict: string;
+  governance_verdict: string;
+  recommended_actions: RecommendedResolutionAction[];
+  evidence: RetrievedCitation[];
+}
+
 type TraceInspectorProps = {
   initialTraceId?: string | null;
   initialLookup?: TraceLookup | null;
@@ -126,6 +144,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
       events[0] ??
       null,
     [events, selectedEventId]
+  );
+  const selectedResolutionProposal = useMemo(
+    () => (selectedEvent ? resolutionProposalForEvent(selectedEvent) : null),
+    [selectedEvent]
   );
   const metadata = useMemo(
     () => deriveTraceMetadata(loadedSessionId, events),
@@ -285,6 +307,7 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                   const isExpanded = expandedPayloads.has(event.timeline_event_id);
                   const eventColor = colorForEventType(event.event_type);
                   const citations = citationsForEvent(event);
+                  const resolutionProposal = resolutionProposalForEvent(event);
 
                   return (
                     <div key={event.timeline_event_id} className="relative">
@@ -369,6 +392,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                           </div>
                         )}
 
+                        {resolutionProposal && (
+                          <ResolutionProposalSummary proposal={resolutionProposal} />
+                        )}
+
                         {citations.length > 0 && (
                           <KnowledgeSources citations={citations} />
                         )}
@@ -428,6 +455,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                       <Metric icon={<GitBranch className="h-4 w-4" />} value={shortId(selectedEvent.correlation_id)} />
                     )}
                   </div>
+
+                  {selectedResolutionProposal && (
+                    <ResolutionProposalSummary proposal={selectedResolutionProposal} compact />
+                  )}
 
                   <div className="space-y-4">
                     <DetailRow label="TIMELINE EVENT ID" value={selectedEvent.timeline_event_id} />
@@ -498,10 +529,39 @@ function mergeTimelineEvents(trace: SessionTraceResponse): TimelineEventView[] {
 }
 
 function citationsForEvent(event: TimelineEventView): RetrievedCitation[] {
-  if (event.event_type !== "diagnostic_analysis_completed") return [];
-  const citations = event.payload.retrieved_citations;
+  const citations =
+    event.event_type === "resolution_proposal_created"
+      ? event.payload.evidence
+      : event.payload.retrieved_citations;
   if (!Array.isArray(citations)) return [];
   return citations.filter(isRetrievedCitation);
+}
+
+function resolutionProposalForEvent(
+  event: TimelineEventView
+): ResolutionProposalPayload | null {
+  if (event.event_type !== "resolution_proposal_created") return null;
+  const payload = event.payload;
+  const proposedReply = stringField(payload.proposed_customer_reply);
+  if (!proposedReply) return null;
+  const actions = Array.isArray(payload.recommended_actions)
+    ? payload.recommended_actions.filter(isRecommendedResolutionAction)
+    : [];
+  const evidence = Array.isArray(payload.evidence)
+    ? payload.evidence.filter(isRetrievedCitation)
+    : [];
+
+  return {
+    proposed_customer_reply: proposedReply,
+    resolution_category: stringField(payload.resolution_category) || "unknown",
+    confidence: numberField(payload.confidence),
+    autonomy_decision: stringField(payload.autonomy_decision) || "unknown",
+    status: stringField(payload.status) || "unknown",
+    supervisor_verdict: stringField(payload.supervisor_verdict) || "unknown",
+    governance_verdict: stringField(payload.governance_verdict) || "unknown",
+    recommended_actions: actions,
+    evidence,
+  };
 }
 
 function isRetrievedCitation(value: unknown): value is RetrievedCitation {
@@ -516,6 +576,93 @@ function isRetrievedCitation(value: unknown): value is RetrievedCitation {
     typeof citation.score === "number" &&
     typeof citation.chunk_ordinal === "number" &&
     typeof citation.token_count === "number"
+  );
+}
+
+function isRecommendedResolutionAction(
+  value: unknown
+): value is RecommendedResolutionAction {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const action = value as Record<string, unknown>;
+  return (
+    typeof action.type === "string" &&
+    typeof action.label === "string" &&
+    typeof action.requires_execution === "boolean"
+  );
+}
+
+function ResolutionProposalSummary({
+  proposal,
+  compact = false,
+}: {
+  proposal: ResolutionProposalPayload;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn("mt-3 rounded border border-border-subtle bg-surface-sunken p-3", compact && "mt-0")}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <ResolutionBadge label="Status" value={proposal.status} />
+        <ResolutionBadge label="Autonomy" value={proposal.autonomy_decision} />
+        <ResolutionBadge label="Confidence" value={formatConfidence(proposal.confidence)} />
+      </div>
+
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+        Proposed Customer Reply
+      </div>
+      <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary">
+        {proposal.proposed_customer_reply}
+      </p>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <ResolutionField label="Category" value={proposal.resolution_category} />
+        <ResolutionField label="Supervisor" value={proposal.supervisor_verdict} />
+        <ResolutionField label="Governance" value={proposal.governance_verdict} />
+        <ResolutionField label="Evidence" value={`${proposal.evidence.length} cited`} />
+      </div>
+
+      {proposal.recommended_actions.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+            Recommended Actions
+          </div>
+          <div className="space-y-1">
+            {proposal.recommended_actions.map((action) => (
+              <div
+                key={`${action.type}:${action.label}`}
+                className="flex items-start justify-between gap-3 text-[12px]"
+              >
+                <span className="min-w-0 text-ink-secondary">{action.label}</span>
+                <span className="shrink-0 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+                  {action.requires_execution ? "tool" : "draft"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResolutionBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded border border-border-subtle px-2 py-1 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary">
+      <span className="text-ink-tertiary">{label}</span>
+      <span>{formatEventLabel(value)}</span>
+    </span>
+  );
+}
+
+function ResolutionField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-ink-tertiary">
+        {label}
+      </div>
+      <div className="truncate font-technical text-[11px] text-ink-secondary">
+        {formatEventLabel(value)}
+      </div>
+    </div>
   );
 }
 
@@ -721,6 +868,7 @@ function deriveTraceMetadata(
 
 function colorForEventType(eventType: string): string {
   if (eventType.startsWith("diagnostic_")) return "#1A4A9A";
+  if (eventType.startsWith("resolution_")) return "#0F766E";
   if (eventType.startsWith("governance_")) return "#C9A84C";
   if (eventType.startsWith("session_")) return "#8A93A4";
   if (eventType.startsWith("escalation_")) return "#B8821C";
@@ -784,4 +932,17 @@ function stringifyValue(value: unknown): string {
 function formatCitationScore(score: number): string {
   if (!Number.isFinite(score)) return String(score);
   return score.toFixed(4);
+}
+
+function formatConfidence(value: number): string {
+  if (!Number.isFinite(value)) return "unknown";
+  return `${Math.round(value * 100)}%`;
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function numberField(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

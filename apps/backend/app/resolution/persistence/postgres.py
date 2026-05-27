@@ -1,0 +1,203 @@
+"""Postgres implementation of resolution proposal persistence."""
+
+from __future__ import annotations
+
+from typing import Any, cast
+from uuid import UUID
+
+from sqlalchemy import Select, select
+from sqlalchemy.exc import IntegrityError
+
+from app.repositories.base import BaseRepository
+from app.repositories.pagination import fetch_scalar_page
+from app.resolution.db.models import ResolutionProposalRow
+from app.resolution.enums import (
+    ResolutionAutonomyDecision,
+    ResolutionGovernanceVerdict,
+    ResolutionProposalStatus,
+    ResolutionSupervisorVerdict,
+)
+from app.resolution.exceptions import ResolutionPersistenceError
+from app.resolution.identity import as_resolution_proposal_id
+from app.resolution.persistence.models import (
+    ResolutionProposalPage,
+    ResolutionProposalQuery,
+)
+from app.resolution.persistence.records import ResolutionProposalRecord
+
+
+class PostgresResolutionProposalPersistence(BaseRepository):
+    """Postgres-backed resolution proposal persistence."""
+
+    async def create_resolution_proposal(
+        self,
+        record: ResolutionProposalRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> ResolutionProposalRecord:
+        _enforce_expected_tenant(record.tenant_id, expected_tenant_id)
+        row = _record_to_row(record)
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+        except IntegrityError as exc:
+            raise ResolutionPersistenceError(
+                f"resolution proposal {record.proposal_id!s} already recorded"
+            ) from exc
+        return record
+
+    async def get_resolution_proposal(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> ResolutionProposalRecord | None:
+        row = await self._proposal_row(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        return None if row is None else _row_to_record(row)
+
+    async def list_resolution_proposals(
+        self,
+        query: ResolutionProposalQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> ResolutionProposalPage:
+        stmt = select(ResolutionProposalRow).where(
+            ResolutionProposalRow.tenant_id == expected_tenant_id
+        )
+        stmt = _apply_filters(stmt, query=query)
+        stmt = stmt.order_by(
+            ResolutionProposalRow.created_at,
+            ResolutionProposalRow.proposal_id,
+        )
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
+        )
+        return ResolutionProposalPage(
+            items=tuple(_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
+        )
+
+    async def _proposal_row(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> ResolutionProposalRow | None:
+        stmt = select(ResolutionProposalRow).where(
+            ResolutionProposalRow.proposal_id == UUID(proposal_id),
+            ResolutionProposalRow.tenant_id == expected_tenant_id,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+
+def _apply_filters(
+    stmt: Select[tuple[ResolutionProposalRow]],
+    *,
+    query: ResolutionProposalQuery,
+) -> Select[tuple[ResolutionProposalRow]]:
+    if query.proposal_id is not None:
+        stmt = stmt.where(
+            ResolutionProposalRow.proposal_id == UUID(query.proposal_id)
+        )
+    if query.tenant_id is not None:
+        stmt = stmt.where(ResolutionProposalRow.tenant_id == query.tenant_id)
+    if query.session_id is not None:
+        stmt = stmt.where(
+            ResolutionProposalRow.session_id == UUID(query.session_id)
+        )
+    if query.execution_id is not None:
+        stmt = stmt.where(
+            ResolutionProposalRow.execution_id == UUID(query.execution_id)
+        )
+    if query.dispatch_id is not None:
+        stmt = stmt.where(
+            ResolutionProposalRow.dispatch_id == UUID(query.dispatch_id)
+        )
+    if query.status is not None:
+        stmt = stmt.where(ResolutionProposalRow.status == query.status)
+    return stmt
+
+
+def _record_to_row(record: ResolutionProposalRecord) -> ResolutionProposalRow:
+    return ResolutionProposalRow(
+        proposal_id=UUID(str(record.proposal_id)),
+        tenant_id=record.tenant_id,
+        session_id=UUID(record.session_id),
+        execution_id=UUID(record.execution_id),
+        dispatch_id=UUID(record.dispatch_id),
+        diagnostic_event_id=(
+            UUID(record.diagnostic_event_id)
+            if record.diagnostic_event_id is not None
+            else None
+        ),
+        proposed_customer_reply=record.proposed_customer_reply,
+        resolution_category=record.resolution_category,
+        confidence=record.confidence,
+        recommended_actions=[
+            dict(action) for action in record.recommended_actions
+        ],
+        evidence=[dict(item) for item in record.evidence],
+        supervisor_verdict=record.supervisor_verdict.value,
+        governance_verdict=record.governance_verdict.value,
+        autonomy_decision=record.autonomy_decision.value,
+        status=record.status.value,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _row_to_record(row: ResolutionProposalRow) -> ResolutionProposalRecord:
+    return ResolutionProposalRecord(
+        proposal_id=as_resolution_proposal_id(row.proposal_id),
+        tenant_id=row.tenant_id,
+        session_id=str(row.session_id),
+        execution_id=str(row.execution_id),
+        dispatch_id=str(row.dispatch_id),
+        diagnostic_event_id=(
+            str(row.diagnostic_event_id)
+            if row.diagnostic_event_id is not None
+            else None
+        ),
+        proposed_customer_reply=row.proposed_customer_reply,
+        resolution_category=row.resolution_category,
+        confidence=row.confidence,
+        recommended_actions=tuple(_as_list_of_dict(row.recommended_actions)),
+        evidence=tuple(_as_list_of_dict(row.evidence)),
+        supervisor_verdict=ResolutionSupervisorVerdict(row.supervisor_verdict),
+        governance_verdict=ResolutionGovernanceVerdict(row.governance_verdict),
+        autonomy_decision=ResolutionAutonomyDecision(row.autonomy_decision),
+        status=ResolutionProposalStatus(row.status),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _enforce_expected_tenant(
+    tenant_id: str,
+    expected_tenant_id: str,
+) -> None:
+    if tenant_id != expected_tenant_id:
+        raise ResolutionPersistenceError(
+            "resolution proposal tenant_id does not match expected_tenant_id"
+        )
+
+
+def _as_list_of_dict(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [
+            {str(k): v for k, v in item.items()}
+            for item in cast(list[Any], value)
+            if isinstance(item, dict)
+        ]
+    return []
+
+
+__all__ = ["PostgresResolutionProposalPersistence"]

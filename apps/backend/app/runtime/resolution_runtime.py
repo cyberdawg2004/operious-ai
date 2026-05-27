@@ -1,0 +1,522 @@
+"""Application-layer runtime for autonomous resolution proposals."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Iterable, Mapping, Sequence
+
+from app.resolution.enums import (
+    ResolutionAutonomyDecision,
+    ResolutionGovernanceVerdict,
+    ResolutionProposalStatus,
+    ResolutionSupervisorVerdict,
+)
+from app.resolution.identity import derive_resolution_proposal_id
+from app.resolution.persistence import (
+    ResolutionProposalPersistenceProtocol,
+    ResolutionProposalRecord,
+)
+
+_DEFAULT_AUTO_APPROVE_THRESHOLD = 0.80
+_DIAGNOSTIC_EVENT_TYPE = "diagnostic_analysis_completed"
+
+_SAFE_AUTO_CATEGORIES = frozenset(
+    {
+        "charging_issue",
+        "generic_troubleshooting",
+        "connectivity_issue",
+        "power_issue",
+    }
+)
+
+_SAFETY_KEYWORDS = frozenset(
+    {
+        "fire",
+        "smoke",
+        "burn",
+        "burning",
+        "injury",
+        "injured",
+        "shock",
+        "explosion",
+        "exploded",
+        "overheat",
+        "overheating",
+        "swollen battery",
+        "chemical",
+        "fumes",
+    }
+)
+_LEGAL_KEYWORDS = frozenset(
+    {
+        "lawsuit",
+        "lawyer",
+        "attorney",
+        "i will sue",
+        "going to sue",
+        "plan to sue",
+        "sue your company",
+        "legal action",
+        "class action",
+        "regulator",
+        "chargeback",
+    }
+)
+_FRAUD_KEYWORDS = frozenset(
+    {
+        "fraud",
+        "stolen",
+        "identity theft",
+        "unauthorized purchase",
+        "scam",
+        "counterfeit",
+    }
+)
+_POLICY_EXCEPTION_KEYWORDS = frozenset(
+    {
+        "exception",
+        "override",
+        "outside policy",
+        "bend the rules",
+        "special case",
+    }
+)
+_UNSUPPORTED_PROMISE_PATTERNS = frozenset(
+    {
+        "we will refund",
+        "we'll refund",
+        "you are eligible for a refund",
+        "approved for refund",
+        "we will replace",
+        "we'll replace",
+        "approved for replacement",
+        "covered under warranty",
+        "warranty covers",
+        "guaranteed replacement",
+    }
+)
+_MONEY_PATTERN = re.compile(
+    r"(?:[$]\s*(?P<prefix>\d+(?:,\d{3})*(?:\.\d{1,2})?)|"
+    r"(?P<suffix>\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:usd|dollars))",
+    flags=re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionProposalRequest:
+    """Inputs available at diagnostic completion time."""
+
+    tenant_id: str
+    session_id: str
+    execution_id: str
+    dispatch_id: str
+    diagnostic_event_id: str | None
+    diagnostic_summary: str
+    diagnostic_category: str
+    diagnostic_confidence: float
+    original_content: str
+    retrieved_citations: Sequence[Mapping[str, Any]] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _GateDecision:
+    supervisor_verdict: ResolutionSupervisorVerdict
+    governance_verdict: ResolutionGovernanceVerdict
+    autonomy_decision: ResolutionAutonomyDecision
+    status: ResolutionProposalStatus
+    reasons: tuple[str, ...]
+
+
+class ResolutionRuntime:
+    """Create deterministic, customer-safe resolution proposals."""
+
+    def __init__(
+        self,
+        *,
+        persistence: ResolutionProposalPersistenceProtocol,
+        auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
+    ) -> None:
+        if auto_approve_threshold < 0 or auto_approve_threshold > 1:
+            raise ValueError("auto_approve_threshold must be between 0 and 1")
+        self._persistence = persistence
+        self._auto_approve_threshold = auto_approve_threshold
+
+    async def create_proposal(
+        self,
+        request: ResolutionProposalRequest,
+    ) -> ResolutionProposalRecord:
+        """Persist and return the deterministic proposal for a diagnostic."""
+
+        evidence = _normalise_evidence(request.retrieved_citations)
+        category = _resolution_category(
+            diagnostic_category=request.diagnostic_category,
+            original_content=request.original_content,
+        )
+        reply = _customer_reply(
+            category=category,
+            evidence=evidence,
+            original_content=request.original_content,
+        )
+        recommended_actions = _recommended_actions(category)
+        gate = _evaluate_gate(
+            category=category,
+            confidence=request.diagnostic_confidence,
+            original_content=request.original_content,
+            reply=reply,
+            evidence=evidence,
+            auto_approve_threshold=self._auto_approve_threshold,
+        )
+        proposal_id = derive_resolution_proposal_id(
+            tenant_id=request.tenant_id,
+            session_id=request.session_id,
+            execution_id=request.execution_id,
+            dispatch_id=request.dispatch_id,
+            diagnostic_event_id=request.diagnostic_event_id,
+            diagnostic_event_type=_DIAGNOSTIC_EVENT_TYPE,
+        )
+        existing = await self._persistence.get_resolution_proposal(
+            str(proposal_id),
+            expected_tenant_id=request.tenant_id,
+        )
+        if existing is not None:
+            return existing
+
+        now = datetime.now(tz=timezone.utc)
+        record = ResolutionProposalRecord(
+            proposal_id=proposal_id,
+            tenant_id=request.tenant_id,
+            session_id=request.session_id,
+            execution_id=request.execution_id,
+            dispatch_id=request.dispatch_id,
+            diagnostic_event_id=request.diagnostic_event_id,
+            proposed_customer_reply=reply,
+            resolution_category=category,
+            confidence=_clamp_confidence(request.diagnostic_confidence),
+            recommended_actions=recommended_actions,
+            evidence=evidence,
+            supervisor_verdict=gate.supervisor_verdict,
+            governance_verdict=gate.governance_verdict,
+            autonomy_decision=gate.autonomy_decision,
+            status=gate.status,
+            created_at=now,
+            updated_at=now,
+        )
+        return await self._persistence.create_resolution_proposal(
+            record,
+            expected_tenant_id=request.tenant_id,
+        )
+
+
+def resolution_proposal_timeline_payload(
+    record: ResolutionProposalRecord,
+) -> dict[str, Any]:
+    """Build the append-only timeline payload for a resolution proposal."""
+
+    payload = record.to_dict()
+    payload["send_eligible"] = (
+        record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    )
+    payload["requires_human_approval"] = (
+        record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    )
+    return payload
+
+
+def _resolution_category(
+    *,
+    diagnostic_category: str,
+    original_content: str,
+) -> str:
+    category = _slug(diagnostic_category)
+    content = original_content.lower()
+    if _contains_any(content, ("warranty", "replacement", "replace")):
+        return "warranty_replacement_inquiry"
+    if _contains_any(content, ("refund", "return", "chargeback")):
+        return "returns_refunds_inquiry"
+    if _contains_any(content, ("charge", "charging", "charger", "battery", "power")):
+        return "charging_issue"
+    if category in {"", "unknown", "unclear", "low_confidence"}:
+        return "unknown_low_confidence"
+    if _contains_any(content, ("troubleshoot", "error", "not working", "broken")):
+        return "generic_troubleshooting"
+    return category
+
+
+def _customer_reply(
+    *,
+    category: str,
+    evidence: tuple[Mapping[str, Any], ...],
+    original_content: str,
+) -> str:
+    del original_content
+    if not evidence:
+        return (
+            "Thanks for reaching out. I could not find cited support evidence "
+            "for a safe automatic response, so a human reviewer should check "
+            "this before we provide next steps. Please share any order details, "
+            "product model, screenshots, and the exact issue you are seeing."
+        )
+
+    source = _source_reference(evidence)
+    if category == "charging_issue":
+        return (
+            "Thanks for reaching out. Based on the cited support guidance I "
+            f"found ({source}), please try these charging checks: confirm the "
+            "cable and adapter are firmly connected, test a known-good outlet, "
+            "and let the device charge for at least 30 minutes. If it still "
+            "will not charge, reply with the device model, purchase or order "
+            "details, and any indicator-light behavior so we can review the "
+            "next support step."
+        )
+    if category == "warranty_replacement_inquiry":
+        return (
+            "Thanks for checking on warranty or replacement eligibility. I "
+            "cannot confirm a warranty or replacement outcome from this draft. "
+            f"Based on the cited support guidance I found ({source}), please "
+            "send your order number, purchase date, product model, photos of "
+            "the issue, and any troubleshooting already tried so a human "
+            "reviewer can apply the policy."
+        )
+    if category == "returns_refunds_inquiry":
+        return (
+            "Thanks for asking about a return or refund. I cannot confirm a "
+            "return or refund outcome from this draft. Based on the cited "
+            f"support guidance I found ({source}), please share your order "
+            "number, delivery date, item condition, and reason for the request "
+            "so a human reviewer can apply the policy."
+        )
+    if category == "unknown_low_confidence":
+        return (
+            "Thanks for reaching out. I do not have enough cited context to "
+            "give a reliable answer yet. Please share your order number or "
+            "account email, the product or service involved, and what outcome "
+            "you need so a human reviewer can continue safely."
+        )
+    return (
+        "Thanks for the details. Based on the cited support guidance I found "
+        f"({source}), please try restarting the device or app, checking the "
+        "connection or power source, and noting any error message. If the "
+        "issue continues, reply with the model, order details, and what "
+        "changed before the issue started."
+    )
+
+
+def _recommended_actions(
+    category: str,
+) -> tuple[Mapping[str, Any], ...]:
+    if category == "charging_issue":
+        return (
+            {
+                "type": "customer_reply_draft",
+                "label": "Share cited charging troubleshooting steps",
+                "requires_execution": False,
+            },
+            {
+                "type": "collect_context",
+                "label": "Collect model, order details, and indicator behavior",
+                "requires_execution": False,
+            },
+        )
+    if category == "warranty_replacement_inquiry":
+        return (
+            {
+                "type": "collect_context",
+                "label": "Collect warranty eligibility details",
+                "requires_execution": False,
+            },
+            {
+                "type": "human_policy_review",
+                "label": "Review replacement policy before any commitment",
+                "requires_execution": False,
+            },
+        )
+    if category == "returns_refunds_inquiry":
+        return (
+            {
+                "type": "collect_context",
+                "label": "Collect return or refund eligibility details",
+                "requires_execution": False,
+            },
+            {
+                "type": "human_policy_review",
+                "label": "Review refund policy before any commitment",
+                "requires_execution": False,
+            },
+        )
+    return (
+        {
+            "type": "collect_context",
+            "label": "Collect missing customer and product details",
+            "requires_execution": False,
+        },
+    )
+
+
+def _evaluate_gate(
+    *,
+    category: str,
+    confidence: float,
+    original_content: str,
+    reply: str,
+    evidence: tuple[Mapping[str, Any], ...],
+    auto_approve_threshold: float,
+) -> _GateDecision:
+    reasons: list[str] = []
+    text = f"{original_content} {reply}".lower()
+    evidence_empty = len(evidence) == 0
+    if evidence_empty:
+        reasons.append("missing_citations")
+    if confidence < auto_approve_threshold:
+        reasons.append("low_confidence")
+    if _contains_any(text, _SAFETY_KEYWORDS):
+        reasons.append("safety_risk")
+    if _contains_any(text, _LEGAL_KEYWORDS):
+        reasons.append("legal_or_chargeback_risk")
+    if _contains_any(text, _FRAUD_KEYWORDS):
+        reasons.append("fraud_risk")
+    if _contains_any(text, _POLICY_EXCEPTION_KEYWORDS):
+        reasons.append("policy_exception")
+    if _high_value_refund_or_replacement(text):
+        reasons.append("high_value_refund_or_replacement")
+    if _has_conflicting_evidence(evidence):
+        reasons.append("conflicting_evidence")
+    if _contains_any(reply.lower(), _UNSUPPORTED_PROMISE_PATTERNS):
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+            governance_verdict=ResolutionGovernanceVerdict.DENY,
+            autonomy_decision=ResolutionAutonomyDecision.DENIED,
+            status=ResolutionProposalStatus.DENIED,
+            reasons=("unsupported_refund_replacement_or_warranty_promise",),
+        )
+    if any(
+        reason in reasons
+        for reason in ("safety_risk", "legal_or_chargeback_risk", "fraud_risk")
+    ):
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
+            governance_verdict=ResolutionGovernanceVerdict.ESCALATE,
+            autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
+            status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
+            reasons=tuple(reasons),
+        )
+    if reasons or category not in _SAFE_AUTO_CATEGORIES:
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
+            governance_verdict=ResolutionGovernanceVerdict.REQUIRE_APPROVAL,
+            autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
+            status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
+            reasons=tuple(reasons or ("unsupported_auto_category",)),
+        )
+    return _GateDecision(
+        supervisor_verdict=ResolutionSupervisorVerdict.PASS,
+        governance_verdict=ResolutionGovernanceVerdict.ALLOW,
+        autonomy_decision=ResolutionAutonomyDecision.AUTO_APPROVED,
+        status=ResolutionProposalStatus.SEND_ELIGIBLE,
+        reasons=("auto_approval_criteria_met",),
+    )
+
+
+def _normalise_evidence(
+    citations: Sequence[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any], ...]:
+    evidence: list[dict[str, Any]] = []
+    for index, citation in enumerate(citations):
+        item: dict[str, Any] = {
+            "rank": _int_value(citation.get("rank"), default=index + 1),
+            "document_id": _text_value(citation.get("document_id")),
+            "title": _text_value(citation.get("title"))
+            or "Cited knowledge document",
+            "document_type": _text_value(citation.get("document_type")),
+            "document_status": _text_value(citation.get("document_status")),
+            "score": _float_value(citation.get("score")),
+            "chunk_ordinal": _int_value(
+                citation.get("chunk_ordinal"),
+                default=0,
+            ),
+            "token_count": _int_value(citation.get("token_count"), default=0),
+        }
+        evidence.append(item)
+    return tuple(evidence)
+
+
+def _source_reference(evidence: tuple[Mapping[str, Any], ...]) -> str:
+    titles = [
+        str(item.get("title"))
+        for item in evidence
+        if isinstance(item.get("title"), str) and str(item.get("title")).strip()
+    ]
+    if not titles:
+        return "cited support guidance"
+    return "; ".join(titles[:2])
+
+
+def _has_conflicting_evidence(
+    evidence: tuple[Mapping[str, Any], ...]
+) -> bool:
+    if any(bool(item.get("conflict")) for item in evidence):
+        return True
+    statuses = {
+        str(item.get("document_status")).lower()
+        for item in evidence
+        if item.get("document_status") is not None
+    }
+    if not statuses:
+        return False
+    return any(status not in {"", "active"} for status in statuses)
+
+
+def _high_value_refund_or_replacement(text: str) -> bool:
+    if not _contains_any(text, ("refund", "replacement", "replace", "warranty")):
+        return False
+    for match in _MONEY_PATTERN.finditer(text):
+        amount_text = match.group("prefix") or match.group("suffix")
+        if amount_text is None:
+            continue
+        amount = float(amount_text.replace(",", ""))
+        if amount >= 100:
+            return True
+    return False
+
+
+def _contains_any(text: str, needles: Iterable[str]) -> bool:
+    return any(needle in text for needle in needles)
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    return slug
+
+
+def _clamp_confidence(value: float) -> float:
+    if value < 0:
+        return 0.0
+    if value > 1:
+        return 1.0
+    return value
+
+
+def _text_value(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _int_value(value: Any, *, default: int) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return default
+
+
+def _float_value(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+__all__ = [
+    "ResolutionProposalRequest",
+    "ResolutionRuntime",
+    "resolution_proposal_timeline_payload",
+]

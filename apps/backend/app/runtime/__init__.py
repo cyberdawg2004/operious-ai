@@ -42,6 +42,11 @@ from app.runtime.provider_circuit_breaker import (
     ProviderCircuitSnapshot,
     ProviderCircuitState,
 )
+from app.runtime.resolution_runtime import (
+    ResolutionProposalRequest,
+    ResolutionRuntime,
+    resolution_proposal_timeline_payload,
+)
 from app.runtime.governance_event_projection import (
     GovernanceDecisionEventLineage,
     GovernanceEventProjectionError,
@@ -119,6 +124,8 @@ __all__ = [
     "ProviderCircuitOpenError",
     "ProviderCircuitSnapshot",
     "ProviderCircuitState",
+    "ResolutionProposalRequest",
+    "ResolutionRuntime",
     "SessionEventProjectionError",
     "SessionOperationalEventProjection",
     "SessionOperationalEventProjector",
@@ -141,6 +148,7 @@ __all__ = [
     "project_escalation_record",
     "project_governance_decision_record",
     "project_qa_score_record",
+    "resolution_proposal_timeline_payload",
     "project_session_timeline_event",
     "project_sop_approval_record",
     "project_supervisor_inspection_record",
