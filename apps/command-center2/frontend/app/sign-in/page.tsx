@@ -5,7 +5,11 @@ import { Logo } from "@/components/logo";
 
 export default function SignInPage() {
   const handleLogin = () => {
-    window.location.href = "/api/auth/login?returnTo=/dashboard";
+    const currentUrl = new URL(window.location.href);
+    const returnTo = currentUrl.searchParams.get("returnTo") || "/dashboard/queue";
+    const loginUrl = new URL("/api/auth/login", window.location.origin);
+    loginUrl.searchParams.set("returnTo", returnTo);
+    window.location.href = loginUrl.toString();
   };
 
   return (

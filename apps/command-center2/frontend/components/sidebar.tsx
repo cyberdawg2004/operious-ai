@@ -248,7 +248,9 @@ export function Sidebar({
           type="button"
           onClick={() => {
             clearLocalAuthorityCache();
-            window.location.assign("/api/auth/logout");
+            const logoutUrl = new URL("/api/auth/logout", window.location.origin);
+            logoutUrl.searchParams.set("returnTo", window.location.origin);
+            window.location.assign(logoutUrl.toString());
           }}
           className={cn(
             "group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150",
