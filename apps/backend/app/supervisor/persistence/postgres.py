@@ -12,10 +12,10 @@ column makes this relationship queryable and FK-enforced.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
@@ -186,7 +186,9 @@ class PostgresSupervisorRepository(BaseRepository):
         *,
         expected_tenant_id: str | None = None,
     ) -> RecordPage[InspectionRecord]:
-        stmt = select(SupervisorInspectionRow)
+        stmt: Select[tuple[SupervisorInspectionRow]] = select(
+            SupervisorInspectionRow
+        )
         if expected_tenant_id is not None:
             stmt = stmt.where(
                 SupervisorInspectionRow.tenant_id == expected_tenant_id
@@ -236,7 +238,10 @@ class PostgresSupervisorRepository(BaseRepository):
 # ─── Filter composer ────────────────────────────────────────────────────
 
 
-def _apply_inspection_filters(stmt, query: InspectionQuery):  # type: ignore[no-untyped-def]
+def _apply_inspection_filters(
+    stmt: Select[tuple[SupervisorInspectionRow]],
+    query: InspectionQuery,
+) -> Select[tuple[SupervisorInspectionRow]]:
     if query.inspection_id is not None:
         stmt = stmt.where(
             SupervisorInspectionRow.inspection_id
@@ -440,7 +445,8 @@ def _require_inspection_id(metadata: object) -> str:
     same wire shape so callers don't have to special-case backends.
     """
     if isinstance(metadata, dict) and "inspection_id" in metadata:
-        return str(metadata["inspection_id"])
+        typed_metadata = cast("dict[object, Any]", metadata)
+        return str(typed_metadata["inspection_id"])
     raise SupervisorPersistenceError(
         "RuntimeFindingRecord.metadata must carry an "
         "'inspection_id' key when persisted"
@@ -449,13 +455,15 @@ def _require_inspection_id(metadata: object) -> str:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
-        return {str(k): v for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType]
+        typed_value = cast("dict[object, Any]", value)
+        return {str(k): v for k, v in typed_value.items()}
     return {}
 
 
 def _as_list_of_str(value: Any) -> list[str]:
     if isinstance(value, list):
-        return [str(v) for v in value]  # pyright: ignore[reportUnknownVariableType]
+        typed_value = cast("list[Any]", value)
+        return [str(v) for v in typed_value]
     return []
 
 
