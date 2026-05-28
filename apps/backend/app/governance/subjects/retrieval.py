@@ -33,6 +33,11 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from app.governance.subjects.base import BaseGovernanceSubject, SubjectKind
+from app.types.json import JsonObject
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +100,7 @@ class RetrievalGovernanceSubject(BaseGovernanceSubject):
     candidate_count: int = 0
     estimated_tokens: int = 0
     retrieval_candidates: tuple[CandidateSummary, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_json_object)
     kind: SubjectKind = SubjectKind.RETRIEVAL
 
     def to_dict(self) -> dict[str, Any]:

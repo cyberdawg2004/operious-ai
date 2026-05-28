@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
 
 from app.identity import (
     AuthorityContext,
@@ -33,6 +32,11 @@ from app.organizational_intelligence.models.pattern import (
 from app.organizational_intelligence.models.recommendation import (
     RecommendationRationale,
 )
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 # ─── SOP ───────────────────────────────────────────────────────────
@@ -55,7 +59,7 @@ class IngestSopRequest:
     author_handle: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -73,7 +77,7 @@ class AnalyzeSopRequest:
     sop_id: SopId
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 # ─── Tonality / communication ─────────────────────────────────────
@@ -88,7 +92,7 @@ class ClassifyTonalityRequest:
     correlation_hint: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -118,7 +122,7 @@ class RegisterCommunicationPatternRequest:
     author_handle: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -140,7 +144,7 @@ class RetrieveCommunicationPatternsRequest:
     limit: int = 5
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -174,7 +178,7 @@ class MemoryEvolutionProposalRequest:
     rationale: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -200,7 +204,7 @@ class ApprovePatternRequest:
     approval: ApprovalRecord
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +215,7 @@ class RejectPatternRequest:
     approval: ApprovalRecord
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,7 +227,7 @@ class SupersedeMemoryArtifactRequest:
     approval: ApprovalRecord
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +242,7 @@ class RetireMemoryArtifactRequest:
     approval: ApprovalRecord
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +282,7 @@ class AnalyzeOperationalPatternsRequest:
     observations: tuple[OperationalPatternObservation, ...]
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,7 +305,7 @@ class GenerateRecommendationRequest:
     ] = ()
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -326,7 +330,7 @@ class ApproveRecommendationRequest:
     approval: ApprovalRecord
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 __all__ = [

@@ -26,6 +26,16 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping
 
+from app.types.json import JsonObject
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
+
+
+def _empty_opaque_mapping() -> dict[str, Any]:
+    return {}
+
 
 class SubjectKind(StrEnum):
     """Discriminator vocabulary for typed governance subjects.
@@ -94,8 +104,8 @@ class GenericGovernanceSubject(BaseGovernanceSubject):
     that a request was governed under a legacy path.
     """
 
-    data: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    data: Mapping[str, Any] = field(default_factory=_empty_opaque_mapping)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_json_object)
     kind: SubjectKind = SubjectKind.GENERIC
 
     def to_dict(self) -> dict[str, Any]:

@@ -9,9 +9,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping
 
 from app.agents.enums import ExecutionState
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +44,7 @@ class CausalityMetadata:
     initiator: str = "system"
     cause: str = ""
     parent_chain: tuple[uuid.UUID, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)

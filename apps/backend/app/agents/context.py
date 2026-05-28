@@ -14,12 +14,16 @@ Frozen, slot-based, replay-safe.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
 
 from app.agents.capabilities import CapabilitySet, ExecutionConstraints
 from app.agents.identity import AgentIdentity, ExecutionIdentity
 from app.agents.value_objects import CausalityMetadata
 from app.identity import AuthorityContext
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +60,7 @@ class AgentExecutionContext:
     causality: CausalityMetadata
     tenant_id: str | None = None
     authority: AuthorityContext | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 __all__ = ["AgentExecutionContext"]

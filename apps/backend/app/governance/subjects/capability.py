@@ -34,6 +34,11 @@ from app.governance.subjects.base import (
     BaseGovernanceSubject,
     SubjectKind,
 )
+from app.types.json import JsonObject
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +64,7 @@ class CapabilityGovernanceSubject(BaseGovernanceSubject):
     held_capabilities: frozenset[str] = frozenset()
     tenant_id: str | None = None
     actor: str = "system"
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_json_object)
     kind: SubjectKind = SubjectKind.CAPABILITY
 
     def to_dict(self) -> dict[str, Any]:

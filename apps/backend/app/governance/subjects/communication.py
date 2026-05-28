@@ -18,6 +18,11 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from app.governance.subjects.base import BaseGovernanceSubject, SubjectKind
+from app.types.json import JsonObject
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +82,7 @@ class CommunicationGovernanceSubject(BaseGovernanceSubject):
     escalation_flags: tuple[str, ...] = ()
     request_id: str | None = None
     tenant_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_json_object)
     kind: SubjectKind = SubjectKind.COMMUNICATION
 
     def to_dict(self) -> dict[str, Any]:

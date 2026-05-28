@@ -21,6 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
+
 
 @dataclass(frozen=True, slots=True)
 class StateTransitionRecord:
@@ -66,7 +72,7 @@ class ToolInvocationRecord:
     latency_ms: float
     governance_decision_id: str | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,7 +138,7 @@ class AgentExecutionRecord:
     tool_invocation_ids: tuple[str, ...] = ()
     governance_decision_ids: tuple[str, ...] = ()
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
     def to_dict(self) -> dict[str, Any]:
         return {

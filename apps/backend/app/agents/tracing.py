@@ -26,10 +26,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
 
 from app.agents.enums import ExecutionState, ToolInvocationStatus
 from app.agents.value_objects import StateTransition
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +73,7 @@ class ToolInvocationTrace:
     latency_ms: float
     governance_decision_id: uuid.UUID | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +134,7 @@ class AgentExecutionTrace:
     tool_invocation_ids: tuple[uuid.UUID, ...] = ()
     governance_decision_ids: tuple[uuid.UUID, ...] = ()
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 __all__ = [

@@ -22,12 +22,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 from app.core.logging import get_logger
 from app.observability.context import get_request_id
+from app.types.json import JsonObject, MetadataMap
 
 _logger = get_logger("audit")
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +48,7 @@ class AuditEvent:
     actor: str
     action: str
     resource: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     request_id: str | None = None
 
