@@ -26,6 +26,7 @@ from app.workers.celery_app import celery_app
 from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_outbox
 from app.workers.escalation_tasks import create_governance_escalation
 from app.workers.execution_recovery_tasks import (
+    reconcile_failed_execution_outbox,
     reconcile_stale_execution_outbox,
     recover_stale_executions,
 )
@@ -50,6 +51,7 @@ _FIRE_AND_FORGET_TASKS = {
     "propose_sop_intelligence_change": propose_sop_intelligence_change,
     "create_governance_escalation": create_governance_escalation,
     "recover_stale_executions": recover_stale_executions,
+    "reconcile_failed_execution_outbox": reconcile_failed_execution_outbox,
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
     "reconcile_stale_escalation_outbox": reconcile_stale_escalation_outbox,
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
@@ -61,6 +63,7 @@ _TASK_RETRY_BUDGETS = {
     "score_supervisor_inspection": 1,
     "propose_sop_intelligence_change": 1,
     "recover_stale_executions": 5,
+    "reconcile_failed_execution_outbox": 5,
     "reconcile_stale_execution_outbox": 5,
     "reconcile_stale_escalation_outbox": 5,
     "cleanup_expired_webhook_nonces": 1,

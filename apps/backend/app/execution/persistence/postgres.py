@@ -550,6 +550,115 @@ class PostgresExecutionPersistence(BaseRepository):
             return None
         return await self.get_outbox(outbox_id)
 
+    async def list_retryable_failed_outbox_records(
+        self,
+        *,
+        tenant_id: str | None,
+        failed_before_or_at: datetime,
+        max_publish_attempts: int,
+        limit: int,
+    ) -> OutboxPage:
+        stmt = (
+            select(ExecutionOutboxRow)
+            .join(
+                ExecutionRow,
+                ExecutionRow.execution_id == ExecutionOutboxRow.execution_id,
+            )
+            .where(
+                ExecutionOutboxRow.state == ExecutionOutboxState.FAILED.value,
+                ExecutionOutboxRow.publish_attempt_count < max_publish_attempts,
+                ExecutionRow.state.not_in(
+                    _TERMINAL_OUTBOX_RETRY_EXECUTION_STATE_VALUES
+                ),
+            )
+            .order_by(ExecutionOutboxRow.created_at, ExecutionOutboxRow.outbox_id)
+            .limit(max(limit * 4, limit))
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(ExecutionRow.tenant_id == tenant_id)
+        rows = (await self.session.execute(stmt)).scalars().all()
+        records: list[ExecutionOutboxRecord] = []
+        for row in rows:
+            record = _row_to_outbox(row)
+            failed_at = _outbox_failed_at(record)
+            if failed_at is None or failed_at > failed_before_or_at:
+                continue
+            records.append(record)
+            if len(records) >= limit:
+                break
+        return OutboxPage(
+            records=tuple(records),
+            total=len(records),
+            limit=limit,
+            offset=0,
+        )
+
+    async def requeue_failed_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId,
+        failed_before_or_at: datetime,
+        requeued_at: datetime,
+        reason: str,
+        max_publish_attempts: int,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionOutboxRecord | None:
+        existing = await self.get_outbox(outbox_id)
+        if existing is None:
+            return None
+        if existing.state is not ExecutionOutboxState.FAILED:
+            return None
+        if existing.publish_attempt_count >= max_publish_attempts:
+            return None
+        failed_at = _outbox_failed_at(existing)
+        if failed_at is None or failed_at > failed_before_or_at:
+            return None
+        parent_stmt = select(ExecutionRow.execution_id).where(
+            ExecutionRow.execution_id == ExecutionOutboxRow.execution_id,
+            ExecutionRow.state.not_in(
+                _TERMINAL_OUTBOX_RETRY_EXECUTION_STATE_VALUES
+            ),
+        )
+        if expected_tenant_id is not None:
+            parent_stmt = parent_stmt.where(
+                ExecutionRow.tenant_id == expected_tenant_id
+            )
+        metadata = dict(existing.metadata)
+        retry_count = _metadata_int(
+            metadata.get("failed_recovery.retry_attempt_count")
+        )
+        stmt = (
+            update(ExecutionOutboxRow)
+            .where(
+                ExecutionOutboxRow.outbox_id == outbox_id,
+                ExecutionOutboxRow.state == ExecutionOutboxState.FAILED.value,
+                ExecutionOutboxRow.publish_attempt_count < max_publish_attempts,
+                ExecutionOutboxRow.execution_id.in_(parent_stmt),
+            )
+            .values(
+                state=ExecutionOutboxState.PENDING.value,
+                claimed_at=None,
+                publisher_id=None,
+                published_at=None,
+                last_error=reason,
+                metadata_json={
+                    **metadata,
+                    "failed_recovery.previous_failure_reason": (
+                        existing.last_error
+                    ),
+                    "failed_recovery.retry_attempt_count": retry_count + 1,
+                    "failed_recovery.last_recovered_at": (
+                        requeued_at.isoformat()
+                    ),
+                    "failed_recovery.reason": reason,
+                },
+            )
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
+        return await self.get_outbox(outbox_id)
+
     async def list_executions(
         self,
         query: ExecutionQuery,
@@ -870,6 +979,31 @@ def _optional_datetime(value: object) -> datetime | None:
         return datetime.fromisoformat(str(value))
     except ValueError:
         return None
+
+
+_TERMINAL_OUTBOX_RETRY_EXECUTION_STATE_VALUES = (
+    ExecutionState.COMPLETED.value,
+    ExecutionState.FAILED.value,
+    ExecutionState.DEAD_LETTERED.value,
+)
+
+
+def _outbox_failed_at(outbox: ExecutionOutboxRecord) -> datetime | None:
+    failed_at = _optional_datetime(outbox.metadata.get("failed_at"))
+    if failed_at is None or failed_at.tzinfo is None:
+        return None
+    return failed_at
+
+
+def _metadata_int(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 __all__ = ["PostgresExecutionPersistence"]

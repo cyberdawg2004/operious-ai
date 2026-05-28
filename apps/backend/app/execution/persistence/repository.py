@@ -153,6 +153,26 @@ class ExecutionPersistenceProtocol(Protocol):
         reason: str,
     ) -> ExecutionOutboxRecord | None: ...
 
+    async def list_retryable_failed_outbox_records(
+        self,
+        *,
+        tenant_id: str | None,
+        failed_before_or_at: datetime,
+        max_publish_attempts: int,
+        limit: int,
+    ) -> OutboxPage: ...
+
+    async def requeue_failed_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId,
+        failed_before_or_at: datetime,
+        requeued_at: datetime,
+        reason: str,
+        max_publish_attempts: int,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionOutboxRecord | None: ...
+
     async def list_executions(
         self,
         query: ExecutionQuery,

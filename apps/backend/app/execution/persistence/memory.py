@@ -463,6 +463,88 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             self._outbox[outbox_id] = updated
             return updated
 
+    async def list_retryable_failed_outbox_records(
+        self,
+        *,
+        tenant_id: str | None,
+        failed_before_or_at: datetime,
+        max_publish_attempts: int,
+        limit: int,
+    ) -> OutboxPage:
+        rows: list[ExecutionOutboxRecord] = []
+        for outbox in self._outbox.values():
+            execution = self._executions.get(outbox.execution_id)
+            if execution is None:
+                continue
+            if tenant_id is not None and execution.tenant_id != tenant_id:
+                continue
+            if execution.state in _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES:
+                continue
+            if outbox.state is not ExecutionOutboxState.FAILED:
+                continue
+            if outbox.publish_attempt_count >= max_publish_attempts:
+                continue
+            failed_at = _outbox_failed_at(outbox)
+            if failed_at is None or failed_at > failed_before_or_at:
+                continue
+            rows.append(outbox)
+        rows.sort(key=lambda row: (row.created_at, str(row.outbox_id)))
+        sliced = rows[:limit]
+        return OutboxPage(records=tuple(sliced), total=len(rows), offset=0)
+
+    async def requeue_failed_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId,
+        failed_before_or_at: datetime,
+        requeued_at: datetime,
+        reason: str,
+        max_publish_attempts: int,
+        expected_tenant_id: str | None = None,
+    ) -> ExecutionOutboxRecord | None:
+        async with self._lock:
+            outbox = self._outbox.get(outbox_id)
+            if outbox is None:
+                return None
+            execution = self._executions.get(outbox.execution_id)
+            if execution is None:
+                return None
+            if (
+                expected_tenant_id is not None
+                and execution.tenant_id != expected_tenant_id
+            ):
+                return None
+            if execution.state in _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES:
+                return None
+            if outbox.state is not ExecutionOutboxState.FAILED:
+                return None
+            if outbox.publish_attempt_count >= max_publish_attempts:
+                return None
+            failed_at = _outbox_failed_at(outbox)
+            if failed_at is None or failed_at > failed_before_or_at:
+                return None
+            metadata = dict(outbox.metadata)
+            retry_count = _metadata_int(
+                metadata.get("failed_recovery.retry_attempt_count")
+            )
+            updated = replace(
+                outbox,
+                state=ExecutionOutboxState.PENDING,
+                claimed_at=None,
+                publisher_id=None,
+                published_at=None,
+                last_error=reason,
+                metadata={
+                    **metadata,
+                    "failed_recovery.previous_failure_reason": outbox.last_error,
+                    "failed_recovery.retry_attempt_count": retry_count + 1,
+                    "failed_recovery.last_recovered_at": requeued_at.isoformat(),
+                    "failed_recovery.reason": reason,
+                },
+            )
+            self._outbox[outbox_id] = updated
+            return updated
+
     async def list_executions(
         self,
         query: ExecutionQuery,
@@ -614,6 +696,39 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         if record is None:
             raise ExecutionPersistenceError(f"outbox not found: {outbox_id}")
         return record
+
+
+_TERMINAL_OUTBOX_RETRY_EXECUTION_STATES = frozenset(
+    {
+        ExecutionState.COMPLETED,
+        ExecutionState.FAILED,
+        ExecutionState.DEAD_LETTERED,
+    }
+)
+
+
+def _outbox_failed_at(outbox: ExecutionOutboxRecord) -> datetime | None:
+    value = outbox.metadata.get("failed_at")
+    if value is None:
+        return None
+    try:
+        failed_at = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if failed_at.tzinfo is None:
+        return None
+    return failed_at
+
+
+def _metadata_int(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 __all__ = ["InMemoryExecutionPersistence"]

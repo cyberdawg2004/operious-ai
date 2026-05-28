@@ -28,7 +28,7 @@ from app.queues import QUEUE_WEBHOOK_MAINTENANCE
 _T = TypeVar("_T")
 
 
-@celery_app.task(
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="recover_stale_executions",
     queue=QUEUE_WEBHOOK_MAINTENANCE,
     bind=True,
@@ -78,7 +78,7 @@ def recover_stale_executions(
     )
 
 
-@celery_app.task(
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="reconcile_stale_execution_outbox",
     queue=QUEUE_WEBHOOK_MAINTENANCE,
     bind=True,
@@ -130,6 +130,66 @@ def reconcile_stale_execution_outbox(
     )
 
 
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="reconcile_failed_execution_outbox",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
+    bind=True,
+    ignore_result=True,
+    max_retries=5,
+    default_retry_delay=30,
+)
+def reconcile_failed_execution_outbox(
+    _self: Any,
+    *,
+    failed_before: str | None = None,
+    cooldown_seconds: int | None = None,
+    max_publish_attempts: int | None = None,
+    limit: int | None = None,
+    tenant_id: str | None = None,
+    reason: str = "failed publisher retry",
+) -> dict[str, object]:
+    """Requeue a bounded page of retryable failed execution outbox rows."""
+
+    settings = get_settings()
+    if cooldown_seconds is not None and cooldown_seconds < 1:
+        raise ValueError("cooldown_seconds must be positive")
+    if max_publish_attempts is not None and max_publish_attempts < 1:
+        raise ValueError("max_publish_attempts must be positive")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    reconciled_at = datetime.now(tz=timezone.utc)
+    threshold = (
+        _parse_datetime(failed_before)
+        if failed_before is not None
+        else reconciled_at
+        - timedelta(
+            seconds=(
+                cooldown_seconds
+                if cooldown_seconds is not None
+                else settings.EXECUTION_OUTBOX_FAILED_RETRY_COOLDOWN_SECONDS
+            )
+        )
+    )
+    return _run_async(
+        reconcile_failed_execution_outbox_runtime(
+            failed_before_or_at=threshold,
+            requeued_at=reconciled_at,
+            limit=(
+                limit
+                if limit is not None
+                else settings.EXECUTION_RECOVERY_BATCH_SIZE
+            ),
+            max_publish_attempts=(
+                max_publish_attempts
+                if max_publish_attempts is not None
+                else settings.EXECUTION_OUTBOX_FAILED_RETRY_MAX_ATTEMPTS
+            ),
+            tenant_id=tenant_id,
+            reason=reason,
+        )
+    )
+
+
 async def recover_stale_executions_runtime(
     *,
     stale_before: datetime,
@@ -173,6 +233,34 @@ async def reconcile_stale_execution_outbox_runtime(
             stale_before=stale_before,
             requeued_at=requeued_at,
             limit=limit,
+            tenant_id=tenant_id,
+            reason=reason,
+        )
+        await session.commit()
+        return _serialize_outbox_sweep(sweep)
+
+
+async def reconcile_failed_execution_outbox_runtime(
+    *,
+    failed_before_or_at: datetime,
+    requeued_at: datetime | None = None,
+    limit: int = 100,
+    max_publish_attempts: int = 3,
+    tenant_id: str | None = None,
+    reason: str = "failed publisher retry",
+) -> dict[str, object]:
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
+    async with session_factory() as session:
+        runtime = ExecutionRuntime(
+            persistence=PostgresExecutionPersistence(session)
+        )
+        sweep = await runtime.reconcile_failed_execution_outbox_records(
+            failed_before_or_at=failed_before_or_at,
+            requeued_at=requeued_at,
+            limit=limit,
+            max_publish_attempts=max_publish_attempts,
             tenant_id=tenant_id,
             reason=reason,
         )
@@ -287,6 +375,8 @@ def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 
 
 __all__ = [
+    "reconcile_failed_execution_outbox",
+    "reconcile_failed_execution_outbox_runtime",
     "recover_stale_executions",
     "recover_stale_executions_runtime",
     "reconcile_stale_execution_outbox",

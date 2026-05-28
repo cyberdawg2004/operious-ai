@@ -32,7 +32,10 @@ from app.workers.dead_letter_persistence import (
 )
 from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_outbox
 from app.workers.escalation_tasks import create_governance_escalation
-from app.workers.execution_recovery_tasks import reconcile_stale_execution_outbox
+from app.workers.execution_recovery_tasks import (
+    reconcile_failed_execution_outbox,
+    reconcile_stale_execution_outbox,
+)
 from app.workers.qa_tasks import score_supervisor_inspection
 from app.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
@@ -227,6 +230,8 @@ def test_task_results_expire_within_ttl() -> None:
     )
     assert celery_app.conf.task_time_limit == settings.CELERY_TASK_TIME_LIMIT_SECONDS
     assert settings.ESCALATION_OUTBOX_CLAIM_LEASE_SECONDS == 300
+    assert settings.EXECUTION_OUTBOX_FAILED_RETRY_COOLDOWN_SECONDS == 30
+    assert settings.EXECUTION_OUTBOX_FAILED_RETRY_MAX_ATTEMPTS == 3
     assert celery_app.conf.broker_transport_options == {
         "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
     }
@@ -236,6 +241,7 @@ def test_task_results_expire_within_ttl() -> None:
     assert getattr(score_supervisor_inspection, "ignore_result") is True
     assert getattr(propose_sop_intelligence_change, "ignore_result") is True
     assert getattr(create_governance_escalation, "ignore_result") is True
+    assert getattr(reconcile_failed_execution_outbox, "ignore_result") is True
     assert getattr(reconcile_stale_execution_outbox, "ignore_result") is True
     assert getattr(reconcile_stale_escalation_outbox, "ignore_result") is True
 

@@ -875,6 +875,153 @@ class ExecutionRuntime:
             refused=tuple(refused),
         )
 
+    async def reconcile_failed_execution_outbox(
+        self,
+        *,
+        outbox_id: ExecutionOutboxId | str,
+        failed_before_or_at: datetime,
+        requeued_at: datetime | None = None,
+        expected_tenant_id: str | None = None,
+        reason: str = "failed publisher retry",
+        max_publish_attempts: int = 3,
+    ) -> ExecutionOutboxReconcileResult:
+        """Requeue one retryable failed outbox row to the normal pending path."""
+
+        _validate_optional_tenant_id(expected_tenant_id)
+        if failed_before_or_at.tzinfo is None:
+            raise ValueError("failed_before_or_at must be timezone-aware")
+        if requeued_at is not None and requeued_at.tzinfo is None:
+            raise ValueError("requeued_at must be timezone-aware")
+        if max_publish_attempts < 1:
+            raise ValueError("max_publish_attempts must be positive")
+        if not reason:
+            raise ValueError("requeue reason must be non-empty")
+        oid = (
+            outbox_id
+            if not isinstance(outbox_id, str)
+            else as_outbox_id(outbox_id)
+        )
+        current = await self.get_outbox(
+            oid,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if current is None:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=None,
+                reason="outbox_not_found",
+            )
+        if current.state is not ExecutionOutboxState.FAILED:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason=f"outbox_not_publishable:{current.state.value}",
+            )
+        if current.publish_attempt_count >= max_publish_attempts:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason="failed_outbox_retry_budget_exhausted",
+            )
+        failed_at = _outbox_failed_at(current)
+        if failed_at is None:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason="failed_outbox_missing_failed_at",
+            )
+        if failed_at > failed_before_or_at:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason="failed_outbox_cooldown_active",
+            )
+        execution = await self._persistence.get_execution(
+            current.execution_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if execution is None:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason="execution_not_found",
+            )
+        if execution.state in _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=current,
+                reason=f"execution_terminal:{execution.state.value}",
+            )
+        updated = await self._persistence.requeue_failed_outbox(
+            outbox_id=oid,
+            failed_before_or_at=failed_before_or_at,
+            requeued_at=requeued_at or datetime.now(tz=timezone.utc),
+            reason=reason,
+            max_publish_attempts=max_publish_attempts,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if updated is None:
+            refreshed = await self.get_outbox(
+                oid,
+                expected_tenant_id=expected_tenant_id,
+            )
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=refreshed,
+                reason="failed_outbox_not_retryable",
+            )
+        return ExecutionOutboxReconcileResult(reconciled=True, outbox=updated)
+
+    async def reconcile_failed_execution_outbox_records(
+        self,
+        *,
+        failed_before_or_at: datetime,
+        requeued_at: datetime | None = None,
+        tenant_id: str | None = None,
+        reason: str = "failed publisher retry",
+        max_publish_attempts: int = 3,
+        limit: int = 100,
+    ) -> ExecutionOutboxReconcileSweepResult:
+        """Requeue a bounded page of retryable failed outbox rows."""
+
+        if failed_before_or_at.tzinfo is None:
+            raise ValueError("failed_before_or_at must be timezone-aware")
+        if requeued_at is not None and requeued_at.tzinfo is None:
+            raise ValueError("requeued_at must be timezone-aware")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if max_publish_attempts < 1:
+            raise ValueError("max_publish_attempts must be positive")
+        if not reason:
+            raise ValueError("requeue reason must be non-empty")
+        page = await self._persistence.list_retryable_failed_outbox_records(
+            tenant_id=tenant_id,
+            failed_before_or_at=failed_before_or_at,
+            max_publish_attempts=max_publish_attempts,
+            limit=limit,
+        )
+        ts = requeued_at or datetime.now(tz=timezone.utc)
+        reconciled: list[ExecutionOutboxReconcileResult] = []
+        refused: list[ExecutionOutboxReconcileResult] = []
+        for outbox in page.records:
+            result = await self.reconcile_failed_execution_outbox(
+                outbox_id=outbox.outbox_id,
+                failed_before_or_at=failed_before_or_at,
+                requeued_at=ts,
+                expected_tenant_id=tenant_id,
+                reason=reason,
+                max_publish_attempts=max_publish_attempts,
+            )
+            if result.reconciled:
+                reconciled.append(result)
+            else:
+                refused.append(result)
+        return ExecutionOutboxReconcileSweepResult(
+            scanned=len(page.records),
+            reconciled=tuple(reconciled),
+            refused=tuple(refused),
+        )
+
     async def require_claim(
         self,
         *,
@@ -931,3 +1078,25 @@ def _worker_legitimacy_violation(
     if attempt.attempt_number != execution.attempt_count:
         return "attempt_not_current"
     return None
+
+
+_TERMINAL_OUTBOX_RETRY_EXECUTION_STATES = frozenset(
+    {
+        ExecutionState.COMPLETED,
+        ExecutionState.FAILED,
+        ExecutionState.DEAD_LETTERED,
+    }
+)
+
+
+def _outbox_failed_at(outbox: ExecutionOutboxRecord) -> datetime | None:
+    value = outbox.metadata.get("failed_at")
+    if value is None:
+        return None
+    try:
+        failed_at = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if failed_at.tzinfo is None:
+        return None
+    return failed_at
