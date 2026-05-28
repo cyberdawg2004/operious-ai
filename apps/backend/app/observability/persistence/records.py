@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
 
 from app.observability.enums import (
     AlertSeverity,
@@ -17,6 +16,11 @@ from app.observability.identity import (
     OperationalSLODefinitionId,
     OperationalTraceSpanId,
 )
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +65,7 @@ class DeadLetterExecutionRecord:
     failed_at: datetime | None
     worker_id: str | None
     error: str | None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +80,7 @@ class OperationalSLODefinitionRecord:
     enabled: bool
     created_at: datetime
     updated_at: datetime
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +97,7 @@ class OperationalTraceSpanRecord:
     latency_ms: float
     status: OperationalTraceStatus
     error: str | None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: MetadataMap = field(default_factory=_empty_json_object)
     created_at: datetime | None = None
 
 
@@ -110,7 +114,7 @@ class OperationalAlertRecord:
     window_start: datetime
     window_end: datetime
     triggered: bool
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +125,7 @@ class StuckExecutionAlertRecord:
     reason: str
     claimed_at: datetime | None
     worker_id: str | None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +136,7 @@ class InboundNormalizationDeadLetterRecord:
     normalization_status: str
     error: str | None
     received_at: datetime
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 __all__ = [

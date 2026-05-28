@@ -23,9 +23,13 @@ mappings are not hashable, but that's fine — we never put
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
 
 from app.agents.enums import CapabilityScope
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +53,7 @@ class AgentCapability:
     name: str
     scope: CapabilityScope
     description: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +105,7 @@ class ExecutionConstraints:
     max_tool_invocations: int = 0
     allowed_tools: tuple[str, ...] = ()
     timeout_ms: int | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
     def permits_tool(self, tool_name: str) -> bool:
         """True iff `tool_name` is allowed by the constraints.

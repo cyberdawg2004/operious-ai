@@ -18,6 +18,10 @@ from app.identity import (
 )
 
 
+def _empty_metadata() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class ValidateAuthorityOwnershipRequest:
     """Validate that no offender is touching a forbidden concern.
@@ -32,7 +36,7 @@ class ValidateAuthorityOwnershipRequest:
     map: AuthorityOwnershipMap | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +52,7 @@ class ValidateLineageRequest:
     scope: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +64,7 @@ class ValidateReplayRequest:
     scope: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +76,7 @@ class ValidateReconstructionRequest:
     scope: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +92,7 @@ class ValidateOrderingRequest:
     scope: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +109,7 @@ class DetectContaminationRequest:
     forbidden_module_prefixes: tuple[str, ...]
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +120,7 @@ class AuditDependenciesRequest:
     forbidden_edges: tuple[tuple[SubstrateName, SubstrateName], ...] = ()
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +132,7 @@ class ValidateSurvivabilityRequest:
     scope: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +155,7 @@ class RecordFailureRequest:
     correlation_id: str | None = None
     tenant_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -176,7 +180,7 @@ class ClassifyContainmentRequest:
     observers: tuple[SubstrateName, ...]
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
 __all__ = [

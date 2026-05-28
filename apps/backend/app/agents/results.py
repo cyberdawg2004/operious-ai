@@ -14,7 +14,12 @@ returning a result variant. This keeps result types narrow and makes
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+
+from app.types.json import JsonObject, MetadataMap
+
+
+def _empty_json_object() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +35,8 @@ class ToolInvocationRequest:
     """
 
     tool_name: str
-    payload: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    payload: MetadataMap = field(default_factory=_empty_json_object)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,8 +50,8 @@ class ToolInvocationResult:
                   upstream IDs).
     """
 
-    output: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    output: MetadataMap = field(default_factory=_empty_json_object)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,8 +62,8 @@ class AgentExecutionResult:
     populate `output` with whatever shape they produce.
     """
 
-    output: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    output: MetadataMap = field(default_factory=_empty_json_object)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
 __all__ = [
