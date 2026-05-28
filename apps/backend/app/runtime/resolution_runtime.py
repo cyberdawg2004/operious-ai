@@ -97,6 +97,18 @@ _UNSUPPORTED_PROMISE_PATTERNS = frozenset(
         "guaranteed replacement",
     }
 )
+_OPTIONAL_EVIDENCE_TEXT_FIELDS = (
+    "chunk_id",
+    "vector_id",
+    "vector_index_name",
+    "safe_excerpt",
+    "safe_excerpt_sha256",
+    "chunk_content_hash",
+)
+_OPTIONAL_EVIDENCE_INT_FIELDS = (
+    "citation_schema_version",
+    "document_version",
+)
 _MONEY_PATTERN = re.compile(
     r"(?:[$]\s*(?P<prefix>\d+(?:,\d{3})*(?:\.\d{1,2})?)|"
     r"(?P<suffix>\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:usd|dollars))",
@@ -437,6 +449,14 @@ def _normalise_evidence(
             ),
             "token_count": _int_value(citation.get("token_count"), default=0),
         }
+        for field in _OPTIONAL_EVIDENCE_TEXT_FIELDS:
+            value = citation.get(field)
+            if isinstance(value, str):
+                item[field] = value.strip()
+        for field in _OPTIONAL_EVIDENCE_INT_FIELDS:
+            value = citation.get(field)
+            if isinstance(value, (int, float)):
+                item[field] = int(value)
         evidence.append(item)
     return tuple(evidence)
 

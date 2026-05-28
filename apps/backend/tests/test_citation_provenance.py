@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -396,6 +397,27 @@ async def test_citation_provenance_in_event_payload(
     assert citations[0]["document_id"]
     assert citations[0]["title"] == "Charging Citation SOP"
     assert isinstance(citations[0]["score"], float)
+    assert citations[0]["citation_schema_version"] == 2
+    assert citations[0]["chunk_id"]
+    assert citations[0]["vector_id"]
+    assert citations[0]["document_version"] == 1
+    assert (
+        citations[0]["vector_index_name"]
+        == get_settings().VECTOR_DEFAULT_INDEX
+    )
+    assert citations[0]["chunk_content_hash"]
+    safe_excerpt = citations[0]["safe_excerpt"]
+    assert isinstance(safe_excerpt, str)
+    assert 0 < len(safe_excerpt) <= 420
+    expected_excerpt = (
+        "Charging support checks USB-C cable fit, battery indicator state, "
+        "warranty replacement eligibility, and safe escalation when an Anker "
+        "power bank will not charge."
+    )
+    assert safe_excerpt == expected_excerpt
+    assert citations[0]["safe_excerpt_sha256"] == hashlib.sha256(
+        safe_excerpt.encode("utf-8")
+    ).hexdigest()
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,26 @@ def _citation() -> dict[str, object]:
         "chunk_ordinal": 0,
         "token_count": 128,
     }
+
+
+def _immutable_citation() -> dict[str, object]:
+    safe_excerpt = "Check USB-C cable fit before warranty replacement triage."
+    citation = _citation()
+    citation.update(
+        {
+            "citation_schema_version": 2,
+            "chunk_id": "66666666-6666-4666-8666-666666666666",
+            "vector_id": "77777777-7777-4777-8777-777777777777",
+            "document_version": 3,
+            "vector_index_name": "tenant_knowledge_default",
+            "safe_excerpt": safe_excerpt,
+            "safe_excerpt_sha256": hashlib.sha256(
+                safe_excerpt.encode("utf-8")
+            ).hexdigest(),
+            "chunk_content_hash": "sha256:charging-sop-chunk",
+        }
+    )
+    return citation
 
 
 def _request(
@@ -121,6 +142,41 @@ async def test_missing_citations_prevent_auto_approval() -> None:
     assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
     assert record.evidence == ()
+
+
+@pytest.mark.asyncio
+async def test_resolution_evidence_preserves_immutable_citation_fields() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence()
+    ).create_proposal(_request(citations=[_immutable_citation()]))
+
+    evidence = record.evidence[0]
+    assert evidence["citation_schema_version"] == 2
+    assert evidence["chunk_id"] == "66666666-6666-4666-8666-666666666666"
+    assert evidence["vector_id"] == "77777777-7777-4777-8777-777777777777"
+    assert evidence["document_version"] == 3
+    assert evidence["vector_index_name"] == "tenant_knowledge_default"
+    assert (
+        evidence["safe_excerpt"]
+        == "Check USB-C cable fit before warranty replacement triage."
+    )
+    assert evidence["safe_excerpt_sha256"] == hashlib.sha256(
+        str(evidence["safe_excerpt"]).encode("utf-8")
+    ).hexdigest()
+    assert evidence["chunk_content_hash"] == "sha256:charging-sop-chunk"
+
+
+@pytest.mark.asyncio
+async def test_old_citation_payloads_still_normalize() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence()
+    ).create_proposal(_request(citations=[_citation()]))
+
+    evidence = record.evidence[0]
+    assert evidence["document_id"] == _citation()["document_id"]
+    assert evidence["title"] == "Charging Troubleshooting SOP"
+    assert "chunk_id" not in evidence
+    assert "safe_excerpt" not in evidence
 
 
 @pytest.mark.asyncio

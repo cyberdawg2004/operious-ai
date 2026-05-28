@@ -84,6 +84,14 @@ interface RetrievedCitation {
   score: number;
   chunk_ordinal: number;
   token_count: number;
+  citation_schema_version?: number;
+  chunk_id?: string;
+  vector_id?: string;
+  document_version?: number;
+  vector_index_name?: string;
+  safe_excerpt?: string;
+  safe_excerpt_sha256?: string;
+  chunk_content_hash?: string;
 }
 
 interface RecommendedResolutionAction {
@@ -575,8 +583,24 @@ function isRetrievedCitation(value: unknown): value is RetrievedCitation {
     typeof citation.document_status === "string" &&
     typeof citation.score === "number" &&
     typeof citation.chunk_ordinal === "number" &&
-    typeof citation.token_count === "number"
+    typeof citation.token_count === "number" &&
+    optionalNumberField(citation.citation_schema_version) &&
+    optionalStringField(citation.chunk_id) &&
+    optionalStringField(citation.vector_id) &&
+    optionalNumberField(citation.document_version) &&
+    optionalStringField(citation.vector_index_name) &&
+    optionalStringField(citation.safe_excerpt) &&
+    optionalStringField(citation.safe_excerpt_sha256) &&
+    optionalStringField(citation.chunk_content_hash)
   );
+}
+
+function optionalStringField(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function optionalNumberField(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === "number";
 }
 
 function isRecommendedResolutionAction(
@@ -690,6 +714,11 @@ function KnowledgeSources({ citations }: { citations: RetrievedCitation[] }) {
                 <span className="block truncate font-medium text-ink-primary">
                   {citation.title}
                 </span>
+                {citation.safe_excerpt && (
+                  <span className="mt-0.5 line-clamp-2 block text-[11px] leading-snug text-ink-secondary">
+                    {citation.safe_excerpt}
+                  </span>
+                )}
                 <span className="font-technical text-[11px] text-ink-tertiary">
                   {citation.document_type} · score {formatCitationScore(citation.score)}
                   {showStatus && (

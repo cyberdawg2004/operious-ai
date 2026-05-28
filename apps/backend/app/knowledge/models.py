@@ -30,6 +30,7 @@ class KnowledgeCitation:
     vector_id: KnowledgeVectorId
     document_id: TenantKnowledgeDocumentId
     document_version: int
+    content_hash: str
     ordinal: int
     score: float
     title: str
@@ -43,6 +44,7 @@ class KnowledgeRetrievalItem:
     vector_id: KnowledgeVectorId
     document_id: TenantKnowledgeDocumentId
     document_version: int
+    content_hash: str
     ordinal: int
     score: float
     content: str

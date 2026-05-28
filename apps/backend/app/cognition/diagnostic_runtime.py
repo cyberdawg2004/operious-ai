@@ -83,6 +83,8 @@ terms that are not grounded in the input or citations."""
 
 _DIAGNOSTIC_OUTPUT_FIELDS = frozenset(DiagnosticLLMOutput.model_fields)
 _CATEGORY_VALUES = tuple(category.value for category in DiagnosticCategory)
+_CITATION_SCHEMA_VERSION = 2
+_SAFE_EXCERPT_MAX_CHARS = 420
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,21 +139,7 @@ class DiagnosticCognitionRuntime:
             top_k=self._config.context_top_k,
             max_tokens=self._config.context_token_budget,
         )
-        retrieved_citations = [
-            {
-                "rank": item.citation_index,
-                "document_id": str(item.document_id),
-                "title": item.title,
-                "document_type": str(
-                    item.metadata.get("document_type", "unknown")
-                ),
-                "document_status": item.document_status or "unknown",
-                "score": round(float(item.score), 4),
-                "chunk_ordinal": item.ordinal,
-                "token_count": item.estimated_tokens,
-            }
-            for item in retrieval.items
-        ]
+        retrieved_citations = _retrieved_citations_payload(retrieval)
         prompt = _render_user_prompt(
             tenant_id=tenant_id,
             dispatch_id=dispatch_id,
@@ -586,6 +574,44 @@ class DiagnosticCognitionRuntime:
             },
         )
         await self._save_usage(record, tenant_id=tenant_id)
+
+
+def _retrieved_citations_payload(
+    retrieval: KnowledgeRetrievalResult,
+) -> list[dict[str, Any]]:
+    citations: list[dict[str, Any]] = []
+    for item in retrieval.items:
+        safe_excerpt = _safe_excerpt(item.content)
+        citations.append(
+            {
+                "rank": item.citation_index,
+                "document_id": str(item.document_id),
+                "title": item.title,
+                "document_type": str(
+                    item.metadata.get("document_type", "unknown")
+                ),
+                "document_status": item.document_status or "unknown",
+                "score": round(float(item.score), 4),
+                "chunk_ordinal": item.ordinal,
+                "token_count": item.estimated_tokens,
+                "citation_schema_version": _CITATION_SCHEMA_VERSION,
+                "chunk_id": str(item.chunk_id),
+                "vector_id": str(item.vector_id),
+                "document_version": item.document_version,
+                "vector_index_name": retrieval.vector_index_name,
+                "safe_excerpt": safe_excerpt,
+                "safe_excerpt_sha256": _sha256_text(safe_excerpt),
+                "chunk_content_hash": item.content_hash,
+            }
+        )
+    return citations
+
+
+def _safe_excerpt(content: str) -> str:
+    excerpt = " ".join(content.split())
+    if len(excerpt) <= _SAFE_EXCERPT_MAX_CHARS:
+        return excerpt
+    return excerpt[:_SAFE_EXCERPT_MAX_CHARS].rstrip()
 
 
 def _governance_runtime(
