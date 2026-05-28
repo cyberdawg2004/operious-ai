@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 
 from app.governance.db.models import (
@@ -244,7 +244,7 @@ class PostgresGovernanceRepository(BaseRepository):
     async def query_decisions(
         self, query: DecisionQuery
     ) -> RecordPage[GovernanceDecisionRecord]:
-        stmt = select(GovernanceDecisionRow)
+        stmt: Select[tuple[GovernanceDecisionRow]] = select(GovernanceDecisionRow)
         stmt = _apply_decision_filters(stmt, query)
         stmt = stmt.order_by(GovernanceDecisionRow.decided_at)
         page = await fetch_scalar_page(
@@ -263,7 +263,7 @@ class PostgresGovernanceRepository(BaseRepository):
     async def query_traces(
         self, query: DecisionQuery
     ) -> RecordPage[GovernanceTraceRecord]:
-        stmt = select(GovernanceTraceRow)
+        stmt: Select[tuple[GovernanceTraceRow]] = select(GovernanceTraceRow)
         stmt = _apply_trace_filters(stmt, query)
         stmt = stmt.order_by(GovernanceTraceRow.started_at)
         page = await fetch_scalar_page(
@@ -283,7 +283,10 @@ class PostgresGovernanceRepository(BaseRepository):
 # ─── Filter composers ────────────────────────────────────────────────────
 
 
-def _apply_decision_filters(stmt, query):  # type: ignore[no-untyped-def]
+def _apply_decision_filters(
+    stmt: Select[tuple[GovernanceDecisionRow]],
+    query: DecisionQuery,
+) -> Select[tuple[GovernanceDecisionRow]]:
     """Apply every ``DecisionQuery`` field to a decisions ``Select``.
 
     Mirrors the in-memory ``_matches_decision`` predicate
@@ -327,7 +330,10 @@ def _apply_decision_filters(stmt, query):  # type: ignore[no-untyped-def]
     return stmt
 
 
-def _apply_trace_filters(stmt, query):  # type: ignore[no-untyped-def]
+def _apply_trace_filters(
+    stmt: Select[tuple[GovernanceTraceRow]],
+    query: DecisionQuery,
+) -> Select[tuple[GovernanceTraceRow]]:
     """Mirrors the in-memory ``_matches_trace`` predicate."""
     if query.decision_id is not None:
         stmt = stmt.where(
