@@ -23,6 +23,7 @@ TASK_DEFAULT_QUEUES: dict[str, str] = {
     "recover_stale_executions": QUEUE_WEBHOOK_MAINTENANCE,
     "recover_dead_letter_replays": QUEUE_WEBHOOK_MAINTENANCE,
     "reconcile_stale_execution_outbox": QUEUE_WEBHOOK_MAINTENANCE,
+    "reconcile_failed_execution_outbox": QUEUE_WEBHOOK_MAINTENANCE,
     "reconcile_stale_escalation_outbox": QUEUE_WEBHOOK_MAINTENANCE,
     "cleanup_expired_webhook_nonces": QUEUE_WEBHOOK_MAINTENANCE,
     "operious.workers.emit_queue_depth_snapshot": QUEUE_WEBHOOK_MAINTENANCE,
@@ -180,6 +181,14 @@ _FALLBACK_KWARG_EXTRACTORS: dict[
     "reconcile_stale_execution_outbox": _extract_optional_maintenance_kwargs(
         "stale_before",
         "lease_seconds",
+        "limit",
+        "tenant_id",
+        "reason",
+    ),
+    "reconcile_failed_execution_outbox": _extract_optional_maintenance_kwargs(
+        "failed_before",
+        "cooldown_seconds",
+        "max_publish_attempts",
         "limit",
         "tenant_id",
         "reason",

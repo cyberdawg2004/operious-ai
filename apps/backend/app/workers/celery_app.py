@@ -76,6 +76,9 @@ celery_app.conf.update(
         "reconcile_stale_execution_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
+        "reconcile_failed_execution_outbox": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
         "reconcile_stale_escalation_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
@@ -107,6 +110,11 @@ celery_app.conf.update(
             "task": "reconcile_stale_escalation_outbox",
             "schedule": 60.0,
             "kwargs": {"limit": 100},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        "reconcile-failed-execution-outbox-minutely": {
+            "task": "reconcile_failed_execution_outbox",
+            "schedule": 60.0,
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
         "queue-depth-snapshot": {
