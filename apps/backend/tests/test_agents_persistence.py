@@ -35,7 +35,13 @@ from app.agents.results import (
     ToolInvocationResult,
 )
 from app.agents.runtime import AgentRegistry, AgentRuntime, BaseAgent
-from app.agents.tools import AgentToolSession, BaseTool, ToolInvoker, ToolRegistry
+from app.agents.tools import (
+    AgentToolSession,
+    BaseTool,
+    ToolCapability,
+    ToolInvoker,
+    ToolRegistry,
+)
 
 
 # ─── Round-trip tests ────────────────────────────────────────────────
@@ -101,6 +107,7 @@ def test_agent_execution_record_round_trip() -> None:
 
 class _EchoTool(BaseTool):
     name: ClassVar[str] = "echo"
+    capability: ClassVar[ToolCapability] = ToolCapability.READ_ONLY
     required_capabilities: ClassVar[frozenset[str]] = frozenset({"tool.echo"})
 
     async def invoke(

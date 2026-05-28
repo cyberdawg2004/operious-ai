@@ -31,7 +31,13 @@ from app.agents.results import (
     ToolInvocationResult,
 )
 from app.agents.runtime import AgentRegistry, AgentRuntime, BaseAgent
-from app.agents.tools import AgentToolSession, BaseTool, ToolInvoker, ToolRegistry
+from app.agents.tools import (
+    AgentToolSession,
+    BaseTool,
+    ToolCapability,
+    ToolInvoker,
+    ToolRegistry,
+)
 from app.agents.value_objects import CausalityMetadata
 
 
@@ -40,6 +46,7 @@ from app.agents.value_objects import CausalityMetadata
 
 class _EchoTool(BaseTool):
     name: ClassVar[str] = "echo"
+    capability: ClassVar[ToolCapability] = ToolCapability.READ_ONLY
     required_capabilities: ClassVar[frozenset[str]] = frozenset({"tool.echo"})
 
     async def invoke(
@@ -50,6 +57,7 @@ class _EchoTool(BaseTool):
 
 class _RaisingTool(BaseTool):
     name: ClassVar[str] = "raiser"
+    capability: ClassVar[ToolCapability] = ToolCapability.READ_ONLY
     required_capabilities: ClassVar[frozenset[str]] = frozenset({"tool.echo"})
 
     async def invoke(

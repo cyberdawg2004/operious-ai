@@ -6,7 +6,7 @@ Every tool call goes through `ToolInvoker.invoke()`. This is the
 * resolves a tool by name,
 * verifies capability requirements are satisfied,
 * verifies the constraint allow-list permits the tool,
-* runs the governance evaluation (when a `GovernanceRuntime` is wired),
+* runs the governance evaluation (mandatory for action-capable tools),
 * invokes the tool,
 * records the `ToolInvocationTrace`,
 * emits the `ToolInvocationEnvelope`.
@@ -23,9 +23,9 @@ envelope. Internal validation uses typed exceptions
 
 Governance integration uses `AgentActionGovernanceSubject` at the
 `PRE_EXECUTION` stage. The action vocabulary is
-`"agent.tool_invocation"`; the resource is the tool name. When no
-`GovernanceRuntime` is wired the evaluation step is skipped and
-`governance_decision_id` on the trace is ``None``.
+`"agent.tool_invocation"`; the resource is the tool name. Read-only
+registries may still omit a `GovernanceRuntime`; action-capable tools
+require one and execute only on a persisted ALLOW decision.
 """
 
 from __future__ import annotations
@@ -42,17 +42,19 @@ from app.agents.enums import ToolInvocationStatus
 from app.agents.exceptions import (
     CapabilityViolationError,
     ConstraintViolationError,
+    ToolConfigurationError,
     ToolNotFoundError,
 )
 from app.agents.results import ToolInvocationRequest
 from app.agents.tools.base import BaseTool
+from app.agents.tools.capability import ToolCapability
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
 from app.agents.identity import derive_tool_invocation_id
 from app.governance.context import GovernanceContext
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
-from app.governance.enums import EnforcementStage
+from app.governance.enums import Decision, EnforcementStage
 from app.governance.subjects.agent_actions import AgentActionGovernanceSubject
 from app.identity import TenantId
 
@@ -66,6 +68,16 @@ class ToolInvoker:
         tool_registry: ToolRegistry,
         governance_runtime: GovernanceRuntime | None = None,
     ) -> None:
+        action_tool_names = tuple(
+            tool.name
+            for tool in tool_registry
+            if _tool_capability(tool) is not ToolCapability.READ_ONLY
+        )
+        if action_tool_names and governance_runtime is None:
+            raise ToolConfigurationError(
+                "governance_runtime is required when action-capable tools "
+                f"are registered: {action_tool_names!r}"
+            )
         self._tools = tool_registry
         self._governance = governance_runtime
 
@@ -136,7 +148,10 @@ class ToolInvoker:
                 governance_envelope=None,
             )
 
-        # 4. Governance gate (optional).
+        # 4. Governance gate.
+        requires_action_governance = (
+            _tool_capability(tool) is not ToolCapability.READ_ONLY
+        )
         governance_envelope: GovernanceEnvelope | None = None
         governance_decision_id: uuid.UUID | None = None
         if self._governance is not None:
@@ -159,7 +174,44 @@ class ToolInvoker:
                 )
             decision = governance_envelope.unwrap()
             governance_decision_id = decision.decision_id
-            if decision.is_blocking:
+            if requires_action_governance:
+                if decision.decision is not Decision.ALLOW:
+                    return self._denied_envelope(
+                        invocation_id=invocation_id,
+                        request=request,
+                        context=context,
+                        started_at=started_at,
+                        loop_start=loop_start,
+                        error=None,
+                        reason="governance_not_allow",
+                        extra_metadata={
+                            "governance_decision": decision.decision.value,
+                            "governance_reason": decision.reason,
+                        },
+                        governance_envelope=governance_envelope,
+                        governance_decision_id=governance_decision_id,
+                    )
+                persisted = await self._governance.get_persisted_decision(
+                    decision.decision_id,
+                    expected_tenant_id=context.tenant_id,
+                )
+                if persisted is None or persisted.decision != Decision.ALLOW.value:
+                    return self._denied_envelope(
+                        invocation_id=invocation_id,
+                        request=request,
+                        context=context,
+                        started_at=started_at,
+                        loop_start=loop_start,
+                        error=None,
+                        reason="governance_decision_not_persisted",
+                        extra_metadata={
+                            "governance_decision": decision.decision.value,
+                            "governance_reason": decision.reason,
+                        },
+                        governance_envelope=governance_envelope,
+                        governance_decision_id=governance_decision_id,
+                    )
+            elif decision.is_blocking:
                 return self._denied_envelope(
                     invocation_id=invocation_id,
                     request=request,
@@ -175,6 +227,19 @@ class ToolInvoker:
                     governance_envelope=governance_envelope,
                     governance_decision_id=governance_decision_id,
                 )
+        elif requires_action_governance:
+            return self._denied_envelope(
+                invocation_id=invocation_id,
+                request=request,
+                context=context,
+                started_at=started_at,
+                loop_start=loop_start,
+                error=ToolConfigurationError(
+                    "governance_runtime is required for action-capable tools"
+                ),
+                reason="governance_required",
+                governance_envelope=None,
+            )
 
         # 5. Invoke the tool.
         try:
@@ -330,6 +395,11 @@ def _build_governance_context(
             "runtime_instance_id": str(context.identity.runtime_instance_id),
         },
     )
+
+
+def _tool_capability(tool: BaseTool) -> ToolCapability:
+    raw = getattr(tool, "capability", ToolCapability.ACTION)
+    return raw if isinstance(raw, ToolCapability) else ToolCapability.ACTION
 
 
 __all__ = ["ToolInvoker"]

@@ -33,6 +33,7 @@ class BoundaryMetadataKey(StrEnum):
     REPLAY_KEY = "boundary.replay_key"
     ORIGINAL_EVENT_ID = "boundary.original_event_id"
     ADAPTER_NAME = "boundary.adapter_name"
+    GOVERNANCE_DECISION_ID = "boundary.governance_decision_id"
     TENANT_ID = "boundary.tenant_id"
     CORRELATION_ID = "boundary.correlation_id"
     REQUEST_ID = "boundary.request_id"

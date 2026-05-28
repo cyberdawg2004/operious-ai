@@ -36,6 +36,7 @@ Adapters MAY:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import ClassVar
 
 from app.boundary.enums import (
     BoundaryDirection,
@@ -87,6 +88,7 @@ class BaseEgressAdapter(ABC):
     name: str
     source_type: BoundarySourceType
     direction: BoundaryDirection = BoundaryDirection.EGRESS
+    requires_governance_decision_id: ClassVar[bool] = True
 
     def __init__(
         self,

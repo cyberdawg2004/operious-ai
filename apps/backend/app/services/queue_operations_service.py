@@ -11,8 +11,8 @@ from inspect import isawaitable
 from typing import Any, cast
 
 from redis.asyncio import Redis
-from sqlalchemy import and_, or_, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, select, text, update
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.core.admission import admission_thresholds_from_settings
 from app.core.config import Settings, get_settings
@@ -189,15 +189,21 @@ class QueueOperationsService:
         set_current_tenant(tenant_id)
 
         async def claim_replay() -> tuple[str, dict[str, Any], str, datetime]:
+            replayed_at = datetime.now(timezone.utc)
             row = (
                 await self._session.execute(
-                    select(DeadLetterTaskRow)
+                    update(DeadLetterTaskRow)
                     .where(
                         DeadLetterTaskRow.dead_letter_task_id == parsed_id,
                         DeadLetterTaskRow.tenant_id == tenant_id,
                         DeadLetterTaskRow.replayed.is_(False),
                     )
-                    .with_for_update(skip_locked=True)
+                    .values(
+                        replayed=True,
+                        replayed_at=replayed_at,
+                        replayed_by=replayed_by,
+                    )
+                    .returning(DeadLetterTaskRow)
                 )
             ).scalar_one_or_none()
             if row is None:
@@ -218,22 +224,18 @@ class QueueOperationsService:
             queue_name = _queue_for_row(row)
             kwargs = _replay_kwargs_for_row(row)
             task_name = row.task_name
-            replayed_at = datetime.now(timezone.utc)
-            row.replayed = True
-            row.replayed_at = replayed_at
-            row.replayed_by = replayed_by
             return queue_name, kwargs, task_name, replayed_at
 
         try:
             try:
-                if self._session.in_transaction():
-                    queue_name, kwargs, task_name, replayed_at = await claim_replay()
-                    await self._session.commit()
-                else:
-                    async with self._session.begin():
-                        queue_name, kwargs, task_name, replayed_at = (
-                            await claim_replay()
-                        )
+                connection = await self._session.connection()
+                queue_name, kwargs, task_name, replayed_at = await claim_replay()
+                await self._session.commit()
+                if _should_commit_external_transaction(
+                    session=self._session,
+                    connection=connection,
+                ):
+                    await connection.commit()
             except Exception:
                 if self._session.in_transaction():
                     await self._session.rollback()
@@ -407,6 +409,17 @@ async def _resolve(value: Awaitable[Any] | Any) -> Any:
     if isawaitable(value):
         return await value
     return value
+
+
+def _should_commit_external_transaction(
+    *,
+    session: AsyncSession,
+    connection: AsyncConnection,
+) -> bool:
+    return (
+        connection.in_transaction()
+        and session.sync_session.join_transaction_mode != "create_savepoint"
+    )
 
 
 __all__ = [

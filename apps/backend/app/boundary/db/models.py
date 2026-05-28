@@ -214,6 +214,11 @@ class BoundaryEgressRow(Base):
     request_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
     )
+    # Nullable for pre-PR_RT-SAFE-2 historical rows. Runtime-created
+    # rows require a persisted ALLOW governance decision before insert.
+    governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
@@ -228,6 +233,11 @@ class BoundaryEgressRow(Base):
             "ix_boundary_egress_runtime_seq",
             "runtime_instance_id",
             "sequence",
+        ),
+        Index(
+            "ix_boundary_egress_tenant_governance_decision",
+            "tenant_id",
+            "governance_decision_id",
         ),
     )
 

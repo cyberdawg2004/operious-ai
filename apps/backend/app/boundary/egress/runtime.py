@@ -18,6 +18,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Protocol
 
 from app.identity import (
     AuthorityResolution,
@@ -35,6 +36,7 @@ from app.boundary.envelopes import BoundaryEgressEnvelope
 from app.boundary.enums import BoundaryDirection
 from app.boundary.exceptions import (
     BoundaryConfigurationError,
+    BoundaryGovernanceError,
 )
 from app.boundary.identity import (
     BoundaryEgressId,
@@ -54,6 +56,23 @@ from app.boundary.tracing import BoundaryTrace
 
 _logger = logging.getLogger(__name__)
 _RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506002")
+_GOVERNANCE_ALLOW_DECISION = "allow"
+
+
+class _GovernanceDecisionRecord(Protocol):
+    decision: str
+
+
+class BoundaryGovernanceDecisionReader(Protocol):
+    """Tenant-scoped point-read contract for persisted decisions."""
+
+    async def get_decision(
+        self,
+        decision_id: str,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> _GovernanceDecisionRecord | None:
+        ...
 
 
 class BoundaryEgressRuntime:
@@ -61,6 +80,7 @@ class BoundaryEgressRuntime:
 
     __slots__ = (
         "_adapters",
+        "_governance_repository",
         "_persistence",
         "_runtime_instance_id",
         "_sequence",
@@ -71,9 +91,11 @@ class BoundaryEgressRuntime:
         *,
         adapters: BoundaryAdapterRegistry,
         persistence: BoundaryPersistenceProtocol | None = None,
+        governance_repository: BoundaryGovernanceDecisionReader | None = None,
     ) -> None:
         self._adapters = adapters
         self._persistence = persistence
+        self._governance_repository = governance_repository
         self._runtime_instance_id = derive_runtime_id(
             namespace=_RUNTIME_NAMESPACE,
             tenant_id=None,
@@ -98,6 +120,12 @@ class BoundaryEgressRuntime:
     ) -> BoundaryPersistenceProtocol | None:
         return self._persistence
 
+    @property
+    def governance_repository(
+        self,
+    ) -> BoundaryGovernanceDecisionReader | None:
+        return self._governance_repository
+
     async def emit(
         self, request: BoundaryEgressRequest
     ) -> BoundaryEgressEnvelope:
@@ -120,6 +148,23 @@ class BoundaryEgressRuntime:
             observed_tenant_id=request.source.tenant_id,
         )
 
+        governance_error = await self._validate_governance_allow(
+            request=request,
+            resolution=resolution,
+        )
+        if governance_error is not None:
+            return self._failed_envelope(
+                request=request,
+                egress_id=egress_id,
+                adapter_name=request.adapter_name,
+                started_at=started_at,
+                t0=t0,
+                error=governance_error,
+                reason=str(governance_error),
+                resolution=resolution,
+                governance_decision_id=request.governance_decision_id,
+            )
+
         # Resolve the named adapter (only required when
         # `prebuilt_payload` is absent).
         adapter_name: str
@@ -138,6 +183,7 @@ class BoundaryEgressRuntime:
                     error=exc,
                     reason=f"adapter resolution failed: {exc}",
                     resolution=resolution,
+                    governance_decision_id=request.governance_decision_id,
                 )
         else:
             adapter_name = request.adapter_name
@@ -181,6 +227,7 @@ class BoundaryEgressRuntime:
             correlation_id=request.correlation_id,
             request_id=request.request_id,
             tenant_id=resolution.tenant_id,
+            governance_decision_id=request.governance_decision_id,
             error=(
                 f"{framework_error.__class__.__name__}: "
                 f"{framework_error}"
@@ -209,6 +256,7 @@ class BoundaryEgressRuntime:
             request_id=request.request_id,
             tenant_id=resolution.tenant_id,
             egress_id=egress_id,
+            governance_decision_id=request.governance_decision_id,
             error=result.error,
             tenant_authority_source=resolution.source.value,
         )
@@ -253,6 +301,47 @@ class BoundaryEgressRuntime:
             )
         return adapter
 
+    async def _validate_governance_allow(
+        self,
+        *,
+        request: BoundaryEgressRequest,
+        resolution: AuthorityResolution,
+    ) -> BoundaryGovernanceError | None:
+        if resolution.tenant_id is None:
+            return BoundaryGovernanceError(
+                "egress governance requires resolved tenant authority"
+            )
+        if request.governance_decision_id is None:
+            return BoundaryGovernanceError(
+                "egress requires governance_decision_id"
+            )
+        if self._governance_repository is None:
+            return BoundaryGovernanceError(
+                "egress requires governance repository"
+            )
+        try:
+            record = await self._governance_repository.get_decision(
+                str(request.governance_decision_id),
+                expected_tenant_id=resolution.tenant_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logger.exception(
+                "egress governance lookup failed for decision_id=%s",
+                request.governance_decision_id,
+            )
+            return BoundaryGovernanceError(
+                f"egress governance lookup failed: {exc}"
+            )
+        if record is None:
+            return BoundaryGovernanceError(
+                "egress governance decision is not persisted for tenant"
+            )
+        if record.decision != _GOVERNANCE_ALLOW_DECISION:
+            return BoundaryGovernanceError(
+                "egress governance decision is not ALLOW"
+            )
+        return None
+
     @staticmethod
     def _build_metadata(
         *,
@@ -275,6 +364,10 @@ class BoundaryEgressRuntime:
         meta[BoundaryMetadataKey.ADAPTER_NAME.value] = (
             adapter_name
         )
+        if request.governance_decision_id is not None:
+            meta[BoundaryMetadataKey.GOVERNANCE_DECISION_ID.value] = (
+                str(request.governance_decision_id)
+            )
         if resolution.tenant_id:
             meta[BoundaryMetadataKey.TENANT_ID.value] = (
                 resolution.tenant_id
@@ -297,9 +390,10 @@ class BoundaryEgressRuntime:
         adapter_name: str,
         started_at: datetime,
         t0: float,
-        error: BoundaryConfigurationError,
+        error: BaseException,
         reason: str,
         resolution: AuthorityResolution,
+        governance_decision_id: uuid.UUID | None = None,
     ) -> BoundaryEgressEnvelope:
         ended_at = datetime.now(tz=timezone.utc)
         latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -317,6 +411,7 @@ class BoundaryEgressRuntime:
             request_id=request.request_id,
             tenant_id=resolution.tenant_id,
             egress_id=egress_id,
+            governance_decision_id=governance_decision_id,
             error=reason,
             tenant_authority_source=resolution.source.value,
         )

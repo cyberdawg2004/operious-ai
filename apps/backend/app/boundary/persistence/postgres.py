@@ -476,6 +476,10 @@ def _ingress_row_to_record(
 def _egress_record_to_row(
     record: BoundaryEgressRecord,
 ) -> BoundaryEgressRow:
+    if record.governance_decision_id is None:
+        raise BoundaryPersistenceError(
+            "new egress rows require governance_decision_id"
+        )
     return BoundaryEgressRow(
         egress_id=record.egress_id,
         direction=record.direction.value,
@@ -496,6 +500,7 @@ def _egress_record_to_row(
         latency_ms=record.latency_ms,
         correlation_id=record.correlation_id,
         request_id=record.request_id,
+        governance_decision_id=record.governance_decision_id,
         error=record.error,
         metadata_json=dict(record.metadata),
     )
@@ -524,6 +529,7 @@ def _egress_row_to_record(
         latency_ms=row.latency_ms,
         correlation_id=row.correlation_id,
         request_id=row.request_id,
+        governance_decision_id=row.governance_decision_id,
         error=row.error,
         metadata=_as_dict(row.metadata_json),
     )

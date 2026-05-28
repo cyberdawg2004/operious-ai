@@ -54,6 +54,7 @@ from app.agents.runtime import AgentRegistry, AgentRuntime, BaseAgent
 from app.agents.tools import (
     AgentToolSession,
     BaseTool,
+    ToolCapability,
     ToolInvoker,
     ToolRegistry,
 )
@@ -107,6 +108,7 @@ from app.supervisor.taxonomy import EvidenceMetadataKey, FindingCode
 
 class _EchoTool(BaseTool):
     name: ClassVar[str] = "echo"
+    capability: ClassVar[ToolCapability] = ToolCapability.READ_ONLY
     required_capabilities: ClassVar[frozenset[str]] = frozenset(
         {"tool.echo"}
     )

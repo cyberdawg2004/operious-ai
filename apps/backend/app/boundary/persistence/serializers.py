@@ -15,6 +15,7 @@ from app.boundary.envelopes import (
 from app.boundary.enums import (
     BoundaryNormalizationStatus,
 )
+from app.boundary.exceptions import BoundaryPersistenceError
 from app.boundary.identity import (
     as_external_conversation_id,
     as_external_message_id,
@@ -179,6 +180,11 @@ def egress_result_to_record(
     source identity sits on the request.
     """
     payload = result.payload
+    if result.governance_decision_id is None:
+        raise BoundaryPersistenceError(
+            "egress_result_to_record requires governance_decision_id for "
+            "new egress rows"
+        )
     return BoundaryEgressRecord(
         egress_id=result.egress_id,
         direction=result.direction,
@@ -207,6 +213,7 @@ def egress_result_to_record(
         latency_ms=result.latency_ms,
         correlation_id=result.correlation_id,
         request_id=result.request_id,
+        governance_decision_id=result.governance_decision_id,
         error=result.error,
         metadata=dict(result.metadata),
     )

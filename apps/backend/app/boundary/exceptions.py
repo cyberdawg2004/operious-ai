@@ -13,6 +13,8 @@
                                       failed at the adapter.
 * `BoundaryReplayError`            — replay detector / idempotency
                                       registry rejected an input.
+* `BoundaryGovernanceError`        — egress governance provenance is
+                                      absent or not an ALLOW decision.
 * `WebhookFreshnessError`          — signed webhook timestamp missing
                                       or outside the freshness window.
 * `WebhookReplayError`             — signed webhook nonce already seen.
@@ -52,6 +54,10 @@ class BoundaryReplayError(BoundaryError):
     """Replay detector / idempotency registry rejected an input."""
 
 
+class BoundaryGovernanceError(BoundaryError):
+    """Governance provenance is missing or insufficient for egress."""
+
+
 class WebhookFreshnessError(BoundaryAuthenticationError):
     """Webhook timestamp is missing or outside the freshness window."""
 
@@ -70,6 +76,7 @@ __all__ = [
     "BoundaryNormalizationError",
     "BoundaryAuthenticationError",
     "BoundaryReplayError",
+    "BoundaryGovernanceError",
     "WebhookFreshnessError",
     "WebhookReplayError",
     "BoundaryPersistenceError",

@@ -80,18 +80,10 @@ class BoundaryTrace:
     # EGRESS-specific
     egress_id: BoundaryEgressId | None = None
     error: str | None = None
-    # 2.5-G1 ⇒ 2.75-δ: governance provenance was originally added
-    # here mirroring the ``CoordinationEnvelope`` pattern, but the
-    # apex boundary substrate (``BoundaryIngressRuntime`` /
-    # ``BoundaryEgressRuntime``) holds no governance gate of its
-    # own — it is the pure protocol translator. Per the doctrine
-    # "schema-without-data is worse than absence" the fields were
-    # removed in Wedge 2.75-δ. Governance-attributed boundary
-    # operations live in the translation/voice substrates whose
-    # traces (``TranslationTrace`` / ``VoiceTrace``) project the
-    # capability-gate verdict directly. A future wedge that adds
-    # an apex boundary governance pre-flight should re-introduce
-    # the fields at that point — not before.
+    # PR_RT-SAFE-2: egress emits are no longer pure ledger writes; a
+    # persisted central ALLOW decision is required before the adapter
+    # can serialize or the record can persist.
+    governance_decision_id: uuid.UUID | None = None
     # 2.75-β: authority-resolution provenance. Records which input
     # axis the effective ``tenant_id`` came from
     # (``typed_authority`` / ``legacy_tenant`` / ``observed_tenant``

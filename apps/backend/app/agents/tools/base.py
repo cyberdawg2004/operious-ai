@@ -11,6 +11,8 @@ packages, not in the substrate). Sprint J ships the contract only.
 Required class attributes:
 
 * `name`: stable registered identifier.
+* `capability`: side-effect tier. Defaults to ACTION so undeclared
+  tools are treated as dangerous.
 * `required_capabilities`: frozen set of capability names. The
   invoker rejects calls when the agent's `CapabilitySet` does not
   cover every required name.
@@ -23,6 +25,7 @@ from typing import ClassVar
 
 from app.agents.context import AgentExecutionContext
 from app.agents.results import ToolInvocationRequest, ToolInvocationResult
+from app.agents.tools.capability import ToolCapability
 
 
 class BaseTool(ABC):
@@ -34,6 +37,7 @@ class BaseTool(ABC):
     """
 
     name: ClassVar[str]
+    capability: ClassVar[ToolCapability] = ToolCapability.ACTION
     required_capabilities: ClassVar[frozenset[str]] = frozenset()
 
     @abstractmethod

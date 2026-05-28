@@ -112,6 +112,9 @@ def _build_egress(
         latency_ms=0.5,
         correlation_id=None,
         request_id=None,
+        governance_decision_id=uuid.uuid5(
+            uuid.NAMESPACE_URL, "test-boundary-router-egress-decision"
+        ),
         error=None,
     )
 

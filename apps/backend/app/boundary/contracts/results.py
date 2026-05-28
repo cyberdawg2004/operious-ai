@@ -120,6 +120,8 @@ class BoundaryEgressResult:
         correlation_id /
         request_id /
         tenant_id:              Lineage handles.
+        governance_decision_id: Persisted ALLOW decision that
+                                 authorized this egress.
         started_at / ended_at:  Wall-clock window.
         latency_ms:             Total emit latency.
         error:                  Set when the framework itself
@@ -140,6 +142,7 @@ class BoundaryEgressResult:
     correlation_id: str | None = None
     request_id: str | None = None
     tenant_id: str | None = None
+    governance_decision_id: uuid.UUID | None = None
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 

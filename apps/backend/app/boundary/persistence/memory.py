@@ -115,6 +115,10 @@ class InMemoryBoundaryPersistence:
         self, record: BoundaryEgressRecord
     ) -> None:
         async with self._lock:
+            if record.governance_decision_id is None:
+                raise BoundaryPersistenceError(
+                    "new egress rows require governance_decision_id"
+                )
             if record.egress_id in self._egress:
                 raise BoundaryPersistenceError(
                     "duplicate egress record: "

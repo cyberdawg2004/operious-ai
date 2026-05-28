@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -78,6 +79,12 @@ class BoundaryEgressRequest:
         correlation_id:      Lineage continuity handle.
         request_id:          Per-call lineage handle.
         egress_id_override:  Replay aid (caller-pinned id).
+        governance_decision_id:
+                              Persisted central governance decision
+                              authorizing this egress. Required by
+                              BoundaryEgressRuntime for new emits;
+                              nullable only for historical rows and
+                              legacy contract deserialization.
         authority:           Typed authority tuple stamped by the
                               caller. ``None`` for legacy callers
                               during the Wedge B2 transition.
@@ -92,6 +99,7 @@ class BoundaryEgressRequest:
     correlation_id: str | None = None
     request_id: str | None = None
     egress_id_override: BoundaryEgressId | None = None
+    governance_decision_id: uuid.UUID | None = None
     authority: AuthorityContext | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 

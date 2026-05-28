@@ -21,6 +21,8 @@ Constitutional guarantees:
 from __future__ import annotations
 
 import ast
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -44,7 +46,13 @@ from app.boundary.models.payload import (
 )
 from app.boundary.models.source import BoundarySource
 from app.boundary.registry.registry import BoundaryAdapterRegistry
+from app.governance.enums import Decision, EnforcementStage
+from app.governance.persistence.memory import InMemoryGovernanceRepository
+from app.governance.persistence.records import GovernanceDecisionRecord
 from app.identity import AuthorityContext, AuthoritySource, TenantId
+
+
+_ALLOW_DECISION_ID = uuid.UUID("0db7601f-62e4-57ce-a716-fb380f99a330")
 
 
 def _source(tenant: str | None = "tenant-source") -> BoundarySource:
@@ -74,10 +82,34 @@ def _ingress_runtime() -> BoundaryIngressRuntime:
     )
 
 
-def _egress_runtime() -> BoundaryEgressRuntime:
+def _egress_runtime(
+    governance_repository: InMemoryGovernanceRepository,
+) -> BoundaryEgressRuntime:
     return BoundaryEgressRuntime(
         adapters=BoundaryAdapterRegistry([ZendeskWebhookAdapter()]),
+        governance_repository=governance_repository,
     )
+
+
+async def _governance_repo(
+    *,
+    tenant_id: str,
+    decision_id: uuid.UUID = _ALLOW_DECISION_ID,
+) -> InMemoryGovernanceRepository:
+    repo = InMemoryGovernanceRepository()
+    await repo.record_decision(
+        GovernanceDecisionRecord(
+            decision_id=str(decision_id),
+            decision=Decision.ALLOW.value,
+            stage=EnforcementStage.PRE_EXECUTION.value,
+            policy_chain_id="test-boundary-authority",
+            reason="test fixture",
+            decided_at=datetime(2026, 5, 29, tzinfo=timezone.utc).isoformat(),
+            tenant_id=tenant_id,
+            subject_kind="boundary.egress",
+        )
+    )
+    return repo
 
 
 # ─── INGRESS — attribution axis ─────────────────────────────────────
@@ -178,13 +210,16 @@ async def test_ingress_failed_envelope_stamps_authority_source() -> None:
 
 @pytest.mark.asyncio
 async def test_egress_typed_authority_wins_over_source_tenant() -> None:
-    rt = _egress_runtime()
+    rt = _egress_runtime(
+        await _governance_repo(tenant_id="tenant-verified")
+    )
     envelope = await rt.emit(
         BoundaryEgressRequest(
             source=_source(tenant="tenant-source"),
             adapter_name="zendesk_webhook_adapter",
             artifact={"body": "ack"},
             prebuilt_payload=EgressPayload(body={"text": "ack"}),
+            governance_decision_id=_ALLOW_DECISION_ID,
             authority=AuthorityContext(tenant_id=TenantId("tenant-verified")),
         )
     )
@@ -201,13 +236,16 @@ async def test_egress_typed_authority_wins_over_source_tenant() -> None:
 
 @pytest.mark.asyncio
 async def test_egress_observed_source_when_no_typed_authority() -> None:
-    rt = _egress_runtime()
+    rt = _egress_runtime(
+        await _governance_repo(tenant_id="tenant-source")
+    )
     envelope = await rt.emit(
         BoundaryEgressRequest(
             source=_source(tenant="tenant-source"),
             adapter_name="zendesk_webhook_adapter",
             artifact={"body": "ack"},
             prebuilt_payload=EgressPayload(body={"text": "ack"}),
+            governance_decision_id=_ALLOW_DECISION_ID,
         )
     )
     assert envelope.is_ok
@@ -221,12 +259,15 @@ async def test_egress_observed_source_when_no_typed_authority() -> None:
 
 @pytest.mark.asyncio
 async def test_egress_failed_envelope_stamps_authority_source() -> None:
-    rt = _egress_runtime()
+    rt = _egress_runtime(
+        await _governance_repo(tenant_id="tenant-verified")
+    )
     envelope = await rt.emit(
         BoundaryEgressRequest(
             source=_source(tenant="tenant-source"),
             adapter_name="does_not_exist",
             artifact={"body": "ack"},
+            governance_decision_id=_ALLOW_DECISION_ID,
             authority=AuthorityContext(tenant_id=TenantId("tenant-verified")),
         )
     )

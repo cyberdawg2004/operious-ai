@@ -122,6 +122,10 @@ def _egress(
         latency_ms=0.5,
         correlation_id=None,
         request_id=None,
+        governance_decision_id=uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"test-boundary-postgres-egress-decision:{sequence}",
+        ),
         error=None,
     )
 

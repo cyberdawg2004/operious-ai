@@ -119,6 +119,7 @@ class BoundaryEgressResponse(BaseModel):
     latency_ms: float
     correlation_id: str | None = None
     request_id: str | None = None
+    governance_decision_id: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -146,6 +147,11 @@ class BoundaryEgressResponse(BaseModel):
             latency_ms=record.latency_ms,
             correlation_id=record.correlation_id,
             request_id=record.request_id,
+            governance_decision_id=(
+                str(record.governance_decision_id)
+                if record.governance_decision_id is not None
+                else None
+            ),
             error=record.error,
             metadata=dict(record.metadata),
         )

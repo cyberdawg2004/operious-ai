@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -49,7 +50,7 @@ def _ingress_record(
     return BoundaryIngressRecord(
         ingress_id=ingress_id or generate_ingress_id(),
         direction=BoundaryDirection.INGRESS,
-        runtime_instance_id=__import__("uuid").uuid4(),
+        runtime_instance_id=uuid.uuid4(),
         sequence=sequence,
         source_type=BoundarySourceType.ZENDESK,
         source_id="acct-1",
@@ -83,7 +84,7 @@ def _egress_record(
     return BoundaryEgressRecord(
         egress_id=egress_id or generate_egress_id(),
         direction=BoundaryDirection.EGRESS,
-        runtime_instance_id=__import__("uuid").uuid4(),
+        runtime_instance_id=uuid.uuid4(),
         sequence=sequence,
         source_type=BoundarySourceType.GENERIC,
         source_id="acct-1",
@@ -100,6 +101,9 @@ def _egress_record(
         latency_ms=1.0,
         correlation_id="corr-1",
         request_id="req-1",
+        governance_decision_id=uuid.uuid5(
+            uuid.NAMESPACE_URL, "test-boundary-egress-decision"
+        ),
         error=None,
     )
 

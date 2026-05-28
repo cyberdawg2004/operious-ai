@@ -319,33 +319,34 @@ async def test_arbitration_trace_populated_on_deny() -> None:
     assert envelope.trace.governance_chain_id == _FIXED_CHAIN_ID
 
 
-# ─── BoundaryTrace field removal ───────────────────────────────────
+# ─── Boundary egress provenance ────────────────────────────────────
 
 
-def test_boundary_trace_no_governance_provenance_fields() -> None:
-    """The apex BoundaryTrace MUST NOT carry governance provenance.
+def test_boundary_trace_carries_egress_governance_decision_only() -> None:
+    """BoundaryTrace carries egress provenance, not governance internals.
 
-    Apex boundary substrates (``BoundaryIngressRuntime`` /
-    ``BoundaryEgressRuntime``) are pure protocol translators with
-    no governance gate. The 2.5-G1 schema additions were unused
-    and have been removed under the doctrine that schema-without-
-    data is worse than absence. A future wedge that adds apex
-    boundary governance should re-introduce the fields then.
+    PR_RT-SAFE-2 makes egress emits fail closed unless they carry a
+    persisted central ALLOW decision id. The trace therefore carries
+    ``governance_decision_id`` for egress lineage, while still avoiding
+    governance-runtime internals such as chain ids.
     """
     from app.boundary.tracing import BoundaryTrace
 
     field_names = {f.name for f in BoundaryTrace.__dataclass_fields__.values()}  # type: ignore[attr-defined]
-    assert "governance_decision_id" not in field_names
+    assert "governance_decision_id" in field_names
     assert "governance_chain_id" not in field_names
 
 
-def test_boundary_persistence_records_no_governance_provenance() -> None:
+def test_boundary_persistence_records_scope_governance_provenance_to_egress() -> None:
     from app.boundary.persistence.records import (
         BoundaryEgressRecord,
         BoundaryIngressRecord,
     )
 
-    for cls in (BoundaryIngressRecord, BoundaryEgressRecord):
-        names = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
-        assert "governance_decision_id" not in names, cls.__name__
-        assert "governance_chain_id" not in names, cls.__name__
+    ingress_names = {f.name for f in BoundaryIngressRecord.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+    egress_names = {f.name for f in BoundaryEgressRecord.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+
+    assert "governance_decision_id" not in ingress_names
+    assert "governance_decision_id" in egress_names
+    assert "governance_chain_id" not in ingress_names
+    assert "governance_chain_id" not in egress_names

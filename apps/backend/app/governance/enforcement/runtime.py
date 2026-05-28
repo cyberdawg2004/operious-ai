@@ -55,6 +55,7 @@ from app.governance.identity.decision_ids import (
 from app.governance.persistence import (
     BaseGovernanceRepository,
 )
+from app.governance.persistence.records import GovernanceDecisionRecord
 from app.governance.persistence.serializers import (
     decision_to_record,
     enforcement_action_to_record,
@@ -104,6 +105,20 @@ class GovernanceRuntime:
 
     def chain_for(self, stage: EnforcementStage) -> PolicyChain | None:
         return self._chains.get(stage)
+
+    async def get_persisted_decision(
+        self,
+        decision_id: uuid.UUID,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> GovernanceDecisionRecord | None:
+        """Return the persisted decision, tenant-scoped, when persistence exists."""
+        if self._persistence is None:
+            return None
+        return await self._persistence.get_decision(
+            str(decision_id),
+            expected_tenant_id=expected_tenant_id,
+        )
 
     # ─── Public API ───────────────────────────────────────────────────
 
