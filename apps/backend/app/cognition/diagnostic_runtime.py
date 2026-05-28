@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping, cast
 
@@ -47,6 +47,7 @@ from app.governance.enforcement.handlers import (
 )
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.evaluators.engine import PolicyEvaluationEngine
+from app.governance.identity import derive_decision_id
 from app.governance.persistence import BaseGovernanceRepository
 from app.governance.policies.chain import PolicyChain
 from app.governance.subjects.execution import ExecutionGovernanceSubject
@@ -98,6 +99,41 @@ class DiagnosticCognitionRuntimeConfig:
     output_token_micro_usd: int = 15
 
 
+@dataclass(frozen=True, slots=True)
+class DiagnosticReasoningSnapshot:
+    """Immutable context captured before the provider round trip."""
+
+    tenant_id: str
+    execution_id: str
+    dispatch_id: str
+    session_id: str
+    content: str
+    attempt_id: str | None
+    attempt_number: int | None
+    worker_id: str | None
+    retrieval: KnowledgeRetrievalResult
+    retrieved_citations: tuple[Mapping[str, Any], ...]
+    system_prompt: str
+    messages: tuple[DiagnosticLLMMessage, ...]
+    usage_id: CognitionLLMUsageId
+    provider_name: str
+    model_name: str
+    max_output_tokens: int
+    temperature: float
+    prompt_sha256: str
+    quota_state: Mapping[str, Any]
+    provider_circuit_state: Mapping[str, Any] | None = None
+
+    def with_provider_circuit_state(
+        self,
+        state: Mapping[str, Any] | None,
+    ) -> "DiagnosticReasoningSnapshot":
+        return replace(
+            self,
+            provider_circuit_state=dict(state) if state is not None else None,
+        )
+
+
 class DiagnosticCognitionRuntime:
     """Runtime for RAG-grounded diagnostic model reasoning."""
 
@@ -132,7 +168,50 @@ class DiagnosticCognitionRuntime:
         session_id: str,
         content: str,
         attempt_id: str | None = None,
+        attempt_number: int | None = None,
+        worker_id: str | None = None,
     ) -> DiagnosticReasoningResult:
+        snapshot = await self.load_reasoning_snapshot(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            content=content,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            worker_id=worker_id,
+        )
+        try:
+            completion = await self.complete_reasoning_snapshot(snapshot)
+        except CognitionLLMProviderError as exc:
+            await self.persist_reasoning_failure(snapshot=snapshot, error=exc)
+            raise
+        except Exception as exc:
+            await self.persist_reasoning_failure(
+                snapshot=snapshot,
+                error=exc,
+                failed=True,
+            )
+            raise CognitionLLMProviderError(
+                f"diagnostic cognition failed: {exc.__class__.__name__}"
+            ) from exc
+        return await self.persist_reasoning_result(
+            snapshot=snapshot,
+            completion=completion,
+        )
+
+    async def load_reasoning_snapshot(
+        self,
+        *,
+        tenant_id: str,
+        execution_id: str,
+        dispatch_id: str,
+        session_id: str,
+        content: str,
+        attempt_id: str | None = None,
+        attempt_number: int | None = None,
+        worker_id: str | None = None,
+    ) -> DiagnosticReasoningSnapshot:
         retrieval = await self._knowledge_runtime.retrieve(
             tenant_id=tenant_id,
             query=content,
@@ -151,65 +230,104 @@ class DiagnosticCognitionRuntime:
             tenant_id=tenant_id,
             execution_id=execution_id,
             model=self._llm_client.model_name,
+            attempt_id=attempt_id,
         )
-        completion: DiagnosticLLMCompletion | None = None
-        audit_id: str | None = None
         messages = (DiagnosticLLMMessage(role="user", content=prompt),)
+        prompt_sha256 = _sha256_text(
+            _full_prompt_snapshot(
+                system_prompt=_SYSTEM_PROMPT,
+                messages=messages,
+            )
+        )
         if self._quota_runtime is not None:
             await self._quota_runtime.check_and_increment(
                 tenant_id=tenant_id,
                 provider=self._llm_client.provider_name,
                 model=self._llm_client.model_name,
             )
+        return DiagnosticReasoningSnapshot(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            content=content,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            worker_id=worker_id,
+            retrieval=retrieval,
+            retrieved_citations=tuple(
+                dict(citation) for citation in retrieved_citations
+            ),
+            system_prompt=_SYSTEM_PROMPT,
+            messages=messages,
+            usage_id=usage_id,
+            provider_name=self._llm_client.provider_name,
+            model_name=self._llm_client.model_name,
+            max_output_tokens=self._config.max_output_tokens,
+            temperature=self._config.temperature,
+            prompt_sha256=prompt_sha256,
+            quota_state={
+                "checked": self._quota_runtime is not None,
+                "provider": self._llm_client.provider_name,
+                "model": self._llm_client.model_name,
+            },
+        )
+
+    async def complete_reasoning_snapshot(
+        self,
+        snapshot: DiagnosticReasoningSnapshot,
+    ) -> DiagnosticLLMCompletion:
+        return await self._complete_llm(
+            system_prompt=snapshot.system_prompt,
+            messages=snapshot.messages,
+            tenant_id=snapshot.tenant_id,
+        )
+
+    async def persist_reasoning_result(
+        self,
+        *,
+        snapshot: DiagnosticReasoningSnapshot,
+        completion: DiagnosticLLMCompletion,
+        allow_existing_governance: bool = False,
+    ) -> DiagnosticReasoningResult:
+        audit_id: str | None = None
         try:
-            completion = await self._complete_llm(
-                system_prompt=_SYSTEM_PROMPT,
-                messages=messages,
-                tenant_id=tenant_id,
-            )
-            prompt_sha256 = _sha256_text(
-                _full_prompt_snapshot(
-                    system_prompt=_SYSTEM_PROMPT,
-                    messages=messages,
-                )
-            )
             audit_id = await self._save_cognition_audit(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                system_prompt=_SYSTEM_PROMPT,
-                messages=messages,
+                snapshot=snapshot,
                 completion=completion,
             )
             parsed = _parse_output(completion.text)
             semantic = validate_governance_terms(
-                canonical_text=content,
-                allowed_text=f"{content}\n\n{_context_text(retrieval)}",
+                canonical_text=snapshot.content,
+                allowed_text=(
+                    f"{snapshot.content}\n\n{_context_text(snapshot.retrieval)}"
+                ),
                 output_text=(
                     f"{parsed.summary}\n{parsed.category.value}\n"
                     f"{parsed.reasoning}"
                 ),
             )
             governance_decision_id = await self._govern_output(
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
-                attempt_id=attempt_id,
-                content=content,
-                retrieval=retrieval,
+                tenant_id=snapshot.tenant_id,
+                execution_id=snapshot.execution_id,
+                dispatch_id=snapshot.dispatch_id,
+                session_id=snapshot.session_id,
+                attempt_id=snapshot.attempt_id,
+                content=snapshot.content,
+                retrieval=snapshot.retrieval,
                 completion=completion,
                 parsed=parsed,
-                prompt_sha256=prompt_sha256,
+                prompt_sha256=snapshot.prompt_sha256,
                 semantic_terms=semantic.output_terms,
                 semantic_valid=True,
+                allow_existing=allow_existing_governance,
             )
             record = _usage_record(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
+                usage_id=snapshot.usage_id,
+                tenant_id=snapshot.tenant_id,
+                execution_id=snapshot.execution_id,
+                dispatch_id=snapshot.dispatch_id,
+                session_id=snapshot.session_id,
                 completion=completion,
                 status=CognitionLLMUsageStatus.ACCEPTED,
                 estimated_cost_micro_usd=_estimate_cost(
@@ -221,14 +339,24 @@ class DiagnosticCognitionRuntime:
                     "governance_decision_id": governance_decision_id,
                     "cognition_audit_id": audit_id,
                     "cognition_audit_record_id": audit_id,
-                    "citation_count": len(retrieval.citations),
-                    "retrieved_citations": retrieved_citations,
-                    **({"attempt_id": attempt_id} if attempt_id is not None else {}),
+                    "citation_count": len(snapshot.retrieval.citations),
+                    "retrieved_citations": _citations_list(snapshot),
+                    **_attempt_metadata(snapshot),
                     "semantic_terms": list(semantic.output_terms),
                     "raw_completion_sha256": _raw_completion_sha256(completion),
+                    "quota_state": dict(snapshot.quota_state),
+                    **(
+                        {
+                            "provider_circuit_state": dict(
+                                snapshot.provider_circuit_state
+                            )
+                        }
+                        if snapshot.provider_circuit_state is not None
+                        else {}
+                    ),
                 },
             )
-            await self._save_usage(record, tenant_id=tenant_id)
+            await self._save_usage(record, tenant_id=snapshot.tenant_id)
             return DiagnosticReasoningResult(
                 summary=parsed.summary,
                 category=parsed.category.value,
@@ -241,10 +369,12 @@ class DiagnosticCognitionRuntime:
                 estimated_cost_micro_usd=record.estimated_cost_micro_usd,
                 usage_id=record.usage_id,
                 governance_decision_id=governance_decision_id,
-                citations=tuple(citation.index for citation in retrieval.citations),
+                citations=tuple(
+                    citation.index for citation in snapshot.retrieval.citations
+                ),
                 semantic_terms=semantic.output_terms,
-                retrieval=retrieval,
-                retrieved_citations=retrieved_citations,
+                retrieval=snapshot.retrieval,
+                retrieved_citations=_citations_list(snapshot),
                 metadata={
                     "raw": dict(completion.raw_metadata),
                     "cognition_audit_id": audit_id,
@@ -253,72 +383,42 @@ class DiagnosticCognitionRuntime:
                 },
             )
         except CognitionSemanticValidationError as exc:
-            await self._save_rejected_usage(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
+            await self.persist_reasoning_failure(
+                snapshot=snapshot,
                 error=exc,
-                provider=self._llm_client.provider_name,
-                model=self._llm_client.model_name,
                 completion=completion,
                 audit_id=audit_id,
             )
             raise
         except CognitionGovernanceRejectionError as exc:
-            await self._save_rejected_usage(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
+            await self.persist_reasoning_failure(
+                snapshot=snapshot,
                 error=exc,
-                provider=self._llm_client.provider_name,
-                model=self._llm_client.model_name,
                 completion=completion,
                 audit_id=audit_id,
             )
             raise
         except CognitionPersistenceError as exc:
-            await self._save_rejected_usage(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
+            await self.persist_reasoning_failure(
+                snapshot=snapshot,
                 error=exc,
-                provider=self._llm_client.provider_name,
-                model=self._llm_client.model_name,
                 completion=completion,
                 audit_id=audit_id,
                 failed=True,
             )
             raise
         except CognitionLLMProviderError as exc:
-            await self._save_rejected_usage(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
+            await self.persist_reasoning_failure(
+                snapshot=snapshot,
                 error=exc,
-                provider=self._llm_client.provider_name,
-                model=self._llm_client.model_name,
                 completion=completion,
                 audit_id=audit_id,
             )
             raise
         except Exception as exc:
-            await self._save_rejected_usage(
-                usage_id=usage_id,
-                tenant_id=tenant_id,
-                execution_id=execution_id,
-                dispatch_id=dispatch_id,
-                session_id=session_id,
+            await self.persist_reasoning_failure(
+                snapshot=snapshot,
                 error=exc,
-                provider=self._llm_client.provider_name,
-                model=self._llm_client.model_name,
                 completion=completion,
                 audit_id=audit_id,
                 failed=True,
@@ -326,6 +426,44 @@ class DiagnosticCognitionRuntime:
             raise CognitionLLMProviderError(
                 f"diagnostic cognition failed: {exc.__class__.__name__}"
             ) from exc
+
+    async def persist_reasoning_failure(
+        self,
+        *,
+        snapshot: DiagnosticReasoningSnapshot,
+        error: BaseException,
+        completion: DiagnosticLLMCompletion | None = None,
+        audit_id: str | None = None,
+        failed: bool = False,
+    ) -> None:
+        await self._save_rejected_usage(
+            usage_id=snapshot.usage_id,
+            tenant_id=snapshot.tenant_id,
+            execution_id=snapshot.execution_id,
+            dispatch_id=snapshot.dispatch_id,
+            session_id=snapshot.session_id,
+            error=error,
+            provider=snapshot.provider_name,
+            model=snapshot.model_name,
+            completion=completion,
+            audit_id=audit_id,
+            failed=failed,
+            metadata={
+                "citation_count": len(snapshot.retrieval.citations),
+                "retrieved_citations": _citations_list(snapshot),
+                **_attempt_metadata(snapshot),
+                "quota_state": dict(snapshot.quota_state),
+                **(
+                    {
+                        "provider_circuit_state": dict(
+                            snapshot.provider_circuit_state
+                        )
+                    }
+                    if snapshot.provider_circuit_state is not None
+                    else {}
+                ),
+            },
+        )
 
     async def _complete_llm(
         self,
@@ -367,6 +505,7 @@ class DiagnosticCognitionRuntime:
         prompt_sha256: str,
         semantic_terms: tuple[str, ...],
         semantic_valid: bool,
+        allow_existing: bool = False,
     ) -> str | None:
         subject = ExecutionGovernanceSubject(
             query=content,
@@ -422,6 +561,8 @@ class DiagnosticCognitionRuntime:
                 )
             )
         except Exception as exc:
+            if allow_existing and "already recorded" in str(exc):
+                return str(derive_decision_id(seed=decision_seed))
             raise CognitionPersistenceError(
                 "diagnostic governance persistence failed: "
                 f"{exc.__class__.__name__}: {_bounded_message(exc)}"
@@ -458,31 +599,28 @@ class DiagnosticCognitionRuntime:
     async def _save_cognition_audit(
         self,
         *,
-        usage_id: CognitionLLMUsageId,
-        tenant_id: str,
-        execution_id: str,
-        system_prompt: str,
-        messages: tuple[DiagnosticLLMMessage, ...],
+        snapshot: DiagnosticReasoningSnapshot,
         completion: DiagnosticLLMCompletion,
     ) -> str:
         prompt_full = _full_prompt_snapshot(
-            system_prompt=system_prompt,
-            messages=messages,
+            system_prompt=snapshot.system_prompt,
+            messages=snapshot.messages,
         )
-        prompt_sha256 = _sha256_text(prompt_full)
+        prompt_sha256 = snapshot.prompt_sha256
         completion_sha256 = _raw_completion_sha256(completion)
         audit_id = derive_cognition_audit_id(
-            tenant_id=tenant_id,
-            execution_id=execution_id,
+            tenant_id=snapshot.tenant_id,
+            execution_id=snapshot.execution_id,
             model=completion.model,
             prompt_sha256=prompt_sha256,
             completion_sha256=completion_sha256,
+            attempt_id=snapshot.attempt_id,
         )
         record = CognitionAuditRecord(
             audit_id=audit_id,
-            tenant_id=tenant_id,
-            execution_id=execution_id,
-            usage_id=usage_id,
+            tenant_id=snapshot.tenant_id,
+            execution_id=snapshot.execution_id,
+            usage_id=snapshot.usage_id,
             prompt_full=prompt_full,
             completion_full=completion.text,
             prompt_sha256=prompt_sha256,
@@ -494,13 +632,14 @@ class DiagnosticCognitionRuntime:
                 "prompt_tokens": completion.usage.prompt_tokens,
                 "completion_tokens": completion.usage.completion_tokens,
                 "total_tokens": completion.usage.total_tokens,
+                **_attempt_metadata(snapshot),
             },
             captured_at=_utcnow(),
         )
         try:
             await self._usage_persistence.save_cognition_audit(
                 record,
-                expected_tenant_id=tenant_id,
+                expected_tenant_id=snapshot.tenant_id,
             )
         except Exception as exc:
             raise CognitionPersistenceError(
@@ -522,6 +661,7 @@ class DiagnosticCognitionRuntime:
         completion: DiagnosticLLMCompletion | None = None,
         audit_id: str | None = None,
         failed: bool = False,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         prompt_tokens = completion.usage.prompt_tokens if completion is not None else 0
         completion_tokens = (
@@ -558,6 +698,7 @@ class DiagnosticCognitionRuntime:
             metadata={
                 "error_type": error.__class__.__name__,
                 "message": _bounded_message(error),
+                **dict(metadata or {}),
                 **(
                     {
                         "cognition_audit_id": audit_id,
@@ -601,10 +742,30 @@ def _retrieved_citations_payload(
                 "vector_index_name": retrieval.vector_index_name,
                 "safe_excerpt": safe_excerpt,
                 "safe_excerpt_sha256": _sha256_text(safe_excerpt),
+                "content_excerpt_sha256": _sha256_text(safe_excerpt),
                 "chunk_content_hash": item.content_hash,
             }
         )
     return citations
+
+
+def _citations_list(
+    snapshot: DiagnosticReasoningSnapshot,
+) -> list[dict[str, Any]]:
+    return [dict(citation) for citation in snapshot.retrieved_citations]
+
+
+def _attempt_metadata(
+    snapshot: DiagnosticReasoningSnapshot,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    if snapshot.attempt_id is not None:
+        metadata["attempt_id"] = snapshot.attempt_id
+    if snapshot.attempt_number is not None:
+        metadata["attempt_number"] = snapshot.attempt_number
+    if snapshot.worker_id is not None:
+        metadata["worker_id"] = snapshot.worker_id
+    return metadata
 
 
 def _safe_excerpt(content: str) -> str:
@@ -907,4 +1068,5 @@ def _utcnow() -> datetime:
 __all__ = [
     "DiagnosticCognitionRuntime",
     "DiagnosticCognitionRuntimeConfig",
+    "DiagnosticReasoningSnapshot",
 ]

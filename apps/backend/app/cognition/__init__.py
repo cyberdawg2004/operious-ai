@@ -20,6 +20,7 @@ from app.cognition.exceptions import (
 from app.cognition.diagnostic_runtime import (
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
+    DiagnosticReasoningSnapshot,
 )
 from app.cognition.llm import (
     AnthropicMessagesClient,
@@ -67,5 +68,6 @@ __all__ = [
     "DiagnosticLLMClient",
     "DiagnosticLLMMessage",
     "DiagnosticReasoningResult",
+    "DiagnosticReasoningSnapshot",
     "KnowledgeRollbackResult",
 ]

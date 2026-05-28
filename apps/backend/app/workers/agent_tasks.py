@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 import traceback
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import Any, TypeVar, cast
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.diagnostic_agent import DiagnosticAgent, DiagnosticResult
@@ -23,6 +25,10 @@ from app.cognition import (
     DeterministicDiagnosticLLMClient,
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
+    DiagnosticLLMClient,
+    DiagnosticLLMMessage,
+    DiagnosticReasoningResult,
+    DiagnosticReasoningSnapshot,
 )
 from app.cognition.exceptions import (
     CognitionGovernanceRejectionError,
@@ -38,6 +44,7 @@ from app.cognition.exceptions import (
     ProviderTransientError,
 )
 from app.cognition.persistence import PostgresCognitionUsagePersistence
+from app.cognition.models import DiagnosticLLMCompletion
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     CoordinationRecord,
@@ -71,7 +78,10 @@ from app.runtime.resolution_runtime import (
     resolution_proposal_timeline_payload,
 )
 from app.runtime.timeline_runtime import TimelineRuntime
-from app.runtime.provider_circuit_breaker import ProviderCircuitBreaker
+from app.runtime.provider_circuit_breaker import (
+    ProviderCircuitBreaker,
+    ProviderCircuitSnapshot,
+)
 from app.session.identity import as_session_id
 from app.session.lifecycle.classifier import is_terminal as is_terminal_session
 from app.session.persistence import (
@@ -104,6 +114,8 @@ _RESOLUTION_DRAFT_CREATED = "resolution_outbound_draft_created"
 _RESOLUTION_FAILED = "resolution_proposal_failed"
 _MAX_EXECUTION_ATTEMPTS = 5
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(
@@ -184,6 +196,7 @@ async def execute_diagnostic_agent_runtime(
             result = await _generate_diagnostic_reasoning_for_work_item(
                 session_factory=session_factory,
                 work_item=prepared,
+                worker_id=worker_id,
             )
         except Exception as exc:  # noqa: BLE001
             return await _persist_diagnostic_failure(
@@ -237,6 +250,12 @@ class _DiagnosticExecutionWorkItem:
     session_id: str
     tenant_id: str
     content: str
+
+
+@dataclass(frozen=True, slots=True)
+class _DiagnosticReasoningDraft:
+    snapshot: DiagnosticReasoningSnapshot
+    completion: DiagnosticLLMCompletion
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,25 +358,314 @@ async def _generate_diagnostic_reasoning_for_work_item(
     *,
     session_factory: Any,
     work_item: _DiagnosticExecutionWorkItem,
-) -> DiagnosticResult:
-    session = session_factory()
+    worker_id: str,
+) -> _DiagnosticReasoningDraft:
+    snapshot = await _load_diagnostic_reasoning_snapshot(
+        session_factory=session_factory,
+        work_item=work_item,
+        worker_id=worker_id,
+    )
     try:
-        result = await _generate_diagnostic_reasoning_draft(
-            cognition_runtime=_diagnostic_cognition_runtime(session),
-            dispatch_id=work_item.dispatch_id,
-            session_id=work_item.session_id,
-            tenant_id=work_item.tenant_id,
-            content=work_item.content,
-            execution_id=work_item.execution_id,
-            attempt_id=work_item.attempt_id,
+        completion = await _complete_diagnostic_reasoning_snapshot(snapshot)
+    except Exception as exc:
+        await _record_provider_circuit_outcome(
+            session_factory=session_factory,
+            snapshot=snapshot,
+            error=exc,
         )
-        await session.commit()
-        return result
-    except Exception:
-        await session.rollback()
+        await _persist_diagnostic_reasoning_failure_forensics(
+            session_factory=session_factory,
+            snapshot=snapshot,
+            exc=exc,
+        )
         raise
+
+    await _record_provider_circuit_outcome(
+        session_factory=session_factory,
+        snapshot=snapshot,
+        completion=completion,
+    )
+    return _DiagnosticReasoningDraft(
+        snapshot=snapshot,
+        completion=completion,
+    )
+
+
+async def _load_diagnostic_reasoning_snapshot(
+    *,
+    session_factory: Any,
+    work_item: _DiagnosticExecutionWorkItem,
+    worker_id: str,
+) -> DiagnosticReasoningSnapshot:
+    previous_tenant = get_current_tenant()
+    set_current_tenant(work_item.tenant_id)
+    try:
+        async with session_factory() as session:
+            try:
+                await _set_transaction_tenant(session, work_item.tenant_id)
+                cognition_runtime = _diagnostic_cognition_runtime(session)
+                snapshot = await cognition_runtime.load_reasoning_snapshot(
+                    tenant_id=work_item.tenant_id,
+                    execution_id=work_item.execution_id,
+                    dispatch_id=work_item.dispatch_id,
+                    session_id=work_item.session_id,
+                    content=work_item.content,
+                    attempt_id=work_item.attempt_id,
+                    attempt_number=work_item.attempt_number,
+                    worker_id=worker_id,
+                )
+                circuit_snapshot = await ProviderCircuitBreaker(
+                    session=session,
+                ).before_request(
+                    tenant_id=snapshot.tenant_id,
+                    provider_name=snapshot.provider_name,
+                )
+                snapshot = snapshot.with_provider_circuit_state(
+                    _provider_circuit_state_payload(circuit_snapshot)
+                )
+                await session.commit()
+                return snapshot
+            except Exception:
+                await session.rollback()
+                raise
     finally:
-        await session.close()
+        set_current_tenant(previous_tenant)
+
+
+async def _set_transaction_tenant(
+    session: AsyncSession,
+    tenant_id: str,
+) -> None:
+    await session.execute(
+        text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+        {"tenant_id": tenant_id},
+    )
+
+
+def _provider_circuit_state_payload(
+    snapshot: ProviderCircuitSnapshot,
+) -> dict[str, object]:
+    return {
+        "state": snapshot.state.value,
+        "consecutive_failures": snapshot.consecutive_failures,
+        "retry_count": snapshot.retry_count,
+        "open_until": (
+            snapshot.open_until.isoformat()
+            if snapshot.open_until is not None
+            else None
+        ),
+        "half_open_trial_started_at": (
+            snapshot.half_open_trial_started_at.isoformat()
+            if snapshot.half_open_trial_started_at is not None
+            else None
+        ),
+    }
+
+
+async def _record_provider_circuit_outcome(
+    *,
+    session_factory: Any,
+    snapshot: DiagnosticReasoningSnapshot,
+    completion: DiagnosticLLMCompletion | None = None,
+    error: BaseException | None = None,
+) -> None:
+    del completion
+    previous_tenant = get_current_tenant()
+    set_current_tenant(snapshot.tenant_id)
+    try:
+        async with session_factory() as session:
+            try:
+                await _set_transaction_tenant(session, snapshot.tenant_id)
+                breaker = ProviderCircuitBreaker(session=session)
+                if error is None:
+                    await breaker.record_success(
+                        tenant_id=snapshot.tenant_id,
+                        provider_name=snapshot.provider_name,
+                    )
+                elif isinstance(error, ProviderRateLimitError):
+                    retry_after = getattr(error, "retry_after_seconds", None)
+                    await breaker.record_http_status(
+                        tenant_id=snapshot.tenant_id,
+                        provider_name=snapshot.provider_name,
+                        status_code=429,
+                        retry_after=(
+                            str(retry_after)
+                            if isinstance(retry_after, int)
+                            else None
+                        ),
+                    )
+                elif isinstance(error, ProviderTransientError):
+                    await breaker.record_transient_failure(
+                        tenant_id=snapshot.tenant_id,
+                        provider_name=snapshot.provider_name,
+                        reason=error.__class__.__name__,
+                    )
+                elif isinstance(error, CognitionLLMProviderError):
+                    status_code = _provider_status_code_from_error(error)
+                    if status_code is None:
+                        await breaker.record_transient_failure(
+                            tenant_id=snapshot.tenant_id,
+                            provider_name=snapshot.provider_name,
+                            reason=error.__class__.__name__,
+                        )
+                    else:
+                        await breaker.record_http_status(
+                            tenant_id=snapshot.tenant_id,
+                            provider_name=snapshot.provider_name,
+                            status_code=status_code,
+                        )
+                else:
+                    await breaker.record_transient_failure(
+                        tenant_id=snapshot.tenant_id,
+                        provider_name=snapshot.provider_name,
+                        reason=error.__class__.__name__,
+                    )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    finally:
+        set_current_tenant(previous_tenant)
+
+
+def _provider_status_code_from_error(error: BaseException) -> int | None:
+    marker = "HTTPStatusError:"
+    message = str(error)
+    marker_index = message.find(marker)
+    if marker_index == -1:
+        return None
+    start = marker_index + len(marker)
+    digits: list[str] = []
+    for char in message[start:]:
+        if not char.isdigit():
+            break
+        digits.append(char)
+    if not digits:
+        return None
+    return int("".join(digits))
+
+
+def _diagnostic_result_from_reasoning(
+    result: DiagnosticReasoningResult,
+) -> DiagnosticResult:
+    cognition_audit_id = result.metadata.get("cognition_audit_id")
+    return DiagnosticResult(
+        summary=result.summary,
+        category=result.category,
+        confidence=result.confidence,
+        provider=result.provider,
+        model=result.model,
+        citations=result.citations,
+        usage_id=str(result.usage_id),
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        total_tokens=result.total_tokens,
+        estimated_cost_micro_usd=result.estimated_cost_micro_usd,
+        governance_decision_id=result.governance_decision_id,
+        cognition_audit_id=(
+            str(cognition_audit_id)
+            if cognition_audit_id is not None
+            else None
+        ),
+        retrieved_citations=result.retrieved_citations,
+    )
+
+
+async def _diagnostic_usage_exists(
+    *,
+    session: AsyncSession,
+    snapshot: DiagnosticReasoningSnapshot,
+) -> bool:
+    existing = await PostgresCognitionUsagePersistence(
+        session,
+        audit_encryptor=_cognition_audit_encryptor(),
+    ).get_llm_usage(
+        snapshot.usage_id,
+        expected_tenant_id=snapshot.tenant_id,
+    )
+    return existing is not None
+
+
+def _log_diagnostic_claim_lost(
+    claim_lost: Mapping[str, object],
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    worker_id: str,
+) -> None:
+    logger.info(
+        "diagnostic_claim_lost_after_llm",
+        extra={
+            "execution_id": work_item.execution_id,
+            "attempt_id": work_item.attempt_id,
+            "attempt_number": work_item.attempt_number,
+            "worker_id": worker_id,
+            "reason": str(claim_lost.get("reason") or "claim_lost"),
+        },
+    )
+
+
+async def _complete_diagnostic_reasoning_snapshot(
+    snapshot: DiagnosticReasoningSnapshot,
+) -> DiagnosticLLMCompletion:
+    client = _diagnostic_llm_client()
+    try:
+        return await client.complete(
+            system_prompt=snapshot.system_prompt,
+            messages=tuple(
+                DiagnosticLLMMessage(
+                    role=message.role,
+                    content=message.content,
+                )
+                for message in snapshot.messages
+            ),
+            max_output_tokens=snapshot.max_output_tokens,
+            temperature=snapshot.temperature,
+            tenant_id=snapshot.tenant_id,
+        )
+    except TypeError as exc:
+        if "tenant_id" not in str(exc):
+            raise
+        return await client.complete(
+            system_prompt=snapshot.system_prompt,
+            messages=snapshot.messages,
+            max_output_tokens=snapshot.max_output_tokens,
+            temperature=snapshot.temperature,
+        )
+
+
+async def _persist_diagnostic_reasoning_failure_forensics(
+    *,
+    session_factory: Any,
+    snapshot: DiagnosticReasoningSnapshot,
+    exc: BaseException,
+) -> None:
+    previous_tenant = get_current_tenant()
+    set_current_tenant(snapshot.tenant_id)
+    try:
+        async with session_factory() as session:
+            try:
+                await _set_transaction_tenant(session, snapshot.tenant_id)
+                await _diagnostic_cognition_runtime(
+                    session
+                ).persist_reasoning_failure(
+                    snapshot=snapshot,
+                    error=exc,
+                    failed=not isinstance(
+                        exc,
+                        (
+                            CognitionLLMProviderError,
+                            ProviderQuotaExceededError,
+                            ProviderRateLimitError,
+                            ProviderTransientError,
+                        ),
+                    ),
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    finally:
+        set_current_tenant(previous_tenant)
 
 
 async def _persist_diagnostic_success(
@@ -365,85 +673,138 @@ async def _persist_diagnostic_success(
     session_factory: Any,
     work_item: _DiagnosticExecutionWorkItem,
     worker_id: str,
-    result: DiagnosticResult,
+    result: _DiagnosticReasoningDraft,
 ) -> dict[str, object]:
-    async with session_factory() as session:
-        execution_runtime = ExecutionRuntime(
-            persistence=PostgresExecutionPersistence(session)
-        )
-        session_repo = PostgresSessionPersistence(session)
-        timeline = TimelineRuntime(persistence=session_repo)
-        claim_lost = await _claim_lost_payload(
-            execution_runtime=execution_runtime,
-            execution_id=work_item.execution_id,
-            attempt_id=work_item.attempt_id,
-            worker_id=worker_id,
-        )
-        if claim_lost is not None:
-            return {
-                **claim_lost,
-                "dispatch_id": work_item.dispatch_id,
-                "session_id": work_item.session_id,
-                "tenant_id": work_item.tenant_id,
-            }
-        diagnostic_event = await timeline.append_event(
-            dispatch_id=work_item.dispatch_id,
-            session_id=work_item.session_id,
-            tenant_id=work_item.tenant_id,
-            event_type=_COMPLETED,
-            payload=result.model_dump(),
-            idempotency_key=_timeline_idempotency_key(
-                execution_id=work_item.execution_id,
-                attempt_id=work_item.attempt_id,
-                event_type=_COMPLETED,
-            ),
-        )
-        await _append_resolution_proposal_after_diagnostic(
-            session=session,
-            timeline=timeline,
-            work_item=work_item,
-            result=result,
-            diagnostic_event_id=diagnostic_event.timeline_event_id,
-        )
-        completed_payload = result.model_dump()
-        completed = await execution_runtime.complete_execution(
-            execution_id=work_item.execution_id,
-            attempt_id=work_item.attempt_id,
-            worker_id=worker_id,
-            result=completed_payload,
-        )
-        if isinstance(completed, ExecutionClaimLost):
-            await session.rollback()
-            return {
-                "execution_id": work_item.execution_id,
-                "attempt_id": work_item.attempt_id,
-                "worker_id": worker_id,
-                "dispatch_id": work_item.dispatch_id,
-                "session_id": work_item.session_id,
-                "tenant_id": work_item.tenant_id,
-                "status": "claim_lost",
-                "reason": completed.reason,
-            }
-        await session.commit()
-        supervisor_queued = await _queue_supervisor_if_closed(
-            session_repo=session_repo,
-            session_id=work_item.session_id,
-            tenant_id=work_item.tenant_id,
-            dispatch_id=work_item.dispatch_id,
-        )
-        return {
-            "execution_id": work_item.execution_id,
-            "attempt_id": work_item.attempt_id,
-            "attempt_number": work_item.attempt_number,
-            "dispatch_id": work_item.dispatch_id,
-            "session_id": work_item.session_id,
-            "tenant_id": work_item.tenant_id,
-            "status": "completed",
-            "supervisor_evaluation_queued": supervisor_queued,
-            "summary": result.summary,
-            "category": result.category,
-            "confidence": result.confidence,
-        }
+    draft = result
+    previous_tenant = get_current_tenant()
+    set_current_tenant(work_item.tenant_id)
+    try:
+        async with session_factory() as session:
+            try:
+                await _set_transaction_tenant(session, work_item.tenant_id)
+                execution_runtime = ExecutionRuntime(
+                    persistence=PostgresExecutionPersistence(session)
+                )
+                session_repo = PostgresSessionPersistence(session)
+                timeline = TimelineRuntime(persistence=session_repo)
+                claim_lost = await _claim_lost_payload(
+                    execution_runtime=execution_runtime,
+                    execution_id=work_item.execution_id,
+                    attempt_id=work_item.attempt_id,
+                    worker_id=worker_id,
+                )
+                if claim_lost is not None:
+                    if not await _diagnostic_usage_exists(
+                        session=session,
+                        snapshot=draft.snapshot,
+                    ):
+                        await _diagnostic_cognition_runtime(
+                            session
+                        ).persist_reasoning_result(
+                            snapshot=draft.snapshot,
+                            completion=draft.completion,
+                            allow_existing_governance=True,
+                        )
+                    await session.commit()
+                    _log_diagnostic_claim_lost(
+                        claim_lost,
+                        work_item=work_item,
+                        worker_id=worker_id,
+                    )
+                    return {
+                        **claim_lost,
+                        "dispatch_id": work_item.dispatch_id,
+                        "session_id": work_item.session_id,
+                        "tenant_id": work_item.tenant_id,
+                    }
+
+                cognition_result = await _diagnostic_cognition_runtime(
+                    session
+                ).persist_reasoning_result(
+                    snapshot=draft.snapshot,
+                    completion=draft.completion,
+                    allow_existing_governance=True,
+                )
+                result_payload = _diagnostic_result_from_reasoning(
+                    cognition_result
+                )
+                authority_tx = await session.begin_nested()
+                try:
+                    diagnostic_event = await timeline.append_event(
+                        dispatch_id=work_item.dispatch_id,
+                        session_id=work_item.session_id,
+                        tenant_id=work_item.tenant_id,
+                        event_type=_COMPLETED,
+                        payload=result_payload.model_dump(),
+                        idempotency_key=_timeline_idempotency_key(
+                            execution_id=work_item.execution_id,
+                            attempt_id=work_item.attempt_id,
+                            event_type=_COMPLETED,
+                        ),
+                    )
+                    await _append_resolution_proposal_after_diagnostic(
+                        session=session,
+                        timeline=timeline,
+                        work_item=work_item,
+                        result=result_payload,
+                        diagnostic_event_id=diagnostic_event.timeline_event_id,
+                    )
+                    completed_payload = result_payload.model_dump()
+                    completed = await execution_runtime.complete_execution(
+                        execution_id=work_item.execution_id,
+                        attempt_id=work_item.attempt_id,
+                        worker_id=worker_id,
+                        result=completed_payload,
+                    )
+                    if isinstance(completed, ExecutionClaimLost):
+                        await authority_tx.rollback()
+                        await session.commit()
+                        claim_lost_payload: dict[str, object] = {
+                            "execution_id": work_item.execution_id,
+                            "attempt_id": work_item.attempt_id,
+                            "worker_id": worker_id,
+                            "dispatch_id": work_item.dispatch_id,
+                            "session_id": work_item.session_id,
+                            "tenant_id": work_item.tenant_id,
+                            "status": "claim_lost",
+                            "reason": completed.reason,
+                        }
+                        _log_diagnostic_claim_lost(
+                            claim_lost_payload,
+                            work_item=work_item,
+                            worker_id=worker_id,
+                        )
+                        return claim_lost_payload
+                    await authority_tx.commit()
+                except Exception:
+                    if authority_tx.is_active:
+                        await authority_tx.rollback()
+                    raise
+                await session.commit()
+                supervisor_queued = await _queue_supervisor_if_closed(
+                    session_repo=session_repo,
+                    session_id=work_item.session_id,
+                    tenant_id=work_item.tenant_id,
+                    dispatch_id=work_item.dispatch_id,
+                )
+                return {
+                    "execution_id": work_item.execution_id,
+                    "attempt_id": work_item.attempt_id,
+                    "attempt_number": work_item.attempt_number,
+                    "dispatch_id": work_item.dispatch_id,
+                    "session_id": work_item.session_id,
+                    "tenant_id": work_item.tenant_id,
+                    "status": "completed",
+                    "supervisor_evaluation_queued": supervisor_queued,
+                    "summary": result_payload.summary,
+                    "category": result_payload.category,
+                    "confidence": result_payload.confidence,
+                }
+            except Exception:
+                await session.rollback()
+                raise
+    finally:
+        set_current_tenant(previous_tenant)
 
 
 async def _persist_diagnostic_failure(
@@ -1173,20 +1534,7 @@ def _diagnostic_cognition_runtime(
         vector_index_name=settings.VECTOR_DEFAULT_INDEX,
         default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
     )
-    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
-        llm_client = DeterministicDiagnosticLLMClient()
-    else:
-        llm_client = AnthropicMessagesClient(
-            api_key=settings.ANTHROPIC_API_KEY,
-            model=settings.ANTHROPIC_DEFAULT_MODEL,
-            base_url=settings.ANTHROPIC_BASE_URL,
-            anthropic_version=settings.ANTHROPIC_VERSION,
-            timeout_seconds=settings.AI_TIMEOUT_SECONDS,
-            provider_circuit_breaker=ProviderCircuitBreaker(
-                session=session,
-                auto_commit=True,
-            ),
-        )
+    llm_client = _diagnostic_llm_client()
     return DiagnosticCognitionRuntime(
         knowledge_runtime=knowledge_runtime,
         llm_client=llm_client,
@@ -1205,6 +1553,19 @@ def _diagnostic_cognition_runtime(
             input_token_micro_usd=settings.COGNITION_LLM_INPUT_TOKEN_MICRO_USD,
             output_token_micro_usd=settings.COGNITION_LLM_OUTPUT_TOKEN_MICRO_USD,
         ),
+    )
+
+
+def _diagnostic_llm_client() -> DiagnosticLLMClient:
+    settings = get_settings()
+    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+        return DeterministicDiagnosticLLMClient()
+    return AnthropicMessagesClient(
+        api_key=settings.ANTHROPIC_API_KEY,
+        model=settings.ANTHROPIC_DEFAULT_MODEL,
+        base_url=settings.ANTHROPIC_BASE_URL,
+        anthropic_version=settings.ANTHROPIC_VERSION,
+        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
     )
 
 

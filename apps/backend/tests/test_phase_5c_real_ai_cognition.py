@@ -315,6 +315,7 @@ async def test_governance_persistence_failure_is_not_reported_as_provider_error(
             tenant_id=_TENANT_ID,
             execution_id=kwargs["execution_id"],
             model=client.model_name,
+            attempt_id=kwargs["attempt_id"],
         ),
         expected_tenant_id=_TENANT_ID,
     )

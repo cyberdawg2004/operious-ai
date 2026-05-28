@@ -19,16 +19,18 @@ def derive_llm_usage_id(
     tenant_id: str,
     execution_id: str,
     model: str,
+    attempt_id: str | None = None,
 ) -> CognitionLLMUsageId:
     """Derive a stable usage id for one model-backed execution."""
 
-    seed = "|".join(
-        (
-            _normalize(tenant_id, "tenant_id"),
-            _normalize(execution_id, "execution_id"),
-            _normalize(model, "model"),
-        )
-    )
+    parts = [
+        _normalize(tenant_id, "tenant_id"),
+        _normalize(execution_id, "execution_id"),
+        _normalize(model, "model"),
+    ]
+    if attempt_id is not None:
+        parts.append(_normalize(attempt_id, "attempt_id"))
+    seed = "|".join(parts)
     return CognitionLLMUsageId(uuid.uuid5(_LLM_USAGE_NAMESPACE, seed))
 
 
@@ -43,18 +45,20 @@ def derive_cognition_audit_id(
     model: str,
     prompt_sha256: str,
     completion_sha256: str,
+    attempt_id: str | None = None,
 ) -> CognitionAuditId:
     """Derive a stable forensic snapshot id for one completed LLM call."""
 
-    seed = "|".join(
-        (
-            _normalize(tenant_id, "tenant_id"),
-            _normalize(execution_id, "execution_id"),
-            _normalize(model, "model"),
-            _normalize(prompt_sha256, "prompt_sha256"),
-            _normalize(completion_sha256, "completion_sha256"),
-        )
-    )
+    parts = [
+        _normalize(tenant_id, "tenant_id"),
+        _normalize(execution_id, "execution_id"),
+        _normalize(model, "model"),
+        _normalize(prompt_sha256, "prompt_sha256"),
+        _normalize(completion_sha256, "completion_sha256"),
+    ]
+    if attempt_id is not None:
+        parts.append(_normalize(attempt_id, "attempt_id"))
+    seed = "|".join(parts)
     return CognitionAuditId(uuid.uuid5(_COGNITION_AUDIT_NAMESPACE, seed))
 
 
