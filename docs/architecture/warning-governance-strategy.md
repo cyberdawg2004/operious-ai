@@ -1,9 +1,9 @@
 # Operious Warning Governance Strategy
 
-Status: DRAFT CONTROL PLAN
-Date: 2026-05-28
+Status: CLOSED PHASE RECORD
+Date: 2026-05-29
 Branch: phase-2-2-stabilized
-Current backend Pyright baseline: 0 errors, 651 warnings
+Current backend Pyright baseline: 0 errors, 442 warnings
 
 This document defines how Operious governs type warnings, Any propagation,
 contract drift, and invisible production-risk defects. The goal is not to
@@ -11,7 +11,27 @@ make Pyright quiet for aesthetics. The goal is to make the system harder to
 break in the places that carry operational authority: governance, execution,
 auth, memory, policy, adapters, queues, and customer-facing resolution.
 
-## Current Warning Baseline
+## Current Warning Status
+
+Command:
+
+```bash
+venv/bin/pyright apps/backend/app 2>&1 | tail -5
+```
+
+Observed on 2026-05-29:
+
+| Metric | Value |
+| --- | ---: |
+| Pyright errors | 0 |
+| Pyright warnings | 442 |
+
+Closeout gates:
+
+- Full backend gate: `2565 passed, 2 skipped`.
+- System smoke gate: `4 passed`.
+
+## Initial Warning Baseline
 
 Command:
 
@@ -19,7 +39,7 @@ Command:
 venv/bin/pyright apps/backend/app --outputjson
 ```
 
-Observed on 2026-05-28:
+Initial observation on 2026-05-28:
 
 | Metric | Value |
 | --- | ---: |
@@ -341,6 +361,8 @@ docs/architecture/warning-governance-report.md
 
 ### Phase WGS-1: Warning Metrics Tooling
 
+Status: Completed.
+
 Create a script that runs Pyright JSON mode, classifies diagnostics, and emits
 both JSON and Markdown snapshots. It must run read-only by default.
 
@@ -364,6 +386,8 @@ Required outputs:
 
 ### Phase WGS-2: Zero New Warnings Gate
 
+Status: Completed.
+
 Add a CI/local gate that compares current warning count to a stored baseline.
 The gate fails if:
 
@@ -375,6 +399,8 @@ The gate fails if:
 
 ### Phase WGS-3: Immediate Regression Reset
 
+Status: Completed. Achieved `648` warnings.
+
 Fix the current +3 warning regression in
 `apps/backend/app/resolution/persistence/postgres.py`.
 
@@ -384,6 +410,8 @@ Expected result:
 - No runtime behavior change.
 
 ### Phase WGS-4: JSON Boundary Type Aliases
+
+Status: Completed. Achieved `592` warnings after the JSON alias pilot.
 
 Create central JSON types:
 
@@ -400,6 +428,9 @@ and memory records. This phase should reduce the biggest warning family:
 
 ### Phase WGS-5: Persistence Row Typing
 
+Status: Completed. Achieved `504` warnings after governance persistence
+typing and `442` warnings after coordination/supervisor persistence typing.
+
 Start with:
 
 - `governance/persistence/postgres.py`
@@ -410,6 +441,8 @@ Use typed SQLAlchemy `Select[...]`, explicit result scalar typing, and local
 JSONB coercion helpers. This targets the heaviest top files.
 
 ### Phase WGS-6: Contract Alignment Audit
+
+Status: Completed.
 
 Create tests that compare:
 
@@ -423,6 +456,8 @@ No warning burn-down is accepted if it hides a contract mismatch.
 
 ### Phase WGS-7: High-Risk Runtime Hardening
 
+Status: Completed for this WGS phase.
+
 Address production-risk findings:
 
 - resolution send eligibility must be backed by central governance,
@@ -433,6 +468,8 @@ Address production-risk findings:
 ## Existing Audit Findings To Fix
 
 ### Finding A: Pyright +3 Regression In Resolution Persistence
+
+Status: Closed.
 
 Severity: P1
 Risk: type looseness around JSONB record hydration.
@@ -452,6 +489,8 @@ Required fix:
 - Require Pyright warning count to drop by 3.
 
 ### Finding B: Resolution Governance Verdict Is Local, Not Central
+
+Status: Closed.
 
 Severity: P0 before external sending
 Risk: a future delivery adapter could treat local `ALLOW` as a true governance
@@ -473,6 +512,8 @@ Required fix before any outbound delivery:
 - Send eligibility must require that persisted decision to be `allow`.
 
 ### Finding C: Failed Execution Outbox Recovery Gap
+
+Status: Closed.
 
 Severity: P0 under production transport instability
 Risk: transient Celery/Redis failure after request commit can leave an
@@ -500,6 +541,8 @@ Required fix:
 
 ### Finding D: Queue Pressure Checks Fail Open
 
+Status: Closed.
+
 Severity: P1 for async ticketing, P0 for realtime voice/chat
 Risk: when Redis pressure checks fail, admission may admit work while the
 queue system is unhealthy.
@@ -523,6 +566,8 @@ Required fix:
 - Emit explicit `admission_telemetry_unavailable` metrics.
 
 ### Finding E: Resolution Evidence Is Not Immutable Enough
+
+Status: Closed.
 
 Severity: P1 now, P0 before autonomous send
 Risk: later reindexing can change what `document_id + chunk_ordinal` resolves
@@ -1224,14 +1269,13 @@ Before every production deploy:
 
 Target trajectory:
 
-| Milestone | Target |
-| --- | ---: |
-| Current accepted baseline | 651 warnings |
-| Immediate regression reset | 648 warnings |
-| After JSON alias pilot | <= 600 warnings |
-| After persistence burn-down phase 1 | <= 525 warnings |
-| After persistence burn-down phase 2 | <= 450 warnings |
-| Before autonomous external send | <= 300 warnings |
-| Before first large enterprise pilot | <= 150 warnings |
-| Long-term critical surface target | 0 warnings in high-risk planes |
-
+| Milestone | Target | Closeout |
+| --- | ---: | ---: |
+| Current accepted baseline | 651 warnings | 651 accepted |
+| Immediate regression reset | 648 warnings | 648 achieved |
+| After JSON alias pilot | <= 600 warnings | 592 achieved |
+| After persistence burn-down phase 1 | <= 525 warnings | 504 achieved |
+| After persistence burn-down phase 2 | <= 450 warnings | 442 achieved |
+| Before autonomous external send | <= 300 warnings | Pending |
+| Before first large enterprise pilot | <= 150 warnings | Pending |
+| Long-term critical surface target | 0 warnings in high-risk planes | Pending |

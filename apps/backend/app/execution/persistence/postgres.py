@@ -576,7 +576,7 @@ class PostgresExecutionPersistence(BaseRepository):
         )
         if tenant_id is not None:
             stmt = stmt.where(ExecutionRow.tenant_id == tenant_id)
-        rows = (await self.session.execute(stmt)).scalars().all()
+        rows = (await self.session.execute(stmt)).scalars().all()  # bounded-load-ok
         records: list[ExecutionOutboxRecord] = []
         for row in rows:
             record = _row_to_outbox(row)
