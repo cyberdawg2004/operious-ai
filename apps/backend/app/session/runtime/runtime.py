@@ -302,13 +302,22 @@ class SessionRuntime:
                 session, sequence_head=0, revision=1
             )
 
-            await self._persistence.save_session(
+            saved_record = await self._persistence.save_session(
                 session_to_record(session)
             )
-            await self._persistence.save_event(
-                event_to_record(opening_event)
+            saved_session = record_to_session(saved_record)
+            existing_opening_event = await self._persistence.get_event(
+                opening_event.event_id,
+                expected_tenant_id=saved_session.identity.tenant_id,
             )
-            await self._registry.register(session)
+            if existing_opening_event is None:
+                await self._persistence.save_event(
+                    event_to_record(opening_event)
+                )
+                await self._registry.register(session)
+            else:
+                session = saved_session
+                await self._registry.register(session)
         except SessionLifecycleError as exc:
             return self._failed_envelope(
                 kind=SessionTraceKind.OPEN_SESSION,

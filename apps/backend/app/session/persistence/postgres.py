@@ -18,11 +18,12 @@ The parent lookup is a single PK SELECT — index-only.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
@@ -70,40 +71,41 @@ class PostgresSessionPersistence(BaseRepository):
 
     async def save_session(
         self, record: SessionRecord
-    ) -> None:
-        existing_stmt = select(SessionRow.revision).where(
-            SessionRow.session_id == record.session_id
+    ) -> SessionRecord:
+        insert_stmt = (
+            pg_insert(SessionRow)
+            .values(**_session_record_to_values(record))
+            .on_conflict_do_nothing(
+                index_elements=[SessionRow.session_id],
+            )
+            .returning(SessionRow)
         )
-        existing_revision = (
-            await self.session.execute(existing_stmt)
+        inserted = (
+            await self.session.execute(insert_stmt)
         ).scalar_one_or_none()
-        if existing_revision is not None and record.revision <= existing_revision:
+        if inserted is not None:
+            return _session_row_to_record(inserted)
+
+        existing_row = await self._get_session_row(
+            record.session_id,
+            expected_tenant_id=record.tenant_id,
+        )
+        if existing_row is None:
+            raise SessionPersistenceError(
+                f"session {record.session_id} is not visible in tenant scope"
+            )
+        existing = _session_row_to_record(existing_row)
+        if record.revision < existing.revision:
             raise SessionPersistenceError(
                 "non-monotonic revision: existing="
-                f"{existing_revision}, incoming="
+                f"{existing.revision}, incoming="
                 f"{record.revision}"
             )
-        try:
-            # SAVEPOINT isolation — IntegrityError rolls back this
-            # nested transaction only; the outer transaction (the
-            # service layer's commit boundary, or a test fixture's
-            # outer BEGIN) is untouched.
-            async with self.session.begin_nested():
-                if existing_revision is None:
-                    self.session.add(_session_record_to_row(record))
-                else:
-                    existing_row = (
-                        await self.session.execute(
-                            select(SessionRow).where(
-                                SessionRow.session_id == record.session_id
-                            )
-                        )
-                    ).scalar_one()
-                    _update_session_row(existing_row, record)
-        except IntegrityError as exc:
-            raise SessionPersistenceError(
-                f"session {record.session_id} could not be persisted"
-            ) from exc
+        if record.revision == existing.revision:
+            return existing
+
+        _update_session_row(existing_row, record)
+        return record
 
     # ─── Events: append-only with contiguous sequence ────────────────
 
@@ -194,6 +196,21 @@ class PostgresSessionPersistence(BaseRepository):
             await self.session.execute(stmt)
         ).scalar_one_or_none()
         return None if row is None else _session_row_to_record(row)
+
+    async def _get_session_row(
+        self,
+        session_id: SessionId,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> SessionRow | None:
+        stmt = select(SessionRow).where(
+            SessionRow.session_id == session_id
+        )
+        if expected_tenant_id is not None:
+            stmt = stmt.where(SessionRow.tenant_id == expected_tenant_id)
+        return (
+            await self.session.execute(stmt)
+        ).scalar_one_or_none()
 
     async def get_event(
         self,
@@ -431,30 +448,30 @@ class PostgresSessionPersistence(BaseRepository):
 # ─── Record ↔ Row converters ────────────────────────────────────────────
 
 
-def _session_record_to_row(record: SessionRecord) -> SessionRow:
-    return SessionRow(
-        session_id=record.session_id,
-        scope=record.scope.value,
-        external_handle=record.external_handle,
-        tenant_id=record.tenant_id,
-        principal_id=record.principal_id,
-        opened_at=record.opened_at,
-        lifecycle_phase=record.lifecycle_phase.value,
-        lifecycle_recorded_at=record.lifecycle_recorded_at,
-        lifecycle_reason=record.lifecycle_reason,
-        lineage_id=record.lineage_id,
-        root_session_id=record.root_session_id,
-        parent_session_id=record.parent_session_id,
-        ancestor_session_ids=[str(a) for a in record.ancestor_session_ids],
-        lineage_depth=record.lineage_depth,
-        sequence_head=record.sequence_head,
-        revision=record.revision,
-        context_environment=record.context_environment,
-        context_labels=list(record.context_labels),
-        context_attributes=dict(record.context_attributes),
-        context_notes=record.context_notes,
-        metadata_json=dict(record.metadata),
-    )
+def _session_record_to_values(record: SessionRecord) -> dict[str, Any]:
+    return {
+        "session_id": record.session_id,
+        "scope": record.scope.value,
+        "external_handle": record.external_handle,
+        "tenant_id": record.tenant_id,
+        "principal_id": record.principal_id,
+        "opened_at": record.opened_at,
+        "lifecycle_phase": record.lifecycle_phase.value,
+        "lifecycle_recorded_at": record.lifecycle_recorded_at,
+        "lifecycle_reason": record.lifecycle_reason,
+        "lineage_id": record.lineage_id,
+        "root_session_id": record.root_session_id,
+        "parent_session_id": record.parent_session_id,
+        "ancestor_session_ids": [str(a) for a in record.ancestor_session_ids],
+        "lineage_depth": record.lineage_depth,
+        "sequence_head": record.sequence_head,
+        "revision": record.revision,
+        "context_environment": record.context_environment,
+        "context_labels": list(record.context_labels),
+        "context_attributes": dict(record.context_attributes),
+        "context_notes": record.context_notes,
+        "metadata_json": dict(record.metadata),
+    }
 
 
 def _update_session_row(
@@ -614,14 +631,19 @@ def _as_list_of_str(value: Any) -> list[str]:
     keep the read path total.
     """
     if isinstance(value, list):
-        return [str(v) for v in value]  # pyright: ignore[reportUnknownVariableType]
+        values = cast(list[object], value)
+        return [str(item) for item in values]
     return []
 
 
 def _as_dict_of_any(value: Any) -> dict[str, Any]:
     """Coerce a JSONB value into ``dict[str, Any]``."""
     if isinstance(value, dict):
-        return {str(k): v for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType]
+        mapping = cast(dict[object, Any], value)
+        return {
+            str(key): item
+            for key, item in mapping.items()
+        }
     return {}
 
 

@@ -198,14 +198,16 @@ async def test_postgres_records_and_retrieves_correlation(
 
 
 @pytest.mark.asyncio
-async def test_postgres_rejects_non_monotonic_session_revision(
+async def test_postgres_duplicate_session_save_returns_existing_session(
     pg_session: AsyncSession,
 ) -> None:
     repo = PostgresSessionPersistence(pg_session)
     sid = _new_session_id()
-    await repo.save_session(_session(session_id=sid, revision=1))
-    with pytest.raises(SessionPersistenceError, match="non-monotonic revision"):
-        await repo.save_session(_session(session_id=sid, revision=1))
+    original = await repo.save_session(_session(session_id=sid, revision=1))
+    duplicate = await repo.save_session(_session(session_id=sid, revision=1))
+
+    assert duplicate.session_id == original.session_id
+    assert duplicate.revision == original.revision
 
 
 @pytest.mark.asyncio

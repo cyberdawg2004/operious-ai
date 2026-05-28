@@ -127,7 +127,7 @@ async def test_ticket_ingress_to_dispatch_lineage_is_deterministic() -> None:
         scope=SessionScope.TENANT.value,
         tenant_id=TENANT_ID,
         principal_id=None,
-        external_handle=first.boundary_ingress_id,
+        external_handle="4242",
     )
     expected_execution_id = derive_execution_id(
         kind="diagnostic_agent",

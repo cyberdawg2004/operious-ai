@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, ClassVar, FrozenSet, Sequence
 
 from app.boundary.identity import as_ingress_id
@@ -53,10 +54,19 @@ from app.runtime import (
     DispatchArbitrationRuntime,
     ExecutionGovernanceRuntime,
 )
-from app.session.contracts.requests import OpenSessionRequest
-from app.session.contracts.results import OpenSessionResult
-from app.session.enums import SessionScope
-from app.session.identity import derive_session_id
+from app.session.continuity import (
+    CaseContinuityResult,
+    CaseContinuityRuntime,
+    ContinuityOutcome,
+)
+from app.session.contracts.requests import AppendEventRequest, OpenSessionRequest
+from app.session.contracts.results import AppendEventResult, OpenSessionResult
+from app.session.enums import (
+    SessionContinuityMode,
+    SessionEventKind,
+    SessionScope,
+)
+from app.session.identity import SessionId, as_session_id, derive_session_id
 from app.session.persistence import SessionPersistenceProtocol
 from app.session.runtime import SessionRuntime
 
@@ -105,6 +115,7 @@ class DispatchService:
         escalation_publisher: EscalationPublisher | None = None,
         dispatch_arbitration_runtime: DispatchArbitrationRuntime | None = None,
         tenant_topology_runtime_provider: TenantTopologyRuntimeProvider | None = None,
+        continuity_runtime: CaseContinuityRuntime | None = None,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
@@ -115,6 +126,9 @@ class DispatchService:
         self._escalation_publisher = escalation_publisher
         self._dispatch_arbitration = dispatch_arbitration_runtime
         self._tenant_topology_runtime_provider = tenant_topology_runtime_provider
+        self._continuity_runtime = continuity_runtime or CaseContinuityRuntime(
+            session_repository=session_repository,
+        )
 
     async def dispatch(
         self,
@@ -220,45 +234,124 @@ class DispatchService:
                     halt_reason=arbitration.halt_reason,
                 )
 
-        session_envelope = await SessionRuntime(
+        session_runtime = SessionRuntime(
             persistence=self._session_repository,
-        ).open_session(
-            OpenSessionRequest(
-                scope=SessionScope.TENANT,
-                external_handle=str(ingress.ingress_id),
-                tenant_id=tenant_id,
-                session_id_override=derive_session_id(
-                    scope=SessionScope.TENANT.value,
-                    tenant_id=tenant_id,
-                    principal_id=None,
-                    external_handle=str(ingress.ingress_id),
-                ),
-                correlation_id=_correlation_id_text(ingress),
-                request_id=ingress.request_id,
-                metadata={
-                    "boundary.ingress_id": str(ingress.ingress_id),
-                    "coordination.dispatch_id": str(
-                        coordination_result.coordination_id
-                    ),
-                    "governance.decision_id": str(governance_decision_id),
-                    "arbitration.evaluation_id": (
-                        arbitration.evaluation_id if arbitration is not None else None
-                    ),
-                    "arbitration.outcome": (
-                        arbitration.outcome if arbitration is not None else None
-                    ),
-                },
-                authority=authority,
-            )
         )
-        if not session_envelope.is_ok or session_envelope.result is None:
-            raise DispatchServiceError("session runtime did not create a session")
-        session_result = session_envelope.result
-        if not isinstance(session_result, OpenSessionResult):
-            raise DispatchServiceError("session runtime returned an unexpected result")
-        session = session_result.session
-        if session is None:
-            raise DispatchServiceError("session runtime returned an empty session")
+        session_external_handle = (
+            ingress.external_conversation_id
+            if ingress.external_conversation_id
+            else str(ingress.ingress_id)
+        )
+        if ingress.external_conversation_id:
+            continuity = await self._continuity_runtime.evaluate(
+                tenant_id=tenant_id,
+                external_handle=session_external_handle,
+                expected_tenant_id=tenant_id,
+            )
+        else:
+            continuity = CaseContinuityResult(
+                outcome=ContinuityOutcome.NEW_CASE,
+            )
+        session_id = _dispatch_session_id(
+            tenant_id=tenant_id,
+            external_handle=session_external_handle,
+        )
+
+        if continuity.outcome is ContinuityOutcome.CONTINUATION:
+            if continuity.existing_session_id is None:
+                raise DispatchServiceError("continuation missing session id")
+            append_envelope = await session_runtime.append_event(
+                AppendEventRequest(
+                    session_id=as_session_id(continuity.existing_session_id),
+                    kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+                    occurred_at=datetime.now(timezone.utc),
+                    continuity_mode=SessionContinuityMode.SYNCHRONOUS,
+                    payload={
+                        "event_type": "follow_up_received",
+                        "boundary.ingress_id": str(ingress.ingress_id),
+                        "boundary.external_conversation_id": (
+                            ingress.external_conversation_id
+                        ),
+                        "previous_session_phase": (
+                            continuity.existing_session_phase
+                        ),
+                        "attempt_number": 1,
+                    },
+                    annotation="follow_up_received",
+                    correlation_id=_correlation_id_text(ingress),
+                    request_id=ingress.request_id,
+                    idempotency_key=(
+                        f"follow_up_received:{ingress.ingress_id}"
+                    ),
+                )
+            )
+            if not append_envelope.is_ok or append_envelope.result is None:
+                raise DispatchServiceError("follow-up event append failed")
+            append_result = append_envelope.result
+            if not isinstance(append_result, AppendEventResult):
+                raise DispatchServiceError(
+                    "session runtime returned an unexpected append result"
+                )
+            session = append_result.session
+            if session is None:
+                raise DispatchServiceError("follow-up append returned no session")
+        else:
+            parent_session_id = None
+            if continuity.outcome is ContinuityOutcome.REOPENED_CASE:
+                if continuity.prior_session_id is None:
+                    raise DispatchServiceError("reopen missing prior session id")
+                parent_session_id = as_session_id(continuity.prior_session_id)
+                session_id = _reopened_dispatch_session_id(
+                    tenant_id=tenant_id,
+                    external_handle=session_external_handle,
+                    ingress=ingress,
+                )
+            session_envelope = await session_runtime.open_session(
+                OpenSessionRequest(
+                    scope=SessionScope.TENANT,
+                    external_handle=session_external_handle,
+                    tenant_id=tenant_id,
+                    parent_session_id=parent_session_id,
+                    session_id_override=session_id,
+                    correlation_id=_correlation_id_text(ingress),
+                    request_id=ingress.request_id,
+                    metadata={
+                        "boundary.ingress_id": str(ingress.ingress_id),
+                        "boundary.external_conversation_id": (
+                            ingress.external_conversation_id
+                        ),
+                        "coordination.dispatch_id": str(
+                            coordination_result.coordination_id
+                        ),
+                        "governance.decision_id": str(governance_decision_id),
+                        "case_continuity.outcome": continuity.outcome.value,
+                        "case_continuity.prior_session_id": (
+                            continuity.prior_session_id
+                        ),
+                        "arbitration.evaluation_id": (
+                            arbitration.evaluation_id
+                            if arbitration is not None
+                            else None
+                        ),
+                        "arbitration.outcome": (
+                            arbitration.outcome
+                            if arbitration is not None
+                            else None
+                        ),
+                    },
+                    authority=authority,
+                )
+            )
+            if not session_envelope.is_ok or session_envelope.result is None:
+                raise DispatchServiceError("session runtime did not create a session")
+            session_result = session_envelope.result
+            if not isinstance(session_result, OpenSessionResult):
+                raise DispatchServiceError(
+                    "session runtime returned an unexpected result"
+                )
+            session = session_result.session
+            if session is None:
+                raise DispatchServiceError("session runtime returned an empty session")
         execution_request = await self._execution_runtime.request_diagnostic_execution(
             dispatch_id=str(coordination_result.coordination_id),
             session_id=str(session.identity.session_id),
@@ -535,6 +628,35 @@ def _correlation_id_text(ingress: BoundaryIngressRecord) -> str:
             uuid.UUID("a8f4016b-4f87-43bc-a8ff-9ef52fd20340"),
             str(ingress.ingress_id),
         )
+    )
+
+
+def _dispatch_session_id(
+    *,
+    tenant_id: str,
+    external_handle: str,
+) -> SessionId:
+    return derive_session_id(
+        scope=SessionScope.TENANT.value,
+        tenant_id=tenant_id,
+        principal_id=None,
+        external_handle=external_handle,
+    )
+
+
+def _reopened_dispatch_session_id(
+    *,
+    tenant_id: str,
+    external_handle: str,
+    ingress: BoundaryIngressRecord,
+) -> SessionId:
+    return derive_session_id(
+        scope=SessionScope.TENANT.value,
+        tenant_id=tenant_id,
+        principal_id=None,
+        external_handle=(
+            f"{external_handle}|reopened|{ingress.ingress_id}"
+        ),
     )
 
 

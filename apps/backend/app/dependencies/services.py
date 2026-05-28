@@ -126,6 +126,7 @@ from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
 )
+from app.session.continuity import CaseContinuityRuntime
 from app.services.escalation_service import EscalationService
 from app.hardening.admission import (
     AdmissionDecision,
@@ -362,6 +363,7 @@ async def get_dispatch_service(
             repository=PostgresTenantConfigurationRepository(session),
         )
     )
+    session_repository = PostgresSessionPersistence(session)
     service = DispatchService(
         coordination_runtime=CoordinationRuntime(
             governance_runtime=_dispatch_governance_runtime(
@@ -371,7 +373,7 @@ async def get_dispatch_service(
             registry=_dispatch_coordination_registry(),
         ),
         boundary_ingress_repository=PostgresBoundaryPersistence(session),
-        session_repository=PostgresSessionPersistence(session),
+        session_repository=session_repository,
         execution_runtime=execution_runtime,
         execution_publisher=deferred_execution_publisher,
         execution_governance_runtime=ExecutionGovernanceRuntime(
@@ -388,6 +390,9 @@ async def get_dispatch_service(
             make_postgres_dispatch_arbitration_runtime(session=session)
         ),
         tenant_topology_runtime_provider=tenant_topology_provider.for_tenant,
+        continuity_runtime=CaseContinuityRuntime(
+            session_repository=session_repository,
+        ),
     )
     try:
         yield service

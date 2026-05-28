@@ -59,7 +59,7 @@ class InMemorySessionPersistence:
 
     async def save_session(
         self, record: SessionRecord
-    ) -> None:
+    ) -> SessionRecord:
         async with self._lock:
             existing = self._sessions.get(record.session_id)
             if existing is not None and (
@@ -71,6 +71,7 @@ class InMemorySessionPersistence:
                     f"{record.revision}"
                 )
             self._sessions[record.session_id] = record
+            return record
 
     # ─── Events: append-only ────────────────────────────────────────
 

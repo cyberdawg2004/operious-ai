@@ -38,7 +38,7 @@ class SessionPersistenceProtocol(Protocol):
       events, sorted-by-id for sessions/correlations).
     """
 
-    async def save_session(self, record: SessionRecord) -> None: ...
+    async def save_session(self, record: SessionRecord) -> SessionRecord: ...
 
     async def save_event(
         self, record: SessionEventRecord
