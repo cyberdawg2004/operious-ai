@@ -1,5 +1,8 @@
 """Resolution ORM exports."""
 
-from app.resolution.db.models import ResolutionProposalRow
+from app.resolution.db.models import (
+    ResolutionOutboundDraftRow,
+    ResolutionProposalRow,
+)
 
-__all__ = ["ResolutionProposalRow"]
+__all__ = ["ResolutionOutboundDraftRow", "ResolutionProposalRow"]

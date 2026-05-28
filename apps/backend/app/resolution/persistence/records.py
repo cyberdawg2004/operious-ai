@@ -10,10 +10,14 @@ from uuid import UUID
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
     ResolutionGovernanceVerdict,
+    ResolutionOutboundDraftStatus,
     ResolutionProposalStatus,
     ResolutionSupervisorVerdict,
 )
-from app.resolution.identity import ResolutionProposalId
+from app.resolution.identity import (
+    ResolutionOutboundDraftId,
+    ResolutionProposalId,
+)
 
 
 def _empty_json_list() -> tuple[Mapping[str, Any], ...]:
@@ -78,4 +82,50 @@ class ResolutionProposalRecord:
         }
 
 
-__all__ = ["ResolutionProposalRecord"]
+@dataclass(frozen=True, slots=True)
+class ResolutionOutboundDraftRecord:
+    """Durable no-send customer reply draft derived from a proposal."""
+
+    draft_id: ResolutionOutboundDraftId
+    tenant_id: str
+    proposal_id: ResolutionProposalId
+    session_id: str
+    execution_id: str
+    dispatch_id: str
+    diagnostic_event_id: str | None
+    governance_decision_id: UUID | None
+    status: ResolutionOutboundDraftStatus
+    draft_body: str
+    draft_body_sha256: str
+    resolution_category: str
+    confidence: float
+    created_at: datetime
+    updated_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the API/timeline-safe draft representation."""
+
+        return {
+            "draft_id": str(self.draft_id),
+            "tenant_id": self.tenant_id,
+            "proposal_id": str(self.proposal_id),
+            "session_id": self.session_id,
+            "execution_id": self.execution_id,
+            "dispatch_id": self.dispatch_id,
+            "diagnostic_event_id": self.diagnostic_event_id,
+            "governance_decision_id": (
+                str(self.governance_decision_id)
+                if self.governance_decision_id is not None
+                else None
+            ),
+            "status": self.status.value,
+            "draft_body": self.draft_body,
+            "draft_body_sha256": self.draft_body_sha256,
+            "resolution_category": self.resolution_category,
+            "confidence": self.confidence,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+__all__ = ["ResolutionOutboundDraftRecord", "ResolutionProposalRecord"]

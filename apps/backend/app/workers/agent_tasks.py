@@ -55,9 +55,15 @@ from app.knowledge import (
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.runtime.resolution_governance_gate import (
+    ResolutionGovernanceGate,
+    build_resolution_governance_runtime,
+)
 from app.runtime.resolution_runtime import (
+    ResolutionOutboundDraftRuntime,
     ResolutionProposalRequest,
     ResolutionRuntime,
+    resolution_outbound_draft_timeline_payload,
     resolution_proposal_timeline_payload,
 )
 from app.runtime.timeline_runtime import TimelineRuntime
@@ -90,6 +96,7 @@ _STARTED = "diagnostic_execution_started"
 _COMPLETED = "diagnostic_analysis_completed"
 _FAILED = "diagnostic_execution_failed"
 _RESOLUTION_CREATED = "resolution_proposal_created"
+_RESOLUTION_DRAFT_CREATED = "resolution_outbound_draft_created"
 _RESOLUTION_FAILED = "resolution_proposal_failed"
 _MAX_EXECUTION_ATTEMPTS = 5
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
@@ -639,8 +646,14 @@ async def _append_resolution_proposal_after_diagnostic(
 ) -> bool:
     try:
         async with session.begin_nested():
+            resolution_persistence = PostgresResolutionProposalPersistence(session)
             proposal = await ResolutionRuntime(
-                persistence=PostgresResolutionProposalPersistence(session)
+                persistence=resolution_persistence,
+                governance_gate=ResolutionGovernanceGate(
+                    governance_runtime=build_resolution_governance_runtime(
+                        persistence=PostgresGovernanceRepository(session)
+                    )
+                ),
             ).create_proposal(
                 ResolutionProposalRequest(
                     tenant_id=work_item.tenant_id,
@@ -665,6 +678,24 @@ async def _append_resolution_proposal_after_diagnostic(
                     execution_id=work_item.execution_id,
                     attempt_id=work_item.attempt_id,
                     event_type=_RESOLUTION_CREATED,
+                ),
+            )
+            draft = await ResolutionOutboundDraftRuntime(
+                persistence=resolution_persistence,
+            ).create_draft_for_proposal(proposal)
+            await timeline.append_event(
+                dispatch_id=work_item.dispatch_id,
+                session_id=work_item.session_id,
+                tenant_id=work_item.tenant_id,
+                event_type=_RESOLUTION_DRAFT_CREATED,
+                payload=resolution_outbound_draft_timeline_payload(
+                    draft=draft,
+                    proposal=proposal,
+                ),
+                idempotency_key=_timeline_idempotency_key(
+                    execution_id=work_item.execution_id,
+                    attempt_id=work_item.attempt_id,
+                    event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
             )
         return True

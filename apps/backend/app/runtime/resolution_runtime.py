@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from dataclasses import dataclass
@@ -11,14 +12,18 @@ from typing import Any, Iterable, Mapping, Protocol, Sequence
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
     ResolutionGovernanceVerdict,
+    ResolutionOutboundDraftStatus,
     ResolutionProposalStatus,
     ResolutionSupervisorVerdict,
 )
 from app.resolution.identity import (
     ResolutionProposalId,
+    derive_resolution_outbound_draft_id,
     derive_resolution_proposal_id,
 )
 from app.resolution.persistence import (
+    ResolutionOutboundDraftPersistenceProtocol,
+    ResolutionOutboundDraftRecord,
     ResolutionProposalPersistenceProtocol,
     ResolutionProposalRecord,
 )
@@ -315,6 +320,57 @@ class ResolutionRuntime:
         return _map_central_governance_result(request, result)
 
 
+class ResolutionOutboundDraftRuntime:
+    """Create durable, no-send outbound drafts from resolution proposals."""
+
+    def __init__(
+        self,
+        *,
+        persistence: ResolutionOutboundDraftPersistenceProtocol,
+    ) -> None:
+        self._persistence = persistence
+
+    async def create_draft_for_proposal(
+        self,
+        proposal: ResolutionProposalRecord,
+    ) -> ResolutionOutboundDraftRecord:
+        """Persist and return the deterministic draft for a proposal."""
+
+        draft_id = derive_resolution_outbound_draft_id(
+            tenant_id=proposal.tenant_id,
+            proposal_id=str(proposal.proposal_id),
+        )
+        existing = await self._persistence.get_resolution_outbound_draft(
+            str(draft_id),
+            expected_tenant_id=proposal.tenant_id,
+        )
+        if existing is not None:
+            return existing
+
+        now = datetime.now(tz=timezone.utc)
+        record = ResolutionOutboundDraftRecord(
+            draft_id=draft_id,
+            tenant_id=proposal.tenant_id,
+            proposal_id=proposal.proposal_id,
+            session_id=proposal.session_id,
+            execution_id=proposal.execution_id,
+            dispatch_id=proposal.dispatch_id,
+            diagnostic_event_id=proposal.diagnostic_event_id,
+            governance_decision_id=proposal.governance_decision_id,
+            status=resolution_outbound_draft_status_for_proposal(proposal),
+            draft_body=proposal.proposed_customer_reply,
+            draft_body_sha256=_sha256_hex(proposal.proposed_customer_reply),
+            resolution_category=proposal.resolution_category,
+            confidence=proposal.confidence,
+            created_at=now,
+            updated_at=now,
+        )
+        return await self._persistence.create_resolution_outbound_draft(
+            record,
+            expected_tenant_id=proposal.tenant_id,
+        )
+
+
 def resolution_proposal_timeline_payload(
     record: ResolutionProposalRecord,
 ) -> dict[str, Any]:
@@ -325,6 +381,32 @@ def resolution_proposal_timeline_payload(
     payload["requires_human_approval"] = (
         record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     )
+    return payload
+
+
+def resolution_outbound_draft_status_for_proposal(
+    record: ResolutionProposalRecord,
+) -> ResolutionOutboundDraftStatus:
+    """Map proposal state to a no-send draft state."""
+
+    if resolution_proposal_is_send_eligible(record):
+        return ResolutionOutboundDraftStatus.READY
+    if record.status is ResolutionProposalStatus.DENIED:
+        return ResolutionOutboundDraftStatus.DENIED
+    if record.status is ResolutionProposalStatus.FAILED:
+        return ResolutionOutboundDraftStatus.FAILED
+    return ResolutionOutboundDraftStatus.PENDING_HUMAN_APPROVAL
+
+
+def resolution_outbound_draft_timeline_payload(
+    *,
+    draft: ResolutionOutboundDraftRecord,
+    proposal: ResolutionProposalRecord,
+) -> dict[str, Any]:
+    """Build the append-only timeline payload for an outbound draft."""
+
+    payload = draft.to_dict()
+    payload["send_eligible"] = resolution_proposal_is_send_eligible(proposal)
     return payload
 
 
@@ -717,6 +799,10 @@ def _clamp_confidence(value: float) -> float:
     return value
 
 
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _text_value(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -739,8 +825,11 @@ __all__ = [
     "ResolutionGovernanceGateProtocol",
     "ResolutionGovernanceGateRequest",
     "ResolutionGovernanceGateResult",
+    "ResolutionOutboundDraftRuntime",
     "ResolutionProposalRequest",
     "ResolutionRuntime",
+    "resolution_outbound_draft_status_for_proposal",
+    "resolution_outbound_draft_timeline_payload",
     "resolution_proposal_is_send_eligible",
     "resolution_proposal_timeline_payload",
 ]

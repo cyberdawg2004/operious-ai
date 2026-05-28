@@ -25,6 +25,15 @@ class ResolutionProposalStatus(StrEnum):
     FAILED = "failed"
 
 
+class ResolutionOutboundDraftStatus(StrEnum):
+    """Durable state of a resolution-owned outbound draft."""
+
+    READY = "ready"
+    PENDING_HUMAN_APPROVAL = "pending_human_approval"
+    DENIED = "denied"
+    FAILED = "failed"
+
+
 class ResolutionSupervisorVerdict(StrEnum):
     """Deterministic supervisor gate result."""
 
@@ -47,6 +56,7 @@ class ResolutionGovernanceVerdict(StrEnum):
 __all__ = [
     "ResolutionAutonomyDecision",
     "ResolutionGovernanceVerdict",
+    "ResolutionOutboundDraftStatus",
     "ResolutionProposalStatus",
     "ResolutionSupervisorVerdict",
 ]

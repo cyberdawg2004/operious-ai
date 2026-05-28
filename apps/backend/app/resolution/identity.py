@@ -6,9 +6,13 @@ import uuid
 from typing import NewType
 
 ResolutionProposalId = NewType("ResolutionProposalId", uuid.UUID)
+ResolutionOutboundDraftId = NewType("ResolutionOutboundDraftId", uuid.UUID)
 
 _RESOLUTION_PROPOSAL_NAMESPACE = uuid.UUID(
     "2b7b4f5a-0001-4b01-9001-000000000001"
+)
+_RESOLUTION_OUTBOUND_DRAFT_NAMESPACE = uuid.UUID(
+    "2b7b4f5a-0001-4b01-9001-000000000002"
 )
 
 
@@ -46,6 +50,28 @@ def as_resolution_proposal_id(value: str | uuid.UUID) -> ResolutionProposalId:
     return ResolutionProposalId(uuid.UUID(str(value)))
 
 
+def derive_resolution_outbound_draft_id(
+    *,
+    tenant_id: str,
+    proposal_id: str | uuid.UUID,
+) -> ResolutionOutboundDraftId:
+    """Derive the durable outbound draft id from proposal lineage."""
+
+    tenant = _required_text("tenant_id", tenant_id)
+    seed = "|".join((tenant, _uuid_text("proposal_id", proposal_id)))
+    return ResolutionOutboundDraftId(
+        uuid.uuid5(_RESOLUTION_OUTBOUND_DRAFT_NAMESPACE, seed)
+    )
+
+
+def as_resolution_outbound_draft_id(
+    value: str | uuid.UUID,
+) -> ResolutionOutboundDraftId:
+    """Coerce an external value into a typed outbound draft id."""
+
+    return ResolutionOutboundDraftId(uuid.UUID(str(value)))
+
+
 def _required_text(name: str, value: str) -> str:
     text = value.strip()
     if not text:
@@ -70,7 +96,10 @@ def _optional_uuid_text(
 
 
 __all__ = [
+    "ResolutionOutboundDraftId",
     "ResolutionProposalId",
+    "as_resolution_outbound_draft_id",
     "as_resolution_proposal_id",
+    "derive_resolution_outbound_draft_id",
     "derive_resolution_proposal_id",
 ]

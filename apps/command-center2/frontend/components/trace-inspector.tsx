@@ -112,6 +112,18 @@ interface ResolutionProposalPayload {
   evidence: RetrievedCitation[];
 }
 
+interface ResolutionOutboundDraftPayload {
+  draft_id: string;
+  proposal_id: string;
+  governance_decision_id: string | null;
+  status: string;
+  draft_body: string;
+  draft_body_sha256: string;
+  resolution_category: string;
+  confidence: number;
+  send_eligible: boolean;
+}
+
 type TraceInspectorProps = {
   initialTraceId?: string | null;
   initialLookup?: TraceLookup | null;
@@ -155,6 +167,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
   );
   const selectedResolutionProposal = useMemo(
     () => (selectedEvent ? resolutionProposalForEvent(selectedEvent) : null),
+    [selectedEvent]
+  );
+  const selectedResolutionDraft = useMemo(
+    () => (selectedEvent ? resolutionDraftForEvent(selectedEvent) : null),
     [selectedEvent]
   );
   const metadata = useMemo(
@@ -316,6 +332,7 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                   const eventColor = colorForEventType(event.event_type);
                   const citations = citationsForEvent(event);
                   const resolutionProposal = resolutionProposalForEvent(event);
+                  const resolutionDraft = resolutionDraftForEvent(event);
 
                   return (
                     <div key={event.timeline_event_id} className="relative">
@@ -404,6 +421,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                           <ResolutionProposalSummary proposal={resolutionProposal} />
                         )}
 
+                        {resolutionDraft && (
+                          <ResolutionDraftSummary draft={resolutionDraft} />
+                        )}
+
                         {citations.length > 0 && (
                           <KnowledgeSources citations={citations} />
                         )}
@@ -466,6 +487,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
 
                   {selectedResolutionProposal && (
                     <ResolutionProposalSummary proposal={selectedResolutionProposal} compact />
+                  )}
+
+                  {selectedResolutionDraft && (
+                    <ResolutionDraftSummary draft={selectedResolutionDraft} compact />
                   )}
 
                   <div className="space-y-4">
@@ -572,6 +597,27 @@ function resolutionProposalForEvent(
   };
 }
 
+function resolutionDraftForEvent(
+  event: TimelineEventView
+): ResolutionOutboundDraftPayload | null {
+  if (event.event_type !== "resolution_outbound_draft_created") return null;
+  const payload = event.payload;
+  const draftBody = stringField(payload.draft_body);
+  if (!draftBody) return null;
+
+  return {
+    draft_id: stringField(payload.draft_id) || "unknown",
+    proposal_id: stringField(payload.proposal_id) || "unknown",
+    governance_decision_id: stringField(payload.governance_decision_id),
+    status: stringField(payload.status) || "unknown",
+    draft_body: draftBody,
+    draft_body_sha256: stringField(payload.draft_body_sha256) || "unknown",
+    resolution_category: stringField(payload.resolution_category) || "unknown",
+    confidence: numberField(payload.confidence),
+    send_eligible: payload.send_eligible === true,
+  };
+}
+
 function isRetrievedCitation(value: unknown): value is RetrievedCitation {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const citation = value as Record<string, unknown>;
@@ -612,6 +658,38 @@ function isRecommendedResolutionAction(
     typeof action.type === "string" &&
     typeof action.label === "string" &&
     typeof action.requires_execution === "boolean"
+  );
+}
+
+function ResolutionDraftSummary({
+  draft,
+  compact = false,
+}: {
+  draft: ResolutionOutboundDraftPayload;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn("mt-3 rounded border border-border-subtle bg-surface-sunken p-3", compact && "mt-0")}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <ResolutionBadge label="Draft" value={draft.status} />
+        <ResolutionBadge label="Eligibility" value={draft.send_eligible ? "send eligible" : "not send eligible"} />
+        <ResolutionBadge label="Confidence" value={formatConfidence(draft.confidence)} />
+      </div>
+
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+        Outbound Draft
+      </div>
+      <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary">
+        {draft.draft_body}
+      </p>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <ResolutionField label="Category" value={draft.resolution_category} />
+        <ResolutionField label="Proposal" value={shortId(draft.proposal_id)} />
+        <ResolutionField label="Draft hash" value={shortId(draft.draft_body_sha256)} />
+        <ResolutionField label="Governance" value={draft.governance_decision_id ? shortId(draft.governance_decision_id) : "none"} />
+      </div>
+    </div>
   );
 }
 

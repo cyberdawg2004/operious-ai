@@ -319,9 +319,10 @@ async def test_worker_restart_does_not_duplicate_execution(
         decision_count = await session.execute(
             text(
                 """
-                SELECT COUNT(*)
+                SELECT policy_chain_id, COUNT(*)
                 FROM governance_decisions
                 WHERE tenant_id = :tenant_id
+                GROUP BY policy_chain_id
                 """
             ),
             {"tenant_id": tenant_id},
@@ -353,7 +354,10 @@ async def test_worker_restart_does_not_duplicate_execution(
         )
 
     total_events, distinct_sequences = event_counts.one()
-    assert decision_count.scalar_one() == 1
+    assert dict(decision_count.all()) == {
+        "cognition.llm_diagnostic.pre_execution": 1,
+        "resolution.communication.pre_execution": 1,
+    }
     assert total_events == distinct_sequences
     assert audit_count.scalar_one() == 1
 
@@ -396,14 +400,18 @@ async def test_processing_continues_when_redis_unavailable(
         decisions = await session.execute(
             text(
                 """
-                SELECT COUNT(*)
+                SELECT policy_chain_id, COUNT(*)
                 FROM governance_decisions
                 WHERE tenant_id = :tenant_id
+                GROUP BY policy_chain_id
                 """
             ),
             {"tenant_id": tenant_id},
         )
-    assert decisions.scalar_one() == 1
+    assert dict(decisions.all()) == {
+        "cognition.llm_diagnostic.pre_execution": 1,
+        "resolution.communication.pre_execution": 1,
+    }
 
 
 def _email_webhook_body(

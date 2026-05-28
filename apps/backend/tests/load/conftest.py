@@ -542,6 +542,10 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
         {"t": tenant_id},
     )
     await session.execute(
+        text("DELETE FROM resolution_outbound_drafts WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
         text("DELETE FROM resolution_proposals WHERE tenant_id = :t"),
         {"t": tenant_id},
     )

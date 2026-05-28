@@ -14,20 +14,29 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
     ResolutionGovernanceVerdict,
+    ResolutionOutboundDraftStatus,
     ResolutionProposalStatus,
     ResolutionSupervisorVerdict,
 )
 from app.resolution.persistence import (
     InMemoryResolutionProposalPersistence,
     PostgresResolutionProposalPersistence,
+    ResolutionOutboundDraftQuery,
     ResolutionProposalQuery,
+)
+from app.governance.persistence import InMemoryGovernanceRepository
+from app.runtime.resolution_governance_gate import (
+    ResolutionGovernanceGate,
+    build_resolution_governance_runtime,
 )
 from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateRequest,
     ResolutionGovernanceGateResult,
+    ResolutionOutboundDraftRuntime,
     ResolutionProposalRequest,
     ResolutionRuntime,
     _map_central_governance_result,
+    resolution_outbound_draft_timeline_payload,
     resolution_proposal_is_send_eligible,
     resolution_proposal_timeline_payload,
 )
@@ -61,6 +70,20 @@ class _StaticResolutionGovernanceGate:
             governance_verdict=self._verdict,
             governance_decision_id=self._decision_id,
         )
+
+
+def _governed_resolution_runtime(
+    *,
+    governance_repository: InMemoryGovernanceRepository,
+) -> ResolutionRuntime:
+    return ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository
+            )
+        ),
+    )
 
 
 def _citation() -> dict[str, object]:
@@ -165,6 +188,29 @@ async def test_safe_charging_issue_creates_send_eligible_proposal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_concrete_gate_persists_allow_decision_and_proposal_stores_id() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = _governed_resolution_runtime(
+        governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(_request())
+
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_decision_id is not None
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert decision is not None
+    assert decision.decision == "allow"
+    assert decision.policy_chain_id == "resolution.communication.pre_execution"
+    assert decision.subject_kind == "communication"
+    assert decision.request_id == f"resolution:{record.proposal_id}"
+    assert decision.metadata["proposal_id"] == str(record.proposal_id)
+
+
+@pytest.mark.asyncio
 async def test_missing_governance_gate_fails_closed_for_send_eligibility() -> None:
     record = await ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence()
@@ -219,6 +265,26 @@ async def test_central_allow_cannot_override_missing_citations() -> None:
     assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
     assert record.governance_decision_id == GOVERNANCE_DECISION_ID
     assert resolution_proposal_is_send_eligible(record) is False
+
+
+@pytest.mark.asyncio
+async def test_concrete_gate_missing_evidence_blocks_send_eligibility() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = _governed_resolution_runtime(
+        governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(_request(citations=[]))
+
+    assert record.status is not ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_decision_id is not None
+    assert resolution_proposal_is_send_eligible(record) is False
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert decision is not None
+    assert decision.decision in {"require_approval", "deny"}
 
 
 @pytest.mark.asyncio
@@ -281,6 +347,27 @@ async def test_central_allow_cannot_override_low_confidence() -> None:
     assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
     assert record.governance_decision_id == GOVERNANCE_DECISION_ID
     assert resolution_proposal_is_send_eligible(record) is False
+
+
+@pytest.mark.asyncio
+async def test_concrete_gate_local_pending_state_blocks_send_eligibility() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = _governed_resolution_runtime(
+        governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(_request(confidence=0.42))
+
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.governance_decision_id is not None
+    assert resolution_proposal_is_send_eligible(record) is False
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert decision is not None
+    assert decision.decision == "require_approval"
 
 
 @pytest.mark.asyncio
@@ -352,6 +439,33 @@ async def test_central_allow_cannot_override_unsupported_promise_denial() -> Non
     assert result.status is ResolutionProposalStatus.DENIED
     assert result.governance_verdict is ResolutionGovernanceVerdict.DENY
     assert result.governance_decision_id == GOVERNANCE_DECISION_ID
+
+
+@pytest.mark.asyncio
+async def test_concrete_gate_refund_warranty_category_requires_approval() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = _governed_resolution_runtime(
+        governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(
+        _request(
+            content="I need a warranty replacement for this charger.",
+            confidence=0.95,
+        )
+    )
+
+    assert record.resolution_category == "warranty_replacement_inquiry"
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.governance_decision_id is not None
+    assert resolution_proposal_is_send_eligible(record) is False
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert decision is not None
+    assert decision.decision == "require_approval"
 
 
 @pytest.mark.asyncio
@@ -454,21 +568,203 @@ async def test_send_eligible_helper_requires_governance_decision_id() -> None:
     assert payload["send_eligible"] is False
 
 
+@pytest.mark.asyncio
+async def test_ready_outbound_draft_for_governance_backed_send_eligible_proposal() -> None:
+    persistence = InMemoryResolutionProposalPersistence()
+    proposal = await ResolutionRuntime(
+        persistence=persistence,
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+    ).create_proposal(_request())
+
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=persistence
+    ).create_draft_for_proposal(proposal)
+    payload = resolution_outbound_draft_timeline_payload(
+        draft=draft,
+        proposal=proposal,
+    )
+
+    assert draft.tenant_id == TENANT_ID
+    assert draft.proposal_id == proposal.proposal_id
+    assert draft.status is ResolutionOutboundDraftStatus.READY
+    assert draft.governance_decision_id == GOVERNANCE_DECISION_ID
+    assert draft.draft_body == proposal.proposed_customer_reply
+    assert draft.draft_body_sha256 == hashlib.sha256(
+        proposal.proposed_customer_reply.encode("utf-8")
+    ).hexdigest()
+    assert payload["send_eligible"] is True
+    assert "adapter_name" not in payload
+    assert "sent_at" not in payload
+
+
+@pytest.mark.asyncio
+async def test_pending_proposal_creates_pending_human_approval_draft() -> None:
+    persistence = InMemoryResolutionProposalPersistence()
+    proposal = await ResolutionRuntime(persistence=persistence).create_proposal(
+        _request()
+    )
+
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=persistence
+    ).create_draft_for_proposal(proposal)
+
+    assert proposal.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert draft.status is ResolutionOutboundDraftStatus.PENDING_HUMAN_APPROVAL
+    assert resolution_outbound_draft_timeline_payload(
+        draft=draft,
+        proposal=proposal,
+    )["send_eligible"] is False
+
+
+@pytest.mark.asyncio
+async def test_denied_proposal_creates_denied_draft() -> None:
+    persistence = InMemoryResolutionProposalPersistence()
+    proposal = await ResolutionRuntime(
+        persistence=persistence,
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.DENY
+        ),
+    ).create_proposal(_request())
+
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=persistence
+    ).create_draft_for_proposal(proposal)
+
+    assert proposal.status is ResolutionProposalStatus.DENIED
+    assert draft.status is ResolutionOutboundDraftStatus.DENIED
+
+
+@pytest.mark.asyncio
+async def test_old_send_eligible_proposal_without_governance_id_creates_pending_draft() -> None:
+    persistence = InMemoryResolutionProposalPersistence()
+    proposal = await ResolutionRuntime(
+        persistence=persistence,
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+    ).create_proposal(_request())
+    old_row_shape = replace(proposal, governance_decision_id=None)
+
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=persistence
+    ).create_draft_for_proposal(old_row_shape)
+
+    assert old_row_shape.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert resolution_proposal_is_send_eligible(old_row_shape) is False
+    assert draft.status is ResolutionOutboundDraftStatus.PENDING_HUMAN_APPROVAL
+
+
+@pytest.mark.asyncio
+@requires_postgres
+async def test_postgres_resolution_outbound_draft_enforces_tenant_rls(
+    pg_session,
+    pg_seed_engine,
+) -> None:
+    await _ensure_committed_tenants(
+        pg_seed_engine,
+        pg_session,
+        TENANT_ID,
+        "tenant-other",
+    )
+    await set_pg_rls_tenant(pg_session, TENANT_ID)
+    persistence = PostgresResolutionProposalPersistence(pg_session)
+    proposal = await ResolutionRuntime(persistence=persistence).create_proposal(
+        _request()
+    )
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=persistence
+    ).create_draft_for_proposal(proposal)
+
+    assert (
+        await persistence.get_resolution_outbound_draft(
+            str(draft.draft_id),
+            expected_tenant_id=TENANT_ID,
+        )
+    ) is not None
+
+    await set_pg_rls_tenant(pg_session, "tenant-other")
+    assert (
+        await persistence.get_resolution_outbound_draft(
+            str(draft.draft_id),
+            expected_tenant_id="tenant-other",
+        )
+    ) is None
+    assert (
+        await persistence.get_resolution_outbound_draft(
+            str(draft.draft_id),
+            expected_tenant_id=TENANT_ID,
+        )
+    ) is None
+    page = await persistence.list_resolution_outbound_drafts(
+        ResolutionOutboundDraftQuery(),
+        expected_tenant_id="tenant-other",
+    )
+    assert page.total == 0
+
+
 def test_resolution_runtime_has_no_external_send_path() -> None:
-    source = Path(
-        "apps/backend/app/runtime/resolution_runtime.py"
-    ).read_text(encoding="utf-8")
+    paths = [
+        Path("apps/backend/app/runtime/resolution_runtime.py"),
+        Path("apps/backend/app/workers/agent_tasks.py"),
+        Path("apps/backend/app/resolution"),
+        Path("apps/backend/migrations/versions/0044_resolution_drafts.py"),
+    ]
     forbidden = (
         "BoundaryEgressRuntime",
         ".emit(",
         ".send(",
-        "Zendesk",
-        "Twilio",
-        "WhatsApp",
-        "SMTP",
+        "boundary_egress",
+        "BaseEgressAdapter",
+        "BoundaryAdapterRegistry",
+        "app.boundary.adapters",
     )
 
-    assert [token for token in forbidden if token in source] == []
+    violations: list[str] = []
+    for root in paths:
+        scanned = [root] if root.is_file() else sorted(root.rglob("*.py"))
+        for path in scanned:
+            source = path.read_text(encoding="utf-8")
+            for token in forbidden:
+                if token in source:
+                    violations.append(f"{path}:{token}")
+
+    assert violations == []
+
+
+def test_resolution_drafts_do_not_persist_delivery_fields() -> None:
+    model_source = Path(
+        "apps/backend/app/resolution/db/models.py"
+    ).read_text(encoding="utf-8")
+    draft_model_source = model_source[model_source.index("class ResolutionOutboundDraftRow") :]
+    records_source = Path(
+        "apps/backend/app/resolution/persistence/records.py"
+    ).read_text(encoding="utf-8")
+    draft_record_source = records_source[
+        records_source.index("class ResolutionOutboundDraftRecord") :
+    ]
+    sources = "\n".join(
+        (
+            draft_model_source,
+            draft_record_source,
+            Path(
+                "apps/backend/migrations/versions/0044_resolution_drafts.py"
+            ).read_text(encoding="utf-8"),
+        )
+    )
+    forbidden = (
+        "adapter_name",
+        "provider",
+        "target_uri",
+        "credentials",
+        "delivery_attempt",
+        "send_at",
+        "sent_at",
+        "send_eligible",
+    )
+
+    assert [token for token in forbidden if token in sources] == []
 
 
 def test_resolution_lineage_paths_do_not_use_uuid4() -> None:
@@ -558,6 +854,57 @@ def test_resolution_governance_decision_migration_is_nullable_and_indexed() -> N
     assert "ForeignKey" not in source
 
 
+def test_resolution_outbound_draft_migration_enables_force_rls_and_indexes() -> None:
+    source = Path(
+        "apps/backend/migrations/versions/0044_resolution_drafts.py"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "down_revision: Union[str, None] = "
+        "\"0043_resolution_proposal_governance_decision\"" in source
+    )
+    assert "\"resolution_outbound_drafts\"" in source
+    assert "\"draft_id\"" in source
+    assert "\"draft_body_sha256\"" in source
+    assert "\"send_eligible\"" not in source
+    assert "ENABLE ROW LEVEL SECURITY" in source
+    assert "FORCE ROW LEVEL SECURITY" in source
+    assert "operious_tenant_rls_allows(tenant_id)" in source
+    assert "ix_resolution_outbound_drafts_tenant_proposal" in source
+    assert "ix_resolution_outbound_drafts_tenant_status" in source
+    assert "ix_resolution_outbound_drafts_tenant_created_at" in source
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE" in source
+
+
+def test_resolution_substrate_is_leaf_clean() -> None:
+    violations: list[str] = []
+    forbidden_prefixes = (
+        "app.boundary",
+        "app.cognition",
+        "app.governance",
+        "app.session",
+    )
+    for path in sorted(Path("apps/backend/app/resolution").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(
+                        alias.name == prefix or alias.name.startswith(f"{prefix}.")
+                        for prefix in forbidden_prefixes
+                    ):
+                        violations.append(f"{path}:{node.lineno} imports {alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if any(
+                    module == prefix or module.startswith(f"{prefix}.")
+                    for prefix in forbidden_prefixes
+                ):
+                    violations.append(f"{path}:{node.lineno} imports {module}")
+
+    assert violations == []
+
+
 def test_worker_hooks_resolution_after_diagnostic_success() -> None:
     source = Path("apps/backend/app/workers/agent_tasks.py").read_text(
         encoding="utf-8"
@@ -568,4 +915,25 @@ def test_worker_hooks_resolution_after_diagnostic_success() -> None:
     complete_execution_index = source.index("complete_execution")
     assert completed_index < resolution_index < complete_execution_index
     assert "_RESOLUTION_CREATED = \"resolution_proposal_created\"" in source
+    assert (
+        "_RESOLUTION_DRAFT_CREATED = "
+        "\"resolution_outbound_draft_created\"" in source
+    )
     assert "_RESOLUTION_FAILED = \"resolution_proposal_failed\"" in source
+    assert "ResolutionGovernanceGate" in source
+    assert "PostgresGovernanceRepository(session)" in source
+    assert "build_resolution_governance_runtime" in source
+    assert "ResolutionOutboundDraftRuntime" in source
+    assert "resolution_outbound_draft_timeline_payload" in source
+
+
+def test_trace_inspector_renders_resolution_draft_and_old_proposals() -> None:
+    source = Path(
+        "apps/command-center2/frontend/components/trace-inspector.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "resolution_proposal_created" in source
+    assert "ResolutionProposalSummary" in source
+    assert "resolution_outbound_draft_created" in source
+    assert "ResolutionDraftSummary" in source
+    assert "draft_body_sha256" in source

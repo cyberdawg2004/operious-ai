@@ -157,4 +157,107 @@ class ResolutionProposalRow(Base):
     )
 
 
-__all__ = ["ResolutionProposalRow"]
+class ResolutionOutboundDraftRow(Base):
+    """ORM row for ``resolution_outbound_drafts``."""
+
+    __tablename__ = "resolution_outbound_drafts"
+
+    draft_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    proposal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    execution_id: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    dispatch_id: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    diagnostic_event_id: Mapped[str | None] = mapped_column(
+        String(_ENUM_WIDTH), nullable=True, index=True
+    )
+    governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    draft_body: Mapped[str] = mapped_column(Text, nullable=False)
+    draft_body_sha256: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False
+    )
+    resolution_category: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="draft_tenant_id_nonempty"),
+        CheckConstraint(
+            "length(session_id) > 0",
+            name="resolution_outbound_draft_session_id_nonempty",
+        ),
+        CheckConstraint(
+            "length(execution_id) > 0",
+            name="resolution_outbound_draft_execution_id_nonempty",
+        ),
+        CheckConstraint(
+            "length(dispatch_id) > 0",
+            name="resolution_outbound_draft_dispatch_id_nonempty",
+        ),
+        CheckConstraint(
+            "status IN "
+            "('ready', 'pending_human_approval', 'denied', 'failed')",
+            name="resolution_outbound_draft_status_valid",
+        ),
+        CheckConstraint(
+            "length(draft_body) > 0",
+            name="resolution_outbound_draft_body_nonempty",
+        ),
+        CheckConstraint(
+            "length(draft_body_sha256) = 64",
+            name="resolution_outbound_draft_body_sha256_valid",
+        ),
+        CheckConstraint(
+            "length(resolution_category) > 0",
+            name="resolution_outbound_draft_category_nonempty",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="resolution_outbound_draft_confidence_bounds",
+        ),
+        Index(
+            "ix_resolution_outbound_drafts_tenant_proposal",
+            "tenant_id",
+            "proposal_id",
+        ),
+        Index(
+            "ix_resolution_outbound_drafts_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+        Index(
+            "ix_resolution_outbound_drafts_tenant_created_at",
+            "tenant_id",
+            "created_at",
+        ),
+    )
+
+
+__all__ = ["ResolutionOutboundDraftRow", "ResolutionProposalRow"]

@@ -173,6 +173,7 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
         "DELETE FROM coordination_envelopes WHERE tenant_id = :t",
         "DELETE FROM operational_sessions WHERE tenant_id = :t",
         "DELETE FROM dead_letter_tasks WHERE tenant_id = :t",
+        "DELETE FROM resolution_outbound_drafts WHERE tenant_id = :t",
         "DELETE FROM resolution_proposals WHERE tenant_id = :t",
         "DELETE FROM execution_records WHERE tenant_id = :t",
         "DELETE FROM tenant_knowledge_vectors WHERE tenant_id = :t",
