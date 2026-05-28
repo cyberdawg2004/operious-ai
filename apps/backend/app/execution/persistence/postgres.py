@@ -28,6 +28,7 @@ from app.execution.exceptions import (
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
+    ExecutionOutboxClaimId,
     ExecutionOutboxId,
     derive_attempt_id,
 )
@@ -41,9 +42,13 @@ from app.execution.persistence.models import (
 )
 from app.execution.persistence.records import (
     ExecutionAttemptRecord,
+    ExecutionClaimLost,
     ExecutionClaimRecord,
+    ExecutionOutboxClaimLost,
     ExecutionOutboxRecord,
+    ExecutionOutboxTransitionResult,
     ExecutionRecord,
+    ExecutionTransitionResult,
 )
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
@@ -167,42 +172,88 @@ class PostgresExecutionPersistence(BaseRepository):
         attempt_id: ExecutionAttemptId | None,
         result: Mapping[str, Any],
         completed_at: datetime,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord:
+        worker_id: str,
+    ) -> ExecutionTransitionResult:
         existing = await self.get_execution(execution_id)
         if existing is None:
             raise ExecutionPersistenceError(
                 f"execution not found: {execution_id}"
             )
-        if existing.state is ExecutionState.COMPLETED:
-            return existing
-        if existing.state is not ExecutionState.CLAIMED:
-            raise ExecutionStateError("only claimed executions can complete")
-        attempt = await self._resolve_running_attempt(
+        attempt = await self._load_attempt_for_transition(
             execution_id=execution_id,
             attempt_id=attempt_id,
             worker_id=worker_id,
             current=existing,
         )
-        await self.session.execute(
-            update(ExecutionAttemptRow)
-            .where(ExecutionAttemptRow.attempt_id == attempt.attempt_id)
-            .values(
-                state=ExecutionAttemptState.COMPLETED.value,
-                completed_at=completed_at,
-                result=dict(result),
+        if isinstance(attempt, ExecutionClaimLost):
+            return attempt
+        if existing.state is ExecutionState.COMPLETED:
+            if attempt.state is ExecutionAttemptState.COMPLETED:
+                return existing
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="execution_not_claimed:completed",
+                current=existing,
             )
+        lost = self._transition_claim_lost(
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            current=existing,
+            attempt=attempt,
         )
-        stmt = (
-            update(ExecutionRow)
-            .where(ExecutionRow.execution_id == execution_id)
-            .values(
-                state=ExecutionState.COMPLETED.value,
-                completed_at=completed_at,
-                result=dict(result),
+        if lost is not None:
+            return lost
+        async with self.session.begin_nested():
+            stmt = (
+                update(ExecutionRow)
+                .where(
+                    ExecutionRow.execution_id == execution_id,
+                    ExecutionRow.state == ExecutionState.CLAIMED.value,
+                    ExecutionRow.attempt_count == attempt.attempt_number,
+                    ExecutionRow.worker_id == worker_id,
+                )
+                .values(
+                    state=ExecutionState.COMPLETED.value,
+                    completed_at=completed_at,
+                    result=dict(result),
+                )
             )
-        )
-        await self.session.execute(stmt)
+            execution_result = cast(
+                CursorResult[Any], await self.session.execute(stmt)
+            )
+            if execution_result.rowcount != 1:
+                return await self._refreshed_execution_claim_lost(
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    reason="execution_claim_lost",
+                )
+            attempt_stmt = (
+                update(ExecutionAttemptRow)
+                .where(
+                    ExecutionAttemptRow.attempt_id == attempt.attempt_id,
+                    ExecutionAttemptRow.execution_id == execution_id,
+                    ExecutionAttemptRow.state
+                    == ExecutionAttemptState.RUNNING.value,
+                    ExecutionAttemptRow.attempt_number == attempt.attempt_number,
+                    ExecutionAttemptRow.worker_id == worker_id,
+                )
+                .values(
+                    state=ExecutionAttemptState.COMPLETED.value,
+                    completed_at=completed_at,
+                    result=dict(result),
+                )
+            )
+            attempt_result = cast(
+                CursorResult[Any], await self.session.execute(attempt_stmt)
+            )
+            if attempt_result.rowcount != 1:
+                raise ExecutionPersistenceError(
+                    "execution completion attempt CAS failed after authority CAS"
+                )
         updated = await self.get_execution(execution_id)
         if updated is None:
             raise ExecutionPersistenceError(
@@ -218,52 +269,89 @@ class PostgresExecutionPersistence(BaseRepository):
         error: str,
         failed_at: datetime,
         retry_requested: bool,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord:
+        worker_id: str,
+    ) -> ExecutionTransitionResult:
         existing = await self.get_execution(execution_id)
         if existing is None:
             raise ExecutionPersistenceError(
                 f"execution not found: {execution_id}"
             )
-        if existing.state is ExecutionState.COMPLETED:
-            return existing
-        if existing.state is not ExecutionState.CLAIMED:
-            raise ExecutionStateError("only claimed executions can fail")
-        attempt = await self._resolve_running_attempt(
+        attempt = await self._load_attempt_for_transition(
             execution_id=execution_id,
             attempt_id=attempt_id,
             worker_id=worker_id,
             current=existing,
         )
-        await self.session.execute(
-            update(ExecutionAttemptRow)
-            .where(ExecutionAttemptRow.attempt_id == attempt.attempt_id)
-            .values(
-                state=ExecutionAttemptState.FAILED.value,
-                failed_at=failed_at,
-                retry_requested=retry_requested,
-                error=error,
-            )
+        if isinstance(attempt, ExecutionClaimLost):
+            return attempt
+        lost = self._transition_claim_lost(
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            current=existing,
+            attempt=attempt,
         )
-        stmt = (
-            update(ExecutionRow)
-            .where(ExecutionRow.execution_id == execution_id)
-            .values(
-                state=(
-                    ExecutionState.REQUESTED.value
-                    if retry_requested
-                    else ExecutionState.FAILED.value
-                ),
-                failed_at=failed_at,
-                error=error,
-            )
+        if lost is not None:
+            return lost
+        next_state = (
+            ExecutionState.REQUESTED
+            if retry_requested
+            else ExecutionState.FAILED
         )
-        await self.session.execute(stmt)
+        async with self.session.begin_nested():
+            stmt = (
+                update(ExecutionRow)
+                .where(
+                    ExecutionRow.execution_id == execution_id,
+                    ExecutionRow.state == ExecutionState.CLAIMED.value,
+                    ExecutionRow.attempt_count == attempt.attempt_number,
+                    ExecutionRow.worker_id == worker_id,
+                )
+                .values(
+                    state=next_state.value,
+                    failed_at=failed_at,
+                    error=error,
+                )
+            )
+            execution_result = cast(
+                CursorResult[Any], await self.session.execute(stmt)
+            )
+            if execution_result.rowcount != 1:
+                return await self._refreshed_execution_claim_lost(
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    reason="execution_claim_lost",
+                )
+            attempt_stmt = (
+                update(ExecutionAttemptRow)
+                .where(
+                    ExecutionAttemptRow.attempt_id == attempt.attempt_id,
+                    ExecutionAttemptRow.execution_id == execution_id,
+                    ExecutionAttemptRow.state
+                    == ExecutionAttemptState.RUNNING.value,
+                    ExecutionAttemptRow.attempt_number == attempt.attempt_number,
+                    ExecutionAttemptRow.worker_id == worker_id,
+                )
+                .values(
+                    state=ExecutionAttemptState.FAILED.value,
+                    failed_at=failed_at,
+                    retry_requested=retry_requested,
+                    error=error,
+                )
+            )
+            attempt_result = cast(
+                CursorResult[Any], await self.session.execute(attempt_stmt)
+            )
+            if attempt_result.rowcount != 1:
+                raise ExecutionPersistenceError(
+                    "execution failure attempt CAS failed after authority CAS"
+                )
         updated = await self.get_execution(execution_id)
         if updated is None:
             raise ExecutionPersistenceError(
                 f"failed execution disappeared: {execution_id}"
-        )
+            )
         return updated
 
     async def dead_letter_execution(
@@ -273,50 +361,84 @@ class PostgresExecutionPersistence(BaseRepository):
         attempt_id: ExecutionAttemptId | None,
         error: str,
         dead_lettered_at: datetime,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord:
+        worker_id: str,
+    ) -> ExecutionTransitionResult:
         existing = await self.get_execution(execution_id)
         if existing is None:
             raise ExecutionPersistenceError(
                 f"execution not found: {execution_id}"
             )
-        if existing.state is ExecutionState.COMPLETED:
-            return existing
-        if existing.state is not ExecutionState.CLAIMED:
-            raise ExecutionStateError(
-                "only claimed executions can be dead-lettered"
-            )
-        attempt = await self._resolve_running_attempt(
+        attempt = await self._load_attempt_for_transition(
             execution_id=execution_id,
             attempt_id=attempt_id,
             worker_id=worker_id,
             current=existing,
         )
-        await self.session.execute(
-            update(ExecutionAttemptRow)
-            .where(ExecutionAttemptRow.attempt_id == attempt.attempt_id)
-            .values(
-                state=ExecutionAttemptState.DEAD_LETTERED.value,
-                failed_at=dead_lettered_at,
-                retry_requested=False,
-                error=error,
-            )
+        if isinstance(attempt, ExecutionClaimLost):
+            return attempt
+        lost = self._transition_claim_lost(
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            current=existing,
+            attempt=attempt,
         )
-        stmt = (
-            update(ExecutionRow)
-            .where(ExecutionRow.execution_id == execution_id)
-            .values(
-                state=ExecutionState.DEAD_LETTERED.value,
-                failed_at=dead_lettered_at,
-                error=error,
+        if lost is not None:
+            return lost
+        async with self.session.begin_nested():
+            stmt = (
+                update(ExecutionRow)
+                .where(
+                    ExecutionRow.execution_id == execution_id,
+                    ExecutionRow.state == ExecutionState.CLAIMED.value,
+                    ExecutionRow.attempt_count == attempt.attempt_number,
+                    ExecutionRow.worker_id == worker_id,
+                )
+                .values(
+                    state=ExecutionState.DEAD_LETTERED.value,
+                    failed_at=dead_lettered_at,
+                    error=error,
+                )
             )
-        )
-        await self.session.execute(stmt)
+            execution_result = cast(
+                CursorResult[Any], await self.session.execute(stmt)
+            )
+            if execution_result.rowcount != 1:
+                return await self._refreshed_execution_claim_lost(
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    reason="execution_claim_lost",
+                )
+            attempt_stmt = (
+                update(ExecutionAttemptRow)
+                .where(
+                    ExecutionAttemptRow.attempt_id == attempt.attempt_id,
+                    ExecutionAttemptRow.execution_id == execution_id,
+                    ExecutionAttemptRow.state
+                    == ExecutionAttemptState.RUNNING.value,
+                    ExecutionAttemptRow.attempt_number == attempt.attempt_number,
+                    ExecutionAttemptRow.worker_id == worker_id,
+                )
+                .values(
+                    state=ExecutionAttemptState.DEAD_LETTERED.value,
+                    failed_at=dead_lettered_at,
+                    retry_requested=False,
+                    error=error,
+                )
+            )
+            attempt_result = cast(
+                CursorResult[Any], await self.session.execute(attempt_stmt)
+            )
+            if attempt_result.rowcount != 1:
+                raise ExecutionPersistenceError(
+                    "execution dead-letter attempt CAS failed after authority CAS"
+                )
         updated = await self.get_execution(execution_id)
         if updated is None:
             raise ExecutionPersistenceError(
                 f"dead-lettered execution disappeared: {execution_id}"
-        )
+            )
         return updated
 
     async def recover_stale_execution(
@@ -416,6 +538,7 @@ class PostgresExecutionPersistence(BaseRepository):
         *,
         execution_id: ExecutionId,
         publisher_id: str,
+        claim_id: ExecutionOutboxClaimId,
         claimed_at: datetime,
     ) -> ExecutionOutboxRecord | None:
         stmt = (
@@ -429,6 +552,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 state=ExecutionOutboxState.PUBLISHING.value,
                 claimed_at=claimed_at,
                 publisher_id=publisher_id,
+                claim_id=claim_id,
                 publish_attempt_count=(
                     ExecutionOutboxRow.publish_attempt_count + 1
                 ),
@@ -449,27 +573,49 @@ class PostgresExecutionPersistence(BaseRepository):
         self,
         *,
         outbox_id: ExecutionOutboxId,
+        claim_id: ExecutionOutboxClaimId,
         published_at: datetime,
-    ) -> ExecutionOutboxRecord:
+    ) -> ExecutionOutboxTransitionResult:
         existing = await self.get_outbox(outbox_id)
         if existing is None:
             raise ExecutionPersistenceError(f"outbox not found: {outbox_id}")
         if existing.state is ExecutionOutboxState.PUBLISHED:
-            return existing
+            if existing.claim_id == claim_id:
+                return existing
+            return ExecutionOutboxClaimLost(
+                outbox_id=outbox_id,
+                claim_id=claim_id,
+                reason="outbox_already_published",
+                current=existing,
+            )
         if existing.state is not ExecutionOutboxState.PUBLISHING:
-            raise ExecutionStateError(
-                "only publishing outbox records can be published"
+            return ExecutionOutboxClaimLost(
+                outbox_id=outbox_id,
+                claim_id=claim_id,
+                reason=f"outbox_not_publishable:{existing.state.value}",
+                current=existing,
             )
         stmt = (
             update(ExecutionOutboxRow)
-            .where(ExecutionOutboxRow.outbox_id == outbox_id)
+            .where(
+                ExecutionOutboxRow.outbox_id == outbox_id,
+                ExecutionOutboxRow.state == ExecutionOutboxState.PUBLISHING.value,
+                ExecutionOutboxRow.claim_id == claim_id,
+            )
             .values(
                 state=ExecutionOutboxState.PUBLISHED.value,
                 published_at=published_at,
                 last_error=None,
             )
         )
-        await self.session.execute(stmt)
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return ExecutionOutboxClaimLost(
+                outbox_id=outbox_id,
+                claim_id=claim_id,
+                reason="outbox_claim_lost",
+                current=await self.get_outbox(outbox_id),
+            )
         updated = await self.get_outbox(outbox_id)
         if updated is None:
             raise ExecutionPersistenceError(
@@ -481,21 +627,34 @@ class PostgresExecutionPersistence(BaseRepository):
         self,
         *,
         outbox_id: ExecutionOutboxId,
+        claim_id: ExecutionOutboxClaimId,
         error: str,
         failed_at: datetime,
-    ) -> ExecutionOutboxRecord:
+    ) -> ExecutionOutboxTransitionResult:
         existing = await self.get_outbox(outbox_id)
         if existing is None:
             raise ExecutionPersistenceError(f"outbox not found: {outbox_id}")
         if existing.state is ExecutionOutboxState.PUBLISHED:
-            return existing
+            return ExecutionOutboxClaimLost(
+                outbox_id=outbox_id,
+                claim_id=claim_id,
+                reason="outbox_already_published",
+                current=existing,
+            )
         if existing.state is not ExecutionOutboxState.PUBLISHING:
-            raise ExecutionStateError(
-                "only publishing outbox records can fail publication"
+            return ExecutionOutboxClaimLost(
+                outbox_id=outbox_id,
+                claim_id=claim_id,
+                reason=f"outbox_not_publishable:{existing.state.value}",
+                current=existing,
             )
         stmt = (
             update(ExecutionOutboxRow)
-            .where(ExecutionOutboxRow.outbox_id == outbox_id)
+            .where(
+                ExecutionOutboxRow.outbox_id == outbox_id,
+                ExecutionOutboxRow.state == ExecutionOutboxState.PUBLISHING.value,
+                ExecutionOutboxRow.claim_id == claim_id,
+            )
             .values(
                 state=ExecutionOutboxState.FAILED.value,
                 published_at=None,
@@ -506,7 +665,14 @@ class PostgresExecutionPersistence(BaseRepository):
                 },
             )
         )
-        await self.session.execute(stmt)
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return ExecutionOutboxClaimLost(
+                outbox_id=outbox_id,
+                claim_id=claim_id,
+                reason="outbox_claim_lost",
+                current=await self.get_outbox(outbox_id),
+            )
         updated = await self.get_outbox(outbox_id)
         if updated is None:
             raise ExecutionPersistenceError(
@@ -537,6 +703,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 state=ExecutionOutboxState.PENDING.value,
                 claimed_at=None,
                 publisher_id=None,
+                claim_id=None,
                 last_error=reason,
                 metadata_json={
                     **dict(existing.metadata),
@@ -639,6 +806,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 state=ExecutionOutboxState.PENDING.value,
                 claimed_at=None,
                 publisher_id=None,
+                claim_id=None,
                 published_at=None,
                 last_error=reason,
                 metadata_json={
@@ -788,6 +956,129 @@ class PostgresExecutionPersistence(BaseRepository):
         if row is None:
             return None
         return ExecutionAttemptId(row.attempt_id)
+
+    def _execution_claim_lost(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str | None,
+        reason: str,
+        current: ExecutionRecord | None = None,
+    ) -> ExecutionClaimLost:
+        return ExecutionClaimLost(
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            reason=reason,
+            current=current,
+        )
+
+    async def _refreshed_execution_claim_lost(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str | None,
+        reason: str,
+    ) -> ExecutionClaimLost:
+        return self._execution_claim_lost(
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            reason=reason,
+            current=await self.get_execution(execution_id),
+        )
+
+    async def _load_attempt_for_transition(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        current: ExecutionRecord,
+    ) -> ExecutionAttemptRecord | ExecutionClaimLost:
+        if attempt_id is None:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=None,
+                worker_id=worker_id,
+                reason="attempt_id_required",
+                current=current,
+            )
+        stmt = select(ExecutionAttemptRow).where(
+            ExecutionAttemptRow.attempt_id == attempt_id
+        )
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="attempt_not_found",
+                current=current,
+            )
+        attempt = _row_to_attempt(row)
+        if attempt.execution_id != execution_id:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="attempt_execution_mismatch",
+                current=current,
+            )
+        if attempt.worker_id != worker_id:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="worker_mismatch:attempt",
+                current=current,
+            )
+        return attempt
+
+    def _transition_claim_lost(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        current: ExecutionRecord,
+        attempt: ExecutionAttemptRecord,
+    ) -> ExecutionClaimLost | None:
+        if current.state is not ExecutionState.CLAIMED:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason=f"execution_not_claimed:{current.state.value}",
+                current=current,
+            )
+        if current.worker_id != worker_id:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="worker_mismatch:execution",
+                current=current,
+            )
+        if attempt.attempt_number != current.attempt_count:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="attempt_not_current",
+                current=current,
+            )
+        if attempt.state is not ExecutionAttemptState.RUNNING:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason=f"attempt_not_running:{attempt.state.value}",
+                current=current,
+            )
+        return None
 
     async def _resolve_running_attempt(
         self,
@@ -940,6 +1231,7 @@ def _outbox_to_row(record: ExecutionOutboxRecord) -> ExecutionOutboxRow:
         claimed_at=record.claimed_at,
         published_at=record.published_at,
         publisher_id=record.publisher_id,
+        claim_id=record.claim_id,
         publish_attempt_count=record.publish_attempt_count,
         last_error=record.last_error,
         metadata_json=dict(record.metadata),
@@ -957,6 +1249,11 @@ def _row_to_outbox(row: ExecutionOutboxRow) -> ExecutionOutboxRecord:
         claimed_at=row.claimed_at,
         published_at=row.published_at,
         publisher_id=row.publisher_id,
+        claim_id=(
+            ExecutionOutboxClaimId(row.claim_id)
+            if row.claim_id is not None
+            else None
+        ),
         publish_attempt_count=row.publish_attempt_count,
         last_error=row.last_error,
         metadata=dict(row.metadata_json or {}),

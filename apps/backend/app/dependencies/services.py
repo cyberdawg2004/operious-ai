@@ -70,7 +70,12 @@ from app.core.config import get_settings
 from app.core.admission import admission_thresholds_from_settings
 from app.core.redis import get_redis_client
 from app.dependencies.database import get_db_session, get_session_factory
-from app.execution import ExecutionRuntime, PostgresExecutionPersistence
+from app.execution import (
+    ExecutionOutboxClaimId,
+    ExecutionOutboxClaimLost,
+    ExecutionRuntime,
+    PostgresExecutionPersistence,
+)
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.execution.publisher import ExecutionPublisher, QueueBackpressureCheck
 from app.events import PostgresOperationalEventPersistence
@@ -777,6 +782,9 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
             except Exception as exc:
                 await self._execution_runtime.mark_outbox_failed(
                     outbox_id=claim.outbox.outbox_id,
+                    claim_id=_require_execution_outbox_claim_id(
+                        claim.outbox.claim_id
+                    ),
                     error=_bounded_publish_error(exc),
                 )
                 await self._session.commit()
@@ -784,9 +792,17 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
                     intent.execution_id,
                     _bounded_publish_error(exc),
                 ) from exc
-            await self._execution_runtime.mark_outbox_published(
+            published = await self._execution_runtime.mark_outbox_published(
                 outbox_id=claim.outbox.outbox_id,
+                claim_id=_require_execution_outbox_claim_id(
+                    claim.outbox.claim_id
+                ),
             )
+            if isinstance(published, ExecutionOutboxClaimLost):
+                raise ExecutionOutboxPublishError(
+                    intent.execution_id,
+                    published.reason,
+                )
             await self._session.commit()
 
 
@@ -824,6 +840,17 @@ def _require_outbox_claim_id(claim_id: str | None) -> str:
         raise EscalationOutboxPublishError(
             "unknown",
             "claimed escalation outbox is missing claim_id",
+        )
+    return claim_id
+
+
+def _require_execution_outbox_claim_id(
+    claim_id: ExecutionOutboxClaimId | None,
+) -> ExecutionOutboxClaimId:
+    if claim_id is None:
+        raise ExecutionOutboxPublishError(
+            "unknown",
+            "claimed execution outbox is missing claim_id",
         )
     return claim_id
 

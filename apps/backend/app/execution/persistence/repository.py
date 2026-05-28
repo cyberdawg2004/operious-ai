@@ -9,6 +9,7 @@ from app.execution.enums import ExecutionKind
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
+    ExecutionOutboxClaimId,
     ExecutionOutboxId,
 )
 from app.execution.persistence.models import (
@@ -23,7 +24,9 @@ from app.execution.persistence.records import (
     ExecutionAttemptRecord,
     ExecutionClaimRecord,
     ExecutionOutboxRecord,
+    ExecutionOutboxTransitionResult,
     ExecutionRecord,
+    ExecutionTransitionResult,
 )
 
 
@@ -78,8 +81,8 @@ class ExecutionPersistenceProtocol(Protocol):
         attempt_id: ExecutionAttemptId | None,
         result: Mapping[str, Any],
         completed_at: datetime,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord: ...
+        worker_id: str,
+    ) -> ExecutionTransitionResult: ...
 
     async def fail_execution(
         self,
@@ -89,8 +92,8 @@ class ExecutionPersistenceProtocol(Protocol):
         error: str,
         failed_at: datetime,
         retry_requested: bool,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord: ...
+        worker_id: str,
+    ) -> ExecutionTransitionResult: ...
 
     async def dead_letter_execution(
         self,
@@ -99,8 +102,8 @@ class ExecutionPersistenceProtocol(Protocol):
         attempt_id: ExecutionAttemptId | None,
         error: str,
         dead_lettered_at: datetime,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord: ...
+        worker_id: str,
+    ) -> ExecutionTransitionResult: ...
 
     async def recover_stale_execution(
         self,
@@ -126,6 +129,7 @@ class ExecutionPersistenceProtocol(Protocol):
         *,
         execution_id: ExecutionId,
         publisher_id: str,
+        claim_id: ExecutionOutboxClaimId,
         claimed_at: datetime,
     ) -> ExecutionOutboxRecord | None: ...
 
@@ -133,16 +137,18 @@ class ExecutionPersistenceProtocol(Protocol):
         self,
         *,
         outbox_id: ExecutionOutboxId,
+        claim_id: ExecutionOutboxClaimId,
         published_at: datetime,
-    ) -> ExecutionOutboxRecord: ...
+    ) -> ExecutionOutboxTransitionResult: ...
 
     async def mark_outbox_failed(
         self,
         *,
         outbox_id: ExecutionOutboxId,
+        claim_id: ExecutionOutboxClaimId,
         error: str,
         failed_at: datetime,
-    ) -> ExecutionOutboxRecord: ...
+    ) -> ExecutionOutboxTransitionResult: ...
 
     async def requeue_stale_outbox(
         self,

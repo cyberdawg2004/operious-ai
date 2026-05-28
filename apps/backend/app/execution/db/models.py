@@ -195,6 +195,9 @@ class ExecutionOutboxRow(Base):
     publisher_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
     )
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     publish_attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )

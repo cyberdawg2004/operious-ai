@@ -182,8 +182,10 @@ async def test_postgres_requeues_failed_outbox_with_tenant_scope(
         claimed_at=failed_at - timedelta(seconds=1),
     )
     assert own_claim.outbox is not None
+    assert own_claim.outbox.claim_id is not None
     await runtime.mark_outbox_failed(
         outbox_id=own_claim.outbox.outbox_id,
+        claim_id=own_claim.outbox.claim_id,
         error="broker unavailable",
         failed_at=failed_at,
     )
@@ -194,8 +196,10 @@ async def test_postgres_requeues_failed_outbox_with_tenant_scope(
         claimed_at=failed_at - timedelta(seconds=1),
     )
     assert other_claim.outbox is not None
+    assert other_claim.outbox.claim_id is not None
     await runtime.mark_outbox_failed(
         outbox_id=other_claim.outbox.outbox_id,
+        claim_id=other_claim.outbox.claim_id,
         error="other broker unavailable",
         failed_at=failed_at,
     )

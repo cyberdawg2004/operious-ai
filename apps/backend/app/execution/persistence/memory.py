@@ -20,6 +20,7 @@ from app.execution.exceptions import (
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
+    ExecutionOutboxClaimId,
     ExecutionOutboxId,
     derive_attempt_id,
 )
@@ -33,9 +34,13 @@ from app.execution.persistence.models import (
 )
 from app.execution.persistence.records import (
     ExecutionAttemptRecord,
+    ExecutionClaimLost,
     ExecutionClaimRecord,
+    ExecutionOutboxClaimLost,
     ExecutionOutboxRecord,
+    ExecutionOutboxTransitionResult,
     ExecutionRecord,
+    ExecutionTransitionResult,
 )
 from app.execution.persistence.repository import (
     ExecutionPersistenceProtocol,
@@ -175,22 +180,37 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         attempt_id: ExecutionAttemptId | None,
         result: Mapping[str, Any],
         completed_at: datetime,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord:
+        worker_id: str,
+    ) -> ExecutionTransitionResult:
         async with self._lock:
             record = self._require(execution_id)
-            if record.state is ExecutionState.COMPLETED:
-                return record
-            if record.state is not ExecutionState.CLAIMED:
-                raise ExecutionStateError(
-                    "only claimed executions can complete"
-                )
-            attempt = self._resolve_running_attempt(
+            attempt = self._load_attempt_for_transition(
                 execution_id=execution_id,
                 attempt_id=attempt_id,
                 worker_id=worker_id,
                 current=record,
             )
+            if isinstance(attempt, ExecutionClaimLost):
+                return attempt
+            if record.state is ExecutionState.COMPLETED:
+                if attempt.state is ExecutionAttemptState.COMPLETED:
+                    return record
+                return self._execution_claim_lost(
+                    execution_id=execution_id,
+                    attempt_id=attempt_id,
+                    worker_id=worker_id,
+                    reason="execution_not_claimed:completed",
+                    current=record,
+                )
+            lost = self._transition_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                current=record,
+                attempt=attempt,
+            )
+            if lost is not None:
+                return lost
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.COMPLETED,
@@ -214,22 +234,27 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         error: str,
         failed_at: datetime,
         retry_requested: bool,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord:
+        worker_id: str,
+    ) -> ExecutionTransitionResult:
         async with self._lock:
             record = self._require(execution_id)
-            if record.state is ExecutionState.COMPLETED:
-                return record
-            if record.state is not ExecutionState.CLAIMED:
-                raise ExecutionStateError(
-                    "only claimed executions can fail"
-                )
-            attempt = self._resolve_running_attempt(
+            attempt = self._load_attempt_for_transition(
                 execution_id=execution_id,
                 attempt_id=attempt_id,
                 worker_id=worker_id,
                 current=record,
             )
+            if isinstance(attempt, ExecutionClaimLost):
+                return attempt
+            lost = self._transition_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                current=record,
+                attempt=attempt,
+            )
+            if lost is not None:
+                return lost
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.FAILED,
@@ -257,22 +282,27 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         attempt_id: ExecutionAttemptId | None,
         error: str,
         dead_lettered_at: datetime,
-        worker_id: str | None = None,
-    ) -> ExecutionRecord:
+        worker_id: str,
+    ) -> ExecutionTransitionResult:
         async with self._lock:
             record = self._require(execution_id)
-            if record.state is ExecutionState.COMPLETED:
-                return record
-            if record.state is not ExecutionState.CLAIMED:
-                raise ExecutionStateError(
-                    "only claimed executions can be dead-lettered"
-                )
-            attempt = self._resolve_running_attempt(
+            attempt = self._load_attempt_for_transition(
                 execution_id=execution_id,
                 attempt_id=attempt_id,
                 worker_id=worker_id,
                 current=record,
             )
+            if isinstance(attempt, ExecutionClaimLost):
+                return attempt
+            lost = self._transition_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                current=record,
+                attempt=attempt,
+            )
+            if lost is not None:
+                return lost
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.DEAD_LETTERED,
@@ -365,6 +395,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         *,
         execution_id: ExecutionId,
         publisher_id: str,
+        claim_id: ExecutionOutboxClaimId,
         claimed_at: datetime,
     ) -> ExecutionOutboxRecord | None:
         async with self._lock:
@@ -378,6 +409,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
                 state=ExecutionOutboxState.PUBLISHING,
                 claimed_at=claimed_at,
                 publisher_id=publisher_id,
+                claim_id=claim_id,
                 publish_attempt_count=outbox.publish_attempt_count + 1,
                 last_error=None,
             )
@@ -388,15 +420,33 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         self,
         *,
         outbox_id: ExecutionOutboxId,
+        claim_id: ExecutionOutboxClaimId,
         published_at: datetime,
-    ) -> ExecutionOutboxRecord:
+    ) -> ExecutionOutboxTransitionResult:
         async with self._lock:
             outbox = self._require_outbox(outbox_id)
             if outbox.state is ExecutionOutboxState.PUBLISHED:
-                return outbox
+                if outbox.claim_id == claim_id:
+                    return outbox
+                return ExecutionOutboxClaimLost(
+                    outbox_id=outbox_id,
+                    claim_id=claim_id,
+                    reason="outbox_already_published",
+                    current=outbox,
+                )
             if outbox.state is not ExecutionOutboxState.PUBLISHING:
-                raise ExecutionStateError(
-                    "only publishing outbox records can be published"
+                return ExecutionOutboxClaimLost(
+                    outbox_id=outbox_id,
+                    claim_id=claim_id,
+                    reason=f"outbox_not_publishable:{outbox.state.value}",
+                    current=outbox,
+                )
+            if outbox.claim_id != claim_id:
+                return ExecutionOutboxClaimLost(
+                    outbox_id=outbox_id,
+                    claim_id=claim_id,
+                    reason="outbox_claim_lost",
+                    current=outbox,
                 )
             updated = replace(
                 outbox,
@@ -411,16 +461,32 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         self,
         *,
         outbox_id: ExecutionOutboxId,
+        claim_id: ExecutionOutboxClaimId,
         error: str,
         failed_at: datetime,
-    ) -> ExecutionOutboxRecord:
+    ) -> ExecutionOutboxTransitionResult:
         async with self._lock:
             outbox = self._require_outbox(outbox_id)
             if outbox.state is ExecutionOutboxState.PUBLISHED:
-                return outbox
+                return ExecutionOutboxClaimLost(
+                    outbox_id=outbox_id,
+                    claim_id=claim_id,
+                    reason="outbox_already_published",
+                    current=outbox,
+                )
             if outbox.state is not ExecutionOutboxState.PUBLISHING:
-                raise ExecutionStateError(
-                    "only publishing outbox records can fail publication"
+                return ExecutionOutboxClaimLost(
+                    outbox_id=outbox_id,
+                    claim_id=claim_id,
+                    reason=f"outbox_not_publishable:{outbox.state.value}",
+                    current=outbox,
+                )
+            if outbox.claim_id != claim_id:
+                return ExecutionOutboxClaimLost(
+                    outbox_id=outbox_id,
+                    claim_id=claim_id,
+                    reason="outbox_claim_lost",
+                    current=outbox,
                 )
             updated = replace(
                 outbox,
@@ -454,6 +520,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
                 state=ExecutionOutboxState.PENDING,
                 claimed_at=None,
                 publisher_id=None,
+                claim_id=None,
                 last_error=reason,
                 metadata={
                     **dict(outbox.metadata),
@@ -532,6 +599,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
                 state=ExecutionOutboxState.PENDING,
                 claimed_at=None,
                 publisher_id=None,
+                claim_id=None,
                 published_at=None,
                 last_error=reason,
                 metadata={
@@ -652,6 +720,109 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         if not ids:
             return None
         return ids[-1]
+
+    def _execution_claim_lost(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str | None,
+        reason: str,
+        current: ExecutionRecord | None = None,
+    ) -> ExecutionClaimLost:
+        return ExecutionClaimLost(
+            execution_id=execution_id,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            reason=reason,
+            current=current,
+        )
+
+    def _load_attempt_for_transition(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        current: ExecutionRecord,
+    ) -> ExecutionAttemptRecord | ExecutionClaimLost:
+        if attempt_id is None:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=None,
+                worker_id=worker_id,
+                reason="attempt_id_required",
+                current=current,
+            )
+        attempt = self._attempts.get(attempt_id)
+        if attempt is None:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="attempt_not_found",
+                current=current,
+            )
+        if attempt.execution_id != execution_id:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="attempt_execution_mismatch",
+                current=current,
+            )
+        if attempt.worker_id != worker_id:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="worker_mismatch:attempt",
+                current=current,
+            )
+        return attempt
+
+    def _transition_claim_lost(
+        self,
+        *,
+        execution_id: ExecutionId,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        current: ExecutionRecord,
+        attempt: ExecutionAttemptRecord,
+    ) -> ExecutionClaimLost | None:
+        if current.state is not ExecutionState.CLAIMED:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason=f"execution_not_claimed:{current.state.value}",
+                current=current,
+            )
+        if current.worker_id != worker_id:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="worker_mismatch:execution",
+                current=current,
+            )
+        if attempt.attempt_number != current.attempt_count:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason="attempt_not_current",
+                current=current,
+            )
+        if attempt.state is not ExecutionAttemptState.RUNNING:
+            return self._execution_claim_lost(
+                execution_id=execution_id,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                reason=f"attempt_not_running:{attempt.state.value}",
+                current=current,
+            )
+        return None
 
     def _resolve_running_attempt(
         self,

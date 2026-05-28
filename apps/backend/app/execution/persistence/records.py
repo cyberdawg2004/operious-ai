@@ -16,6 +16,7 @@ from app.execution.enums import (
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
+    ExecutionOutboxClaimId,
     ExecutionOutboxId,
 )
 
@@ -72,6 +73,17 @@ class ExecutionClaimRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionClaimLost:
+    """Typed stale-worker outcome for a lost execution claim."""
+
+    execution_id: ExecutionId
+    attempt_id: ExecutionAttemptId | None
+    worker_id: str | None
+    reason: str
+    current: ExecutionRecord | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionOutboxRecord:
     """Durable transport intent for one execution record."""
 
@@ -82,14 +94,35 @@ class ExecutionOutboxRecord:
     claimed_at: datetime | None = None
     published_at: datetime | None = None
     publisher_id: str | None = None
+    claim_id: ExecutionOutboxClaimId | None = None
     publish_attempt_count: int = 0
     last_error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class ExecutionOutboxClaimLost:
+    """Typed stale-publisher outcome for a lost outbox claim."""
+
+    outbox_id: ExecutionOutboxId
+    claim_id: ExecutionOutboxClaimId | None
+    reason: str
+    current: ExecutionOutboxRecord | None = None
+
+
+ExecutionTransitionResult = ExecutionRecord | ExecutionClaimLost
+ExecutionOutboxTransitionResult = (
+    ExecutionOutboxRecord | ExecutionOutboxClaimLost
+)
+
+
 __all__ = [
     "ExecutionAttemptRecord",
+    "ExecutionClaimLost",
     "ExecutionClaimRecord",
+    "ExecutionOutboxClaimLost",
     "ExecutionOutboxRecord",
+    "ExecutionOutboxTransitionResult",
     "ExecutionRecord",
+    "ExecutionTransitionResult",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
@@ -18,25 +19,34 @@ from app.execution.exceptions import ExecutionAdmissionError
 from app.execution.identity import (
     ExecutionAttemptId,
     ExecutionId,
+    ExecutionOutboxClaimId,
     ExecutionOutboxId,
     as_attempt_id,
     as_execution_id,
+    as_outbox_claim_id,
     as_outbox_id,
     derive_execution_id,
+    derive_outbox_claim_id,
     derive_outbox_id,
 )
 from app.execution.persistence import (
     ExecutionAttemptPage,
     ExecutionAttemptQuery,
     ExecutionAttemptRecord,
+    ExecutionClaimLost,
     ExecutionPage,
+    ExecutionOutboxClaimLost,
     ExecutionOutboxRecord,
+    ExecutionOutboxTransitionResult,
     ExecutionPersistenceProtocol,
     ExecutionQuery,
     ExecutionRecord,
+    ExecutionTransitionResult,
     OutboxPage,
     OutboxQuery,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,11 +452,11 @@ class ExecutionRuntime:
         *,
         execution_id: ExecutionId | str,
         attempt_id: ExecutionAttemptId | str | None = None,
-        worker_id: str | None = None,
+        worker_id: str,
         result: Mapping[str, Any],
         completed_at: datetime | None = None,
-    ) -> ExecutionRecord:
-        _validate_optional_worker_id(worker_id)
+    ) -> ExecutionTransitionResult:
+        _validate_worker_id(worker_id)
         eid = (
             execution_id
             if not isinstance(execution_id, str)
@@ -461,25 +471,28 @@ class ExecutionRuntime:
                 else as_attempt_id(attempt_id)
             )
         )
-        return await self._persistence.complete_execution(
+        outcome = await self._persistence.complete_execution(
             execution_id=eid,
             attempt_id=aid,
             result=result,
             completed_at=completed_at or datetime.now(tz=timezone.utc),
             worker_id=worker_id,
         )
+        if isinstance(outcome, ExecutionClaimLost):
+            _log_execution_claim_lost(outcome, operation="complete")
+        return outcome
 
     async def fail_execution(
         self,
         *,
         execution_id: ExecutionId | str,
         attempt_id: ExecutionAttemptId | str | None = None,
-        worker_id: str | None = None,
+        worker_id: str,
         error: str,
         failed_at: datetime | None = None,
         retry_requested: bool = False,
-    ) -> ExecutionRecord:
-        _validate_optional_worker_id(worker_id)
+    ) -> ExecutionTransitionResult:
+        _validate_worker_id(worker_id)
         eid = (
             execution_id
             if not isinstance(execution_id, str)
@@ -494,7 +507,7 @@ class ExecutionRuntime:
                 else as_attempt_id(attempt_id)
             )
         )
-        return await self._persistence.fail_execution(
+        outcome = await self._persistence.fail_execution(
             execution_id=eid,
             attempt_id=aid,
             error=error,
@@ -502,17 +515,20 @@ class ExecutionRuntime:
             retry_requested=retry_requested,
             worker_id=worker_id,
         )
+        if isinstance(outcome, ExecutionClaimLost):
+            _log_execution_claim_lost(outcome, operation="fail")
+        return outcome
 
     async def dead_letter_execution(
         self,
         *,
         execution_id: ExecutionId | str,
         attempt_id: ExecutionAttemptId | str | None = None,
-        worker_id: str | None = None,
+        worker_id: str,
         error: str,
         dead_lettered_at: datetime | None = None,
-    ) -> ExecutionRecord:
-        _validate_optional_worker_id(worker_id)
+    ) -> ExecutionTransitionResult:
+        _validate_worker_id(worker_id)
         eid = (
             execution_id
             if not isinstance(execution_id, str)
@@ -527,13 +543,16 @@ class ExecutionRuntime:
                 else as_attempt_id(attempt_id)
             )
         )
-        return await self._persistence.dead_letter_execution(
+        outcome = await self._persistence.dead_letter_execution(
             execution_id=eid,
             attempt_id=aid,
             error=error,
             dead_lettered_at=dead_lettered_at or datetime.now(tz=timezone.utc),
             worker_id=worker_id,
         )
+        if isinstance(outcome, ExecutionClaimLost):
+            _log_execution_claim_lost(outcome, operation="dead_letter")
+        return outcome
 
     async def recover_stale_execution(
         self,
@@ -710,9 +729,28 @@ class ExecutionRuntime:
             if not isinstance(execution_id, str)
             else as_execution_id(execution_id)
         )
+        current = await self._persistence.get_outbox_by_execution(eid)
+        if current is None:
+            return ExecutionOutboxClaimResult(
+                claimed=False,
+                outbox=None,
+                reason="outbox_not_found",
+            )
+        if current.state is not ExecutionOutboxState.PENDING:
+            return ExecutionOutboxClaimResult(
+                claimed=False,
+                outbox=current,
+                reason=f"outbox_not_publishable:{current.state.value}",
+            )
+        claim_id = derive_outbox_claim_id(
+            outbox_id=current.outbox_id,
+            publisher_id=publisher_id,
+            publish_attempt_count=current.publish_attempt_count + 1,
+        )
         claimed = await self._persistence.claim_outbox_for_execution(
             execution_id=eid,
             publisher_id=publisher_id,
+            claim_id=claim_id,
             claimed_at=claimed_at or datetime.now(tz=timezone.utc),
         )
         if claimed is not None:
@@ -721,51 +759,69 @@ class ExecutionRuntime:
                 outbox=claimed,
             )
         current = await self._persistence.get_outbox_by_execution(eid)
-        if current is None:
-            return ExecutionOutboxClaimResult(
-                claimed=False,
-                outbox=None,
-                reason="outbox_not_found",
-            )
         return ExecutionOutboxClaimResult(
             claimed=False,
             outbox=current,
-            reason=f"outbox_not_publishable:{current.state.value}",
+            reason=(
+                "outbox_not_found"
+                if current is None
+                else f"outbox_not_publishable:{current.state.value}"
+            ),
         )
 
     async def mark_outbox_published(
         self,
         *,
         outbox_id: ExecutionOutboxId | str,
+        claim_id: ExecutionOutboxClaimId | str,
         published_at: datetime | None = None,
-    ) -> ExecutionOutboxRecord:
+    ) -> ExecutionOutboxTransitionResult:
         oid = (
             outbox_id
             if not isinstance(outbox_id, str)
             else as_outbox_id(outbox_id)
         )
-        return await self._persistence.mark_outbox_published(
+        cid = (
+            claim_id
+            if not isinstance(claim_id, str)
+            else as_outbox_claim_id(claim_id)
+        )
+        outcome = await self._persistence.mark_outbox_published(
             outbox_id=oid,
+            claim_id=cid,
             published_at=published_at or datetime.now(tz=timezone.utc),
         )
+        if isinstance(outcome, ExecutionOutboxClaimLost):
+            _log_outbox_claim_lost(outcome, operation="published")
+        return outcome
 
     async def mark_outbox_failed(
         self,
         *,
         outbox_id: ExecutionOutboxId | str,
+        claim_id: ExecutionOutboxClaimId | str,
         error: str,
         failed_at: datetime | None = None,
-    ) -> ExecutionOutboxRecord:
+    ) -> ExecutionOutboxTransitionResult:
         oid = (
             outbox_id
             if not isinstance(outbox_id, str)
             else as_outbox_id(outbox_id)
         )
-        return await self._persistence.mark_outbox_failed(
+        cid = (
+            claim_id
+            if not isinstance(claim_id, str)
+            else as_outbox_claim_id(claim_id)
+        )
+        outcome = await self._persistence.mark_outbox_failed(
             outbox_id=oid,
+            claim_id=cid,
             error=error,
             failed_at=failed_at or datetime.now(tz=timezone.utc),
         )
+        if isinstance(outcome, ExecutionOutboxClaimLost):
+            _log_outbox_claim_lost(outcome, operation="failed")
+        return outcome
 
     async def reconcile_stale_outbox(
         self,
@@ -1049,9 +1105,9 @@ __all__ = [
 ]
 
 
-def _validate_optional_worker_id(worker_id: str | None) -> None:
-    if worker_id is not None and not worker_id:
-        raise ValueError("worker_id must be non-empty when supplied")
+def _validate_worker_id(worker_id: str) -> None:
+    if not worker_id:
+        raise ValueError("worker_id must be non-empty")
 
 
 def _validate_optional_tenant_id(tenant_id: str | None) -> None:
@@ -1078,6 +1134,45 @@ def _worker_legitimacy_violation(
     if attempt.attempt_number != execution.attempt_count:
         return "attempt_not_current"
     return None
+
+
+def _log_execution_claim_lost(
+    outcome: ExecutionClaimLost,
+    *,
+    operation: str,
+) -> None:
+    logger.info(
+        "execution_claim_lost",
+        extra={
+            "operation": operation,
+            "execution_id": str(outcome.execution_id),
+            "attempt_id": (
+                None
+                if outcome.attempt_id is None
+                else str(outcome.attempt_id)
+            ),
+            "worker_id": outcome.worker_id,
+            "reason": outcome.reason,
+        },
+    )
+
+
+def _log_outbox_claim_lost(
+    outcome: ExecutionOutboxClaimLost,
+    *,
+    operation: str,
+) -> None:
+    logger.info(
+        "execution_outbox_claim_lost",
+        extra={
+            "operation": operation,
+            "outbox_id": str(outcome.outbox_id),
+            "claim_id": (
+                None if outcome.claim_id is None else str(outcome.claim_id)
+            ),
+            "reason": outcome.reason,
+        },
+    )
 
 
 _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES = frozenset(

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.execution import (
+    ExecutionClaimLost,
     ExecutionAttemptQuery,
     ExecutionAttemptState,
     ExecutionQuery,
@@ -18,7 +19,7 @@ from app.execution import (
     derive_execution_id,
 )
 from app.execution.enums import ExecutionKind, ExecutionOutboxState
-from app.execution.exceptions import ExecutionAdmissionError, ExecutionStateError
+from app.execution.exceptions import ExecutionAdmissionError
 from tests.conftest import execution_admission_token
 
 
@@ -274,14 +275,17 @@ async def test_completed_execution_cannot_be_reclaimed() -> None:
         requested_at=_NOW,
         admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
-    await runtime.claim_execution(
+    claimed = await runtime.claim_execution(
         execution_id=request.execution.execution_id,
         worker_id="worker-a",
         claimed_at=_NOW,
     )
+    assert claimed.attempt is not None
 
     completed = await runtime.complete_execution(
         execution_id=request.execution.execution_id,
+        attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-a",
         result={"summary": "done"},
         completed_at=_NOW,
     )
@@ -309,12 +313,16 @@ async def test_complete_requires_claimed_state() -> None:
         admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
     )
 
-    with pytest.raises(ExecutionStateError):
-        await runtime.complete_execution(
-            execution_id=request.execution.execution_id,
-            result={},
-            completed_at=_NOW,
-        )
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=None,
+        worker_id="worker-a",
+        result={},
+        completed_at=_NOW,
+    )
+
+    assert isinstance(completed, ExecutionClaimLost)
+    assert completed.reason == "attempt_id_required"
 
 
 @pytest.mark.asyncio
@@ -366,9 +374,11 @@ async def test_published_outbox_cannot_be_reclaimed() -> None:
         claimed_at=_NOW,
     )
     assert claimed.outbox is not None
+    assert claimed.outbox.claim_id is not None
 
     published = await runtime.mark_outbox_published(
         outbox_id=claimed.outbox.outbox_id,
+        claim_id=claimed.outbox.claim_id,
         published_at=_NOW,
     )
     duplicate = await runtime.claim_outbox_for_execution(
@@ -399,9 +409,11 @@ async def test_failed_outbox_records_transport_error() -> None:
         claimed_at=_NOW,
     )
     assert claimed.outbox is not None
+    assert claimed.outbox.claim_id is not None
 
     failed = await runtime.mark_outbox_failed(
         outbox_id=claimed.outbox.outbox_id,
+        claim_id=claimed.outbox.claim_id,
         error="broker unavailable",
         failed_at=_NOW,
     )
@@ -436,6 +448,7 @@ async def test_attempt_id_is_deterministic_and_attempt_is_completed() -> None:
     completed = await runtime.complete_execution(
         execution_id=request.execution.execution_id,
         attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-a",
         result={"summary": "done"},
         completed_at=_NOW,
     )
@@ -471,6 +484,7 @@ async def test_retryable_failure_reopens_execution_with_attempt_lineage() -> Non
     reopened = await runtime.fail_execution(
         execution_id=request.execution.execution_id,
         attempt_id=first.attempt.attempt_id,
+        worker_id="worker-a",
         error="transient",
         failed_at=_NOW,
         retry_requested=True,
@@ -515,6 +529,7 @@ async def test_dead_lettered_execution_cannot_be_reclaimed() -> None:
     dead_lettered = await runtime.dead_letter_execution(
         execution_id=request.execution.execution_id,
         attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-a",
         error="exhausted",
         dead_lettered_at=_NOW,
     )
@@ -628,19 +643,20 @@ async def test_worker_legitimacy_rejects_wrong_worker_completion() -> None:
     )
     assert claimed.attempt is not None
 
-    with pytest.raises(ExecutionStateError):
-        await runtime.complete_execution(
-            execution_id=request.execution.execution_id,
-            attempt_id=claimed.attempt.attempt_id,
-            worker_id="worker-b",
-            result={"summary": "late"},
-            completed_at=_NOW,
-        )
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-b",
+        result={"summary": "late"},
+        completed_at=_NOW,
+    )
 
     current = await store.get_execution(request.execution.execution_id)
     attempts = await store.list_attempts(
         ExecutionAttemptQuery(execution_id=request.execution.execution_id)
     )
+    assert isinstance(completed, ExecutionClaimLost)
+    assert completed.reason == "worker_mismatch:attempt"
     assert current is not None
     assert current.state is ExecutionState.CLAIMED
     assert attempts.attempts[0].state is ExecutionAttemptState.RUNNING
@@ -702,14 +718,16 @@ async def test_stale_attempt_cannot_complete_after_recovery() -> None:
         recovered_at=_NOW + timedelta(minutes=6),
     )
 
-    with pytest.raises(ExecutionStateError):
-        await runtime.complete_execution(
-            execution_id=request.execution.execution_id,
-            attempt_id=first.attempt.attempt_id,
-            worker_id="worker-a",
-            result={"summary": "too late"},
-            completed_at=_NOW + timedelta(minutes=7),
-        )
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=first.attempt.attempt_id,
+        worker_id="worker-a",
+        result={"summary": "too late"},
+        completed_at=_NOW + timedelta(minutes=7),
+    )
+
+    assert isinstance(completed, ExecutionClaimLost)
+    assert completed.reason == "execution_not_claimed:requested"
 
 
 @pytest.mark.asyncio

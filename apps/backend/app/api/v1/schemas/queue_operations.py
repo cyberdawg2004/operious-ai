@@ -69,6 +69,7 @@ class DeadLetterItem(BaseModel):
     task_payload: dict[str, Any]
     created_at: datetime
     replayed: bool
+    replay_state: str
     replayed_at: datetime | None
     replayed_by: str | None
 
@@ -85,6 +86,7 @@ class DeadLetterItem(BaseModel):
             task_payload=dict(record.task_payload),
             created_at=record.created_at,
             replayed=record.replayed,
+            replay_state=record.replay_state,
             replayed_at=record.replayed_at,
             replayed_by=record.replayed_by,
         )

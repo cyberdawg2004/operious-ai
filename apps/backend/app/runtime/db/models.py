@@ -142,6 +142,23 @@ class DeadLetterTaskRow(Base):
     replayed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    replay_state: Mapped[str] = mapped_column(
+        String(_STATE_WIDTH),
+        nullable=False,
+        default="none",
+        server_default=text("'none'"),
+        index=True,
+    )
+    replay_claim_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    replay_attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    replay_claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    replay_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     replayed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -160,6 +177,14 @@ class DeadLetterTaskRow(Base):
         CheckConstraint("length(task_id) > 0", name="task_id_nonempty"),
         CheckConstraint("length(reason) > 0", name="reason_nonempty"),
         CheckConstraint("retry_count >= 0", name="dead_letter_retry_nonnegative"),
+        CheckConstraint(
+            "replay_state IN ('none', 'claimed', 'published', 'failed')",
+            name="dead_letter_replay_state_valid",
+        ),
+        CheckConstraint(
+            "replay_attempt_count >= 0",
+            name="dead_letter_replay_attempt_nonnegative",
+        ),
         UniqueConstraint(
             "task_name",
             "task_id",
@@ -173,6 +198,11 @@ class DeadLetterTaskRow(Base):
         Index(
             "ix_dead_letter_tasks_replayed",
             "replayed",
+            "tenant_id",
+        ),
+        Index(
+            "ix_dead_letter_tasks_replay_state_tenant",
+            "replay_state",
             "tenant_id",
         ),
     )

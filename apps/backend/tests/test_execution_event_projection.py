@@ -127,8 +127,10 @@ async def test_projector_projects_execution_lineage_idempotently() -> None:
         claimed_at=_NOW + timedelta(seconds=1),
     )
     assert outbox_claim.outbox is not None
+    assert outbox_claim.outbox.claim_id is not None
     await runtime.mark_outbox_published(
         outbox_id=outbox_claim.outbox.outbox_id,
+        claim_id=outbox_claim.outbox.claim_id,
         published_at=_NOW + timedelta(seconds=2),
     )
     first_claim = await runtime.claim_execution(

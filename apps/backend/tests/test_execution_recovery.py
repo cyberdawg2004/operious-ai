@@ -267,8 +267,10 @@ async def _create_failed_outbox(
         claimed_at=failed_at - timedelta(seconds=1),
     )
     assert claim.outbox is not None
+    assert claim.outbox.claim_id is not None
     failed = await runtime.mark_outbox_failed(
         outbox_id=claim.outbox.outbox_id,
+        claim_id=claim.outbox.claim_id,
         error="broker unavailable",
         failed_at=failed_at,
     )

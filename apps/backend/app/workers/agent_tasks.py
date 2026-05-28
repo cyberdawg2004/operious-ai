@@ -46,7 +46,11 @@ from app.coordination.persistence import (
 from app.core.config import get_settings
 from app.db.session import dispose_engine, get_session_factory, reset_engine_state
 from app.db.tenant_context import get_current_tenant, set_current_tenant
-from app.execution import ExecutionRuntime, PostgresExecutionPersistence
+from app.execution import (
+    ExecutionClaimLost,
+    ExecutionRuntime,
+    PostgresExecutionPersistence,
+)
 from app.governance.persistence import PostgresGovernanceRepository
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
@@ -402,12 +406,24 @@ async def _persist_diagnostic_success(
             diagnostic_event_id=diagnostic_event.timeline_event_id,
         )
         completed_payload = result.model_dump()
-        await execution_runtime.complete_execution(
+        completed = await execution_runtime.complete_execution(
             execution_id=work_item.execution_id,
             attempt_id=work_item.attempt_id,
             worker_id=worker_id,
             result=completed_payload,
         )
+        if isinstance(completed, ExecutionClaimLost):
+            await session.rollback()
+            return {
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "worker_id": worker_id,
+                "dispatch_id": work_item.dispatch_id,
+                "session_id": work_item.session_id,
+                "tenant_id": work_item.tenant_id,
+                "status": "claim_lost",
+                "reason": completed.reason,
+            }
         await session.commit()
         supervisor_queued = await _queue_supervisor_if_closed(
             session_repo=session_repo,
@@ -809,13 +825,16 @@ async def _fail_execution_record(
     retry_requested: bool,
 ) -> bool:
     try:
-        await execution_runtime.fail_execution(
+        failed = await execution_runtime.fail_execution(
             execution_id=str(execution_id),
             attempt_id=str(attempt_id),
             worker_id=worker_id,
             error=str(failure.get("message") or failure),
             retry_requested=retry_requested,
         )
+        if isinstance(failed, ExecutionClaimLost):
+            await session.rollback()
+            return False
         await session.commit()
         return True
     except Exception:  # noqa: BLE001
@@ -833,12 +852,15 @@ async def _dead_letter_execution_record(
     failure: Mapping[str, object],
 ) -> bool:
     try:
-        await execution_runtime.dead_letter_execution(
+        dead_lettered = await execution_runtime.dead_letter_execution(
             execution_id=str(execution_id),
             attempt_id=str(attempt_id),
             worker_id=worker_id,
             error=str(failure.get("message") or failure),
         )
+        if isinstance(dead_lettered, ExecutionClaimLost):
+            await session.rollback()
+            return False
         await session.commit()
         return True
     except Exception:  # noqa: BLE001

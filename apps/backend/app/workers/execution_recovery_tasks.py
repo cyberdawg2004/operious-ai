@@ -22,6 +22,7 @@ from app.execution import (
     ExecutionRuntime,
     PostgresExecutionPersistence,
 )
+from app.services.queue_operations_service import QueueOperationsService
 from app.workers.celery_app import celery_app
 from app.queues import QUEUE_WEBHOOK_MAINTENANCE
 
@@ -190,6 +191,57 @@ def reconcile_failed_execution_outbox(
     )
 
 
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="recover_dead_letter_replays",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
+    bind=True,
+    ignore_result=True,
+    max_retries=5,
+    default_retry_delay=30,
+)
+def recover_dead_letter_replays(
+    _self: Any,
+    *,
+    claimed_before: str | None = None,
+    lease_seconds: int | None = None,
+    limit: int | None = None,
+    tenant_id: str | None = None,
+    reason: str = "dead-letter replay recovery",
+) -> dict[str, object]:
+    """Make failed or stale claimed DLQ replay rows retryable."""
+
+    settings = get_settings()
+    if lease_seconds is not None and lease_seconds < 1:
+        raise ValueError("lease_seconds must be positive")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    recovered_at = datetime.now(tz=timezone.utc)
+    threshold = (
+        _parse_datetime(claimed_before)
+        if claimed_before is not None
+        else recovered_at
+        - timedelta(
+            seconds=(
+                lease_seconds
+                if lease_seconds is not None
+                else settings.EXECUTION_CLAIM_LEASE_SECONDS
+            )
+        )
+    )
+    return _run_async(
+        recover_dead_letter_replays_runtime(
+            claimed_before_or_at=threshold,
+            limit=(
+                limit
+                if limit is not None
+                else settings.EXECUTION_RECOVERY_BATCH_SIZE
+            ),
+            tenant_id=tenant_id,
+            reason=reason,
+        )
+    )
+
+
 async def recover_stale_executions_runtime(
     *,
     stale_before: datetime,
@@ -266,6 +318,33 @@ async def reconcile_failed_execution_outbox_runtime(
         )
         await session.commit()
         return _serialize_outbox_sweep(sweep)
+
+
+async def recover_dead_letter_replays_runtime(
+    *,
+    claimed_before_or_at: datetime,
+    limit: int = 100,
+    tenant_id: str | None = None,
+    reason: str = "dead-letter replay recovery",
+) -> dict[str, object]:
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
+    async with session_factory() as session:
+        service = QueueOperationsService(session=session)
+        recovery = await service.recover_dead_letter_replays(
+            claimed_before_or_at=claimed_before_or_at,
+            tenant_id=tenant_id,
+            limit=limit,
+            reason=reason,
+        )
+        await session.commit()
+        return {
+            "status": "completed",
+            "scanned": recovery.scanned,
+            "recovered_count": recovery.recovered_count,
+            "recovered_ids": list(recovery.recovered_ids),
+        }
 
 
 def _serialize_sweep(
@@ -377,6 +456,8 @@ def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 __all__ = [
     "reconcile_failed_execution_outbox",
     "reconcile_failed_execution_outbox_runtime",
+    "recover_dead_letter_replays",
+    "recover_dead_letter_replays_runtime",
     "recover_stale_executions",
     "recover_stale_executions_runtime",
     "reconcile_stale_execution_outbox",

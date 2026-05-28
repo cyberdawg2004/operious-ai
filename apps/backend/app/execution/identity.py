@@ -18,6 +18,7 @@ from app.identity import project_optional_str
 ExecutionId = NewType("ExecutionId", uuid.UUID)
 ExecutionAttemptId = NewType("ExecutionAttemptId", uuid.UUID)
 ExecutionOutboxId = NewType("ExecutionOutboxId", uuid.UUID)
+ExecutionOutboxClaimId = NewType("ExecutionOutboxClaimId", uuid.UUID)
 
 
 _EXECUTION_NAMESPACE: uuid.UUID = uuid.UUID(
@@ -28,6 +29,9 @@ _OUTBOX_NAMESPACE: uuid.UUID = uuid.UUID(
 )
 _ATTEMPT_NAMESPACE: uuid.UUID = uuid.UUID(
     "e0ec7001-0003-4003-8003-000000000003"
+)
+_OUTBOX_CLAIM_NAMESPACE: uuid.UUID = uuid.UUID(
+    "e0ec7001-0004-4004-8004-000000000004"
 )
 _RUNTIME_BOOT_ID = secrets.token_urlsafe(32)
 _RUNTIME_COUNTER = itertools.count()
@@ -76,6 +80,24 @@ def derive_outbox_id(*, execution_id: uuid.UUID) -> ExecutionOutboxId:
     )
 
 
+def derive_outbox_claim_id(
+    *,
+    outbox_id: uuid.UUID | str,
+    publisher_id: str,
+    publish_attempt_count: int,
+) -> ExecutionOutboxClaimId:
+    if not publisher_id:
+        raise ValueError("publisher_id is required")
+    if publish_attempt_count < 1:
+        raise ValueError("publish_attempt_count must be >= 1")
+    return ExecutionOutboxClaimId(
+        uuid.uuid5(
+            _OUTBOX_CLAIM_NAMESPACE,
+            f"{outbox_id}|{publisher_id}|{publish_attempt_count}",
+        )
+    )
+
+
 def derive_attempt_id(
     *, execution_id: uuid.UUID, attempt_number: int
 ) -> ExecutionAttemptId:
@@ -103,15 +125,24 @@ def as_outbox_id(value: uuid.UUID | str) -> ExecutionOutboxId:
     )
 
 
+def as_outbox_claim_id(value: uuid.UUID | str) -> ExecutionOutboxClaimId:
+    return ExecutionOutboxClaimId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
 __all__ = [
     "ExecutionAttemptId",
     "ExecutionId",
+    "ExecutionOutboxClaimId",
     "ExecutionOutboxId",
     "as_attempt_id",
     "as_execution_id",
+    "as_outbox_claim_id",
     "as_outbox_id",
     "derive_attempt_id",
     "derive_execution_id",
+    "derive_outbox_claim_id",
     "derive_outbox_id",
     "generate_execution_id",
 ]

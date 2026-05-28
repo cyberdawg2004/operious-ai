@@ -6,8 +6,10 @@ import asyncio
 import ast
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Thread
 from typing import Any
 
 from fastapi import Depends
@@ -28,7 +30,13 @@ from app.queues import (
     QUEUE_QA,
 )
 from app.runtime.db.models import DeadLetterTaskRow
-from app.services.queue_operations_service import QueueOperationsService
+from app.services.queue_operations_service import (
+    DEAD_LETTER_REPLAY_CLAIMED,
+    DEAD_LETTER_REPLAY_FAILED,
+    DEAD_LETTER_REPLAY_NONE,
+    DEAD_LETTER_REPLAY_PUBLISHED,
+    QueueOperationsService,
+)
 from app.tenant.db.models import TenantRow
 from tests.conftest import requires_postgres, set_pg_rls_tenant
 
@@ -316,8 +324,119 @@ async def test_replay_marks_record_as_replayed(
     ]
     await pg_session.refresh(row)
     assert row.replayed is True
+    assert row.replay_state == DEAD_LETTER_REPLAY_PUBLISHED
+    assert row.replay_claim_id is not None
     assert row.replayed_by == "operator-principal"
     assert row.replayed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_replay_commits_claimed_state_before_publish(
+    pg_engine: AsyncEngine,
+) -> None:
+    seed = f"claimed-first-{uuid.uuid4()}"
+    async with _queue_session_for_tenant(pg_engine, _TENANT) as session:
+        row = await _seed_dlq(
+            session,
+            tenant_id=_TENANT,
+            seed=seed,
+        )
+        dlq_id = row.dead_letter_task_id
+        await session.commit()
+
+    sent = _InspectingSentTasks(
+        engine=pg_engine,
+        dlq_id=dlq_id,
+        tenant_id=_TENANT,
+    )
+    async with _queue_session_for_tenant(pg_engine, _TENANT) as session:
+        service = QueueOperationsService(session=session, replay_publisher=sent)
+
+        result = await service.replay_dead_letter(
+            dlq_id=str(dlq_id),
+            tenant_id=_TENANT,
+            replayed_by="operator-principal",
+        )
+
+    assert result.status == "replayed"
+    assert sent.observed_state == DEAD_LETTER_REPLAY_CLAIMED
+    assert sent.observed_replayed is False
+    assert sent.calls == [
+        (
+            "execute_diagnostic_agent",
+            {"execution_id": f"execution-{seed}", "tenant_id": _TENANT},
+            QUEUE_DIAGNOSTIC_NORMAL,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_replay_publish_failure_marks_failed_not_stranded(
+    pg_session: AsyncSession,
+) -> None:
+    row = await _seed_dlq(pg_session, tenant_id=_TENANT, seed="publish-fails")
+    service = QueueOperationsService(
+        session=pg_session,
+        replay_publisher=_FailingSentTasks(),
+    )
+
+    with pytest.raises(RuntimeError, match="broker unavailable"):
+        await service.replay_dead_letter(
+            dlq_id=str(row.dead_letter_task_id),
+            tenant_id=_TENANT,
+            replayed_by="operator-principal",
+        )
+
+    await pg_session.refresh(row)
+    assert row.replay_state == DEAD_LETTER_REPLAY_FAILED
+    assert row.replayed is False
+    assert row.replay_claim_id is not None
+    assert row.replay_last_error is not None
+    assert "RuntimeError: broker unavailable" in row.replay_last_error
+
+
+@pytest.mark.asyncio
+async def test_replay_recovery_reattempts_failed_row(
+    pg_session: AsyncSession,
+) -> None:
+    old_claim = uuid.uuid5(uuid.NAMESPACE_URL, "failed-replay-claim")
+    row = await _seed_dlq(
+        pg_session,
+        tenant_id=_TENANT,
+        seed="failed-retry",
+        replay_state=DEAD_LETTER_REPLAY_FAILED,
+        replay_attempt_count=1,
+        replay_claim_id=old_claim,
+        replay_claimed_at=_NOW,
+    )
+    sent = _SentTasks()
+    service = QueueOperationsService(session=pg_session, replay_publisher=sent)
+
+    recovered = await service.recover_dead_letter_replays(
+        claimed_before_or_at=_NOW,
+        tenant_id=_TENANT,
+    )
+    await pg_session.commit()
+    await service.replay_dead_letter(
+        dlq_id=str(row.dead_letter_task_id),
+        tenant_id=_TENANT,
+        replayed_by="operator-principal",
+    )
+
+    await pg_session.refresh(row)
+    assert recovered.recovered_count == 1
+    assert recovered.recovered_ids == (str(row.dead_letter_task_id),)
+    assert row.replay_state == DEAD_LETTER_REPLAY_PUBLISHED
+    assert row.replayed is True
+    assert row.replay_attempt_count == 2
+    assert row.replay_claim_id != old_claim
+    assert sent.calls == [
+        (
+            "execute_diagnostic_agent",
+            {"execution_id": "execution-failed-retry", "tenant_id": _TENANT},
+            QUEUE_DIAGNOSTIC_NORMAL,
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -545,6 +664,10 @@ async def _seed_dlq(
     queue: str | None = QUEUE_DIAGNOSTIC_NORMAL,
     metadata: Mapping[str, Any] | None = None,
     replayed: bool = False,
+    replay_state: str | None = None,
+    replay_attempt_count: int = 0,
+    replay_claim_id: uuid.UUID | None = None,
+    replay_claimed_at: datetime | None = None,
     created_at: datetime | None = None,
 ) -> DeadLetterTaskRow:
     await session.merge(TenantRow(tenant_id=tenant_id))
@@ -563,6 +686,18 @@ async def _seed_dlq(
         retry_count=3,
         created_at=created_at or _NOW,
         replayed=replayed,
+        replay_state=(
+            replay_state
+            if replay_state is not None
+            else (
+                DEAD_LETTER_REPLAY_PUBLISHED
+                if replayed
+                else DEAD_LETTER_REPLAY_NONE
+            )
+        ),
+        replay_claim_id=replay_claim_id,
+        replay_attempt_count=replay_attempt_count,
+        replay_claimed_at=replay_claimed_at,
         replayed_at=_NOW if replayed else None,
         replayed_by="operator-principal" if replayed else None,
         metadata_json=dict(
@@ -649,3 +784,97 @@ class _SentTasks:
         queue: str,
     ) -> None:
         self.calls.append((task_name, dict(kwargs), queue))
+
+
+class _FailingSentTasks:
+    def publish(
+        self,
+        *,
+        task_name: str,
+        kwargs: Mapping[str, Any],
+        queue: str,
+    ) -> None:
+        del task_name, kwargs, queue
+        raise RuntimeError("broker unavailable")
+
+
+class _InspectingSentTasks(_SentTasks):
+    def __init__(
+        self,
+        *,
+        engine: AsyncEngine,
+        dlq_id: uuid.UUID,
+        tenant_id: str,
+    ) -> None:
+        super().__init__()
+        self._engine = engine
+        self._dlq_id = dlq_id
+        self._tenant_id = tenant_id
+        self.observed_state: str | None = None
+        self.observed_replayed: bool | None = None
+
+    def publish(
+        self,
+        *,
+        task_name: str,
+        kwargs: Mapping[str, Any],
+        queue: str,
+    ) -> None:
+        errors: list[BaseException] = []
+
+        def runner() -> None:
+            try:
+                asyncio.run(self._inspect_claim())
+            except BaseException as exc:  # noqa: BLE001 - test helper surfaces it.
+                errors.append(exc)
+
+        thread = Thread(target=runner)
+        thread.start()
+        thread.join()
+        if errors:
+            raise errors[0]
+        super().publish(task_name=task_name, kwargs=kwargs, queue=queue)
+
+    async def _inspect_claim(self) -> None:
+        async with self._engine.connect() as connection:
+            await connection.execute(
+                text("SELECT set_config('app.current_tenant_id', :t, false)"),
+                {"t": self._tenant_id},
+            )
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT replay_state, replayed "
+                        "FROM dead_letter_tasks "
+                        "WHERE dead_letter_task_id = :id "
+                        "AND tenant_id = :tenant_id"
+                    ),
+                    {
+                        "id": self._dlq_id,
+                        "tenant_id": self._tenant_id,
+                    },
+                )
+            ).one()
+            self.observed_state = str(row[0])
+            self.observed_replayed = bool(row[1])
+
+
+@asynccontextmanager
+async def _queue_session_for_tenant(
+    engine: AsyncEngine,
+    tenant_id: str,
+) -> AsyncIterator[AsyncSession]:
+    connection = await engine.connect()
+    await connection.execute(
+        text("SELECT set_config('app.current_tenant_id', :t, false)"),
+        {"t": tenant_id},
+    )
+    await connection.commit()
+    session = AsyncSession(bind=connection, expire_on_commit=False)
+    try:
+        yield session
+    finally:
+        await session.close()
+        if connection.in_transaction():
+            await connection.rollback()
+        await connection.close()

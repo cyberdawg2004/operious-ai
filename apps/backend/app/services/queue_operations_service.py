@@ -33,6 +33,15 @@ from app.runtime.db.models import DeadLetterTaskRow
 
 logger = logging.getLogger(__name__)
 
+DEAD_LETTER_REPLAY_NONE = "none"
+DEAD_LETTER_REPLAY_CLAIMED = "claimed"
+DEAD_LETTER_REPLAY_PUBLISHED = "published"
+DEAD_LETTER_REPLAY_FAILED = "failed"
+
+_DLQ_REPLAY_CLAIM_NAMESPACE = uuid.UUID(
+    "d71c7001-0001-4001-8001-000000000001"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class QueueDepthItemRecord:
@@ -61,6 +70,7 @@ class DeadLetterItemRecord:
     task_payload: Mapping[str, Any]
     created_at: datetime
     replayed: bool
+    replay_state: str
     replayed_at: datetime | None
     replayed_by: str | None
 
@@ -78,6 +88,24 @@ class DeadLetterReplayRecord:
     id: str
     status: str
     replayed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeadLetterReplayRecoveryRecord:
+    scanned: int
+    recovered_count: int
+    recovered_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DeadLetterReplayClaim:
+    dlq_id: uuid.UUID
+    queue_name: str
+    kwargs: dict[str, Any]
+    task_name: str
+    replayed_at: datetime
+    replayed_by: str
+    claim_id: uuid.UUID
 
 
 class QueueOperationsError(RuntimeError):
@@ -188,48 +216,15 @@ class QueueOperationsService:
         previous_tenant = get_current_tenant()
         set_current_tenant(tenant_id)
 
-        async def claim_replay() -> tuple[str, dict[str, Any], str, datetime]:
-            replayed_at = datetime.now(timezone.utc)
-            row = (
-                await self._session.execute(
-                    update(DeadLetterTaskRow)
-                    .where(
-                        DeadLetterTaskRow.dead_letter_task_id == parsed_id,
-                        DeadLetterTaskRow.tenant_id == tenant_id,
-                        DeadLetterTaskRow.replayed.is_(False),
-                    )
-                    .values(
-                        replayed=True,
-                        replayed_at=replayed_at,
-                        replayed_by=replayed_by,
-                    )
-                    .returning(DeadLetterTaskRow)
-                )
-            ).scalar_one_or_none()
-            if row is None:
-                existing_id = (
-                    await self._session.execute(
-                        select(DeadLetterTaskRow.dead_letter_task_id).where(
-                            DeadLetterTaskRow.dead_letter_task_id == parsed_id,
-                            DeadLetterTaskRow.tenant_id == tenant_id,
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing_id is None:
-                    raise DeadLetterNotFoundError("dead-letter record not found")
-                raise DeadLetterAlreadyReplayedError(
-                    "dead-letter replay already in progress"
-                )
-
-            queue_name = _queue_for_row(row)
-            kwargs = _replay_kwargs_for_row(row)
-            task_name = row.task_name
-            return queue_name, kwargs, task_name, replayed_at
-
         try:
             try:
                 connection = await self._session.connection()
-                queue_name, kwargs, task_name, replayed_at = await claim_replay()
+                await self._set_replay_tenant(tenant_id)
+                claim = await self._claim_dead_letter_replay(
+                    parsed_id=parsed_id,
+                    tenant_id=tenant_id,
+                    replayed_by=replayed_by,
+                )
                 await self._session.commit()
                 if _should_commit_external_transaction(
                     session=self._session,
@@ -240,19 +235,323 @@ class QueueOperationsService:
                 if self._session.in_transaction():
                     await self._session.rollback()
                 raise
+
+            try:
+                self._replay_publisher.publish(
+                    task_name=claim.task_name,
+                    kwargs=claim.kwargs,
+                    queue=claim.queue_name,
+                )
+            except Exception as exc:
+                try:
+                    connection = await self._session.connection()
+                    await self._set_replay_tenant(tenant_id)
+                    await self._mark_dead_letter_replay_failed(
+                        claim=claim,
+                        failed_at=datetime.now(timezone.utc),
+                        error=_bounded_replay_error(exc),
+                    )
+                    await self._session.commit()
+                    if _should_commit_external_transaction(
+                        session=self._session,
+                        connection=connection,
+                    ):
+                        await connection.commit()
+                except Exception:
+                    if self._session.in_transaction():
+                        await self._session.rollback()
+                    raise
+                raise
+
+            published_at = datetime.now(timezone.utc)
+            try:
+                connection = await self._session.connection()
+                await self._set_replay_tenant(tenant_id)
+                published = await self._mark_dead_letter_replay_published(
+                    claim=claim,
+                    published_at=published_at,
+                )
+                await self._session.commit()
+                if _should_commit_external_transaction(
+                    session=self._session,
+                    connection=connection,
+                ):
+                    await connection.commit()
+            except Exception:
+                if self._session.in_transaction():
+                    await self._session.rollback()
+                raise
+            if not published:
+                raise DeadLetterAlreadyReplayedError(
+                    "dead-letter replay claim lost"
+                )
+            return DeadLetterReplayRecord(
+                id=str(parsed_id),
+                status="replayed",
+                replayed_at=published_at,
+            )
         finally:
             set_current_tenant(previous_tenant)
 
-        self._replay_publisher.publish(
-            task_name=task_name,
+    async def recover_dead_letter_replays(
+        self,
+        *,
+        claimed_before_or_at: datetime,
+        tenant_id: str | None = None,
+        limit: int = 100,
+        reason: str = "dead-letter replay recovery",
+    ) -> DeadLetterReplayRecoveryRecord:
+        """Make failed or stale claimed replay rows retryable again."""
+
+        if claimed_before_or_at.tzinfo is None:
+            raise ValueError("claimed_before_or_at must be timezone-aware")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if not reason:
+            raise ValueError("recovery reason must be non-empty")
+
+        previous_tenant = get_current_tenant()
+        if tenant_id is not None:
+            set_current_tenant(tenant_id)
+        try:
+            stmt = (
+                select(DeadLetterTaskRow)
+                .where(
+                    DeadLetterTaskRow.replayed.is_(False),
+                    or_(
+                        DeadLetterTaskRow.replay_state
+                        == DEAD_LETTER_REPLAY_FAILED,
+                        and_(
+                            DeadLetterTaskRow.replay_state
+                            == DEAD_LETTER_REPLAY_CLAIMED,
+                            DeadLetterTaskRow.replay_claimed_at.is_not(None),
+                            DeadLetterTaskRow.replay_claimed_at
+                            <= claimed_before_or_at,
+                        ),
+                    ),
+                )
+                .order_by(
+                    DeadLetterTaskRow.created_at,
+                    DeadLetterTaskRow.dead_letter_task_id,
+                )
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+            if tenant_id is not None:
+                stmt = stmt.where(DeadLetterTaskRow.tenant_id == tenant_id)
+            rows = (await self._session.execute(stmt)).scalars().all()
+            recovered_ids: list[str] = []
+            recovered_at = datetime.now(timezone.utc)
+            for row in rows:
+                metadata = dict(row.metadata_json or {})
+                row.replay_state = DEAD_LETTER_REPLAY_FAILED
+                row.replay_claim_id = None
+                row.replay_claimed_at = None
+                row.replay_last_error = reason
+                row.metadata_json = {
+                    **metadata,
+                    "replay_recovery.reason": reason,
+                    "replay_recovery.recovered_at": recovered_at.isoformat(),
+                }
+                recovered_ids.append(str(row.dead_letter_task_id))
+            await self._session.flush()
+            return DeadLetterReplayRecoveryRecord(
+                scanned=len(rows),
+                recovered_count=len(recovered_ids),
+                recovered_ids=tuple(recovered_ids),
+            )
+        finally:
+            set_current_tenant(previous_tenant)
+
+    async def _claim_dead_letter_replay(
+        self,
+        *,
+        parsed_id: uuid.UUID,
+        tenant_id: str,
+        replayed_by: str,
+    ) -> _DeadLetterReplayClaim:
+        row = (
+            await self._session.execute(
+                select(DeadLetterTaskRow)
+                .where(
+                    DeadLetterTaskRow.dead_letter_task_id == parsed_id,
+                    DeadLetterTaskRow.tenant_id == tenant_id,
+                    DeadLetterTaskRow.replayed.is_(False),
+                    DeadLetterTaskRow.replay_state.in_(
+                        (
+                            DEAD_LETTER_REPLAY_NONE,
+                            DEAD_LETTER_REPLAY_FAILED,
+                        )
+                    ),
+                )
+                .with_for_update(skip_locked=True)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            existing_id = (
+                await self._session.execute(
+                    select(DeadLetterTaskRow.dead_letter_task_id).where(
+                        DeadLetterTaskRow.dead_letter_task_id == parsed_id,
+                        DeadLetterTaskRow.tenant_id == tenant_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_id is None:
+                raise DeadLetterNotFoundError("dead-letter record not found")
+            raise DeadLetterAlreadyReplayedError(
+                "dead-letter replay already in progress"
+            )
+
+        queue_name = _queue_for_row(row)
+        kwargs = _replay_kwargs_for_row(row)
+        replayed_at = datetime.now(timezone.utc)
+        next_attempt_count = row.replay_attempt_count + 1
+        claim_id = _derive_replay_claim_id(
+            dlq_id=row.dead_letter_task_id,
+            tenant_id=row.tenant_id,
+            replay_attempt_count=next_attempt_count,
+        )
+        metadata = dict(row.metadata_json or {})
+        result = cast(
+            Any,
+            await self._session.execute(
+                update(DeadLetterTaskRow)
+                .where(
+                    DeadLetterTaskRow.dead_letter_task_id
+                    == row.dead_letter_task_id,
+                    DeadLetterTaskRow.tenant_id == tenant_id,
+                    DeadLetterTaskRow.replayed.is_(False),
+                    DeadLetterTaskRow.replay_state.in_(
+                        (
+                            DEAD_LETTER_REPLAY_NONE,
+                            DEAD_LETTER_REPLAY_FAILED,
+                        )
+                    ),
+                    DeadLetterTaskRow.replay_attempt_count
+                    == row.replay_attempt_count,
+                )
+                .values(
+                    replay_state=DEAD_LETTER_REPLAY_CLAIMED,
+                    replay_claim_id=claim_id,
+                    replay_attempt_count=next_attempt_count,
+                    replay_claimed_at=replayed_at,
+                    replay_last_error=None,
+                    replayed=False,
+                    replayed_at=None,
+                    replayed_by=replayed_by,
+                    metadata_json={
+                        **metadata,
+                        "replay.claimed_at": replayed_at.isoformat(),
+                        "replay.claim_id": str(claim_id),
+                    },
+                )
+            ),
+        )
+        if result.rowcount != 1:
+            raise DeadLetterAlreadyReplayedError(
+                "dead-letter replay already in progress"
+            )
+        return _DeadLetterReplayClaim(
+            dlq_id=row.dead_letter_task_id,
+            queue_name=queue_name,
             kwargs=kwargs,
-            queue=queue_name,
-        )
-        return DeadLetterReplayRecord(
-            id=str(parsed_id),
-            status="replayed",
+            task_name=row.task_name,
             replayed_at=replayed_at,
+            replayed_by=replayed_by,
+            claim_id=claim_id,
         )
+
+    async def _set_replay_tenant(self, tenant_id: str) -> None:
+        await self._session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
+            {"tenant_id": tenant_id},
+        )
+
+    async def _mark_dead_letter_replay_published(
+        self,
+        *,
+        claim: _DeadLetterReplayClaim,
+        published_at: datetime,
+    ) -> bool:
+        result = cast(
+            Any,
+            await self._session.execute(
+                update(DeadLetterTaskRow)
+                .where(
+                    DeadLetterTaskRow.dead_letter_task_id == claim.dlq_id,
+                    DeadLetterTaskRow.replay_state
+                    == DEAD_LETTER_REPLAY_CLAIMED,
+                    DeadLetterTaskRow.replay_claim_id == claim.claim_id,
+                    DeadLetterTaskRow.replayed.is_(False),
+                )
+                .values(
+                    replay_state=DEAD_LETTER_REPLAY_PUBLISHED,
+                    replayed=True,
+                    replayed_at=published_at,
+                    replayed_by=claim.replayed_by,
+                    replay_last_error=None,
+                    metadata_json=DeadLetterTaskRow.metadata_json.op("||")(
+                        {
+                            "replay.published_at": published_at.isoformat(),
+                        }
+                    ),
+                )
+            ),
+        )
+        if result.rowcount == 1:
+            return True
+        logger.info(
+            "dead_letter_replay_claim_lost",
+            extra={
+                "dlq_id": str(claim.dlq_id),
+                "claim_id": str(claim.claim_id),
+                "operation": "published",
+            },
+        )
+        return False
+
+    async def _mark_dead_letter_replay_failed(
+        self,
+        *,
+        claim: _DeadLetterReplayClaim,
+        failed_at: datetime,
+        error: str,
+    ) -> None:
+        result = cast(
+            Any,
+            await self._session.execute(
+                update(DeadLetterTaskRow)
+                .where(
+                    DeadLetterTaskRow.dead_letter_task_id == claim.dlq_id,
+                    DeadLetterTaskRow.replay_state
+                    == DEAD_LETTER_REPLAY_CLAIMED,
+                    DeadLetterTaskRow.replay_claim_id == claim.claim_id,
+                    DeadLetterTaskRow.replayed.is_(False),
+                )
+                .values(
+                    replay_state=DEAD_LETTER_REPLAY_FAILED,
+                    replay_last_error=error,
+                    replayed=False,
+                    replayed_at=None,
+                    replayed_by=claim.replayed_by,
+                    metadata_json=DeadLetterTaskRow.metadata_json.op("||")(
+                        {
+                            "replay.failed_at": failed_at.isoformat(),
+                            "replay.failure": error,
+                        }
+                    ),
+                )
+            ),
+        )
+        if result.rowcount != 1:
+            logger.info(
+                "dead_letter_replay_claim_lost",
+                extra={
+                    "dlq_id": str(claim.dlq_id),
+                    "claim_id": str(claim.claim_id),
+                    "operation": "failed",
+                },
+            )
 
     async def _queue_status_item(
         self,
@@ -349,6 +648,7 @@ def _item_from_row(row: DeadLetterTaskRow) -> DeadLetterItemRecord:
         task_payload=_metadata_dict(metadata, "task_payload"),
         created_at=row.created_at,
         replayed=row.replayed,
+        replay_state=row.replay_state,
         replayed_at=row.replayed_at,
         replayed_by=row.replayed_by,
     )
@@ -382,6 +682,29 @@ def _parse_dlq_id(dlq_id: str) -> uuid.UUID:
         return uuid.UUID(dlq_id)
     except ValueError as exc:
         raise DeadLetterNotFoundError("dead-letter record not found") from exc
+
+
+def _derive_replay_claim_id(
+    *,
+    dlq_id: uuid.UUID,
+    tenant_id: str,
+    replay_attempt_count: int,
+) -> uuid.UUID:
+    if not tenant_id:
+        raise ValueError("tenant_id is required")
+    if replay_attempt_count < 1:
+        raise ValueError("replay_attempt_count must be >= 1")
+    return uuid.uuid5(
+        _DLQ_REPLAY_CLAIM_NAMESPACE,
+        f"{dlq_id}|{tenant_id}|{replay_attempt_count}",
+    )
+
+
+def _bounded_replay_error(exc: BaseException) -> str:
+    message = f"{exc.__class__.__name__}: {exc}"
+    if len(message) > 240:
+        return f"{message[:237]}..."
+    return message
 
 
 def _metadata_str(metadata: Mapping[str, Any], key: str) -> str | None:
@@ -428,7 +751,12 @@ __all__ = [
     "DeadLetterItemRecord",
     "DeadLetterListPage",
     "DeadLetterNotFoundError",
+    "DeadLetterReplayRecoveryRecord",
     "DeadLetterReplayRecord",
+    "DEAD_LETTER_REPLAY_CLAIMED",
+    "DEAD_LETTER_REPLAY_FAILED",
+    "DEAD_LETTER_REPLAY_NONE",
+    "DEAD_LETTER_REPLAY_PUBLISHED",
     "QueueDepthItemRecord",
     "QueueOperationsService",
     "QueueStatusRecord",

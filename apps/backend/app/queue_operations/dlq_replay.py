@@ -21,6 +21,7 @@ TASK_DEFAULT_QUEUES: dict[str, str] = {
     "score_supervisor_inspection": QUEUE_QA,
     "propose_sop_intelligence_change": QUEUE_SOP_INTELLIGENCE,
     "recover_stale_executions": QUEUE_WEBHOOK_MAINTENANCE,
+    "recover_dead_letter_replays": QUEUE_WEBHOOK_MAINTENANCE,
     "reconcile_stale_execution_outbox": QUEUE_WEBHOOK_MAINTENANCE,
     "reconcile_stale_escalation_outbox": QUEUE_WEBHOOK_MAINTENANCE,
     "cleanup_expired_webhook_nonces": QUEUE_WEBHOOK_MAINTENANCE,
@@ -167,6 +168,13 @@ _FALLBACK_KWARG_EXTRACTORS: dict[
         "stale_before",
         "lease_seconds",
         "limit",
+        "reason",
+    ),
+    "recover_dead_letter_replays": _extract_optional_maintenance_kwargs(
+        "claimed_before",
+        "lease_seconds",
+        "limit",
+        "tenant_id",
         "reason",
     ),
     "reconcile_stale_execution_outbox": _extract_optional_maintenance_kwargs(
