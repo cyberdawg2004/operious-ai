@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import Any, TypeGuard
 from uuid import UUID
 
 from sqlalchemy import Select, select
@@ -190,14 +191,27 @@ def _enforce_expected_tenant(
         )
 
 
-def _as_list_of_dict(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, list):
-        return [
-            {str(k): v for k, v in item.items()}
-            for item in cast(list[Any], value)
-            if isinstance(item, dict)
-        ]
-    return []
+def _as_list_of_dict(value: object) -> list[dict[str, Any]]:
+    if not _is_object_list(value):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for item in value:
+        if not _is_object_mapping(item):
+            continue
+        copied_item: dict[str, Any] = {}
+        for key, item_value in item.items():
+            copied_item[str(key)] = item_value
+        items.append(copied_item)
+    return items
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
+    return isinstance(value, Mapping)
 
 
 __all__ = ["PostgresResolutionProposalPersistence"]
