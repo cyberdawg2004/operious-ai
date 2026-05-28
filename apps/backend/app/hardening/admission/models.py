@@ -24,6 +24,18 @@ class AdmissionReason(str, enum.Enum):
     REDIS_MEMORY_PRESSURE = "REDIS_MEMORY_PRESSURE"
     DB_POOL_PRESSURE = "DB_POOL_PRESSURE"
     TENANT_QUOTA_EXCEEDED = "TENANT_QUOTA_EXCEEDED"
+    TELEMETRY_UNAVAILABLE_REALTIME = "telemetry_unavailable_realtime"
+    TELEMETRY_UNAVAILABLE_VOICE = "telemetry_unavailable_voice"
+
+
+class AdmissionChannelClass(str, enum.Enum):
+    """Risk class used when admission telemetry is unavailable."""
+
+    ASYNC_TICKET = "async_ticket"
+    BATCH = "batch"
+    REALTIME_CHAT = "realtime_chat"
+    VOICE = "voice"
+    INTERNAL_EXECUTION = "internal_execution"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,3 +52,19 @@ class AdmissionDecision:
     db_pool_wait_ms: float | None
     retry_after_seconds: int
     evaluated_at: datetime
+    queue_depth_available: bool = True
+    queue_age_available: bool = True
+    redis_memory_available: bool = True
+    unavailable_reasons: tuple[str, ...] = ()
+    channel_class: AdmissionChannelClass = AdmissionChannelClass.ASYNC_TICKET
+
+    @property
+    def telemetry_unavailable(self) -> bool:
+        """Whether any required admission telemetry could not be read."""
+
+        return (
+            not self.queue_depth_available
+            or not self.queue_age_available
+            or not self.redis_memory_available
+            or bool(self.unavailable_reasons)
+        )

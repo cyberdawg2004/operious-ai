@@ -5,12 +5,14 @@ from app.hardening.admission.gate import (
     AdmissionGateThresholds,
 )
 from app.hardening.admission.models import (
+    AdmissionChannelClass,
     AdmissionDecision,
     AdmissionOutcome,
     AdmissionReason,
 )
 
 __all__ = [
+    "AdmissionChannelClass",
     "AdmissionDecision",
     "AdmissionGate",
     "AdmissionGateThresholds",

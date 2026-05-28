@@ -18,6 +18,7 @@ from app.db.models.admission import AdmissionRecordRow
 from app.execution import celery_publisher as execution_publisher_module
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.hardening.admission import (
+    AdmissionChannelClass,
     AdmissionDecision,
     AdmissionGate,
     AdmissionGateThresholds,
@@ -52,12 +53,14 @@ class _AdmissionRedis:
         oldest_age_seconds: float | None = None,
         memory_info: Mapping[str, Any] | None = None,
         fail_info: bool = False,
+        fail_llen: bool = False,
         fail_zrange: bool = False,
     ) -> None:
         self.depth = depth
         self.oldest_age_seconds = oldest_age_seconds
         self.memory_info = dict(memory_info or {"used_memory": 1, "maxmemory": 0})
         self.fail_info = fail_info
+        self.fail_llen = fail_llen
         self.fail_zrange = fail_zrange
         self.zadds: list[tuple[str, Mapping[str, float], bool]] = []
 
@@ -69,6 +72,8 @@ class _AdmissionRedis:
 
     async def llen(self, name: str) -> int:
         del name
+        if self.fail_llen:
+            raise RuntimeError("llen unavailable")
         return self.depth
 
     async def zrange(
@@ -122,6 +127,7 @@ async def test_admit_when_all_thresholds_below_warn() -> None:
     assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.reason is None
     assert decision.queue_depth == 1
+    assert decision.telemetry_unavailable is False
 
 
 @pytest.mark.asyncio
@@ -227,6 +233,9 @@ async def test_redis_memory_unavailable_fails_open() -> None:
 
     assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.redis_memory_pct is None
+    assert decision.redis_memory_available is False
+    assert decision.telemetry_unavailable is True
+    assert decision.unavailable_reasons == ("redis_memory_unavailable",)
 
 
 @pytest.mark.asyncio
@@ -235,6 +244,56 @@ async def test_queue_age_unavailable_fails_open() -> None:
 
     assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.queue_age_seconds is None
+    assert decision.queue_age_available is False
+    assert decision.telemetry_unavailable is True
+    assert decision.unavailable_reasons == (
+        f"queue_age_unavailable:{QUEUE_DIAGNOSTIC_NORMAL}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_queue_depth_unavailable_is_not_silent_depth_zero() -> None:
+    decision = await _decision(_AdmissionRedis(fail_llen=True))
+
+    assert decision.outcome is AdmissionOutcome.ADMIT
+    assert decision.queue_depth == 0
+    assert decision.queue_depth_available is False
+    assert decision.telemetry_unavailable is True
+    assert decision.unavailable_reasons == (
+        f"queue_depth_unavailable:{QUEUE_DIAGNOSTIC_NORMAL}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_realtime_chat_defers_when_telemetry_unavailable() -> None:
+    decision = await AdmissionGate(
+        redis_client=_AdmissionRedis(fail_llen=True),
+        thresholds=_thresholds(),
+    ).evaluate(
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+        tenant_id=TENANT_ID,
+        channel="webchat",
+    )
+
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_REALTIME
+    assert decision.channel_class is AdmissionChannelClass.REALTIME_CHAT
+
+
+@pytest.mark.asyncio
+async def test_voice_defers_when_telemetry_unavailable() -> None:
+    decision = await AdmissionGate(
+        redis_client=_AdmissionRedis(fail_llen=True),
+        thresholds=_thresholds(),
+    ).evaluate(
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+        tenant_id=TENANT_ID,
+        channel="voice",
+    )
+
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_VOICE
+    assert decision.channel_class is AdmissionChannelClass.VOICE
 
 
 @pytest.mark.asyncio

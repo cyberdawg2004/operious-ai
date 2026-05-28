@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Index, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,7 +13,7 @@ from app.db.base import Base
 
 
 class AdmissionRecordRow(Base):
-    """Persisted non-ADMIT admission decision.
+    """Persisted admission decision requiring operational visibility.
 
     This is an operational capacity log with no tenant-facing read API in
     PR_T3, but it still carries tenant context and is protected by RLS.
@@ -53,6 +53,31 @@ class AdmissionRecordRow(Base):
         default=30,
     )
     channel: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    queue_depth_available: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    queue_age_available: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    redis_memory_available: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+    )
+    telemetry_unavailable: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    unavailable_reasons: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

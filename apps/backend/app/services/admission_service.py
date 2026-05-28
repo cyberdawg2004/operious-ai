@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class AdmissionService(BaseService):
-    """Evaluate admission and persist non-ADMIT decisions durably."""
+    """Evaluate admission and persist actionable admission decisions durably."""
 
     def __init__(
         self,
@@ -55,13 +55,23 @@ class AdmissionService(BaseService):
             request_correlation_id=request_correlation_id,
             db_pool_wait_ms=db_pool_wait_ms,
         )
-        if decision.outcome is AdmissionOutcome.ADMIT:
+        should_record = (
+            decision.outcome is not AdmissionOutcome.ADMIT
+            or decision.telemetry_unavailable
+        )
+        if not should_record:
             return decision
         self._emit_admission_decision(
             decision=decision,
             tenant_id=tenant_id,
             channel=channel,
         )
+        if decision.telemetry_unavailable:
+            self._log_telemetry_unavailable(
+                decision=decision,
+                tenant_id=tenant_id,
+                channel=channel,
+            )
         await self._persist_decision(
             decision=decision,
             tenant_id=tenant_id,
@@ -95,6 +105,12 @@ class AdmissionService(BaseService):
                         db_pool_wait_ms=decision.db_pool_wait_ms,
                         retry_after_seconds=decision.retry_after_seconds,
                         channel=channel,
+                        channel_class=decision.channel_class.value,
+                        queue_depth_available=decision.queue_depth_available,
+                        queue_age_available=decision.queue_age_available,
+                        redis_memory_available=decision.redis_memory_available,
+                        telemetry_unavailable=decision.telemetry_unavailable,
+                        unavailable_reasons=list(decision.unavailable_reasons),
                         evaluated_at=decision.evaluated_at,
                     )
                 )
@@ -126,12 +142,37 @@ class AdmissionService(BaseService):
                     if decision.reason is not None
                     else None
                 ),
+                admission_telemetry_unavailable=decision.telemetry_unavailable,
+                channel_class=decision.channel_class.value,
+                unavailable_reasons=decision.unavailable_reasons,
+                final_decision=decision.outcome.value,
             )
         except Exception:  # noqa: BLE001 - metrics must not affect admission.
             logger.warning(
                 "admission_metrics_emit_failed",
                 extra={"decision_id": str(decision.decision_id)},
             )
+
+    def _log_telemetry_unavailable(
+        self,
+        *,
+        decision: AdmissionDecision,
+        tenant_id: str | None,
+        channel: str | None,
+    ) -> None:
+        logger.warning(
+            "admission_telemetry_unavailable",
+            extra={
+                "decision_id": str(decision.decision_id),
+                "tenant_id": tenant_id,
+                "channel": channel,
+                "admission_telemetry_unavailable": True,
+                "channel_class": decision.channel_class.value,
+                "queue_name": decision.queue_name,
+                "unavailable_reasons": decision.unavailable_reasons,
+                "final_decision": decision.outcome.value,
+            },
+        )
 
     async def _measure_db_pool_wait(self) -> float | None:
         if self._db_pool_wait_provider is None:

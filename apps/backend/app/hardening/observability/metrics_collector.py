@@ -139,6 +139,10 @@ class OperationalMetricsCollector:
         decision: str,
         queue_name: str | None,
         reason: str | None,
+        admission_telemetry_unavailable: bool = False,
+        channel_class: str | None = None,
+        unavailable_reasons: tuple[str, ...] = (),
+        final_decision: str | None = None,
     ) -> None:
         self._emit(
             "admission.decision",
@@ -148,6 +152,10 @@ class OperationalMetricsCollector:
                 "decision": decision,
                 "queue_name": queue_name,
                 "reason": reason,
+                "admission_telemetry_unavailable": admission_telemetry_unavailable,
+                "channel_class": channel_class,
+                "unavailable_reasons": unavailable_reasons,
+                "final_decision": final_decision or decision,
             },
         )
 

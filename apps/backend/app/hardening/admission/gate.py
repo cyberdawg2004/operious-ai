@@ -12,6 +12,7 @@ from inspect import isawaitable
 from typing import Any, Protocol, cast
 
 from app.hardening.admission.models import (
+    AdmissionChannelClass,
     AdmissionDecision,
     AdmissionOutcome,
     AdmissionReason,
@@ -20,6 +21,43 @@ from app.hardening.admission.models import (
 logger = logging.getLogger(__name__)
 
 QUEUE_AGE_ZSET_KEY = "queue:age:{queue_name}"
+
+_ASYNC_TICKET_CHANNELS = frozenset(
+    {
+        "email",
+        "lark",
+        "shulex",
+        "zendesk",
+        "ticket",
+        "webhook",
+        "whatsapp",
+        "whatsapp_webhook",
+        "async_ticket",
+    }
+)
+_BATCH_CHANNELS = frozenset({"batch", "batch_ingest", "batch_ingestion"})
+_REALTIME_CHAT_CHANNELS = frozenset(
+    {
+        "realtime_chat",
+        "whatsapp_live",
+        "whatsapp_realtime",
+        "livechat",
+        "live_chat",
+        "webchat",
+        "web_chat",
+    }
+)
+_VOICE_CHANNELS = frozenset({"voice", "call", "calls"})
+_INTERNAL_EXECUTION_CHANNELS = frozenset(
+    {
+        "internal_execution",
+        "execution",
+        "execution_publish",
+        "execution_recovery",
+        "diagnostic_execution",
+        "diagnostic_internal",
+    }
+)
 
 
 class AdmissionRedisClient(Protocol):
@@ -54,6 +92,13 @@ class AdmissionGateThresholds:
     redis_memory_pct_reject: float = 90.0
     db_pool_wait_warn_ms: float = 250.0
     db_pool_wait_reject_ms: float = 1000.0
+
+
+@dataclass(frozen=True, slots=True)
+class _TelemetrySample:
+    value: float | int | None
+    available: bool
+    unavailable_reasons: tuple[str, ...] = ()
 
 
 class AdmissionGate:
@@ -93,209 +138,257 @@ class AdmissionGate:
                 )
             ),
         )
-        redis_memory_pct = await self._redis_memory_pct(queue_name=queue_identity)
-        queue_depth = await self._queue_depth(queue_names=targets)
-        queue_age_seconds = await self._queue_age_seconds(queue_names=targets)
+        channel_class = classify_admission_channel(channel)
+        redis_memory_sample = await self._redis_memory_pct_sample(
+            queue_name=queue_identity
+        )
+        queue_depth_sample = await self._queue_depth_sample(queue_names=targets)
+        queue_age_sample = await self._queue_age_seconds_sample(queue_names=targets)
+        redis_memory_pct = (
+            float(redis_memory_sample.value)
+            if redis_memory_sample.value is not None
+            else None
+        )
+        queue_depth = int(queue_depth_sample.value or 0)
+        queue_age_seconds = (
+            float(queue_age_sample.value)
+            if queue_age_sample.value is not None
+            else None
+        )
+        unavailable_reasons = _dedupe_reasons(
+            (
+                *redis_memory_sample.unavailable_reasons,
+                *queue_depth_sample.unavailable_reasons,
+                *queue_age_sample.unavailable_reasons,
+            )
+        )
 
-        if (
-            redis_memory_pct is not None
-            and redis_memory_pct >= self._thresholds.redis_memory_pct_reject
-        ):
+        def decision(
+            *,
+            outcome: AdmissionOutcome,
+            reason: AdmissionReason | None,
+            retry_after_seconds: int,
+        ) -> AdmissionDecision:
             return self._decision(
                 decision_id=decision_id,
-                outcome=AdmissionOutcome.REJECT,
-                reason=AdmissionReason.REDIS_MEMORY_PRESSURE,
+                outcome=outcome,
+                reason=reason,
                 queue_name=queue_identity,
                 queue_depth=queue_depth,
                 queue_age_seconds=queue_age_seconds,
                 redis_memory_pct=redis_memory_pct,
                 db_pool_wait_ms=db_pool_wait_ms,
-                retry_after_seconds=60,
+                retry_after_seconds=retry_after_seconds,
                 evaluated_at=now,
+                queue_depth_available=queue_depth_sample.available,
+                queue_age_available=queue_age_sample.available,
+                redis_memory_available=redis_memory_sample.available,
+                unavailable_reasons=unavailable_reasons,
+                channel_class=channel_class,
+            )
+
+        if (
+            redis_memory_pct is not None
+            and redis_memory_pct >= self._thresholds.redis_memory_pct_reject
+        ):
+            return decision(
+                outcome=AdmissionOutcome.REJECT,
+                reason=AdmissionReason.REDIS_MEMORY_PRESSURE,
+                retry_after_seconds=60,
             )
 
         if (
             db_pool_wait_ms is not None
             and db_pool_wait_ms >= self._thresholds.db_pool_wait_reject_ms
         ):
-            return self._decision(
-                decision_id=decision_id,
+            return decision(
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.DB_POOL_PRESSURE,
-                queue_name=queue_identity,
-                queue_depth=queue_depth,
-                queue_age_seconds=queue_age_seconds,
-                redis_memory_pct=redis_memory_pct,
-                db_pool_wait_ms=db_pool_wait_ms,
                 retry_after_seconds=60,
-                evaluated_at=now,
             )
         if (
             db_pool_wait_ms is not None
             and db_pool_wait_ms >= self._thresholds.db_pool_wait_warn_ms
         ):
-            return self._decision(
-                decision_id=decision_id,
+            return decision(
                 outcome=AdmissionOutcome.DEFER,
                 reason=AdmissionReason.DB_POOL_PRESSURE,
-                queue_name=queue_identity,
-                queue_depth=queue_depth,
-                queue_age_seconds=queue_age_seconds,
-                redis_memory_pct=redis_memory_pct,
-                db_pool_wait_ms=db_pool_wait_ms,
                 retry_after_seconds=30,
-                evaluated_at=now,
             )
 
         if queue_depth >= self._thresholds.queue_depth_reject:
-            return self._decision(
-                decision_id=decision_id,
+            return decision(
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.QUEUE_DEPTH_EXCEEDED,
-                queue_name=queue_identity,
-                queue_depth=queue_depth,
-                queue_age_seconds=queue_age_seconds,
-                redis_memory_pct=redis_memory_pct,
-                db_pool_wait_ms=db_pool_wait_ms,
                 retry_after_seconds=30,
-                evaluated_at=now,
             )
         if queue_depth >= self._thresholds.queue_depth_warn:
-            return self._decision(
-                decision_id=decision_id,
+            return decision(
                 outcome=AdmissionOutcome.DEFER,
                 reason=AdmissionReason.QUEUE_DEPTH_EXCEEDED,
-                queue_name=queue_identity,
-                queue_depth=queue_depth,
-                queue_age_seconds=queue_age_seconds,
-                redis_memory_pct=redis_memory_pct,
-                db_pool_wait_ms=db_pool_wait_ms,
                 retry_after_seconds=15,
-                evaluated_at=now,
             )
 
         if (
             queue_age_seconds is not None
             and queue_age_seconds >= self._thresholds.queue_age_reject_seconds
         ):
-            return self._decision(
-                decision_id=decision_id,
+            return decision(
                 outcome=AdmissionOutcome.REJECT,
                 reason=AdmissionReason.QUEUE_AGE_EXCEEDED,
-                queue_name=queue_identity,
-                queue_depth=queue_depth,
-                queue_age_seconds=queue_age_seconds,
-                redis_memory_pct=redis_memory_pct,
-                db_pool_wait_ms=db_pool_wait_ms,
                 retry_after_seconds=60,
-                evaluated_at=now,
             )
         if (
             queue_age_seconds is not None
             and queue_age_seconds >= self._thresholds.queue_age_warn_seconds
         ):
-            return self._decision(
-                decision_id=decision_id,
+            return decision(
                 outcome=AdmissionOutcome.DEFER,
                 reason=AdmissionReason.QUEUE_AGE_EXCEEDED,
-                queue_name=queue_identity,
-                queue_depth=queue_depth,
-                queue_age_seconds=queue_age_seconds,
-                redis_memory_pct=redis_memory_pct,
-                db_pool_wait_ms=db_pool_wait_ms,
                 retry_after_seconds=20,
-                evaluated_at=now,
             )
 
-        return self._decision(
-            decision_id=decision_id,
+        if unavailable_reasons:
+            if channel_class is AdmissionChannelClass.REALTIME_CHAT:
+                return decision(
+                    outcome=AdmissionOutcome.DEFER,
+                    reason=AdmissionReason.TELEMETRY_UNAVAILABLE_REALTIME,
+                    retry_after_seconds=15,
+                )
+            if channel_class is AdmissionChannelClass.VOICE:
+                return decision(
+                    outcome=AdmissionOutcome.DEFER,
+                    reason=AdmissionReason.TELEMETRY_UNAVAILABLE_VOICE,
+                    retry_after_seconds=10,
+                )
+
+        return decision(
             outcome=AdmissionOutcome.ADMIT,
             reason=None,
-            queue_name=queue_identity,
-            queue_depth=queue_depth,
-            queue_age_seconds=queue_age_seconds,
-            redis_memory_pct=redis_memory_pct,
-            db_pool_wait_ms=db_pool_wait_ms,
             retry_after_seconds=30,
-            evaluated_at=now,
         )
 
     async def redis_memory_pct(self) -> float | None:
         """Return Redis memory pressure, or None when unbounded/unavailable."""
 
-        return await self._redis_memory_pct(queue_name=None)
+        sample = await self._redis_memory_pct_sample(queue_name=None)
+        return float(sample.value) if sample.value is not None else None
 
     async def queue_age_seconds(self, *, queue_name: str) -> float | None:
         """Return oldest message age for a queue, if the sentinel exists."""
 
-        return await self._queue_age_seconds(queue_names=(queue_name,))
+        sample = await self._queue_age_seconds_sample(queue_names=(queue_name,))
+        return float(sample.value) if sample.value is not None else None
 
-    async def _redis_memory_pct(self, *, queue_name: str | None) -> float | None:
+    async def _redis_memory_pct_sample(self, *, queue_name: str | None) -> _TelemetrySample:
         try:
             info = await _resolve(self._redis.info("memory"))
             used = int(info.get("used_memory", 0))
             max_memory = int(info.get("maxmemory", 0))
             if max_memory <= 0:
-                return None
-            return round((used / max_memory) * 100, 2)
-        except Exception:  # noqa: BLE001 - admission must fail open here.
+                return _TelemetrySample(value=None, available=True)
+            return _TelemetrySample(
+                value=round((used / max_memory) * 100, 2),
+                available=True,
+            )
+        except Exception:  # noqa: BLE001 - admission policy handles telemetry loss.
             logger.warning(
                 "admission_redis_memory_check_failed",
                 extra={"queue_name": queue_name},
             )
-            return None
+            return _TelemetrySample(
+                value=None,
+                available=False,
+                unavailable_reasons=("redis_memory_unavailable",),
+            )
 
-    async def _queue_depth(self, *, queue_names: Sequence[str]) -> int:
+    async def _queue_depth_sample(self, *, queue_names: Sequence[str]) -> _TelemetrySample:
         depth = 0
+        unavailable_reasons: list[str] = []
         for queue_name in queue_names:
-            depth += await self._single_queue_depth(queue_name=queue_name)
-        return depth
+            sample = await self._single_queue_depth_sample(queue_name=queue_name)
+            depth += int(sample.value or 0)
+            unavailable_reasons.extend(sample.unavailable_reasons)
+        return _TelemetrySample(
+            value=depth,
+            available=not unavailable_reasons,
+            unavailable_reasons=tuple(unavailable_reasons),
+        )
 
-    async def _single_queue_depth(self, *, queue_name: str) -> int:
+    async def _single_queue_depth_sample(self, *, queue_name: str) -> _TelemetrySample:
         try:
             value = await _resolve(self._redis.llen(queue_name))
-            return int(value or 0)
-        except Exception:  # noqa: BLE001 - admission must fail open here.
+            return _TelemetrySample(value=int(value or 0), available=True)
+        except Exception:  # noqa: BLE001 - admission policy handles telemetry loss.
             logger.warning(
                 "admission_queue_depth_check_failed",
                 extra={"queue_name": queue_name},
             )
-            return 0
+            return _TelemetrySample(
+                value=0,
+                available=False,
+                unavailable_reasons=(f"queue_depth_unavailable:{queue_name}",),
+            )
 
-    async def _queue_age_seconds(self, *, queue_names: Sequence[str]) -> float | None:
+    async def _queue_age_seconds_sample(
+        self,
+        *,
+        queue_names: Sequence[str],
+    ) -> _TelemetrySample:
         ages: list[float] = []
+        unavailable_reasons: list[str] = []
         for queue_name in queue_names:
-            age = await self._single_queue_age_seconds(queue_name=queue_name)
-            if age is not None:
-                ages.append(age)
+            sample = await self._single_queue_age_seconds_sample(queue_name=queue_name)
+            if sample.value is not None:
+                ages.append(float(sample.value))
+            unavailable_reasons.extend(sample.unavailable_reasons)
         if not ages:
-            return None
-        return max(ages)
+            return _TelemetrySample(
+                value=None,
+                available=not unavailable_reasons,
+                unavailable_reasons=tuple(unavailable_reasons),
+            )
+        return _TelemetrySample(
+            value=max(ages),
+            available=not unavailable_reasons,
+            unavailable_reasons=tuple(unavailable_reasons),
+        )
 
-    async def _single_queue_age_seconds(self, *, queue_name: str) -> float | None:
+    async def _single_queue_age_seconds_sample(
+        self,
+        *,
+        queue_name: str,
+    ) -> _TelemetrySample:
         try:
             key = QUEUE_AGE_ZSET_KEY.format(queue_name=queue_name)
             result = await _resolve(
                 self._redis.zrange(key, 0, 0, withscores=True)
             )
             if not result:
-                return None
+                return _TelemetrySample(value=None, available=True)
             first = result[0]
             if not isinstance(first, tuple):
-                return None
+                return _TelemetrySample(value=None, available=True)
             queue_age_entry = cast(tuple[object, ...], first)
             if len(queue_age_entry) < 2:
-                return None
+                return _TelemetrySample(value=None, available=True)
             score = queue_age_entry[1]
             if not isinstance(score, int | float | str):
-                return None
-            return round(max(0.0, time.time() - float(score)), 2)
-        except Exception:  # noqa: BLE001 - admission must fail open here.
+                return _TelemetrySample(value=None, available=True)
+            return _TelemetrySample(
+                value=round(max(0.0, time.time() - float(score)), 2),
+                available=True,
+            )
+        except Exception:  # noqa: BLE001 - admission policy handles telemetry loss.
             logger.warning(
                 "admission_queue_age_check_failed",
                 extra={"queue_name": queue_name},
             )
-            return None
+            return _TelemetrySample(
+                value=None,
+                available=False,
+                unavailable_reasons=(f"queue_age_unavailable:{queue_name}",),
+            )
 
     @staticmethod
     def _decision(
@@ -310,6 +403,11 @@ class AdmissionGate:
         db_pool_wait_ms: float | None,
         retry_after_seconds: int,
         evaluated_at: datetime,
+        queue_depth_available: bool,
+        queue_age_available: bool,
+        redis_memory_available: bool,
+        unavailable_reasons: tuple[str, ...],
+        channel_class: AdmissionChannelClass,
     ) -> AdmissionDecision:
         return AdmissionDecision(
             decision_id=decision_id,
@@ -322,6 +420,11 @@ class AdmissionGate:
             db_pool_wait_ms=db_pool_wait_ms,
             retry_after_seconds=retry_after_seconds,
             evaluated_at=evaluated_at,
+            queue_depth_available=queue_depth_available,
+            queue_age_available=queue_age_available,
+            redis_memory_available=redis_memory_available,
+            unavailable_reasons=unavailable_reasons,
+            channel_class=channel_class,
         )
 
 
@@ -353,9 +456,39 @@ def _non_empty_names(values: Iterable[str]) -> Iterable[str]:
         yield stripped
 
 
+def classify_admission_channel(channel: str | None) -> AdmissionChannelClass:
+    """Return the risk class for an admission channel."""
+
+    normalized = (channel or "").strip().lower().replace("-", "_")
+    if normalized in _REALTIME_CHAT_CHANNELS:
+        return AdmissionChannelClass.REALTIME_CHAT
+    if normalized in _VOICE_CHANNELS:
+        return AdmissionChannelClass.VOICE
+    if normalized in _BATCH_CHANNELS:
+        return AdmissionChannelClass.BATCH
+    if normalized in _INTERNAL_EXECUTION_CHANNELS:
+        return AdmissionChannelClass.INTERNAL_EXECUTION
+    if normalized in _ASYNC_TICKET_CHANNELS:
+        return AdmissionChannelClass.ASYNC_TICKET
+    if "livechat" in normalized or "webchat" in normalized:
+        return AdmissionChannelClass.REALTIME_CHAT
+    if "voice" in normalized or "call" in normalized:
+        return AdmissionChannelClass.VOICE
+    if "batch" in normalized:
+        return AdmissionChannelClass.BATCH
+    if "execution" in normalized or "diagnostic" in normalized:
+        return AdmissionChannelClass.INTERNAL_EXECUTION
+    return AdmissionChannelClass.ASYNC_TICKET
+
+
+def _dedupe_reasons(reasons: Iterable[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(reason for reason in reasons if reason))
+
+
 __all__ = [
     "AdmissionGate",
     "AdmissionGateThresholds",
     "AdmissionRedisClient",
     "QUEUE_AGE_ZSET_KEY",
+    "classify_admission_channel",
 ]

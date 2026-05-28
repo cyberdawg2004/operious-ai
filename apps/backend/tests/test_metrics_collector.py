@@ -81,6 +81,10 @@ def test_emit_admission_decision_fields(
         decision="DEFER",
         queue_name=QUEUE_DIAGNOSTIC_NORMAL,
         reason="QUEUE_DEPTH_EXCEEDED",
+        admission_telemetry_unavailable=True,
+        channel_class="async_ticket",
+        unavailable_reasons=("queue_depth_unavailable:diagnostic",),
+        final_decision="DEFER",
     )
 
     record = _record(caplog, "admission.decision")
@@ -89,6 +93,10 @@ def test_emit_admission_decision_fields(
     assert record.decision == "DEFER"
     assert record.queue_name == QUEUE_DIAGNOSTIC_NORMAL
     assert record.reason == "QUEUE_DEPTH_EXCEEDED"
+    assert record.admission_telemetry_unavailable is True
+    assert record.channel_class == "async_ticket"
+    assert record.unavailable_reasons == ("queue_depth_unavailable:diagnostic",)
+    assert record.final_decision == "DEFER"
 
 
 def test_emit_queue_depth_snapshot_fields(
