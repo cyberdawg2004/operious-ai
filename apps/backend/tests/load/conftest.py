@@ -175,6 +175,14 @@ async def committed_burst_seed(
     get_settings.cache_clear()
     reset_engine_state()
 
+    lock_session = get_owner_session_factory()()
+    await lock_session.execute(
+        text(
+            "SELECT pg_advisory_lock("
+            "hashtext('operious_load_tests')::bigint"
+            ")"
+        )
+    )
     seeded: dict[str, list[str]] = {}
 
     async def seed_tenant(tenant_id: str) -> None:
@@ -288,16 +296,29 @@ async def committed_burst_seed(
         return execution_id
 
     try:
-        yield {
-            "seed_tenant": seed_tenant,
-            "seed_execution": seed_execution,
-        }
+        try:
+            yield {
+                "seed_tenant": seed_tenant,
+                "seed_execution": seed_execution,
+            }
+        finally:
+            async with get_owner_session_factory()() as session:
+                for tenant_id in seeded:
+                    await _delete_tenant_data(session, tenant_id)
+                await session.commit()
     finally:
-        async with get_owner_session_factory()() as session:
-            for tenant_id in seeded:
-                await _delete_tenant_data(session, tenant_id)
-            await session.commit()
-        await dispose_engine()
+        try:
+            await lock_session.execute(
+                text(
+                    "SELECT pg_advisory_unlock("
+                    "hashtext('operious_load_tests')::bigint"
+                    ")"
+                )
+            )
+            await lock_session.commit()
+        finally:
+            await lock_session.close()
+            await dispose_engine()
         get_settings.cache_clear()
         reset_engine_state()
 
@@ -518,6 +539,10 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
     )
     await session.execute(
         text("DELETE FROM dead_letter_tasks WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
+        text("DELETE FROM resolution_proposals WHERE tenant_id = :t"),
         {"t": tenant_id},
     )
     await session.execute(

@@ -6,6 +6,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -23,6 +24,7 @@ from app.runtime.resolution_runtime import (
     ResolutionRuntime,
     resolution_proposal_timeline_payload,
 )
+from app.tenant.db.models import TenantRow
 from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 TENANT_ID = "tenant-resolution"
@@ -64,6 +66,32 @@ def _request(
         original_content=content,
         retrieved_citations=citations if citations is not None else [_citation()],
     )
+
+
+async def _ensure_committed_tenants(
+    seed_engine: AsyncEngine | None,
+    fallback_session: AsyncSession,
+    *tenant_ids: str,
+) -> None:
+    if seed_engine is None:
+        for tenant_id in tenant_ids:
+            await fallback_session.merge(TenantRow(tenant_id=tenant_id))
+        await fallback_session.flush()
+        return
+
+    async with seed_engine.begin() as connection:
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
+        try:
+            for tenant_id in tenant_ids:
+                await session.merge(TenantRow(tenant_id=tenant_id))
+            await session.flush()
+            await session.commit()
+        finally:
+            await session.close()
 
 
 @pytest.mark.asyncio
@@ -147,7 +175,14 @@ async def test_resolution_proposal_reads_are_tenant_scoped() -> None:
 @requires_postgres
 async def test_postgres_resolution_persistence_enforces_tenant_rls(
     pg_session,
+    pg_seed_engine,
 ) -> None:
+    await _ensure_committed_tenants(
+        pg_seed_engine,
+        pg_session,
+        TENANT_ID,
+        "tenant-other",
+    )
     await set_pg_rls_tenant(pg_session, TENANT_ID)
     persistence = PostgresResolutionProposalPersistence(pg_session)
     record = await ResolutionRuntime(persistence=persistence).create_proposal(
@@ -260,6 +295,25 @@ def test_resolution_migration_enables_force_rls() -> None:
     assert "ENABLE ROW LEVEL SECURITY" in source
     assert "FORCE ROW LEVEL SECURITY" in source
     assert "operious_tenant_rls_allows(tenant_id)" in source
+
+
+def test_resolution_tenant_fk_migration_checks_orphans_and_adds_fk() -> None:
+    source = Path(
+        "apps/backend/migrations/versions/0042_resolution_proposal_tenant_fk.py"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "down_revision: Union[str, None] = \"0041_resolution_proposals\""
+        in source
+    )
+    assert "orphan_rows" in source
+    assert "WHERE t.tenant_id IS NULL" in source
+    assert "tenant_id values exist" in source
+    assert "create_foreign_key" in source
+    assert "\"resolution_proposals\"" in source
+    assert "\"tenants\"" in source
+    assert "[\"tenant_id\"]" in source
+    assert "ondelete=\"RESTRICT\"" in source
 
 
 def test_worker_hooks_resolution_after_diagnostic_success() -> None:

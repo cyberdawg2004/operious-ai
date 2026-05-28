@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     String,
     Text,
@@ -33,7 +34,10 @@ class ResolutionProposalRow(Base):
         UUID(as_uuid=True), primary_key=True
     )
     tenant_id: Mapped[str] = mapped_column(
-        String(TENANT_ID_MAX_LENGTH), nullable=False, index=True
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
