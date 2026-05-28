@@ -13,10 +13,10 @@ SQL three-valued logic, matching the governance / session pattern.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 
 from app.coordination.db.models import CoordinationEnvelopeRow
@@ -74,7 +74,9 @@ class PostgresCoordinationPersistence(BaseRepository):
         *,
         expected_tenant_id: str | None = None,
     ) -> RecordPage[CoordinationRecord]:
-        stmt = select(CoordinationEnvelopeRow)
+        stmt: Select[tuple[CoordinationEnvelopeRow]] = select(
+            CoordinationEnvelopeRow
+        )
         if expected_tenant_id is not None:
             stmt = stmt.where(
                 CoordinationEnvelopeRow.tenant_id == expected_tenant_id
@@ -102,7 +104,10 @@ class PostgresCoordinationPersistence(BaseRepository):
 # ─── Filter composer ────────────────────────────────────────────────────
 
 
-def _apply_filters(stmt, query: CoordinationQuery):  # type: ignore[no-untyped-def]
+def _apply_filters(
+    stmt: Select[tuple[CoordinationEnvelopeRow]],
+    query: CoordinationQuery,
+) -> Select[tuple[CoordinationEnvelopeRow]]:
     """Mirror ``InMemoryCoordinationPersistence._matches`` field-by-field."""
     if query.coordination_id is not None:
         stmt = stmt.where(
@@ -266,7 +271,8 @@ def _row_to_record(row: CoordinationEnvelopeRow) -> CoordinationRecord:
 def _as_dict(value: Any) -> dict[str, Any]:
     """Coerce a JSONB column into ``dict[str, Any]``."""
     if isinstance(value, dict):
-        return {str(k): v for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType]
+        typed_value = cast("dict[object, Any]", value)
+        return {str(k): v for k, v in typed_value.items()}
     return {}
 
 
