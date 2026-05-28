@@ -374,8 +374,15 @@ def compute_baseline_delta(
     baseline_warning_count = _summary_count(baseline_report, "warning_count")
     current_error_count = _summary_count(current_report, "error_count")
     baseline_error_count = _summary_count(baseline_report, "error_count")
+    current_high_risk_warning_count = _high_risk_warning_count(current_warnings)
+    baseline_high_risk_warning_count = _high_risk_warning_count(baseline_warnings)
+    new_high_risk_fingerprints = [
+        fingerprint
+        for fingerprint in sorted(new_fingerprints)
+        if _is_high_risk_diagnostic(current_by_fingerprint[fingerprint])
+    ]
 
-    return {
+    delta = {
         "baseline_path": str(baseline_path),
         "baseline_warning_count": baseline_warning_count,
         "current_warning_count": current_warning_count,
@@ -383,11 +390,21 @@ def compute_baseline_delta(
         "baseline_error_count": baseline_error_count,
         "current_error_count": current_error_count,
         "error_delta": current_error_count - baseline_error_count,
+        "baseline_high_risk_warning_count": baseline_high_risk_warning_count,
+        "current_high_risk_warning_count": current_high_risk_warning_count,
+        "high_risk_warning_delta": (
+            current_high_risk_warning_count - baseline_high_risk_warning_count
+        ),
         "new_warning_count": len(new_fingerprints),
+        "new_high_risk_warning_count": len(new_high_risk_fingerprints),
         "resolved_warning_count": len(resolved_fingerprints),
         "new_warnings": [
             _delta_diagnostic(current_by_fingerprint[fingerprint])
             for fingerprint in sorted(new_fingerprints)
+        ],
+        "new_high_risk_warnings": [
+            _delta_diagnostic(current_by_fingerprint[fingerprint])
+            for fingerprint in new_high_risk_fingerprints
         ],
         "resolved_warnings": [
             _delta_diagnostic(baseline_by_fingerprint[fingerprint])
@@ -400,6 +417,21 @@ def compute_baseline_delta(
             "risk_plane",
         ),
     }
+    delta["regression_reasons"] = regression_reasons(delta)
+    return delta
+
+
+def regression_reasons(delta: Mapping[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if int(delta.get("error_delta", 0)) > 0:
+        reasons.append("error_count_increased")
+    if int(delta.get("warning_delta", 0)) > 0:
+        reasons.append("warning_count_increased")
+    if int(delta.get("high_risk_warning_delta", 0)) > 0:
+        reasons.append("high_risk_warning_count_increased")
+    if int(delta.get("new_high_risk_warning_count", 0)) > 0:
+        reasons.append("new_high_risk_warnings")
+    return reasons
 
 
 def count_any_unknown_indicators(
@@ -726,6 +758,14 @@ def _delta_diagnostic(diagnostic: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _high_risk_warning_count(diagnostics: Iterable[Mapping[str, Any]]) -> int:
+    return sum(1 for diagnostic in diagnostics if _is_high_risk_diagnostic(diagnostic))
+
+
+def _is_high_risk_diagnostic(diagnostic: Mapping[str, Any]) -> bool:
+    return str(diagnostic.get("risk_plane", RISK_PLANE_OTHER)) in HIGH_RISK_PLANES
+
+
 def _warning_diagnostics_from_report(report: Mapping[str, Any]) -> list[dict[str, Any]]:
     diagnostics = report.get("diagnostics")
     if not isinstance(diagnostics, list):
@@ -789,7 +829,7 @@ def _warning_regressed(report: Mapping[str, Any]) -> bool:
     delta = report.get("baseline_delta")
     if not isinstance(delta, Mapping):
         return False
-    return int(delta.get("warning_delta", 0)) > 0
+    return bool(regression_reasons(delta))
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -883,8 +923,20 @@ def _append_baseline_delta(lines: list[str], delta_value: Any) -> None:
             f"| Baseline warnings | {delta_value.get('baseline_warning_count', 0)} |",
             f"| Current warnings | {delta_value.get('current_warning_count', 0)} |",
             f"| Warning delta | {delta_value.get('warning_delta', 0)} |",
+            (
+                "| High-risk warning delta | "
+                f"{delta_value.get('high_risk_warning_delta', 0)} |"
+            ),
             f"| New warnings | {delta_value.get('new_warning_count', 0)} |",
+            (
+                "| New high-risk warnings | "
+                f"{delta_value.get('new_high_risk_warning_count', 0)} |"
+            ),
             f"| Resolved warnings | {delta_value.get('resolved_warning_count', 0)} |",
+            (
+                "| Regression reasons | "
+                f"{', '.join(delta_value.get('regression_reasons', [])) or 'none'} |"
+            ),
         ]
     )
 

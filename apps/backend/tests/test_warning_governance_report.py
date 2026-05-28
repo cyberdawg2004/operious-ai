@@ -110,13 +110,79 @@ def test_baseline_delta_math_uses_stable_warning_fingerprints() -> None:
     )
 
     assert delta["warning_delta"] == 1
+    assert delta["high_risk_warning_delta"] == 1
     assert delta["new_warning_count"] == 2
+    assert delta["new_high_risk_warning_count"] == 2
     assert delta["resolved_warning_count"] == 1
     assert {item["fingerprint"] for item in delta["new_warnings"]} == {
         introduced["fingerprint"],
         introduced_again["fingerprint"],
     }
+    assert {item["fingerprint"] for item in delta["new_high_risk_warnings"]} == {
+        introduced["fingerprint"],
+        introduced_again["fingerprint"],
+    }
     assert delta["resolved_warnings"][0]["fingerprint"] == resolved["fingerprint"]
+
+
+def test_regression_gate_catches_enterprise_governance_cases() -> None:
+    low_risk = _diagnostic("apps/backend/app/db/url.py", 10)
+    high_risk = _diagnostic("apps/backend/app/governance/runtime.py", 20)
+
+    high_risk_delta = reporter.compute_baseline_delta(
+        current_report={
+            "summary": {"warning_count": 1, "error_count": 0},
+            "diagnostics": [high_risk],
+        },
+        baseline_report={
+            "summary": {"warning_count": 1, "error_count": 0},
+            "diagnostics": [low_risk],
+        },
+        baseline_path=Path("/tmp/baseline.json"),
+    )
+
+    assert high_risk_delta["warning_delta"] == 0
+    assert high_risk_delta["high_risk_warning_delta"] == 1
+    assert high_risk_delta["new_high_risk_warning_count"] == 1
+    assert "high_risk_warning_count_increased" in high_risk_delta[
+        "regression_reasons"
+    ]
+    assert "new_high_risk_warnings" in high_risk_delta["regression_reasons"]
+    assert reporter._warning_regressed({"baseline_delta": high_risk_delta})
+
+    replaced_high_risk = _diagnostic("apps/backend/app/execution/runtime.py", 30)
+    flat_high_risk_delta = reporter.compute_baseline_delta(
+        current_report={
+            "summary": {"warning_count": 1, "error_count": 0},
+            "diagnostics": [high_risk],
+        },
+        baseline_report={
+            "summary": {"warning_count": 1, "error_count": 0},
+            "diagnostics": [replaced_high_risk],
+        },
+        baseline_path=Path("/tmp/baseline.json"),
+    )
+
+    assert flat_high_risk_delta["warning_delta"] == 0
+    assert flat_high_risk_delta["high_risk_warning_delta"] == 0
+    assert flat_high_risk_delta["new_high_risk_warning_count"] == 1
+    assert flat_high_risk_delta["regression_reasons"] == ["new_high_risk_warnings"]
+    assert reporter._warning_regressed({"baseline_delta": flat_high_risk_delta})
+
+    error_delta = reporter.compute_baseline_delta(
+        current_report={
+            "summary": {"warning_count": 0, "error_count": 1},
+            "diagnostics": [],
+        },
+        baseline_report={
+            "summary": {"warning_count": 0, "error_count": 0},
+            "diagnostics": [],
+        },
+        baseline_path=Path("/tmp/baseline.json"),
+    )
+
+    assert error_delta["regression_reasons"] == ["error_count_increased"]
+    assert reporter._warning_regressed({"baseline_delta": error_delta})
 
 
 def test_any_unknown_propagation_counters() -> None:
