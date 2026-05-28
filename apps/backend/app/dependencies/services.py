@@ -122,6 +122,10 @@ from app.runtime.tenant_production_hardening import (
 )
 from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
+from app.services.conversation_service import (
+    ConversationService,
+    build_conversation_service,
+)
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
@@ -330,6 +334,53 @@ async def check_batch_ingest_admission(
 def get_execution_publisher() -> ExecutionPublisher:
     """Return the execution publisher transport boundary."""
     return CeleryExecutionPublisher()
+
+
+async def get_conversation_service(
+    session: AsyncSession = Depends(get_db_session),
+    execution_publisher: ExecutionPublisher = Depends(
+        get_execution_publisher
+    ),
+) -> AsyncIterator[ConversationService]:
+    """Return the live conversation service for this request."""
+
+    execution_persistence = PostgresExecutionPersistence(session)
+    execution_runtime = ExecutionRuntime(persistence=execution_persistence)
+    deferred_execution_publisher = _DeferredExecutionPublisher(
+        delegate=execution_publisher,
+        execution_runtime=execution_runtime,
+        session=session,
+        publisher_id="api:conversation",
+    )
+    service = build_conversation_service(
+        session_repository=PostgresSessionPersistence(session),
+        coordination_runtime=CoordinationRuntime(
+            governance_runtime=_dispatch_governance_runtime(
+                PostgresGovernanceRepository(session)
+            ),
+            persistence=PostgresCoordinationPersistence(session),
+            registry=_dispatch_coordination_registry(),
+        ),
+        execution_runtime=execution_runtime,
+        execution_governance_runtime=ExecutionGovernanceRuntime(
+            tenant_configuration_repository=PostgresTenantConfigurationRepository(
+                session
+            ),
+            execution_persistence=execution_persistence,
+            governance_repository=PostgresGovernanceRepository(session),
+            provider_circuit_breaker=ProviderCircuitBreaker(session=session),
+            default_provider_name="anthropic",
+        ),
+        execution_publisher=deferred_execution_publisher,
+        redis_client=get_redis_client(),
+    )
+    try:
+        yield service
+        await session.commit()
+        await deferred_execution_publisher.flush()
+    except Exception:
+        await session.rollback()
+        raise
 
 
 async def get_dispatch_service(
@@ -865,6 +916,7 @@ __all__ = [
     "get_arbitration_repository",
     "get_boundary_repository",
     "get_cognition_service",
+    "get_conversation_service",
     "get_coordination_repository",
     "get_escalation_service",
     "get_governance_repository",

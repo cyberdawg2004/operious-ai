@@ -38,6 +38,8 @@ _EVENT_KIND_WIRE: dict[SessionEventKind, str] = {
     SessionEventKind.TERMINATION_RECORDED: "termination_recorded",
     SessionEventKind.ARCHIVAL_RECORDED: "archival_recorded",
     SessionEventKind.OPERATIONAL_OBSERVATION: "operational_observation",
+    SessionEventKind.CUSTOMER_MESSAGE: "customer_message",
+    SessionEventKind.ASSISTANT_RESPONSE: "assistant_response",
 }
 
 _CONTINUITY_MODE_WIRE: dict[SessionContinuityMode, str] = {

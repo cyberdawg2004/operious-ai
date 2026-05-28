@@ -117,6 +117,8 @@ class OperationalAct(StrEnum):
     SESSION_RECORD_TERMINATION = "session:record_termination"
     SESSION_RECORD_ARCHIVAL = "session:record_archival"
     SESSION_OBSERVE_OPERATION = "session:observe_operation"
+    SESSION_RECORD_CUSTOMER_MESSAGE = "session:record_customer_message"
+    SESSION_RECORD_ASSISTANT_RESPONSE = "session:record_assistant_response"
 
     # ─── supervisor ─────────────────────────────────────────────────
     SUPERVISOR_INSPECT = "supervisor:inspect"

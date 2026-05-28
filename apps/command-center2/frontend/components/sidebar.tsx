@@ -14,6 +14,7 @@ import {
   Building2,
   ChevronDown,
   LayoutList,
+  MessageSquare,
   Network,
   Brain,
   BookOpen,
@@ -39,6 +40,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: "operations", href: dashboardRoutes.operations, label: "Operations Queue", icon: LayoutList, group: "operations" },
+  { id: "conversations", href: dashboardRoutes.conversations, label: "Conversations", icon: MessageSquare, group: "operations" },
   { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity, group: "operations" },
   { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "DLQ Inspector", icon: AlertTriangle, group: "operations" },
   { id: "trace", href: dashboardRoutes.trace, label: "Trace Inspector", icon: Network, group: "operations" },

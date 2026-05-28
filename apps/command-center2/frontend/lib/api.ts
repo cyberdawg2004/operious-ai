@@ -488,10 +488,26 @@ export async function apiRequest<T>(
   return payload as T;
 }
 
-export function listSessions(query: { limit: number; offset: number }) {
+export function listSessions(query: { limit: number; offset: number; phase?: string }) {
   return apiRequest<{ items: SessionRecord[]; total: number }>("/session/sessions", {
     query,
   });
+}
+
+export type ConversationMessageResponse = {
+  turn_id: string;
+  phase_a_response: string;
+  execution_id: string;
+};
+
+export function submitConversationMessage(sessionId: string, content: string) {
+  return apiRequest<ConversationMessageResponse>(
+    `/conversation/${sessionId}/message`,
+    {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }
+  );
 }
 
 export function readCurrentPrincipal() {

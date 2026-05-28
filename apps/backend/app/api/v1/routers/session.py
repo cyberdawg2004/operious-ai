@@ -32,6 +32,7 @@ from app.api.v1.schemas.session import (
 from app.dependencies.authority import require_tenant_scope
 from app.dependencies.services import get_session_repository
 from app.session.contracts.results import ReconstructSessionResult
+from app.session.enums import SessionLifecyclePhase
 from app.session.identity import (
     SessionCorrelationId,
     SessionEventId,
@@ -126,6 +127,7 @@ async def get_session(
 async def list_sessions(
     principal_id: str | None = Query(None),
     external_handle: str | None = Query(None),
+    phase: str | None = Query(None),
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     repo: SessionPersistenceProtocol = Depends(get_session_repository),
@@ -134,6 +136,7 @@ async def list_sessions(
     query = SessionQuery(
         principal_id=principal_id,
         external_handle=external_handle,
+        lifecycle_phase=_parse_phase_or_400(phase),
         limit=limit,
         offset=offset,
     )
@@ -144,6 +147,18 @@ async def list_sessions(
         items=[SessionResponse.from_record(r) for r in page.sessions],
         total=page.total,
     )
+
+
+def _parse_phase_or_400(raw: str | None) -> SessionLifecyclePhase | None:
+    if raw is None:
+        return None
+    try:
+        return SessionLifecyclePhase(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_lifecycle_phase"},
+        ) from exc
 
 
 # ─── Events ──────────────────────────────────────────────────────────────

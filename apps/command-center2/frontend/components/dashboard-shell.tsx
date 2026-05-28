@@ -27,6 +27,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Operations Queue",
     description: "Live execution sessions, lifecycle state, latency, and governance outcomes.",
   },
+  conversations: {
+    eyebrow: "Operations",
+    title: "Conversations",
+    description: "Active customer sessions, live turns, and operator takeover.",
+  },
   "queue-status": {
     eyebrow: "Operations",
     title: "Queue Status",

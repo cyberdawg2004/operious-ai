@@ -129,6 +129,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
     "get_arbitration_repository",
     "get_boundary_repository",
     "get_cognition_service",
+    "get_conversation_service",
     "get_coordination_repository",
     "get_escalation_service",
     "get_governance_repository",

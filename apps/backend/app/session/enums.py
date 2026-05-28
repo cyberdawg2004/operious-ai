@@ -89,6 +89,8 @@ class SessionEventKind(StrEnum):
     OPERATIONAL_OBSERVATION   — generic externally-supplied
                                   observation (substrate-agnostic
                                   audit annotation).
+    CUSTOMER_MESSAGE          — customer-authored conversation turn.
+    ASSISTANT_RESPONSE        — assistant-authored conversation turn.
     """
 
     SESSION_OPENED = "session_opened"
@@ -101,6 +103,8 @@ class SessionEventKind(StrEnum):
     TERMINATION_RECORDED = "termination_recorded"
     ARCHIVAL_RECORDED = "archival_recorded"
     OPERATIONAL_OBSERVATION = "operational_observation"
+    CUSTOMER_MESSAGE = "customer_message"
+    ASSISTANT_RESPONSE = "assistant_response"
 
 
 class SessionContinuityMode(StrEnum):

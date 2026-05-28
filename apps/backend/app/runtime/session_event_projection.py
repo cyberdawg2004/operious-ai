@@ -230,6 +230,12 @@ SESSION_EVENT_KIND_TO_OPERATIONAL_ACT: Mapping[
     SessionEventKind.OPERATIONAL_OBSERVATION: (
         OperationalAct.SESSION_OBSERVE_OPERATION
     ),
+    SessionEventKind.CUSTOMER_MESSAGE: (
+        OperationalAct.SESSION_RECORD_CUSTOMER_MESSAGE
+    ),
+    SessionEventKind.ASSISTANT_RESPONSE: (
+        OperationalAct.SESSION_RECORD_ASSISTANT_RESPONSE
+    ),
 }
 
 

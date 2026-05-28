@@ -9,6 +9,7 @@ import sys
 import traceback
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from threading import Thread
 from typing import Any, TypeVar, cast
 
@@ -51,6 +52,7 @@ from app.coordination.persistence import (
     PostgresCoordinationPersistence,
 )
 from app.core.config import get_settings
+from app.core.redis import get_redis_client
 from app.db.session import dispose_engine, get_session_factory, reset_engine_state
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.execution import (
@@ -76,18 +78,27 @@ from app.runtime.resolution_runtime import (
     ResolutionRuntime,
     resolution_outbound_draft_timeline_payload,
     resolution_proposal_timeline_payload,
+    resolution_proposal_is_send_eligible,
 )
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.runtime.provider_circuit_breaker import (
     ProviderCircuitBreaker,
     ProviderCircuitSnapshot,
 )
+from app.session.contracts.requests import AppendEventRequest
+from app.session.contracts.results import AppendEventResult
+from app.session.conversation import (
+    derive_conversation_turn_id,
+    publish_conversation_event,
+)
+from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import as_session_id
 from app.session.lifecycle.classifier import is_terminal as is_terminal_session
 from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
 )
+from app.session.runtime import SessionRuntime
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app, enqueued_at_iso
@@ -250,6 +261,22 @@ class _DiagnosticExecutionWorkItem:
     session_id: str
     tenant_id: str
     content: str
+    conversation_turn_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolutionAppendResult:
+    success: bool
+    customer_reply: str | None = None
+    governance_decision_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ConversationPhaseBEvent:
+    turn_id: str
+    content: str
+    governance_decision_id: str
+    execution_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +331,9 @@ async def _prepare_diagnostic_execution(
         dispatch_id = execution.dispatch_id
         session_id = execution.session_id
         tenant_id = execution.tenant_id
+        conversation_turn_id = _metadata_text(
+            dict(execution.metadata).get("conversation.turn_id")
+        )
         claim_lost = await _claim_lost_payload(
             execution_runtime=execution_runtime,
             execution_id=execution_id_text,
@@ -351,6 +381,7 @@ async def _prepare_diagnostic_execution(
             session_id=session_id,
             tenant_id=tenant_id,
             content=content,
+            conversation_turn_id=conversation_turn_id,
         )
 
 
@@ -742,12 +773,20 @@ async def _persist_diagnostic_success(
                             event_type=_COMPLETED,
                         ),
                     )
-                    await _append_resolution_proposal_after_diagnostic(
+                    resolution_append = (
+                        await _append_resolution_proposal_after_diagnostic(
+                            session=session,
+                            timeline=timeline,
+                            work_item=work_item,
+                            result=result_payload,
+                            diagnostic_event_id=diagnostic_event.timeline_event_id,
+                        )
+                    )
+                    phase_b_event = await _append_conversation_phase_b_turn(
                         session=session,
-                        timeline=timeline,
+                        session_repo=session_repo,
                         work_item=work_item,
-                        result=result_payload,
-                        diagnostic_event_id=diagnostic_event.timeline_event_id,
+                        resolution_append=resolution_append,
                     )
                     completed_payload = result_payload.model_dump()
                     completed = await execution_runtime.complete_execution(
@@ -781,6 +820,10 @@ async def _persist_diagnostic_success(
                         await authority_tx.rollback()
                     raise
                 await session.commit()
+                await _publish_conversation_phase_b(
+                    work_item=work_item,
+                    phase_b_event=phase_b_event,
+                )
                 supervisor_queued = await _queue_supervisor_if_closed(
                     session_repo=session_repo,
                     session_id=work_item.session_id,
@@ -1020,7 +1063,7 @@ async def _append_resolution_proposal_after_diagnostic(
     work_item: _DiagnosticExecutionWorkItem,
     result: DiagnosticResult,
     diagnostic_event_id: str,
-) -> bool:
+) -> _ResolutionAppendResult:
     try:
         async with session.begin_nested():
             resolution_persistence = PostgresResolutionProposalPersistence(session)
@@ -1075,7 +1118,16 @@ async def _append_resolution_proposal_after_diagnostic(
                     event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
             )
-        return True
+        if (
+            resolution_proposal_is_send_eligible(proposal)
+            and proposal.governance_decision_id is not None
+        ):
+            return _ResolutionAppendResult(
+                success=True,
+                customer_reply=draft.draft_body,
+                governance_decision_id=str(proposal.governance_decision_id),
+            )
+        return _ResolutionAppendResult(success=True)
     except Exception as exc:  # noqa: BLE001
         await _append_resolution_failure_event(
             session=session,
@@ -1084,7 +1136,122 @@ async def _append_resolution_proposal_after_diagnostic(
             diagnostic_event_id=diagnostic_event_id,
             exc=exc,
         )
-        return False
+        return _ResolutionAppendResult(success=False)
+
+
+async def _append_conversation_phase_b_turn(
+    *,
+    session: AsyncSession,
+    session_repo: SessionPersistenceProtocol,
+    work_item: _DiagnosticExecutionWorkItem,
+    resolution_append: _ResolutionAppendResult,
+) -> _ConversationPhaseBEvent | None:
+    del session
+    if work_item.conversation_turn_id is None:
+        return None
+    if (
+        not resolution_append.success
+        or resolution_append.customer_reply is None
+        or resolution_append.governance_decision_id is None
+    ):
+        return None
+    session_record = await session_repo.get_session(
+        as_session_id(work_item.session_id),
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if session_record is None:
+        return None
+    turn_id = derive_conversation_turn_id(
+        session_id=work_item.session_id,
+        sequence=session_record.sequence_head + 1,
+    )
+    envelope = await SessionRuntime(persistence=session_repo).append_event(
+        AppendEventRequest(
+            session_id=as_session_id(work_item.session_id),
+            kind=SessionEventKind.ASSISTANT_RESPONSE,
+            occurred_at=datetime.now(timezone.utc),
+            continuity_mode=SessionContinuityMode.SYNCHRONOUS,
+            payload={
+                "content": resolution_append.customer_reply,
+                "phase": "B",
+                "turn_id": turn_id,
+                "governance_decision_id": (
+                    resolution_append.governance_decision_id
+                ),
+                "execution_id": work_item.execution_id,
+            },
+            annotation="assistant_response_phase_b",
+            correlation_id=work_item.dispatch_id,
+            request_id=work_item.dispatch_id,
+            idempotency_key=(
+                "conversation.phase_b:"
+                f"{work_item.execution_id}:{work_item.attempt_id}"
+            ),
+        )
+    )
+    if not envelope.is_ok or envelope.result is None:
+        return None
+    result = envelope.result
+    if not isinstance(result, AppendEventResult) or result.event is None:
+        return None
+    payload = dict(result.event.payload)
+    return _ConversationPhaseBEvent(
+        turn_id=str(payload.get("turn_id") or turn_id),
+        content=str(payload.get("content") or resolution_append.customer_reply),
+        governance_decision_id=str(
+            payload.get("governance_decision_id")
+            or resolution_append.governance_decision_id
+        ),
+        execution_id=str(payload.get("execution_id") or work_item.execution_id),
+    )
+
+
+async def _publish_conversation_phase_b(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    phase_b_event: _ConversationPhaseBEvent | None,
+) -> None:
+    if work_item.conversation_turn_id is None:
+        return
+    try:
+        redis_client = get_redis_client()
+        if phase_b_event is not None:
+            await publish_conversation_event(
+                redis_client=redis_client,
+                session_id=work_item.session_id,
+                event={
+                    "type": "turn",
+                    "role": "assistant",
+                    "phase": "B",
+                    "turn_id": phase_b_event.turn_id,
+                    "content": phase_b_event.content,
+                    "governance_decision_id": (
+                        phase_b_event.governance_decision_id
+                    ),
+                    "execution_id": phase_b_event.execution_id,
+                    "tenant_id": work_item.tenant_id,
+                    "session_id": work_item.session_id,
+                },
+            )
+        await publish_conversation_event(
+            redis_client=redis_client,
+            session_id=work_item.session_id,
+            event={
+                "type": "status",
+                "phase": "complete",
+                "tenant_id": work_item.tenant_id,
+                "session_id": work_item.session_id,
+                "execution_id": work_item.execution_id,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "conversation_stream_publish_failed",
+            extra={
+                "session_id": work_item.session_id,
+                "execution_id": work_item.execution_id,
+            },
+        )
 
 
 async def _append_resolution_failure_event(
@@ -1583,6 +1750,13 @@ def _bounded_exception_message(exc: BaseException) -> str:
     if len(message) <= 180:
         return message
     return f"{message[:177]}..."
+
+
+def _metadata_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text or None
 
 
 def _running_under_pytest() -> bool:
