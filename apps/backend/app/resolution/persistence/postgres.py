@@ -148,6 +148,11 @@ def _record_to_row(record: ResolutionProposalRecord) -> ResolutionProposalRow:
         evidence=[dict(item) for item in record.evidence],
         supervisor_verdict=record.supervisor_verdict.value,
         governance_verdict=record.governance_verdict.value,
+        governance_decision_id=(
+            UUID(str(record.governance_decision_id))
+            if record.governance_decision_id is not None
+            else None
+        ),
         autonomy_decision=record.autonomy_decision.value,
         status=record.status.value,
         created_at=record.created_at,
@@ -174,6 +179,7 @@ def _row_to_record(row: ResolutionProposalRow) -> ResolutionProposalRecord:
         evidence=tuple(_as_list_of_dict(row.evidence)),
         supervisor_verdict=ResolutionSupervisorVerdict(row.supervisor_verdict),
         governance_verdict=ResolutionGovernanceVerdict(row.governance_verdict),
+        governance_decision_id=row.governance_decision_id,
         autonomy_decision=ResolutionAutonomyDecision(row.autonomy_decision),
         status=ResolutionProposalStatus(row.status),
         created_at=row.created_at,

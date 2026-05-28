@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Protocol, Sequence
 
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -13,7 +14,10 @@ from app.resolution.enums import (
     ResolutionProposalStatus,
     ResolutionSupervisorVerdict,
 )
-from app.resolution.identity import derive_resolution_proposal_id
+from app.resolution.identity import (
+    ResolutionProposalId,
+    derive_resolution_proposal_id,
+)
 from app.resolution.persistence import (
     ResolutionProposalPersistenceProtocol,
     ResolutionProposalRecord,
@@ -133,12 +137,55 @@ class ResolutionProposalRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolutionGovernanceGateRequest:
+    """Application-layer governance input for a proposed resolution."""
+
+    proposal_id: ResolutionProposalId
+    tenant_id: str
+    session_id: str
+    execution_id: str
+    dispatch_id: str
+    diagnostic_event_id: str | None
+    diagnostic_summary: str
+    diagnostic_category: str
+    diagnostic_confidence: float
+    original_content: str
+    proposed_customer_reply: str
+    resolution_category: str
+    recommended_actions: tuple[Mapping[str, Any], ...]
+    evidence: tuple[Mapping[str, Any], ...]
+    local_supervisor_verdict: ResolutionSupervisorVerdict
+    local_governance_verdict: ResolutionGovernanceVerdict
+    local_autonomy_decision: ResolutionAutonomyDecision
+    local_status: ResolutionProposalStatus
+    local_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionGovernanceGateResult:
+    """Central governance verdict for a proposed resolution."""
+
+    governance_verdict: ResolutionGovernanceVerdict
+    governance_decision_id: uuid.UUID | None = None
+
+
+class ResolutionGovernanceGateProtocol(Protocol):
+    """Application-layer interface for central resolution governance."""
+
+    async def evaluate_resolution_proposal(
+        self,
+        request: ResolutionGovernanceGateRequest,
+    ) -> ResolutionGovernanceGateResult: ...
+
+
+@dataclass(frozen=True, slots=True)
 class _GateDecision:
     supervisor_verdict: ResolutionSupervisorVerdict
     governance_verdict: ResolutionGovernanceVerdict
     autonomy_decision: ResolutionAutonomyDecision
     status: ResolutionProposalStatus
     reasons: tuple[str, ...]
+    governance_decision_id: uuid.UUID | None = None
 
 
 class ResolutionRuntime:
@@ -148,11 +195,13 @@ class ResolutionRuntime:
         self,
         *,
         persistence: ResolutionProposalPersistenceProtocol,
+        governance_gate: ResolutionGovernanceGateProtocol | None = None,
         auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
     ) -> None:
         if auto_approve_threshold < 0 or auto_approve_threshold > 1:
             raise ValueError("auto_approve_threshold must be between 0 and 1")
         self._persistence = persistence
+        self._governance_gate = governance_gate
         self._auto_approve_threshold = auto_approve_threshold
 
     async def create_proposal(
@@ -195,6 +244,30 @@ class ResolutionRuntime:
         if existing is not None:
             return existing
 
+        gate = await self._evaluate_central_governance(
+            ResolutionGovernanceGateRequest(
+                proposal_id=proposal_id,
+                tenant_id=request.tenant_id,
+                session_id=request.session_id,
+                execution_id=request.execution_id,
+                dispatch_id=request.dispatch_id,
+                diagnostic_event_id=request.diagnostic_event_id,
+                diagnostic_summary=request.diagnostic_summary,
+                diagnostic_category=request.diagnostic_category,
+                diagnostic_confidence=request.diagnostic_confidence,
+                original_content=request.original_content,
+                proposed_customer_reply=reply,
+                resolution_category=category,
+                recommended_actions=recommended_actions,
+                evidence=evidence,
+                local_supervisor_verdict=gate.supervisor_verdict,
+                local_governance_verdict=gate.governance_verdict,
+                local_autonomy_decision=gate.autonomy_decision,
+                local_status=gate.status,
+                local_reasons=gate.reasons,
+            )
+        )
+
         now = datetime.now(tz=timezone.utc)
         record = ResolutionProposalRecord(
             proposal_id=proposal_id,
@@ -214,11 +287,32 @@ class ResolutionRuntime:
             status=gate.status,
             created_at=now,
             updated_at=now,
+            governance_decision_id=gate.governance_decision_id,
         )
         return await self._persistence.create_resolution_proposal(
             record,
             expected_tenant_id=request.tenant_id,
         )
+
+    async def _evaluate_central_governance(
+        self,
+        request: ResolutionGovernanceGateRequest,
+    ) -> _GateDecision:
+        if self._governance_gate is None:
+            return _fail_closed_gate_decision(
+                governance_verdict=ResolutionGovernanceVerdict.REQUIRE_APPROVAL,
+                reason="resolution_governance_gate_missing",
+            )
+        try:
+            result = await self._governance_gate.evaluate_resolution_proposal(
+                request
+            )
+        except Exception:  # noqa: BLE001
+            return _fail_closed_gate_decision(
+                governance_verdict=ResolutionGovernanceVerdict.DENY,
+                reason="resolution_governance_gate_failed",
+            )
+        return _map_central_governance_result(request, result)
 
 
 def resolution_proposal_timeline_payload(
@@ -227,13 +321,119 @@ def resolution_proposal_timeline_payload(
     """Build the append-only timeline payload for a resolution proposal."""
 
     payload = record.to_dict()
-    payload["send_eligible"] = (
-        record.status is ResolutionProposalStatus.SEND_ELIGIBLE
-    )
+    payload["send_eligible"] = resolution_proposal_is_send_eligible(record)
     payload["requires_human_approval"] = (
         record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     )
     return payload
+
+
+def resolution_proposal_is_send_eligible(
+    record: ResolutionProposalRecord,
+) -> bool:
+    """Return true only when central governance lineage is persisted."""
+
+    return (
+        record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+        and record.governance_decision_id is not None
+    )
+
+
+def _map_central_governance_result(
+    request: ResolutionGovernanceGateRequest,
+    result: ResolutionGovernanceGateResult,
+) -> _GateDecision:
+    decision_id = result.governance_decision_id
+    if decision_id is None:
+        return _fail_closed_gate_decision(
+            governance_verdict=ResolutionGovernanceVerdict.REQUIRE_APPROVAL,
+            reason="resolution_governance_decision_id_missing",
+        )
+    if result.governance_verdict is ResolutionGovernanceVerdict.DENY:
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+            governance_verdict=ResolutionGovernanceVerdict.DENY,
+            autonomy_decision=ResolutionAutonomyDecision.DENIED,
+            status=ResolutionProposalStatus.DENIED,
+            reasons=("central_governance_denied",),
+            governance_decision_id=decision_id,
+        )
+    if _local_gate_denied(request):
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+            governance_verdict=request.local_governance_verdict,
+            autonomy_decision=ResolutionAutonomyDecision.DENIED,
+            status=ResolutionProposalStatus.DENIED,
+            reasons=tuple(request.local_reasons or ("local_governance_denied",)),
+            governance_decision_id=decision_id,
+        )
+    if result.governance_verdict is not ResolutionGovernanceVerdict.ALLOW:
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
+            governance_verdict=result.governance_verdict,
+            autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
+            status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
+            reasons=(f"central_governance_{result.governance_verdict.value}",),
+            governance_decision_id=decision_id,
+        )
+    if _local_gate_passed(request):
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.PASS,
+            governance_verdict=ResolutionGovernanceVerdict.ALLOW,
+            autonomy_decision=ResolutionAutonomyDecision.AUTO_APPROVED,
+            status=ResolutionProposalStatus.SEND_ELIGIBLE,
+            reasons=("local_and_central_governance_allowed",),
+            governance_decision_id=decision_id,
+        )
+    return _GateDecision(
+        supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
+        governance_verdict=request.local_governance_verdict,
+        autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
+        status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
+        reasons=tuple(request.local_reasons or ("local_governance_not_auto_approved",)),
+        governance_decision_id=decision_id,
+    )
+
+
+def _local_gate_passed(request: ResolutionGovernanceGateRequest) -> bool:
+    return (
+        request.local_status is ResolutionProposalStatus.AUTO_APPROVED
+        and request.local_supervisor_verdict is ResolutionSupervisorVerdict.PASS
+        and request.local_governance_verdict is ResolutionGovernanceVerdict.ALLOW
+        and request.local_autonomy_decision
+        is ResolutionAutonomyDecision.AUTO_APPROVED
+    )
+
+
+def _local_gate_denied(request: ResolutionGovernanceGateRequest) -> bool:
+    return (
+        request.local_status is ResolutionProposalStatus.DENIED
+        or request.local_supervisor_verdict is ResolutionSupervisorVerdict.FAIL
+        or request.local_governance_verdict is ResolutionGovernanceVerdict.DENY
+        or request.local_autonomy_decision is ResolutionAutonomyDecision.DENIED
+    )
+
+
+def _fail_closed_gate_decision(
+    *,
+    governance_verdict: ResolutionGovernanceVerdict,
+    reason: str,
+) -> _GateDecision:
+    if governance_verdict is ResolutionGovernanceVerdict.DENY:
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+            governance_verdict=ResolutionGovernanceVerdict.DENY,
+            autonomy_decision=ResolutionAutonomyDecision.DENIED,
+            status=ResolutionProposalStatus.DENIED,
+            reasons=(reason,),
+        )
+    return _GateDecision(
+        supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
+        governance_verdict=governance_verdict,
+        autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
+        status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
+        reasons=(reason,),
+    )
 
 
 def _resolution_category(
@@ -425,7 +625,7 @@ def _evaluate_gate(
         supervisor_verdict=ResolutionSupervisorVerdict.PASS,
         governance_verdict=ResolutionGovernanceVerdict.ALLOW,
         autonomy_decision=ResolutionAutonomyDecision.AUTO_APPROVED,
-        status=ResolutionProposalStatus.SEND_ELIGIBLE,
+        status=ResolutionProposalStatus.AUTO_APPROVED,
         reasons=("auto_approval_criteria_met",),
     )
 
@@ -536,7 +736,11 @@ def _float_value(value: Any) -> float:
 
 
 __all__ = [
+    "ResolutionGovernanceGateProtocol",
+    "ResolutionGovernanceGateRequest",
+    "ResolutionGovernanceGateResult",
     "ResolutionProposalRequest",
     "ResolutionRuntime",
+    "resolution_proposal_is_send_eligible",
     "resolution_proposal_timeline_payload",
 ]

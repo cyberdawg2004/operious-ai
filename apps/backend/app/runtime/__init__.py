@@ -43,8 +43,12 @@ from app.runtime.provider_circuit_breaker import (
     ProviderCircuitState,
 )
 from app.runtime.resolution_runtime import (
+    ResolutionGovernanceGateProtocol,
+    ResolutionGovernanceGateRequest,
+    ResolutionGovernanceGateResult,
     ResolutionProposalRequest,
     ResolutionRuntime,
+    resolution_proposal_is_send_eligible,
     resolution_proposal_timeline_payload,
 )
 from app.runtime.governance_event_projection import (
@@ -124,8 +128,12 @@ __all__ = [
     "ProviderCircuitOpenError",
     "ProviderCircuitSnapshot",
     "ProviderCircuitState",
+    "ResolutionGovernanceGateProtocol",
+    "ResolutionGovernanceGateRequest",
+    "ResolutionGovernanceGateResult",
     "ResolutionProposalRequest",
     "ResolutionRuntime",
+    "resolution_proposal_is_send_eligible",
     "SessionEventProjectionError",
     "SessionOperationalEventProjection",
     "SessionOperationalEventProjector",

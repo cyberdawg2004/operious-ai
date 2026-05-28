@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
+from uuid import UUID
 
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -38,6 +39,7 @@ class ResolutionProposalRecord:
     status: ResolutionProposalStatus
     created_at: datetime
     updated_at: datetime
+    governance_decision_id: UUID | None = None
     recommended_actions: tuple[Mapping[str, Any], ...] = field(
         default_factory=_empty_json_list
     )
@@ -64,6 +66,11 @@ class ResolutionProposalRecord:
             "evidence": [dict(item) for item in self.evidence],
             "supervisor_verdict": self.supervisor_verdict.value,
             "governance_verdict": self.governance_verdict.value,
+            "governance_decision_id": (
+                str(self.governance_decision_id)
+                if self.governance_decision_id is not None
+                else None
+            ),
             "autonomy_decision": self.autonomy_decision.value,
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),

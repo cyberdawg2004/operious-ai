@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,8 +23,12 @@ from app.resolution.persistence import (
     ResolutionProposalQuery,
 )
 from app.runtime.resolution_runtime import (
+    ResolutionGovernanceGateRequest,
+    ResolutionGovernanceGateResult,
     ResolutionProposalRequest,
     ResolutionRuntime,
+    _map_central_governance_result,
+    resolution_proposal_is_send_eligible,
     resolution_proposal_timeline_payload,
 )
 from app.tenant.db.models import TenantRow
@@ -33,6 +39,28 @@ SESSION_ID = "11111111-1111-4111-8111-111111111111"
 EXECUTION_ID = "22222222-2222-4222-8222-222222222222"
 DISPATCH_ID = "33333333-3333-4333-8333-333333333333"
 DIAGNOSTIC_EVENT_ID = "44444444-4444-4444-8444-444444444444"
+GOVERNANCE_DECISION_ID = uuid.UUID("99999999-9999-4999-8999-999999999999")
+
+
+class _StaticResolutionGovernanceGate:
+    def __init__(
+        self,
+        verdict: ResolutionGovernanceVerdict,
+        decision_id: uuid.UUID | None = GOVERNANCE_DECISION_ID,
+    ) -> None:
+        self._verdict = verdict
+        self._decision_id = decision_id
+        self.requests: list[ResolutionGovernanceGateRequest] = []
+
+    async def evaluate_resolution_proposal(
+        self,
+        request: ResolutionGovernanceGateRequest,
+    ) -> ResolutionGovernanceGateResult:
+        self.requests.append(request)
+        return ResolutionGovernanceGateResult(
+            governance_verdict=self._verdict,
+            governance_decision_id=self._decision_id,
+        )
 
 
 def _citation() -> dict[str, object]:
@@ -118,7 +146,8 @@ async def _ensure_committed_tenants(
 @pytest.mark.asyncio
 async def test_safe_charging_issue_creates_send_eligible_proposal() -> None:
     persistence = InMemoryResolutionProposalPersistence()
-    runtime = ResolutionRuntime(persistence=persistence)
+    gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
+    runtime = ResolutionRuntime(persistence=persistence, governance_gate=gate)
 
     record = await runtime.create_proposal(_request())
 
@@ -128,8 +157,40 @@ async def test_safe_charging_issue_creates_send_eligible_proposal() -> None:
     assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
     assert record.supervisor_verdict is ResolutionSupervisorVerdict.PASS
     assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
+    assert record.governance_decision_id == GOVERNANCE_DECISION_ID
     assert record.evidence
     assert "refund" not in record.proposed_customer_reply.lower()
+    assert len(gate.requests) == 1
+    assert gate.requests[0].local_status is ResolutionProposalStatus.AUTO_APPROVED
+
+
+@pytest.mark.asyncio
+async def test_missing_governance_gate_fails_closed_for_send_eligibility() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence()
+    ).create_proposal(_request())
+
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.governance_decision_id is None
+    assert resolution_proposal_is_send_eligible(record) is False
+
+
+@pytest.mark.asyncio
+async def test_allow_without_governance_decision_id_fails_closed() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW,
+            decision_id=None,
+        ),
+    ).create_proposal(_request())
+
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.governance_decision_id is None
+    assert resolution_proposal_is_send_eligible(record) is False
 
 
 @pytest.mark.asyncio
@@ -142,6 +203,22 @@ async def test_missing_citations_prevent_auto_approval() -> None:
     assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
     assert record.evidence == ()
+
+
+@pytest.mark.asyncio
+async def test_central_allow_cannot_override_missing_citations() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+    ).create_proposal(_request(citations=[]))
+
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.governance_decision_id == GOVERNANCE_DECISION_ID
+    assert resolution_proposal_is_send_eligible(record) is False
 
 
 @pytest.mark.asyncio
@@ -191,9 +268,27 @@ async def test_low_confidence_requires_human_approval() -> None:
 
 
 @pytest.mark.asyncio
-async def test_safety_smoke_fire_or_injury_requires_human_approval() -> None:
+async def test_central_allow_cannot_override_low_confidence() -> None:
     record = await ResolutionRuntime(
-        persistence=InMemoryResolutionProposalPersistence()
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+    ).create_proposal(_request(confidence=0.42))
+
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.governance_decision_id == GOVERNANCE_DECISION_ID
+    assert resolution_proposal_is_send_eligible(record) is False
+
+
+@pytest.mark.asyncio
+async def test_safety_smoke_fire_or_injury_requires_human_approval() -> None:
+    gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ESCALATE)
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=gate,
     ).create_proposal(
         _request(
             content="The charger started smoking and caused a hand injury.",
@@ -204,6 +299,59 @@ async def test_safety_smoke_fire_or_injury_requires_human_approval() -> None:
     assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
     assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     assert record.governance_verdict is ResolutionGovernanceVerdict.ESCALATE
+    assert record.governance_decision_id == GOVERNANCE_DECISION_ID
+
+
+@pytest.mark.asyncio
+async def test_central_allow_cannot_override_safety_escalation() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+    ).create_proposal(
+        _request(
+            content="The charger started smoking and caused a hand injury.",
+            confidence=0.95,
+        )
+    )
+
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ESCALATE
+    assert record.governance_decision_id == GOVERNANCE_DECISION_ID
+    assert resolution_proposal_is_send_eligible(record) is False
+
+
+@pytest.mark.asyncio
+async def test_central_allow_cannot_override_unsupported_promise_denial() -> None:
+    gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
+    await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=gate,
+    ).create_proposal(_request())
+    request = replace(
+        gate.requests[0],
+        proposed_customer_reply="We will refund and replace this under warranty.",
+        local_supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+        local_governance_verdict=ResolutionGovernanceVerdict.DENY,
+        local_autonomy_decision=ResolutionAutonomyDecision.DENIED,
+        local_status=ResolutionProposalStatus.DENIED,
+        local_reasons=("unsupported_refund_replacement_or_warranty_promise",),
+    )
+
+    result = _map_central_governance_result(
+        request,
+        ResolutionGovernanceGateResult(
+            governance_verdict=ResolutionGovernanceVerdict.ALLOW,
+            governance_decision_id=GOVERNANCE_DECISION_ID,
+        ),
+    )
+
+    assert result.autonomy_decision is ResolutionAutonomyDecision.DENIED
+    assert result.status is ResolutionProposalStatus.DENIED
+    assert result.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert result.governance_decision_id == GOVERNANCE_DECISION_ID
 
 
 @pytest.mark.asyncio
@@ -244,6 +392,7 @@ async def test_postgres_resolution_persistence_enforces_tenant_rls(
     record = await ResolutionRuntime(persistence=persistence).create_proposal(
         _request()
     )
+    assert record.governance_decision_id is None
 
     assert (
         await persistence.get_resolution_proposal(
@@ -269,8 +418,10 @@ async def test_postgres_resolution_persistence_enforces_tenant_rls(
 
 @pytest.mark.asyncio
 async def test_resolution_timeline_payload_is_customer_safe_handoff() -> None:
+    gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
     record = await ResolutionRuntime(
-        persistence=InMemoryResolutionProposalPersistence()
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=gate,
     ).create_proposal(_request())
 
     payload = resolution_proposal_timeline_payload(record)
@@ -281,8 +432,26 @@ async def test_resolution_timeline_payload_is_customer_safe_handoff() -> None:
         dict(action) for action in record.recommended_actions
     ]
     assert payload["evidence"] == [dict(item) for item in record.evidence]
+    assert payload["governance_decision_id"] == str(GOVERNANCE_DECISION_ID)
     assert payload["send_eligible"] is True
     assert payload["requires_human_approval"] is False
+
+
+@pytest.mark.asyncio
+async def test_send_eligible_helper_requires_governance_decision_id() -> None:
+    record = await ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+    ).create_proposal(_request())
+
+    old_row_shape = replace(record, governance_decision_id=None)
+    payload = resolution_proposal_timeline_payload(old_row_shape)
+
+    assert old_row_shape.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert resolution_proposal_is_send_eligible(old_row_shape) is False
+    assert payload["send_eligible"] is False
 
 
 def test_resolution_runtime_has_no_external_send_path() -> None:
@@ -370,6 +539,23 @@ def test_resolution_tenant_fk_migration_checks_orphans_and_adds_fk() -> None:
     assert "\"tenants\"" in source
     assert "[\"tenant_id\"]" in source
     assert "ondelete=\"RESTRICT\"" in source
+
+
+def test_resolution_governance_decision_migration_is_nullable_and_indexed() -> None:
+    source = Path(
+        "apps/backend/migrations/versions/0043_resolution_proposal_governance_decision.py"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "down_revision: Union[str, None] = "
+        "\"0042_resolution_proposal_tenant_fk\"" in source
+    )
+    assert "\"governance_decision_id\"" in source
+    assert "postgresql.UUID(as_uuid=True)" in source
+    assert "nullable=True" in source
+    assert "ix_resolution_proposals_tenant_governance_decision" in source
+    assert "[\"tenant_id\", \"governance_decision_id\"]" in source
+    assert "ForeignKey" not in source
 
 
 def test_worker_hooks_resolution_after_diagnostic_success() -> None:

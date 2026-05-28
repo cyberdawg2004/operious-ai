@@ -76,6 +76,9 @@ class ResolutionProposalRow(Base):
     governance_verdict: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
+    governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     autonomy_decision: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
@@ -145,6 +148,11 @@ class ResolutionProposalRow(Base):
             "ix_resolution_proposals_tenant_created_at",
             "tenant_id",
             "created_at",
+        ),
+        Index(
+            "ix_resolution_proposals_tenant_governance_decision",
+            "tenant_id",
+            "governance_decision_id",
         ),
     )
 
