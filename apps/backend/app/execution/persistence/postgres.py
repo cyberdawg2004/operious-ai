@@ -174,6 +174,8 @@ class PostgresExecutionPersistence(BaseRepository):
         result: Mapping[str, Any],
         completed_at: datetime,
         worker_id: str,
+        diagnostic_category: str | None = None,
+        diagnostic_confidence: float | None = None,
     ) -> ExecutionTransitionResult:
         existing = await self.get_execution(execution_id)
         if existing is None:
@@ -207,7 +209,14 @@ class PostgresExecutionPersistence(BaseRepository):
         )
         if lost is not None:
             return lost
-        result_envelope = ExecutionResultEnvelope.from_dict(result).to_dict()
+        result_envelope = ExecutionResultEnvelope.from_dict(result)
+        category = diagnostic_category or result_envelope.diagnostic_category
+        confidence = (
+            diagnostic_confidence
+            if diagnostic_confidence is not None
+            else result_envelope.diagnostic_confidence
+        )
+        result_payload = result_envelope.to_dict()
         async with self.session.begin_nested():
             stmt = (
                 update(ExecutionRow)
@@ -220,7 +229,9 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=ExecutionState.COMPLETED.value,
                     completed_at=completed_at,
-                    result=result_envelope,
+                    diagnostic_category=category,
+                    diagnostic_confidence=confidence,
+                    result=result_payload,
                 )
             )
             execution_result = cast(
@@ -246,7 +257,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=ExecutionAttemptState.COMPLETED.value,
                     completed_at=completed_at,
-                    result=result_envelope,
+                    result=result_payload,
                 )
             )
             attempt_result = cast(
@@ -1156,6 +1167,8 @@ def _execution_to_row(record: ExecutionRecord) -> ExecutionRow:
         completed_at=record.completed_at,
         failed_at=record.failed_at,
         worker_id=record.worker_id,
+        diagnostic_category=record.diagnostic_category,
+        diagnostic_confidence=record.diagnostic_confidence,
         result=record.result.to_dict(),
         error=record.error,
         metadata_json=metadata,
@@ -1226,6 +1239,8 @@ def _row_to_execution(row: ExecutionRow) -> ExecutionRecord:
         completed_at=row.completed_at,
         failed_at=row.failed_at,
         worker_id=row.worker_id,
+        diagnostic_category=row.diagnostic_category,
+        diagnostic_confidence=row.diagnostic_confidence,
         result=ExecutionResultEnvelope.from_dict(row.result or {}),
         error=row.error,
         metadata=metadata,

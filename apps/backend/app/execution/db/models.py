@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Float,
     Integer,
     Boolean,
     String,
@@ -65,6 +66,12 @@ class ExecutionRow(Base):
     )
     worker_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
+    )
+    diagnostic_category: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True
+    )
+    diagnostic_confidence: Mapped[float | None] = mapped_column(
+        Float, nullable=True
     )
     result: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

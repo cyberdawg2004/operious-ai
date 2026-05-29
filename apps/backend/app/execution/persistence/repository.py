@@ -82,6 +82,8 @@ class ExecutionPersistenceProtocol(Protocol):
         result: Mapping[str, Any],
         completed_at: datetime,
         worker_id: str,
+        diagnostic_category: str | None = None,
+        diagnostic_confidence: float | None = None,
     ) -> ExecutionTransitionResult: ...
 
     async def fail_execution(

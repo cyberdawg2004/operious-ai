@@ -456,6 +456,8 @@ class ExecutionRuntime:
         worker_id: str,
         result: Mapping[str, Any],
         completed_at: datetime | None = None,
+        diagnostic_category: str | None = None,
+        diagnostic_confidence: float | None = None,
     ) -> ExecutionTransitionResult:
         _validate_worker_id(worker_id)
         eid = (
@@ -472,12 +474,21 @@ class ExecutionRuntime:
                 else as_attempt_id(attempt_id)
             )
         )
+        result_envelope = ExecutionResultEnvelope.from_dict(result)
         outcome = await self._persistence.complete_execution(
             execution_id=eid,
             attempt_id=aid,
-            result=ExecutionResultEnvelope.from_dict(result).to_dict(),
+            result=result_envelope.to_dict(),
             completed_at=completed_at or datetime.now(tz=timezone.utc),
             worker_id=worker_id,
+            diagnostic_category=(
+                diagnostic_category or result_envelope.diagnostic_category
+            ),
+            diagnostic_confidence=(
+                diagnostic_confidence
+                if diagnostic_confidence is not None
+                else result_envelope.diagnostic_confidence
+            ),
         )
         if isinstance(outcome, ExecutionClaimLost):
             _log_execution_claim_lost(outcome, operation="complete")

@@ -194,6 +194,8 @@ class Settings(BaseSettings):
     SEMANTIC_CIRCUIT_WINDOW_SECONDS: int = Field(default=300)
     SEMANTIC_CIRCUIT_CLUSTER_THRESHOLD: int = Field(default=5)
     SEMANTIC_CIRCUIT_SIMILARITY_THRESHOLD: float = Field(default=0.7)
+    DEFECT_CLUSTER_WINDOW_HOURS: int = Field(default=24)
+    DEFECT_CLUSTER_THRESHOLD: int = Field(default=5)
     ALERT_QUEUE_AGE_CRITICAL_SECONDS: int = 600
     ALERT_DLQ_SPIKE_THRESHOLD: int = 5
     ALERT_REDIS_MEMORY_PCT: float = 85.0

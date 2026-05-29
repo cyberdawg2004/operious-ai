@@ -182,6 +182,8 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         result: Mapping[str, Any],
         completed_at: datetime,
         worker_id: str,
+        diagnostic_category: str | None = None,
+        diagnostic_confidence: float | None = None,
     ) -> ExecutionTransitionResult:
         async with self._lock:
             record = self._require(execution_id)
@@ -213,6 +215,12 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             if lost is not None:
                 return lost
             result_envelope = ExecutionResultEnvelope.from_dict(result)
+            category = diagnostic_category or result_envelope.diagnostic_category
+            confidence = (
+                diagnostic_confidence
+                if diagnostic_confidence is not None
+                else result_envelope.diagnostic_confidence
+            )
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.COMPLETED,
@@ -223,6 +231,8 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
                 record,
                 state=ExecutionState.COMPLETED,
                 completed_at=completed_at,
+                diagnostic_category=category,
+                diagnostic_confidence=confidence,
                 result=result_envelope,
             )
             self._executions[execution_id] = updated

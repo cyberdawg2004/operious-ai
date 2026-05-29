@@ -26,6 +26,13 @@ from app.runtime.execution_event_projection import (
     ExecutionOperationalEventProjector,
     project_execution_records,
 )
+from app.runtime.defect_cluster_runtime import (
+    CLUSTER_THRESHOLD,
+    CLUSTER_WINDOW_HOURS,
+    DefectClusterCandidate,
+    DefectClusterDetectionRuntime,
+    derive_defect_cluster_id,
+)
 from app.runtime.escalation_event_projection import (
     EscalationEventProjectionError,
     EscalationOperationalEventProjection,
@@ -114,6 +121,10 @@ __all__ = [
     "CoordinationEventProjectionError",
     "CoordinationOperationalEventProjection",
     "CoordinationOperationalEventProjector",
+    "CLUSTER_THRESHOLD",
+    "CLUSTER_WINDOW_HOURS",
+    "DefectClusterCandidate",
+    "DefectClusterDetectionRuntime",
     "DispatchArbitrationEvaluation",
     "DispatchArbitrationProposal",
     "DispatchArbitrationRuntime",
@@ -161,6 +172,7 @@ __all__ = [
     "TenantCoordinationTopologyRuntimeProvider",
     "TimelineRuntime",
     "build_coordination_topology_runtime",
+    "derive_defect_cluster_id",
     "make_postgres_sop_approval_event_projector",
     "make_postgres_dispatch_arbitration_runtime",
     "project_arbitration_record",

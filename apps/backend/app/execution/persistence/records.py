@@ -38,6 +38,8 @@ class ExecutionRecord:
     state: ExecutionState
     attempt_count: int
     requested_at: datetime
+    diagnostic_category: str | None = None
+    diagnostic_confidence: float | None = None
     governance_decision_id: uuid.UUID | None = None
     execution_governance_evaluation_id: uuid.UUID | None = None
     governance_admitted_at: datetime | None = None

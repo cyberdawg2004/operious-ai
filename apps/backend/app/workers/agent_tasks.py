@@ -858,7 +858,7 @@ async def _persist_diagnostic_success(
                             "governance_decision_id",
                         }
                     )
-                    completed_payload = ExecutionResultEnvelope(
+                    completed_envelope = ExecutionResultEnvelope(
                         diagnostic_category=result_payload.category,
                         diagnostic_confidence=result_payload.confidence,
                         diagnostic_summary=result_payload.summary,
@@ -869,12 +869,19 @@ async def _persist_diagnostic_success(
                         resolution_proposal_id=resolution_append.proposal_id,
                         resolution_draft_id=resolution_append.draft_id,
                         metadata=result_metadata,
-                    ).to_dict()
+                    )
+                    completed_payload = completed_envelope.to_dict()
                     completed = await execution_runtime.complete_execution(
                         execution_id=work_item.execution_id,
                         attempt_id=work_item.attempt_id,
                         worker_id=worker_id,
                         result=completed_payload,
+                        diagnostic_category=(
+                            completed_envelope.diagnostic_category
+                        ),
+                        diagnostic_confidence=(
+                            completed_envelope.diagnostic_confidence
+                        ),
                     )
                     if isinstance(completed, ExecutionClaimLost):
                         await authority_tx.rollback()

@@ -1,5 +1,9 @@
 """Runtime substrate ORM models."""
 
-from app.runtime.db.models import DeadLetterTaskRow, ProviderCircuitStateRow
+from app.runtime.db.models import (
+    DeadLetterTaskRow,
+    DefectClusterRow,
+    ProviderCircuitStateRow,
+)
 
-__all__ = ["DeadLetterTaskRow", "ProviderCircuitStateRow"]
+__all__ = ["DeadLetterTaskRow", "DefectClusterRow", "ProviderCircuitStateRow"]

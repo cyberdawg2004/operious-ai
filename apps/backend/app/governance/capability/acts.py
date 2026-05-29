@@ -121,6 +121,7 @@ class OperationalAct(StrEnum):
     SESSION_RECORD_ASSISTANT_RESPONSE = "session:record_assistant_response"
 
     # ─── supervisor ─────────────────────────────────────────────────
+    DEFECT_CLUSTER_DETECTED = "supervisor:defect_cluster_detected"
     SUPERVISOR_INSPECT = "supervisor:inspect"
 
 
