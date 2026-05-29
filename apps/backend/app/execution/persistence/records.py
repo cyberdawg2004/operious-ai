@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 import uuid
 
+from app.execution.envelope import ExecutionResultEnvelope
 from app.execution.enums import (
     ExecutionAttemptState,
     ExecutionKind,
@@ -40,9 +41,20 @@ class ExecutionRecord:
     completed_at: datetime | None = None
     failed_at: datetime | None = None
     worker_id: str | None = None
-    result: Mapping[str, Any] = field(default_factory=dict)
+    result: ExecutionResultEnvelope = field(
+        default_factory=ExecutionResultEnvelope
+    )
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        result = cast(Any, self.result)
+        if not isinstance(result, ExecutionResultEnvelope):
+            object.__setattr__(
+                self,
+                "result",
+                ExecutionResultEnvelope.from_dict(result),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +71,20 @@ class ExecutionAttemptRecord:
     failed_at: datetime | None = None
     previous_attempt_id: ExecutionAttemptId | None = None
     retry_requested: bool = False
-    result: Mapping[str, Any] = field(default_factory=dict)
+    result: ExecutionResultEnvelope = field(
+        default_factory=ExecutionResultEnvelope
+    )
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        result = cast(Any, self.result)
+        if not isinstance(result, ExecutionResultEnvelope):
+            object.__setattr__(
+                self,
+                "result",
+                ExecutionResultEnvelope.from_dict(result),
+            )
 
 
 @dataclass(frozen=True, slots=True)

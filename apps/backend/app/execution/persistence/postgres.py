@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 
+from app.execution.envelope import ExecutionResultEnvelope
 from app.execution.db.models import (
     ExecutionAttemptRow,
     ExecutionOutboxRow,
@@ -206,6 +207,7 @@ class PostgresExecutionPersistence(BaseRepository):
         )
         if lost is not None:
             return lost
+        result_envelope = ExecutionResultEnvelope.from_dict(result).to_dict()
         async with self.session.begin_nested():
             stmt = (
                 update(ExecutionRow)
@@ -218,7 +220,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=ExecutionState.COMPLETED.value,
                     completed_at=completed_at,
-                    result=dict(result),
+                    result=result_envelope,
                 )
             )
             execution_result = cast(
@@ -244,7 +246,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=ExecutionAttemptState.COMPLETED.value,
                     completed_at=completed_at,
-                    result=dict(result),
+                    result=result_envelope,
                 )
             )
             attempt_result = cast(
@@ -270,6 +272,7 @@ class PostgresExecutionPersistence(BaseRepository):
         failed_at: datetime,
         retry_requested: bool,
         worker_id: str,
+        result: Mapping[str, Any],
     ) -> ExecutionTransitionResult:
         existing = await self.get_execution(execution_id)
         if existing is None:
@@ -293,6 +296,7 @@ class PostgresExecutionPersistence(BaseRepository):
         )
         if lost is not None:
             return lost
+        result_envelope = ExecutionResultEnvelope.from_dict(result).to_dict()
         next_state = (
             ExecutionState.REQUESTED
             if retry_requested
@@ -310,6 +314,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=next_state.value,
                     failed_at=failed_at,
+                    result=result_envelope,
                     error=error,
                 )
             )
@@ -337,6 +342,7 @@ class PostgresExecutionPersistence(BaseRepository):
                     state=ExecutionAttemptState.FAILED.value,
                     failed_at=failed_at,
                     retry_requested=retry_requested,
+                    result=result_envelope,
                     error=error,
                 )
             )
@@ -362,6 +368,7 @@ class PostgresExecutionPersistence(BaseRepository):
         error: str,
         dead_lettered_at: datetime,
         worker_id: str,
+        result: Mapping[str, Any],
     ) -> ExecutionTransitionResult:
         existing = await self.get_execution(execution_id)
         if existing is None:
@@ -385,6 +392,7 @@ class PostgresExecutionPersistence(BaseRepository):
         )
         if lost is not None:
             return lost
+        result_envelope = ExecutionResultEnvelope.from_dict(result).to_dict()
         async with self.session.begin_nested():
             stmt = (
                 update(ExecutionRow)
@@ -397,6 +405,7 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=ExecutionState.DEAD_LETTERED.value,
                     failed_at=dead_lettered_at,
+                    result=result_envelope,
                     error=error,
                 )
             )
@@ -424,6 +433,7 @@ class PostgresExecutionPersistence(BaseRepository):
                     state=ExecutionAttemptState.DEAD_LETTERED.value,
                     failed_at=dead_lettered_at,
                     retry_requested=False,
+                    result=result_envelope,
                     error=error,
                 )
             )
@@ -1146,7 +1156,7 @@ def _execution_to_row(record: ExecutionRecord) -> ExecutionRow:
         completed_at=record.completed_at,
         failed_at=record.failed_at,
         worker_id=record.worker_id,
-        result=dict(record.result),
+        result=record.result.to_dict(),
         error=record.error,
         metadata_json=metadata,
     )
@@ -1164,7 +1174,7 @@ def _attempt_to_row(record: ExecutionAttemptRecord) -> ExecutionAttemptRow:
         failed_at=record.failed_at,
         previous_attempt_id=record.previous_attempt_id,
         retry_requested=record.retry_requested,
-        result=dict(record.result),
+        result=record.result.to_dict(),
         error=record.error,
         metadata_json=dict(record.metadata),
     )
@@ -1186,7 +1196,7 @@ def _row_to_attempt(row: ExecutionAttemptRow) -> ExecutionAttemptRecord:
             else None
         ),
         retry_requested=row.retry_requested,
-        result=dict(row.result or {}),
+        result=ExecutionResultEnvelope.from_dict(row.result or {}),
         error=row.error,
         metadata=dict(row.metadata_json or {}),
     )
@@ -1216,7 +1226,7 @@ def _row_to_execution(row: ExecutionRow) -> ExecutionRecord:
         completed_at=row.completed_at,
         failed_at=row.failed_at,
         worker_id=row.worker_id,
-        result=dict(row.result or {}),
+        result=ExecutionResultEnvelope.from_dict(row.result or {}),
         error=row.error,
         metadata=metadata,
     )

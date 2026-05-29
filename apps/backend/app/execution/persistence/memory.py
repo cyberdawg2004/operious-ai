@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any, Mapping
 
+from app.execution.envelope import ExecutionResultEnvelope
 from app.execution.enums import (
     ExecutionAttemptState,
     ExecutionKind,
@@ -211,17 +212,18 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             )
             if lost is not None:
                 return lost
+            result_envelope = ExecutionResultEnvelope.from_dict(result)
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.COMPLETED,
                 completed_at=completed_at,
-                result=dict(result),
+                result=result_envelope,
             )
             updated = replace(
                 record,
                 state=ExecutionState.COMPLETED,
                 completed_at=completed_at,
-                result=dict(result),
+                result=result_envelope,
             )
             self._executions[execution_id] = updated
             return updated
@@ -235,6 +237,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         failed_at: datetime,
         retry_requested: bool,
         worker_id: str,
+        result: Mapping[str, Any],
     ) -> ExecutionTransitionResult:
         async with self._lock:
             record = self._require(execution_id)
@@ -255,11 +258,13 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             )
             if lost is not None:
                 return lost
+            result_envelope = ExecutionResultEnvelope.from_dict(result)
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.FAILED,
                 failed_at=failed_at,
                 retry_requested=retry_requested,
+                result=result_envelope,
                 error=error,
             )
             updated = replace(
@@ -270,6 +275,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
                     else ExecutionState.FAILED
                 ),
                 failed_at=failed_at,
+                result=result_envelope,
                 error=error,
             )
             self._executions[execution_id] = updated
@@ -283,6 +289,7 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         error: str,
         dead_lettered_at: datetime,
         worker_id: str,
+        result: Mapping[str, Any],
     ) -> ExecutionTransitionResult:
         async with self._lock:
             record = self._require(execution_id)
@@ -303,17 +310,20 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
             )
             if lost is not None:
                 return lost
+            result_envelope = ExecutionResultEnvelope.from_dict(result)
             self._attempts[attempt.attempt_id] = replace(
                 attempt,
                 state=ExecutionAttemptState.DEAD_LETTERED,
                 failed_at=dead_lettered_at,
                 retry_requested=False,
+                result=result_envelope,
                 error=error,
             )
             updated = replace(
                 record,
                 state=ExecutionState.DEAD_LETTERED,
                 failed_at=dead_lettered_at,
+                result=result_envelope,
                 error=error,
             )
             self._executions[execution_id] = updated

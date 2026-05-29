@@ -6,6 +6,10 @@ from app.execution.enums import (
     ExecutionOutboxState,
     ExecutionState,
 )
+from app.execution.envelope import (
+    CURRENT_SCHEMA_VERSION,
+    ExecutionResultEnvelope,
+)
 from app.execution.admission import GovernanceAdmissionToken
 from app.execution.exceptions import ExecutionAdmissionError
 from app.execution.identity import (
@@ -69,6 +73,7 @@ __all__ = [
     "ExecutionClaimResult",
     "ExecutionClaimLost",
     "ExecutionClaimRecord",
+    "ExecutionResultEnvelope",
     "ExecutionId",
     "ExecutionKind",
     "ExecutionOutboxClaimId",
@@ -93,6 +98,7 @@ __all__ = [
     "ExecutionTransitionResult",
     "ExecutionWorkerLegitimacyResult",
     "GovernanceAdmissionToken",
+    "CURRENT_SCHEMA_VERSION",
     "InMemoryExecutionPersistence",
     "OutboxPage",
     "OutboxQuery",

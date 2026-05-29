@@ -623,7 +623,7 @@ def _attempt_metadata(
             if attempt.completed_at is not None
             else None
         )
-        metadata["result"] = dict(attempt.result)
+        metadata["result"] = attempt.result.to_dict()
     elif transition in {"failed", "recovered"}:
         metadata["attempt_state"] = ExecutionAttemptState.FAILED.value
         metadata["failed_at"] = (
@@ -643,7 +643,7 @@ def _attempt_metadata(
         )
         metadata["retry_requested"] = attempt.retry_requested
         metadata["error"] = attempt.error
-        metadata["result"] = dict(attempt.result)
+        metadata["result"] = attempt.result.to_dict()
         metadata["attempt_metadata"] = dict(attempt.metadata)
     return metadata
 

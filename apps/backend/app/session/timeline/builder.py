@@ -45,6 +45,8 @@ from app.session.serializers.canonical import (
     canonicalize_payload,
 )
 
+_SCHEMA_VERSION = "1"
+
 
 def build_event(
     *,
@@ -70,7 +72,9 @@ def build_event(
         continuity_mode=continuity_mode,
         occurred_at=occurred_at,
         recorded_at=recorded_at,
-        payload=canonicalize_payload(payload or {}),
+        payload=canonicalize_payload(
+            {"_schema_version": _SCHEMA_VERSION, **dict(payload or {})}
+        ),
         correlation_id=correlation_id,
         annotation=annotation,
         idempotency_key=idempotency_key,

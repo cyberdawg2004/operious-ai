@@ -85,6 +85,7 @@ from app.db.session import dispose_engine, get_session_factory, reset_engine_sta
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.execution import (
     ExecutionClaimLost,
+    ExecutionResultEnvelope,
     ExecutionRuntime,
     PostgresExecutionPersistence,
 )
@@ -305,6 +306,8 @@ class _ResolutionAppendResult:
     success: bool
     customer_reply: str | None = None
     governance_decision_id: str | None = None
+    proposal_id: str | None = None
+    draft_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -834,7 +837,26 @@ async def _persist_diagnostic_success(
                         work_item=work_item,
                         resolution_append=resolution_append,
                     )
-                    completed_payload = result_payload.model_dump()
+                    result_metadata = result_payload.model_dump(
+                        exclude={
+                            "category",
+                            "confidence",
+                            "summary",
+                            "governance_decision_id",
+                        }
+                    )
+                    completed_payload = ExecutionResultEnvelope(
+                        diagnostic_category=result_payload.category,
+                        diagnostic_confidence=result_payload.confidence,
+                        diagnostic_summary=result_payload.summary,
+                        governance_decision_id=(
+                            result_payload.governance_decision_id
+                            or resolution_append.governance_decision_id
+                        ),
+                        resolution_proposal_id=resolution_append.proposal_id,
+                        resolution_draft_id=resolution_append.draft_id,
+                        metadata=result_metadata,
+                    ).to_dict()
                     completed = await execution_runtime.complete_execution(
                         execution_id=work_item.execution_id,
                         attempt_id=work_item.attempt_id,
@@ -1205,8 +1227,19 @@ async def _append_resolution_proposal_after_diagnostic(
                 success=True,
                 customer_reply=draft.draft_body,
                 governance_decision_id=str(proposal.governance_decision_id),
+                proposal_id=str(proposal.proposal_id),
+                draft_id=str(draft.draft_id),
             )
-        return _ResolutionAppendResult(success=True)
+        return _ResolutionAppendResult(
+            success=True,
+            governance_decision_id=(
+                str(proposal.governance_decision_id)
+                if proposal.governance_decision_id is not None
+                else None
+            ),
+            proposal_id=str(proposal.proposal_id),
+            draft_id=str(draft.draft_id),
+        )
     except Exception as exc:  # noqa: BLE001
         await _append_resolution_failure_event(
             session=session,
@@ -1535,6 +1568,13 @@ async def _fail_execution_record(
             worker_id=worker_id,
             error=str(failure.get("message") or failure),
             retry_requested=retry_requested,
+            result=ExecutionResultEnvelope(
+                error_code=str(
+                    failure.get("error_class") or "diagnostic_failed"
+                ),
+                error_message=str(failure.get("message") or failure),
+                metadata=dict(failure),
+            ).to_dict(),
         )
         if isinstance(failed, ExecutionClaimLost):
             await session.rollback()
@@ -1561,6 +1601,14 @@ async def _dead_letter_execution_record(
             attempt_id=str(attempt_id),
             worker_id=worker_id,
             error=str(failure.get("message") or failure),
+            result=ExecutionResultEnvelope(
+                error_code=str(
+                    failure.get("error_class")
+                    or "diagnostic_dead_lettered"
+                ),
+                error_message=str(failure.get("message") or failure),
+                metadata=dict(failure),
+            ).to_dict(),
         )
         if isinstance(dead_lettered, ExecutionClaimLost):
             await session.rollback()

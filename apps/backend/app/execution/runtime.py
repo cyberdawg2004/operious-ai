@@ -14,6 +14,7 @@ from app.execution.enums import (
     ExecutionState,
 )
 from app.execution.admission import GovernanceAdmissionToken
+from app.execution.envelope import ExecutionResultEnvelope
 from app.execution.exceptions import ExecutionNotClaimableError
 from app.execution.exceptions import ExecutionAdmissionError
 from app.execution.identity import (
@@ -474,7 +475,7 @@ class ExecutionRuntime:
         outcome = await self._persistence.complete_execution(
             execution_id=eid,
             attempt_id=aid,
-            result=result,
+            result=ExecutionResultEnvelope.from_dict(result).to_dict(),
             completed_at=completed_at or datetime.now(tz=timezone.utc),
             worker_id=worker_id,
         )
@@ -491,6 +492,7 @@ class ExecutionRuntime:
         error: str,
         failed_at: datetime | None = None,
         retry_requested: bool = False,
+        result: Mapping[str, Any] | None = None,
     ) -> ExecutionTransitionResult:
         _validate_worker_id(worker_id)
         eid = (
@@ -514,6 +516,14 @@ class ExecutionRuntime:
             failed_at=failed_at or datetime.now(tz=timezone.utc),
             retry_requested=retry_requested,
             worker_id=worker_id,
+            result=(
+                ExecutionResultEnvelope.from_dict(result).to_dict()
+                if result is not None
+                else ExecutionResultEnvelope(
+                    error_code="execution_failed",
+                    error_message=error,
+                ).to_dict()
+            ),
         )
         if isinstance(outcome, ExecutionClaimLost):
             _log_execution_claim_lost(outcome, operation="fail")
@@ -527,6 +537,7 @@ class ExecutionRuntime:
         worker_id: str,
         error: str,
         dead_lettered_at: datetime | None = None,
+        result: Mapping[str, Any] | None = None,
     ) -> ExecutionTransitionResult:
         _validate_worker_id(worker_id)
         eid = (
@@ -549,6 +560,14 @@ class ExecutionRuntime:
             error=error,
             dead_lettered_at=dead_lettered_at or datetime.now(tz=timezone.utc),
             worker_id=worker_id,
+            result=(
+                ExecutionResultEnvelope.from_dict(result).to_dict()
+                if result is not None
+                else ExecutionResultEnvelope(
+                    error_code="execution_dead_lettered",
+                    error_message=error,
+                ).to_dict()
+            ),
         )
         if isinstance(outcome, ExecutionClaimLost):
             _log_execution_claim_lost(outcome, operation="dead_letter")

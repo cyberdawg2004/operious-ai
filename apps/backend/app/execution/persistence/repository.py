@@ -93,6 +93,7 @@ class ExecutionPersistenceProtocol(Protocol):
         failed_at: datetime,
         retry_requested: bool,
         worker_id: str,
+        result: Mapping[str, Any],
     ) -> ExecutionTransitionResult: ...
 
     async def dead_letter_execution(
@@ -103,6 +104,7 @@ class ExecutionPersistenceProtocol(Protocol):
         error: str,
         dead_lettered_at: datetime,
         worker_id: str,
+        result: Mapping[str, Any],
     ) -> ExecutionTransitionResult: ...
 
     async def recover_stale_execution(
