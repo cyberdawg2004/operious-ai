@@ -49,6 +49,13 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.runtime.quota_runtime import TenantQuotaRuntime
+from app.agents.tools.action_governance import (
+    build_action_tool_governance_runtime,
+)
+from app.agents.tools.actions import build_action_tool_registry
+from app.agents.tools.approvals import PostgresActionApprovalRepository
+from app.agents.tools.invoker import ToolInvoker
+from app.agents.tools.orchestration import ActionOrchestrationRuntime
 from app.arbitration.persistence import (
     ArbitrationPersistenceProtocol,
     PostgresArbitrationPersistence,
@@ -120,6 +127,9 @@ from app.runtime import (
 from app.runtime.tenant_production_hardening import (
     TenantProductionHardeningRuntime,
 )
+from app.runtime.timeline_runtime import TimelineRuntime
+from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
 from app.services.conversation_service import (
@@ -528,6 +538,33 @@ def get_cognition_service(
             session,
             audit_encryptor=audit_encryptor,
         ),
+        session=session,
+    )
+
+
+def get_action_approval_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> ActionApprovalService:
+    """Return the manager action-approval service for this request."""
+    governance_repository = PostgresGovernanceRepository(session)
+    session_repository = PostgresSessionPersistence(session)
+    timeline_runtime = TimelineRuntime(persistence=session_repository)
+    return ActionApprovalService(
+        approval_repository=PostgresActionApprovalRepository(session),
+        governance_repository=governance_repository,
+        resolution_repository=PostgresResolutionProposalPersistence(session),
+        session_repository=session_repository,
+        orchestration_runtime=ActionOrchestrationRuntime(
+            tool_invoker=ToolInvoker(
+                tool_registry=build_action_tool_registry(),
+                governance_runtime=build_action_tool_governance_runtime(
+                    persistence=governance_repository,
+                ),
+            ),
+            approval_repository=PostgresActionApprovalRepository(session),
+            timeline_runtime=timeline_runtime,
+        ),
+        timeline_runtime=timeline_runtime,
         session=session,
     )
 

@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.v1.routers.action_approvals import (
+    router as action_approvals_router,
+)
 from app.api.v1.routers.audit_export import router as audit_export_router
 from app.api.v1.routers.arbitration import router as arbitration_router
 from app.api.v1.routers.auth import router as auth_router
@@ -51,6 +54,9 @@ api_router_v1.include_router(coordination_router, prefix="/coordination")
 api_router_v1.include_router(dispatch_router, prefix="/coordination")
 api_router_v1.include_router(escalation_router, prefix="/escalations")
 api_router_v1.include_router(cognition_router, prefix="/cognition")
+api_router_v1.include_router(
+    action_approvals_router, prefix="/approvals/actions"
+)
 api_router_v1.include_router(conversation_router, prefix="/conversation")
 api_router_v1.include_router(
     sop_intelligence_router, prefix="/sop-intelligence/approvals"

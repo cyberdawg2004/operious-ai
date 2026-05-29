@@ -173,6 +173,41 @@ export type ApprovalRecord = {
   created_at: string;
 };
 
+export type ActionApprovalSummary = {
+  approval_id: string;
+  tenant_id: string;
+  session_id: string;
+  execution_id: string | null;
+  status: "pending" | "approved" | "denied";
+  tool_name: string;
+  payload: Record<string, unknown>;
+  idempotency_key: string;
+  governance_decision_id: string | null;
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type ActionApprovalDetail = {
+  approval_id: string;
+  status: "pending" | "approved" | "denied";
+  tool_name: string;
+  payload: Record<string, unknown>;
+  idempotency_key: string;
+  requested_at: string;
+  session_id: string;
+  session_phase: string;
+  session_opened_at: string;
+  classification_category: string | null;
+  classification_confidence: number | null;
+  classification_summary: string | null;
+  governance_decision_id: string | null;
+  governance_reason: string | null;
+  governance_evaluated_at: string | null;
+};
+
 export type TenantKnowledgeDocument = {
   document_id: string;
   title: string;
@@ -594,6 +629,42 @@ export function applyApproval(approvalId: string) {
   return apiRequest<{ approval: ApprovalRecord }>(
     `/cognition/approvals/${encodeURIComponent(approvalId)}/apply`,
     { method: "POST" }
+  );
+}
+
+export function listActionApprovals(query: {
+  status?: ActionApprovalSummary["status"];
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<{ items: ActionApprovalSummary[] }>("/approvals/actions", {
+    query,
+  }).then((page) => page.items);
+}
+
+export function getActionApproval(approvalId: string) {
+  return apiRequest<ActionApprovalDetail>(
+    `/approvals/actions/${encodeURIComponent(approvalId)}`
+  );
+}
+
+export function approveActionApproval(approvalId: string, note?: string) {
+  return apiRequest<ActionApprovalSummary>(
+    `/approvals/actions/${encodeURIComponent(approvalId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ note: note || null }),
+    }
+  );
+}
+
+export function denyActionApproval(approvalId: string, reason: string) {
+  return apiRequest<ActionApprovalSummary>(
+    `/approvals/actions/${encodeURIComponent(approvalId)}/deny`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }
   );
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import ClassVar, FrozenSet, Sequence
 
 import pytest
@@ -39,6 +40,7 @@ from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.enums import Decision, EnforcementStage
 from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.persistence.memory import InMemoryGovernanceRepository
+from app.governance.persistence.records import GovernanceDecisionRecord
 from app.governance.policies.base import BaseGovernancePolicy
 from app.governance.policies.chain import PolicyChain
 from app.governance.subjects.base import SubjectKind
@@ -195,6 +197,40 @@ async def _invoke(
     )
 
 
+async def _invoke_pre_approved(
+    *,
+    invoker: ToolInvoker,
+    decision_id: str,
+) -> object:
+    return await invoker.invoke(
+        ToolInvocationRequest(
+            tool_name="mutating_echo",
+            payload={"value": 1},
+            metadata={"target_resource": "external:test"},
+        ),
+        _context(tool_name="mutating_echo"),
+        invocation_ordinal=1,
+        pre_approved_decision_id=decision_id,
+    )
+
+
+def _persisted_decision(
+    *,
+    decision_id: str,
+    decision: Decision = Decision.ALLOW,
+) -> GovernanceDecisionRecord:
+    return GovernanceDecisionRecord(
+        decision_id=decision_id,
+        decision=decision.value,
+        stage=EnforcementStage.PRE_EXECUTION.value,
+        policy_chain_id="manager.action_approval.v1",
+        reason="manager_approved",
+        decided_at=datetime.now(timezone.utc).isoformat(),
+        tenant_id="tenant-action",
+        subject_kind="manager_approval",
+    )
+
+
 def test_action_tool_without_governance_runtime_raises() -> None:
     with pytest.raises(ToolConfigurationError):
         ToolInvoker(tool_registry=_registry(_ActionTool([])))
@@ -243,6 +279,46 @@ async def test_action_tool_allow_with_persisted_decision_runs() -> None:
     )
     assert persisted is not None
     assert persisted.decision == Decision.ALLOW.value
+
+
+@pytest.mark.asyncio
+async def test_pre_approved_decision_id_allows_action_tool() -> None:
+    calls: list[dict[str, object]] = []
+    governance, persistence = _governance(Decision.DENY)
+    decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "manager-approved-tool"))
+    await persistence.record_decision(_persisted_decision(decision_id=decision_id))
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+    )
+
+    envelope = await _invoke_pre_approved(
+        invoker=invoker,
+        decision_id=decision_id,
+    )
+
+    assert envelope.is_ok
+    assert calls == [{"value": 1}]
+    assert str(envelope.trace.governance_decision_id) == decision_id
+
+
+@pytest.mark.asyncio
+async def test_pre_approved_nonexistent_decision_denies() -> None:
+    calls: list[dict[str, object]] = []
+    governance, _ = _governance(Decision.ALLOW)
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+    )
+
+    envelope = await _invoke_pre_approved(
+        invoker=invoker,
+        decision_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "missing-manager-approval")),
+    )
+
+    assert envelope.is_denied
+    assert envelope.trace.metadata["reason"] == "pre_approved_decision_not_found"
+    assert calls == []
 
 
 @pytest.mark.asyncio

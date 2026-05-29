@@ -18,6 +18,7 @@ Layout:
 * `retrieval`       — `RetrievalGovernanceSubject`, `CandidateSummary`.
 * `execution`       — `ExecutionGovernanceSubject`.
 * `agent_actions`   — `AgentActionGovernanceSubject` (stub for Sprint J/L).
+* `manager_approval` — `ManagerApprovalGovernanceSubject`.
 * `communication`   — `CommunicationGovernanceSubject`,
                       `AttachmentSummary` (stub for comms runtime).
 
@@ -49,6 +50,9 @@ from app.governance.subjects.communication import (
     CommunicationGovernanceSubject,
 )
 from app.governance.subjects.execution import ExecutionGovernanceSubject
+from app.governance.subjects.manager_approval import (
+    ManagerApprovalGovernanceSubject,
+)
 from app.governance.subjects.retrieval import (
     CandidateSummary,
     RetrievalGovernanceSubject,
@@ -63,6 +67,7 @@ __all__ = [
     "CommunicationGovernanceSubject",
     "ExecutionGovernanceSubject",
     "GenericGovernanceSubject",
+    "ManagerApprovalGovernanceSubject",
     "RetrievalGovernanceSubject",
     "SubjectKind",
 ]

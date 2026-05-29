@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Protocol, cast
 
@@ -106,6 +106,84 @@ _SELECT_BY_IDEMPOTENCY_SQL = text(
     """
 )
 
+_LIST_APPROVALS_SQL = text(
+    """
+    SELECT
+        approval_id,
+        tenant_id,
+        session_id,
+        execution_id,
+        tool_name,
+        idempotency_key,
+        payload_json,
+        governance_decision_id,
+        status,
+        requested_at,
+        resolved_at,
+        resolved_by,
+        resolution_note,
+        metadata
+    FROM public.action_approval_records
+    WHERE tenant_id = :expected_tenant_id
+    ORDER BY requested_at DESC, approval_id DESC
+    LIMIT :limit OFFSET :offset
+    """
+)
+
+_LIST_APPROVALS_BY_STATUS_SQL = text(
+    """
+    SELECT
+        approval_id,
+        tenant_id,
+        session_id,
+        execution_id,
+        tool_name,
+        idempotency_key,
+        payload_json,
+        governance_decision_id,
+        status,
+        requested_at,
+        resolved_at,
+        resolved_by,
+        resolution_note,
+        metadata
+    FROM public.action_approval_records
+    WHERE tenant_id = :expected_tenant_id
+      AND status = :status
+    ORDER BY requested_at DESC, approval_id DESC
+    LIMIT :limit OFFSET :offset
+    """
+)
+
+_RESOLVE_APPROVAL_SQL = text(
+    """
+    UPDATE public.action_approval_records
+    SET
+        status = :status,
+        resolved_at = :resolved_at,
+        resolved_by = :resolved_by,
+        resolution_note = :resolution_note,
+        metadata = CAST(:metadata AS jsonb)
+    WHERE approval_id = CAST(:approval_id AS uuid)
+      AND tenant_id = :expected_tenant_id
+    RETURNING
+        approval_id,
+        tenant_id,
+        session_id,
+        execution_id,
+        tool_name,
+        idempotency_key,
+        payload_json,
+        governance_decision_id,
+        status,
+        requested_at,
+        resolved_at,
+        resolved_by,
+        resolution_note,
+        metadata
+    """
+)
+
 
 class ActionApprovalError(RuntimeError):
     """Raised when an approval record cannot be persisted."""
@@ -157,6 +235,27 @@ class ActionApprovalRepository(Protocol):
         expected_tenant_id: str,
     ) -> ActionApprovalRecord | None: ...
 
+    async def list_approvals(
+        self,
+        *,
+        expected_tenant_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[ActionApprovalRecord, ...]: ...
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+        status: str,
+        resolved_at: datetime,
+        resolved_by: str,
+        resolution_note: str | None,
+        metadata: MetadataMap,
+    ) -> ActionApprovalRecord | None: ...
+
 
 class InMemoryActionApprovalRepository:
     def __init__(self) -> None:
@@ -199,6 +298,50 @@ class InMemoryActionApprovalRepository:
         if record is None or record.tenant_id != expected_tenant_id:
             return None
         return record
+
+    async def list_approvals(
+        self,
+        *,
+        expected_tenant_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[ActionApprovalRecord, ...]:
+        records = [
+            record
+            for record in self._by_id.values()
+            if record.tenant_id == expected_tenant_id
+            and (status is None or record.status == status)
+        ]
+        records.sort(key=lambda record: (record.requested_at, record.approval_id))
+        records.reverse()
+        return tuple(records[offset : offset + limit])
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+        status: str,
+        resolved_at: datetime,
+        resolved_by: str,
+        resolution_note: str | None,
+        metadata: MetadataMap,
+    ) -> ActionApprovalRecord | None:
+        record = self._by_id.get(approval_id)
+        if record is None or record.tenant_id != expected_tenant_id:
+            return None
+        resolved = replace(
+            record,
+            status=status,
+            resolved_at=resolved_at,
+            resolved_by=resolved_by,
+            resolution_note=resolution_note,
+            metadata=dict(metadata),
+        )
+        self._by_id[approval_id] = resolved
+        self._by_idempotency_key[resolved.idempotency_key] = resolved
+        return resolved
 
 
 class PostgresActionApprovalRepository(TenantScopedRepository):
@@ -261,6 +404,61 @@ class PostgresActionApprovalRepository(TenantScopedRepository):
                 {
                     "idempotency_key": idempotency_key,
                     "expected_tenant_id": expected_tenant_id,
+                },
+            )
+        ).mappings().one_or_none()
+        return None if row is None else _row_to_record(row)
+
+    async def list_approvals(
+        self,
+        *,
+        expected_tenant_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[ActionApprovalRecord, ...]:
+        await self._scope(expected_tenant_id)
+        statement = (
+            _LIST_APPROVALS_SQL if status is None else _LIST_APPROVALS_BY_STATUS_SQL
+        )
+        params: dict[str, object] = {
+            "expected_tenant_id": expected_tenant_id,
+            "limit": limit,
+            "offset": offset,
+        }
+        if status is not None:
+            params["status"] = status
+        rows = (
+            await self.session.execute(
+                statement,
+                params,
+            )
+        ).mappings().all()
+        return tuple(_row_to_record(row) for row in rows)
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+        status: str,
+        resolved_at: datetime,
+        resolved_by: str,
+        resolution_note: str | None,
+        metadata: MetadataMap,
+    ) -> ActionApprovalRecord | None:
+        await self._scope(expected_tenant_id)
+        row = (
+            await self.session.execute(
+                _RESOLVE_APPROVAL_SQL,
+                {
+                    "approval_id": approval_id,
+                    "expected_tenant_id": expected_tenant_id,
+                    "status": status,
+                    "resolved_at": resolved_at,
+                    "resolved_by": resolved_by,
+                    "resolution_note": resolution_note,
+                    "metadata": json.dumps(dict(metadata), sort_keys=True),
                 },
             )
         ).mappings().one_or_none()

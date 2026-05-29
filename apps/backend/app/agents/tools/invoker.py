@@ -87,6 +87,7 @@ class ToolInvoker:
         context: AgentExecutionContext,
         *,
         invocation_ordinal: int,
+        pre_approved_decision_id: str | None = None,
     ) -> ToolInvocationEnvelope:
         """Run the full pipeline. Never raises."""
         loop = asyncio.get_event_loop()
@@ -154,7 +155,66 @@ class ToolInvoker:
         )
         governance_envelope: GovernanceEnvelope | None = None
         governance_decision_id: uuid.UUID | None = None
-        if self._governance is not None:
+        if pre_approved_decision_id is not None:
+            if self._governance is None:
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=ToolConfigurationError(
+                        "governance_runtime is required for pre-approved actions"
+                    ),
+                    reason="governance_required",
+                    governance_envelope=None,
+                )
+            try:
+                governance_decision_id = uuid.UUID(pre_approved_decision_id)
+            except ValueError as exc:
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=exc,
+                    reason="pre_approved_decision_invalid",
+                    governance_envelope=None,
+                )
+            persisted = await self._governance.get_persisted_decision(
+                governance_decision_id,
+                expected_tenant_id=context.tenant_id,
+            )
+            if persisted is None:
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=None,
+                    reason="pre_approved_decision_not_found",
+                    governance_envelope=None,
+                    governance_decision_id=governance_decision_id,
+                )
+            if persisted.decision != Decision.ALLOW.value:
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=None,
+                    reason="pre_approved_decision_not_allow",
+                    extra_metadata={
+                        "governance_decision": persisted.decision,
+                        "governance_reason": persisted.reason,
+                    },
+                    governance_envelope=None,
+                    governance_decision_id=governance_decision_id,
+                )
+        elif self._governance is not None:
             governance_envelope = await self._governance.evaluate(
                 _build_governance_context(request, context, tool)
             )

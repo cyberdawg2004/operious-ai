@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Building2,
   ChevronDown,
+  Inbox,
   LayoutList,
   MessageSquare,
   Network,
@@ -44,6 +45,7 @@ const navItems: NavItem[] = [
   { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity, group: "operations" },
   { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "DLQ Inspector", icon: AlertTriangle, group: "operations" },
   { id: "trace", href: dashboardRoutes.trace, label: "Trace Inspector", icon: Network, group: "operations" },
+  { id: "approvals", href: dashboardRoutes.approvals, label: "Approval Inbox", icon: Inbox, group: "intelligence" },
   { id: "cognition", href: dashboardRoutes.cognition, label: "Cognition Hub", icon: Brain, group: "intelligence" },
   { id: "knowledge", href: dashboardRoutes.knowledge, label: "Knowledge Base", icon: BookOpen, group: "intelligence" },
   { id: "governance", href: dashboardRoutes.governance, label: "Governance", icon: Gavel, group: "platform" },
@@ -72,6 +74,7 @@ interface SidebarProps {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
   className?: string;
+  approvalCount?: number | null;
 }
 
 export function Sidebar({
@@ -83,6 +86,7 @@ export function Sidebar({
   mobileOpen = false,
   onMobileClose,
   className,
+  approvalCount = null,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const pathname = usePathname();
@@ -229,6 +233,16 @@ export function Sidebar({
                         >
                           {item.label}
                         </span>
+                        {item.id === "approvals" && approvalCount !== null && approvalCount > 0 && (
+                          <span
+                            className={cn(
+                              "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-gold-primary px-1.5 font-technical text-[10px] font-semibold text-white",
+                              collapsed && "lg:hidden"
+                            )}
+                          >
+                            {approvalCount > 99 ? "99+" : approvalCount}
+                          </span>
+                        )}
                       </Link>
                     </li>
                   );

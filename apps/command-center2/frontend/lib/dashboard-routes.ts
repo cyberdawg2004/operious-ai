@@ -4,6 +4,7 @@ export const dashboardRoutes = {
   "queue-status": "/dashboard/queue-status",
   "dlq-inspector": "/dashboard/dlq",
   trace: "/dashboard/traces",
+  approvals: "/dashboard/approvals",
   cognition: "/dashboard/cognition",
   knowledge: "/dashboard/knowledge",
   governance: "/dashboard/governance",

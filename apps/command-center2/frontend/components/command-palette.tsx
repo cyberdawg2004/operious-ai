@@ -13,6 +13,7 @@ import {
   Users,
   Settings,
   FileText,
+  Inbox,
   Radio,
   GitBranch,
 } from "lucide-react";
@@ -73,6 +74,12 @@ const categories: CommandCategory[] = [
     id: "navigation",
     label: "NAVIGATION",
     items: [
+      {
+        id: "nav-approvals",
+        icon: Inbox,
+        label: "Open Approval Inbox",
+        shortcut: ["G", "P"],
+      },
       {
         id: "nav-cognition",
         icon: Brain,
@@ -182,6 +189,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
       "open-queue-status": "queue-status",
       "open-dlq-inspector": "dlq-inspector",
       "open-trace": "trace",
+      "nav-approvals": "approvals",
       "nav-cognition": "cognition",
       "nav-knowledge": "knowledge",
       "nav-governance": "governance",

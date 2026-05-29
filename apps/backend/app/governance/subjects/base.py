@@ -58,6 +58,7 @@ class SubjectKind(StrEnum):
     RETRIEVAL = "retrieval"
     EXECUTION = "execution"
     AGENT_ACTION = "agent_action"
+    MANAGER_APPROVAL = "manager_approval"
     COMMUNICATION = "communication"
     CAPABILITY = "capability"
 

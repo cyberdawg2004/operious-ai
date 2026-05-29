@@ -12,6 +12,7 @@ from app.agents.context import AgentExecutionContext
 from app.agents.identity import derive_action_idempotency_key
 from app.agents.results import ToolInvocationRequest
 from app.agents.tools.approvals import (
+    ActionApprovalRecord,
     ActionApprovalRepository,
     build_pending_action_approval,
 )
@@ -124,6 +125,86 @@ class ActionOrchestrationRuntime:
             any_denied=any(
                 outcome.status == "denied" for outcome in outcomes
             ),
+        )
+
+    async def re_invoke_approved_action(
+        self,
+        *,
+        approval_record: ActionApprovalRecord,
+        approved_decision_id: str,
+        execution_context: AgentExecutionContext,
+        expected_tenant_id: str,
+    ) -> ActionOutcome:
+        """Re-invoke one manager-approved action through ToolInvoker."""
+        if approval_record.tenant_id != expected_tenant_id:
+            raise ValueError("approval tenant does not match expected tenant")
+
+        action_type = _text(approval_record.metadata.get("action_type")) or "unknown"
+        target_resource = (
+            _text(approval_record.metadata.get("target_resource"))
+            or _target_resource(
+                action={},
+                tool_name=approval_record.tool_name,
+                payload=approval_record.payload_json,
+            )
+        )
+        request = ToolInvocationRequest(
+            tool_name=approval_record.tool_name,
+            payload=dict(approval_record.payload_json),
+            metadata=_approval_request_metadata(
+                approval_record=approval_record,
+                action_type=action_type,
+                target_resource=target_resource,
+            ),
+        )
+        envelope = await self._tool_invoker.invoke(
+            request,
+            execution_context,
+            invocation_ordinal=1,
+            pre_approved_decision_id=approved_decision_id,
+        )
+        governance_decision_id = (
+            str(envelope.trace.governance_decision_id)
+            if envelope.trace.governance_decision_id is not None
+            else None
+        )
+        dispatch_id = (
+            _text(approval_record.metadata.get("dispatch_id"))
+            or approval_record.execution_id
+            or approval_record.approval_id
+        )
+
+        if envelope.is_ok and envelope.result is not None:
+            await self._timeline_runtime.append_event(
+                session_id=approval_record.session_id,
+                dispatch_id=dispatch_id,
+                tenant_id=approval_record.tenant_id,
+                event_type=_ACTION_EXECUTED,
+                payload={
+                    "approval_id": approval_record.approval_id,
+                    "tool_name": approval_record.tool_name,
+                    "action_type": action_type,
+                    "idempotency_key": approval_record.idempotency_key,
+                    "governance_decision_id": governance_decision_id,
+                    "result": dict(envelope.result.output),
+                },
+                timestamp=datetime.now(timezone.utc),
+                idempotency_key=f"action:approved-executed:{approval_record.idempotency_key}",
+            )
+            return ActionOutcome(
+                tool_name=approval_record.tool_name,
+                idempotency_key=approval_record.idempotency_key,
+                status="executed",
+                governance_decision_id=governance_decision_id,
+                approval_record_id=approval_record.approval_id,
+            )
+
+        return ActionOutcome(
+            tool_name=approval_record.tool_name,
+            idempotency_key=approval_record.idempotency_key,
+            status=("denied" if envelope.is_denied else "error"),
+            governance_decision_id=governance_decision_id,
+            approval_record_id=approval_record.approval_id,
         )
 
     async def _execute_action(
@@ -463,6 +544,31 @@ def _request_metadata(
                 metadata[key] = value
     if "issue_category" not in metadata:
         metadata["issue_category"] = proposal.resolution_category
+    return metadata
+
+
+def _approval_request_metadata(
+    *,
+    approval_record: ActionApprovalRecord,
+    action_type: str,
+    target_resource: str,
+) -> JsonObject:
+    metadata = {
+        str(key): _json_value(value)
+        for key, value in approval_record.metadata.items()
+    }
+    metadata.update(
+        {
+            "approval_id": approval_record.approval_id,
+            "session_id": approval_record.session_id,
+            "execution_id": approval_record.execution_id,
+            "action_type": action_type,
+            "tool_name": approval_record.tool_name,
+            "target_resource": target_resource,
+            "target_resource_id": target_resource,
+            "idempotency_key": approval_record.idempotency_key,
+        }
+    )
     return metadata
 
 

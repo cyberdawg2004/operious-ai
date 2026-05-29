@@ -16,6 +16,7 @@ import {
   getConfiguredOperatorLabel,
   getConfiguredPrincipalId,
   getConfiguredTenantId,
+  listActionApprovals,
 } from "@/lib/api";
 import { dashboardRoutes, type DashboardViewId } from "@/lib/dashboard-routes";
 import { useAuthSession } from "@/lib/use-auth-session";
@@ -46,6 +47,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     eyebrow: "Observability",
     title: "Trace Inspector",
     description: "Replay recorded spans and inspect substrate-level execution evidence.",
+  },
+  approvals: {
+    eyebrow: "Governance",
+    title: "Approval Inbox",
+    description: "Pending manager approvals for governed action tools.",
   },
   cognition: {
     eyebrow: "Cognition",
@@ -117,6 +123,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [selectedTraceLookup, setSelectedTraceLookup] = useState<TraceLookup | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [approvalCount, setApprovalCount] = useState<number | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const activeItem = getActiveItem(pathname);
@@ -145,6 +152,27 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       document.documentElement.style.overflow = "";
     };
   }, [mobileSidebarOpen]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadApprovalCount = () => {
+      listActionApprovals({ status: "pending", limit: 100, offset: 0 })
+        .then((approvals) => {
+          if (active) setApprovalCount(approvals.length);
+        })
+        .catch(() => {
+          if (active) setApprovalCount(null);
+        });
+    };
+
+    loadApprovalCount();
+    const interval = window.setInterval(loadApprovalCount, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [tenantId]);
 
   const navigateTo = (itemId: string) => {
     const href = dashboardRoutes[itemId as DashboardViewId];
@@ -189,6 +217,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           userName={operatorLabel}
           userRole={principalId ?? "Principal scope not configured"}
           onTenantClick={() => navigateTo("settings")}
+          approvalCount={approvalCount}
         />
 
         <div className="min-w-0 flex-1 lg:flex lg:min-h-screen lg:flex-col">
