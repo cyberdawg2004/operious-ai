@@ -21,9 +21,10 @@ classified as `STREAM_FRAME` with `external_message_id` set to
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Mapping
+from typing import Any, cast
 
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.enums import (
@@ -70,13 +71,14 @@ class TwilioVoiceAdapter(BaseIngressAdapter):
         source: BoundarySource,
         payload: IngressPayload,
     ) -> BoundaryNormalizationResult:
-        body = payload.body
-        if not isinstance(body, Mapping):
+        raw_body = payload.body
+        if not isinstance(raw_body, Mapping):
             raise BoundaryNormalizationError(
                 "Twilio payload must be a mapping (form fields)"
             )
+        body = cast(Mapping[str, Any], raw_body)
 
-        call_sid = body.get("CallSid")
+        call_sid: Any = body.get("CallSid")
         if not isinstance(call_sid, str) or not call_sid:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
@@ -84,8 +86,8 @@ class TwilioVoiceAdapter(BaseIngressAdapter):
             )
 
         # Stream-frame variant.
-        sequence = body.get("Sequence") or body.get("MediaSeq")
-        track = body.get("Track")
+        sequence: Any = body.get("Sequence") or body.get("MediaSeq")
+        track: Any = body.get("Track")
         if track is not None or sequence is not None:
             seq_str = (
                 str(sequence) if sequence is not None else "0"
@@ -109,7 +111,7 @@ class TwilioVoiceAdapter(BaseIngressAdapter):
             )
 
         # Status-event variant.
-        status_value = body.get("CallStatus")
+        status_value: Any = body.get("CallStatus")
         message_type = _CALL_STATUS_MAP.get(
             status_value or "",
             BoundaryMessageType.UNKNOWN,

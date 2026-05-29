@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.enums import (
     BoundaryReplayDisposition,
@@ -69,7 +69,7 @@ class BoundaryReplayRecord:
     last_disposition: BoundaryReplayDisposition = (
         BoundaryReplayDisposition.NEW
     )
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["BoundaryReplayRecord"]

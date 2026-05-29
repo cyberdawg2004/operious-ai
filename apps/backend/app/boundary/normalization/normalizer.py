@@ -17,6 +17,9 @@ BoundaryNormalizationResult` modulo the adapter's own behaviour.
 
 from __future__ import annotations
 
+from typing import cast
+
+from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.enums import BoundaryNormalizationStatus
 from app.boundary.exceptions import (
     BoundaryAuthenticationError,
@@ -46,7 +49,7 @@ class BoundaryNormalizer:
     def normalize(
         self,
         *,
-        adapter,  # type: ignore[no-untyped-def]
+        adapter: BaseIngressAdapter,
         source: BoundarySource,
         payload: IngressPayload,
     ) -> BoundaryNormalizationResult:
@@ -78,7 +81,7 @@ class BoundaryNormalizer:
                 ),
             )
 
-        if not isinstance(raw, BoundaryNormalizationResult):
+        if not isinstance(cast(object, raw), BoundaryNormalizationResult):
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.ADAPTER_ERROR,
                 error=(

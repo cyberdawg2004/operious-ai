@@ -1016,9 +1016,9 @@ class SessionRuntime:
         kind: SessionEventKind,
         occurred_at: datetime,
         continuity_mode: SessionContinuityMode,
-        payload,  # type: ignore[no-untyped-def]
+        payload: Mapping[str, Any] | None,
         annotation: str | None,
-        correlation_id,  # type: ignore[no-untyped-def]
+        correlation_id: SessionCorrelationId | None,
         request_correlation_id: str | None,
         request_request_id: str | None,
         extra_metadata: dict[str, object],

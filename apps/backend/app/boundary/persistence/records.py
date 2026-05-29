@@ -54,7 +54,7 @@ class BoundaryIngressRecord:
     # 2.5-G1 ⇒ 2.75-δ: governance provenance removed (no apex
     # producer). See ``BoundaryTrace`` docstring for the doctrine
     # rationale.
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +85,7 @@ class BoundaryEgressRecord:
     # Nullable for historical rows produced before PR_RT-SAFE-2. New
     # runtime-emitted rows are application-enforced non-null and must
     # reference a persisted ALLOW governance decision.
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)

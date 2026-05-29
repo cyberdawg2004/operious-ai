@@ -14,6 +14,7 @@ from app.boundary.envelopes import (
 )
 from app.boundary.enums import (
     BoundaryNormalizationStatus,
+    BoundarySourceType,
 )
 from app.boundary.exceptions import BoundaryPersistenceError
 from app.boundary.identity import (
@@ -196,7 +197,7 @@ def _source_language_from_metadata(metadata: dict[str, object]) -> str:
 def egress_result_to_record(
     result: BoundaryEgressResult,
     *,
-    source_type,  # type: ignore[no-untyped-def]
+    source_type: BoundarySourceType,
     source_id: str,
 ) -> BoundaryEgressRecord:
     """Project a `BoundaryEgressResult` into an immutable record.
@@ -248,7 +249,7 @@ def egress_result_to_record(
 def egress_envelope_to_record(
     envelope: BoundaryEgressEnvelope,
     *,
-    source_type,  # type: ignore[no-untyped-def]
+    source_type: BoundarySourceType,
     source_id: str,
 ) -> BoundaryEgressRecord | None:
     if envelope.result is None:
@@ -262,7 +263,7 @@ def egress_envelope_to_record(
 
 def _infer_source_type_from_metadata(
     result: BoundaryIngressResult,
-):  # type: ignore[no-untyped-def]
+) -> BoundarySourceType:
     """Best-effort fallback when the result has no event."""
     from app.boundary.enums import BoundarySourceType
 

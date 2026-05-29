@@ -21,7 +21,7 @@ class RerankingRequest:
 
     query: str
     candidates: tuple[RetrievalCandidate, ...]
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)

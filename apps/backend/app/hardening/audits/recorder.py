@@ -48,7 +48,7 @@ class HardeningAuditRecorder:
             summary=summary,
             correlation_id=correlation_id,
             tenant_id=tenant_id,
-            metadata=metadata or {},
+            metadata=dict(metadata or {}),
         )
 
     @staticmethod

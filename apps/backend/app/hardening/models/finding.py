@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.hardening.enums import (
     HardeningFindingKind,
@@ -44,7 +44,7 @@ class HardeningFinding:
     scope: str | None = None
     offender: str | None = None
     evidence: tuple[str, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.ordinal < 0:

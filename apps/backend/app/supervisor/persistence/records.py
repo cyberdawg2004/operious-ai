@@ -35,7 +35,7 @@ class EvaluationEvidenceRecord:
     tool_invocation_ids: tuple[str, ...] = ()
     governance_decision_ids: tuple[str, ...] = ()
     state_transition_indices: tuple[int, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,7 +75,7 @@ class RuntimeFindingRecord:
     message: str
     evidence: EvaluationEvidenceRecord
     detected_at: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -118,7 +118,7 @@ class QAEvaluationRecord:
     ended_at: str
     latency_ms: float
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -163,7 +163,7 @@ class EscalationDecisionRecord:
     reason: str
     triggering_finding_ids: tuple[str, ...]
     decided_at: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -204,7 +204,7 @@ class SupervisorDecisionRecord:
     escalation_ids: tuple[str, ...]
     reason: str
     decided_at: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -260,7 +260,7 @@ class InspectionRecord:
     latency_ms: float
     error: str | None = None
     tenant_authority_source: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def compliance_score(self) -> float:

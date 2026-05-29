@@ -120,7 +120,7 @@ class IdempotencyRecord:
     first_seen_at: datetime
     last_seen_at: datetime
     observation_count: int = 1
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class InMemoryIdempotencyStore:

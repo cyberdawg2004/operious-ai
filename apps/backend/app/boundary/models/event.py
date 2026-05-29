@@ -67,7 +67,7 @@ class ExternalBoundaryEvent:
     external_conversation_id: ExternalConversationId | None = None
     external_emitted_at: datetime | None = None
     adapter_name: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["ExternalBoundaryEvent"]

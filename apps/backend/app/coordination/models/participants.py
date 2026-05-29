@@ -17,7 +17,7 @@ record the lineage.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +38,7 @@ class CoordinationParticipant:
     participant_id: str
     kind: str = "agent"
     tenant_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -27,7 +27,7 @@ class EmbeddingExecutionContext:
 
     provider: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["EmbeddingExecutionContext"]

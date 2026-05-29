@@ -18,7 +18,7 @@ record.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,7 @@ class CoordinationTopologyFindingRecord:
     source_node_id: str | None
     target_node_id: str | None
     detected_at: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,7 +56,7 @@ class CoordinationTopologyFindingRecord:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationTopologyFindingRecord":
         def _opt(k: str) -> str | None:
             v = data.get(k)
@@ -115,7 +115,7 @@ class CoordinationTopologyRecord:
     reason: str
     error: str | None = None
     findings: tuple[CoordinationTopologyFindingRecord, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,7 +157,7 @@ class CoordinationTopologyRecord:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationTopologyRecord":
         def _opt(k: str) -> str | None:
             v = data.get(k)

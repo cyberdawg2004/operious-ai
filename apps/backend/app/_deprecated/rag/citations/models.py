@@ -28,7 +28,7 @@ class Citation:
     score: float
     source: str | None = None
     source_strategy: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)

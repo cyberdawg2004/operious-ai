@@ -28,7 +28,10 @@ from app.coordination.topology.enums import (
 from app.coordination.topology.evaluators.base import (
     BaseCoordinationTopologyEvaluator,
 )
-from app.coordination.topology.identity import derive_finding_id
+from app.coordination.topology.identity import (
+    TopologyNodeId,
+    derive_finding_id,
+)
 from app.coordination.topology.models.findings import (
     CoordinationTopologyFinding,
 )
@@ -137,8 +140,8 @@ class BoundaryIsolationEvaluator(BaseCoordinationTopologyEvaluator):
         message: str,
         ordinal: int,
         boundary_id: str,
-        source_node_id,  # type: ignore[no-untyped-def]
-        target_node_id,  # type: ignore[no-untyped-def]
+        source_node_id: TopologyNodeId,
+        target_node_id: TopologyNodeId,
     ) -> CoordinationTopologyFinding:
         seed_uuid = (
             request.evaluation_id_override

@@ -68,7 +68,7 @@ class ProviderCircuitSnapshot:
     last_failure_reason: str | None
     last_transition_at: datetime
     updated_at: datetime
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def is_open(self) -> bool:

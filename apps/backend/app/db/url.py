@@ -21,7 +21,9 @@ class DatabaseEngineConfig:
 
     async_url: str
     sync_url: str
-    connect_args: dict[str, object] = field(default_factory=dict)
+    connect_args: dict[str, object] = field(
+        default_factory=dict[str, object]
+    )
 
 
 def build_database_engine_config(

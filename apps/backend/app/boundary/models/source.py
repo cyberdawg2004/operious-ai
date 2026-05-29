@@ -14,7 +14,7 @@ matches their authentication context BEFORE constructing the
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.enums import BoundarySourceType
 
@@ -36,7 +36,7 @@ class BoundarySource:
     source_id: str
     tenant_id: str | None = None
     display_name: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.source_id:

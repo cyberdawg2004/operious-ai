@@ -92,7 +92,9 @@ class CoordinationEnvelopesPage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    items: list[CoordinationEnvelopeResponse] = Field(default_factory=list)
+    items: list[CoordinationEnvelopeResponse] = Field(
+        default_factory=list[CoordinationEnvelopeResponse]
+    )
     total: int
     offset: int
 

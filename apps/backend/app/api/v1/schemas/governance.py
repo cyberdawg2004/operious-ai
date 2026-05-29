@@ -178,10 +178,14 @@ class GovernanceDecisionResponse(BaseModel):
     tenant_id: str | None = None
     subject_kind: str
     governance_version: str
-    violations: list[PolicyViolationSchema] = Field(default_factory=list)
-    restrictions: list[RuntimeRestrictionSchema] = Field(default_factory=list)
+    violations: list[PolicyViolationSchema] = Field(
+        default_factory=list[PolicyViolationSchema]
+    )
+    restrictions: list[RuntimeRestrictionSchema] = Field(
+        default_factory=list[RuntimeRestrictionSchema]
+    )
     evaluated_rules: list[PolicyEvaluationResultSchema] = Field(
-        default_factory=list
+        default_factory=list[PolicyEvaluationResultSchema]
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -244,7 +248,7 @@ class GovernanceTraceResponse(BaseModel):
     enforcement_status: str | None = None
     enforcement_latency_ms: float | None = None
     policy_traces: list[PolicyEvaluationTraceSchema] = Field(
-        default_factory=list
+        default_factory=list[PolicyEvaluationTraceSchema]
     )
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -289,9 +293,11 @@ class GovernanceDecisionsPage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    items: list[GovernanceDecisionResponse] = Field(default_factory=list)
+    items: list[GovernanceDecisionResponse] = Field(
+        default_factory=list[GovernanceDecisionResponse]
+    )
     decisions: list[GovernanceDecisionResponse] = Field(
-        default_factory=list
+        default_factory=list[GovernanceDecisionResponse]
     )
     total: int = Field(
         ..., description="Total matching decisions before pagination."

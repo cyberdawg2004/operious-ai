@@ -62,7 +62,9 @@ class OperationalReplayFinding:
     severity: OperationalReplayFindingSeverity
     message: str
     event_id: EventId | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(
+        default_factory=dict[str, Any]
+    )
 
 
 @dataclass(frozen=True, slots=True)

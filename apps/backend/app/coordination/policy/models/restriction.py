@@ -16,7 +16,7 @@ not be confused with governance restrictions in the audit trail.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.policy.enums import CoordinationRestrictionType
 
@@ -47,11 +47,11 @@ class CoordinationPolicyRestriction:
 
     kind: CoordinationRestrictionType
     target: str
-    value: Mapping[str, Any] = field(default_factory=dict)
+    value: dict[str, Any] = field(default_factory=dict[str, Any])
     reason: str = ""
     policy_id: str | None = None
     rule_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,7 +66,7 @@ class CoordinationPolicyRestriction:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationPolicyRestriction":
         return cls(
             kind=CoordinationRestrictionType(data["kind"]),

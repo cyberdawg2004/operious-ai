@@ -110,7 +110,7 @@ class BudgetingResult:
     total_tokens: int
     included_count: int
     excluded_count: int
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

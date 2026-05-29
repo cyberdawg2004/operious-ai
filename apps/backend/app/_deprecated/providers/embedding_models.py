@@ -40,7 +40,7 @@ class EmbeddingRequest:
     texts: tuple[str, ...]
     model: str
     dimensions: int | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     timeout_s: float | None = None
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.voice.enums import AudioFormat
 from app.boundary.voice.models.audio import VoiceAudioHandle
@@ -30,7 +30,7 @@ class IngressTranscribeRequest:
     request_id: str | None = None
     tenant_id: str | None = None
     authority: AuthorityContext | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.target_language:
@@ -68,7 +68,7 @@ class EgressSynthesizeRequest:
     request_id: str | None = None
     tenant_id: str | None = None
     authority: AuthorityContext | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.target_language:

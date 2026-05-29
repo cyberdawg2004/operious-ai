@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.hardening.enums import SubstrateName
 from app.hardening.identity import (
@@ -46,7 +46,7 @@ class SemanticAuthorityBoundary:
     owner: SubstrateName
     description: str
     forbidden_owners: tuple[SubstrateName, ...] = ()
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.concern:

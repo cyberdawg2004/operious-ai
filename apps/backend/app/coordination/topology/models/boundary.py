@@ -25,7 +25,7 @@ crossing is attempted.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.topology.enums import (
     TopologyBoundaryCrossing,
@@ -62,7 +62,7 @@ class AuthorityBoundary:
     allowed_crossing_pairs: tuple[
         tuple[TopologyNodeId, TopologyNodeId], ...
     ] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def contains(self, node_id: TopologyNodeId) -> bool:
         return node_id in self.member_node_ids

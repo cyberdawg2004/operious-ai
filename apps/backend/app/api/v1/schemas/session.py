@@ -159,28 +159,34 @@ class SessionCorrelationResponse(BaseModel):
 class SessionsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[SessionResponse] = Field(default_factory=list)
+    items: list[SessionResponse] = Field(
+        default_factory=list[SessionResponse]
+    )
     total: int
 
 
 class SessionEventsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[SessionEventResponse] = Field(default_factory=list)
+    items: list[SessionEventResponse] = Field(
+        default_factory=list[SessionEventResponse]
+    )
     total: int
 
 
 class SessionCorrelationsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[SessionCorrelationResponse] = Field(default_factory=list)
+    items: list[SessionCorrelationResponse] = Field(
+        default_factory=list[SessionCorrelationResponse]
+    )
     total: int
 
 
 class SessionTimelineResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    events: list[TimelineEvent] = Field(default_factory=list)
+    events: list[TimelineEvent] = Field(default_factory=list[TimelineEvent])
     total: int
 
     @classmethod

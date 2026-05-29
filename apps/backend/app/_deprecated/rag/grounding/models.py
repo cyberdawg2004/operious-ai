@@ -28,7 +28,7 @@ class GroundingFragment:
     document_id: uuid.UUID
     content: str
     score: float
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,7 @@ class GroundingResult:
 
     fragments: tuple[GroundingFragment, ...]
     strategy_name: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __len__(self) -> int:
         return len(self.fragments)

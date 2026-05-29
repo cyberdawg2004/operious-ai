@@ -74,7 +74,7 @@ class CoordinationRecord:
     # Payload
     payload_content_type: str
     payload_schema_version: str
-    payload_body: Mapping[str, Any]
+    payload_body: dict[str, Any]
     # Timestamps (ISO-8601, UTC)
     created_at: str
     dispatched_at: str
@@ -84,10 +84,10 @@ class CoordinationRecord:
     # after all non-default fields to satisfy dataclass ordering.
     tenant_authority_source: str | None = None
     # Metadata bags
-    recipient_metadata: Mapping[str, Any] = field(default_factory=dict)
-    payload_metadata: Mapping[str, Any] = field(default_factory=dict)
-    message_metadata: Mapping[str, Any] = field(default_factory=dict)
-    envelope_metadata: Mapping[str, Any] = field(default_factory=dict)
+    recipient_metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+    payload_metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+    message_metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+    envelope_metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {

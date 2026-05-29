@@ -20,7 +20,7 @@ composition time.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.topology.identity import TopologyNodeId
 
@@ -45,7 +45,7 @@ class CoordinationPath:
     path_id: str
     node_ids: tuple[TopologyNodeId, ...]
     description: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def source_node_id(self) -> TopologyNodeId:

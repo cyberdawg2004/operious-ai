@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.organizational_intelligence.enums import (
     CommunicationPatternKind,
@@ -62,7 +62,7 @@ class CommunicationPattern:
     approval_id: ApprovalId
     registered_at: datetime
     author_handle: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.handle:

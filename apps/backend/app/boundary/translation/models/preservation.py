@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.translation.enums import (
     SemanticPreservationStatus,
@@ -29,7 +29,7 @@ class SemanticPreservationCheck:
     canonical_tokens_present: tuple[str, ...]
     canonical_tokens_missing: tuple[str, ...]
     introduced_governance_tokens: tuple[str, ...]
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.summary:

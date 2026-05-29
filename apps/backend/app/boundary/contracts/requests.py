@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.identity import (
     BoundaryEgressId,
@@ -53,7 +53,7 @@ class BoundaryIngressRequest:
     request_id: str | None = None
     ingress_id_override: BoundaryIngressId | None = None
     authority: AuthorityContext | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +101,7 @@ class BoundaryEgressRequest:
     egress_id_override: BoundaryEgressId | None = None
     governance_decision_id: uuid.UUID | None = None
     authority: AuthorityContext | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

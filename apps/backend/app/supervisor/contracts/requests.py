@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.agents.envelopes import AgentExecutionEnvelope
 from app.agents.persistence.records import (
@@ -86,7 +86,7 @@ class ExecutionInspectionRequest:
     evaluator_names: tuple[str, ...] | None = None
     inspection_id_override: uuid.UUID | None = None
     decision_id_override: uuid.UUID | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         check_tenant_authority_coexistence(

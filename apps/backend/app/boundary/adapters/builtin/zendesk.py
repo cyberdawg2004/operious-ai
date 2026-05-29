@@ -17,8 +17,9 @@ configured. It DOES classify message types into the canonical
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, cast
 
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.enums import (
@@ -61,14 +62,15 @@ class ZendeskWebhookAdapter(BaseIngressAdapter):
         source: BoundarySource,
         payload: IngressPayload,
     ) -> BoundaryNormalizationResult:
-        body = payload.body
-        if not isinstance(body, Mapping):
+        raw_body = payload.body
+        if not isinstance(raw_body, Mapping):
             raise BoundaryNormalizationError(
                 "Zendesk payload must be a mapping"
             )
-        event_id = body.get("event_id") or body.get("id")
-        ticket_id = body.get("ticket_id")
-        ext_type = body.get("type") or ""
+        body = cast(Mapping[str, Any], raw_body)
+        event_id: Any = body.get("event_id") or body.get("id")
+        ticket_id: Any = body.get("ticket_id")
+        ext_type: Any = body.get("type") or ""
 
         if not event_id or not isinstance(event_id, str):
             return BoundaryNormalizationResult(

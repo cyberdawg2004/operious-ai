@@ -17,7 +17,7 @@ authorisation. The `AllowedPathEvaluator` interprets them.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.enums import (
     CoordinationDirection,
@@ -69,7 +69,7 @@ class CoordinationEdge:
     crosses_boundary_id: str | None = None
     description: str = ""
     priority: int = 100
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def matches_message_type(
         self, message_type: CoordinationMessageType

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.enums import ArbitrationAuthorityLevel
 from app.arbitration.identity import ArbitrationRecommendationId
@@ -57,7 +57,7 @@ class ArbitrationRecommendation:
     source_id: str
     reason: str = ""
     emitted_at: datetime | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["ArbitrationRecommendation"]

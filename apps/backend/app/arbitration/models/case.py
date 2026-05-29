@@ -21,7 +21,7 @@ identifiers / overrides.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.identity import ArbitrationCaseId
 from app.arbitration.models.recommendation import (
@@ -75,7 +75,7 @@ class ArbitrationCase:
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     subject: str | None = None
     tenant_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def signal_count(self) -> int:

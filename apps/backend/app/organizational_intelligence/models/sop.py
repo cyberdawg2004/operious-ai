@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.organizational_intelligence.enums import (
     IntelligenceScope,
@@ -55,7 +55,7 @@ class SopVersion:
     content_fingerprint: str
     ingested_at: datetime
     author_handle: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.version < 1:
@@ -90,7 +90,7 @@ class StandardOperatingProcedure:
     last_updated_at: datetime
     version_history: tuple[SopVersionId, ...] = ()
     revision: int = 0
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.external_handle:
@@ -132,7 +132,7 @@ class SopFinding:
     location_hint: str | None = None
     evidence: tuple[str, ...] = ()
     detected_at: datetime | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.ordinal < 0:
@@ -161,7 +161,7 @@ class SopAnalysis:
     analyzed_at: datetime
     analyzer_signature: str
     summary: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.analyzed_at.tzinfo is None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.voice.identity import VoiceReplayId
 
@@ -19,7 +19,7 @@ class VoiceReplay:
     transcript_fingerprint: str | None
     provider_name: str
     captured_at: datetime
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.seed:

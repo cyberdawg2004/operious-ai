@@ -21,7 +21,7 @@ class RerankingTrace:
     input_count: int
     output_count: int
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["RerankingTrace", "TraceStatus"]

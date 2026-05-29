@@ -42,7 +42,7 @@ class StrategyInvocationTrace:
     # embedding sub-trace is preserved here so callers can read the
     # per-attempt embedding diagnostics from the assembly trace alone.
     embedding_trace: EmbeddingTrace | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +62,7 @@ class RetrievalRuntimeTrace:
     policy_id: str | None = None
     tenant_scope: str | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

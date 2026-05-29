@@ -28,7 +28,7 @@ class EvaluationEvidenceSchema(BaseModel):
     execution_id: str
     tool_invocation_ids: list[str] = Field(default_factory=list)
     governance_decision_ids: list[str] = Field(default_factory=list)
-    state_transition_indices: list[int] = Field(default_factory=list)
+    state_transition_indices: list[int] = Field(default_factory=list[int])
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -205,7 +205,9 @@ class InspectionResponse(BaseModel):
 class InspectionsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[InspectionResponse] = Field(default_factory=list)
+    items: list[InspectionResponse] = Field(
+        default_factory=list[InspectionResponse]
+    )
     total: int
     offset: int
 
@@ -214,21 +216,27 @@ class InspectionFindingsResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     inspection_id: str
-    items: list[RuntimeFindingSchema] = Field(default_factory=list)
+    items: list[RuntimeFindingSchema] = Field(
+        default_factory=list[RuntimeFindingSchema]
+    )
 
 
 class InspectionEvaluationsResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     inspection_id: str
-    items: list[QAEvaluationSchema] = Field(default_factory=list)
+    items: list[QAEvaluationSchema] = Field(
+        default_factory=list[QAEvaluationSchema]
+    )
 
 
 class InspectionEscalationsResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     inspection_id: str
-    items: list[EscalationDecisionSchema] = Field(default_factory=list)
+    items: list[EscalationDecisionSchema] = Field(
+        default_factory=list[EscalationDecisionSchema]
+    )
 
 
 __all__ = [

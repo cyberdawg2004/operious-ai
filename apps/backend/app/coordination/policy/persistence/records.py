@@ -22,7 +22,7 @@ record.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +34,8 @@ class CoordinationPolicyRestrictionRecord:
     reason: str
     policy_id: str | None
     rule_id: str | None
-    value: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    value: dict[str, Any] = field(default_factory=dict[str, Any])
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,7 +50,7 @@ class CoordinationPolicyRestrictionRecord:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationPolicyRestrictionRecord":
         return cls(
             kind=str(data["kind"]),
@@ -80,7 +80,7 @@ class CoordinationPolicyEscalationRecord:
     reason: str
     policy_id: str | None
     rule_id: str | None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -94,7 +94,7 @@ class CoordinationPolicyEscalationRecord:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationPolicyEscalationRecord":
         return cls(
             kind=str(data["kind"]),
@@ -129,7 +129,7 @@ class CoordinationPolicyFindingRecord:
     detected_at: str
     restrictions: tuple[CoordinationPolicyRestrictionRecord, ...] = ()
     escalations: tuple[CoordinationPolicyEscalationRecord, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -149,7 +149,7 @@ class CoordinationPolicyFindingRecord:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationPolicyFindingRecord":
         return cls(
             finding_id=str(data["finding_id"]),
@@ -215,7 +215,7 @@ class CoordinationPolicyRecord:
     findings: tuple[CoordinationPolicyFindingRecord, ...] = ()
     restrictions: tuple[CoordinationPolicyRestrictionRecord, ...] = ()
     escalations: tuple[CoordinationPolicyEscalationRecord, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -254,7 +254,7 @@ class CoordinationPolicyRecord:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationPolicyRecord":
         return cls(
             evaluation_id=str(data["evaluation_id"]),

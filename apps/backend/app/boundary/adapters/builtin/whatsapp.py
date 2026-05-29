@@ -22,8 +22,9 @@ a caller-side concern OUTSIDE the substrate.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, cast
 
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.enums import (
@@ -58,53 +59,74 @@ class WhatsAppWebhookAdapter(BaseIngressAdapter):
         source: BoundarySource,
         payload: IngressPayload,
     ) -> BoundaryNormalizationResult:
-        body = payload.body
-        if not isinstance(body, Mapping):
+        raw_body = payload.body
+        body = _mapping_or_none(raw_body)
+        if body is None:
             raise BoundaryNormalizationError(
                 "WhatsApp payload must be a mapping"
             )
 
-        entries = body.get("entry") or []
-        if not isinstance(entries, list) or not entries:
+        entries_value = body.get("entry")
+        entries = (
+            cast(list[object], entries_value)
+            if isinstance(entries_value, list)
+            else []
+        )
+        if not entries:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="missing or empty `entry` array",
             )
-        first_entry = entries[0]
-        if not isinstance(first_entry, Mapping):
+        first_entry = _mapping_or_none(entries[0])
+        if first_entry is None:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="`entry[0]` must be a mapping",
             )
-        changes = first_entry.get("changes") or []
-        if not isinstance(changes, list) or not changes:
+        changes_value = first_entry.get("changes")
+        changes = (
+            cast(list[object], changes_value)
+            if isinstance(changes_value, list)
+            else []
+        )
+        if not changes:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="missing or empty `changes` array",
             )
-        first_change = changes[0]
-        if not isinstance(first_change, Mapping):
+        first_change = _mapping_or_none(changes[0])
+        if first_change is None:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="`changes[0]` must be a mapping",
             )
-        value = first_change.get("value")
-        if not isinstance(value, Mapping):
+        value = _mapping_or_none(first_change.get("value"))
+        if value is None:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="`changes[0].value` must be a mapping",
             )
 
-        messages = value.get("messages") or []
-        statuses = value.get("statuses") or []
+        messages_value = value.get("messages")
+        messages = (
+            cast(list[object], messages_value)
+            if isinstance(messages_value, list)
+            else []
+        )
+        statuses_value = value.get("statuses")
+        statuses = (
+            cast(list[object], statuses_value)
+            if isinstance(statuses_value, list)
+            else []
+        )
 
-        if isinstance(messages, list) and messages:
+        if messages:
             return self._normalize_message(
                 source=source,
                 value=value,
                 messages=messages,
             )
-        if isinstance(statuses, list) and statuses:
+        if statuses:
             return self._normalize_status(
                 source=source,
                 value=value,
@@ -121,16 +143,16 @@ class WhatsAppWebhookAdapter(BaseIngressAdapter):
         *,
         source: BoundarySource,
         value: Mapping[str, Any],
-        messages: list[Any],
+        messages: list[object],
     ) -> BoundaryNormalizationResult:
-        first = messages[0]
-        if not isinstance(first, Mapping):
+        first = _mapping_or_none(messages[0])
+        if first is None:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="`messages[0]` must be a mapping",
             )
-        ext_message_id = first.get("id")
-        wa_from = first.get("from")
+        ext_message_id: Any = first.get("id")
+        wa_from: Any = first.get("from")
         if not isinstance(ext_message_id, str) or not ext_message_id:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
@@ -142,20 +164,22 @@ class WhatsAppWebhookAdapter(BaseIngressAdapter):
                 error="missing or non-string message `from`",
             )
 
-        timestamp_raw = first.get("timestamp")
+        timestamp_raw: Any = first.get("timestamp")
         emitted_at = _parse_timestamp(timestamp_raw)
-        msg_type = first.get("type") or "text"
-        text_body = None
-        if isinstance(first.get("text"), Mapping):
-            text_body = first["text"].get("body")
+        msg_type: Any = first.get("type") or "text"
+        text_body: Any = None
+        text_value = _mapping_or_none(first.get("text"))
+        if text_value is not None:
+            text_body = text_value.get("body")
+        metadata = _mapping_or_none(value.get("metadata"))
 
         canonical: dict[str, Any] = {
             "from": wa_from,
             "type": msg_type,
             "text": text_body,
             "phone_number_id": (
-                value.get("metadata", {}).get("phone_number_id")
-                if isinstance(value.get("metadata"), Mapping)
+                metadata.get("phone_number_id")
+                if metadata is not None
                 else None
             ),
         }
@@ -177,17 +201,17 @@ class WhatsAppWebhookAdapter(BaseIngressAdapter):
         *,
         source: BoundarySource,
         value: Mapping[str, Any],
-        statuses: list[Any],
+        statuses: list[object],
     ) -> BoundaryNormalizationResult:
-        first = statuses[0]
-        if not isinstance(first, Mapping):
+        first = _mapping_or_none(statuses[0])
+        if first is None:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
                 error="`statuses[0]` must be a mapping",
             )
-        ext_message_id = first.get("id")
-        recipient = first.get("recipient_id")
-        status_value = first.get("status")
+        ext_message_id: Any = first.get("id")
+        recipient: Any = first.get("recipient_id")
+        status_value: Any = first.get("status")
         if not isinstance(ext_message_id, str) or not ext_message_id:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.MALFORMED,
@@ -195,12 +219,13 @@ class WhatsAppWebhookAdapter(BaseIngressAdapter):
             )
 
         emitted_at = _parse_timestamp(first.get("timestamp"))
+        metadata = _mapping_or_none(value.get("metadata"))
         canonical: dict[str, Any] = {
             "status": status_value,
             "recipient_id": recipient,
             "phone_number_id": (
-                value.get("metadata", {}).get("phone_number_id")
-                if isinstance(value.get("metadata"), Mapping)
+                metadata.get("phone_number_id")
+                if metadata is not None
                 else None
             ),
         }
@@ -236,6 +261,12 @@ def _parse_timestamp(value: Any) -> datetime | None:
             )
         except ValueError:
             return None
+    return None
+
+
+def _mapping_or_none(value: object) -> Mapping[str, Any] | None:
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, Any], value)
     return None
 
 

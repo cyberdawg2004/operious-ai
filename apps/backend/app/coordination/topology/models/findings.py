@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.topology.enums import (
     CoordinationTopologyDecision,
@@ -64,7 +64,7 @@ class CoordinationTopologyFinding:
     source_node_id: TopologyNodeId | None = None
     target_node_id: TopologyNodeId | None = None
     detected_at: datetime | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["CoordinationTopologyFinding"]

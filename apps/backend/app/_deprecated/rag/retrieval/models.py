@@ -53,7 +53,7 @@ class RetrievalRuntimeRequest:
     query: str
     policy: RetrievalPolicy
     strategies: tuple[str, ...]
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +88,7 @@ class RetrievalCandidate:
     source: str | None = None
     source_strategy: str = ""
     strategy_rank: int = 0
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)

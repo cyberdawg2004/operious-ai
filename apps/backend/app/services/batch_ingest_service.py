@@ -241,7 +241,11 @@ class _BatchIngestAdapter(BaseIngressAdapter):
             "body": text,
             "received_at": emitted_at.isoformat() if emitted_at else None,
             "metadata": canonicalize_payload(
-                raw_metadata if isinstance(raw_metadata, Mapping) else {}
+                (
+                    cast(Mapping[str, object], raw_metadata)
+                    if isinstance(raw_metadata, Mapping)
+                    else {}
+                )
             ),
         }
         return BoundaryNormalizationResult(

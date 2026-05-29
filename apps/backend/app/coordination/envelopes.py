@@ -37,7 +37,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.contracts.messages import CoordinationMessage
 from app.coordination.enums import (
@@ -121,7 +121,7 @@ class CoordinationEnvelope:
     created_at: datetime
     dispatched_at: datetime
     tenant_authority_source: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def message_id(self) -> CoordinationMessageId:

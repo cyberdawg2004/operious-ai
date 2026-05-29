@@ -48,9 +48,9 @@ class CoordinationPayload:
     """
 
     content_type: str
-    body: Mapping[str, Any] = field(default_factory=dict)
+    body: dict[str, Any] = field(default_factory=dict[str, Any])
     schema_version: str = "1"
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {

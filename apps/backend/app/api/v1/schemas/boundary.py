@@ -162,14 +162,18 @@ class BoundaryEgressResponse(BaseModel):
 class BoundaryIngressPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[BoundaryIngressResponse] = Field(default_factory=list)
+    items: list[BoundaryIngressResponse] = Field(
+        default_factory=list[BoundaryIngressResponse]
+    )
     total: int
 
 
 class BoundaryEgressPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[BoundaryEgressResponse] = Field(default_factory=list)
+    items: list[BoundaryEgressResponse] = Field(
+        default_factory=list[BoundaryEgressResponse]
+    )
     total: int
 
 

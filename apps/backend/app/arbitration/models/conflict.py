@@ -18,7 +18,7 @@ tuple of participants for full audit fidelity.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.enums import (
     ArbitrationAuthorityLevel,
@@ -56,7 +56,7 @@ class ArbitrationConflict:
     participants: tuple[str, ...]
     participant_authorities: tuple[ArbitrationAuthorityLevel, ...] = ()
     summary: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["ArbitrationConflict"]

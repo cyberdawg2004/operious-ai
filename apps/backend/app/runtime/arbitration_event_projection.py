@@ -13,7 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Mapping, cast
 import uuid
 
 from app.arbitration.identity import (
@@ -514,16 +515,19 @@ def _coerce_case_id(case_id: ArbitrationCaseId | str) -> ArbitrationCaseId:
     return case_id
 
 
-def _json_safe(value: Any) -> Any:
+def _json_safe(value: object) -> Any:
     if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
         return {
-            str(key): _json_safe(value[key])
-            for key in sorted(value.keys(), key=str)
+            str(key): _json_safe(mapping[key])
+            for key in sorted(mapping.keys(), key=str)
         }
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
+        sequence = cast(Sequence[object], value)
+        return [_json_safe(item) for item in sequence]
     if isinstance(value, set):
-        return [_json_safe(item) for item in sorted(value, key=str)]
+        items = cast(set[object], value)
+        return [_json_safe(item) for item in sorted(items, key=str)]
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, uuid.UUID):

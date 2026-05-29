@@ -27,7 +27,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.policy.enums import (
     CoordinationPolicyDecision,
@@ -73,7 +73,7 @@ class CoordinationPolicyFinding:
     restrictions: tuple[CoordinationPolicyRestriction, ...] = ()
     escalations: tuple[CoordinationPolicyEscalation, ...] = ()
     detected_at: datetime | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["CoordinationPolicyFinding"]

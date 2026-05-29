@@ -108,7 +108,7 @@ class BaseEgressAdapter(ABC):
         self,
         *,
         source: BoundarySource,
-        artifact,  # type: ignore[no-untyped-def]
+        artifact: object,
     ) -> EgressPayload:
         """Translate a runtime artifact to an outbound payload."""
 

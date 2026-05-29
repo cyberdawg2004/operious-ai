@@ -41,7 +41,7 @@ class AssemblyRequest:
     strategies: tuple[str, ...] | None = None
     reranker: str | None = None
     grounding_strategy: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +73,7 @@ class AssembledContext:
     grounding: GroundingResult
     reranker_name: str
     grounding_strategy: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def fragments(self):

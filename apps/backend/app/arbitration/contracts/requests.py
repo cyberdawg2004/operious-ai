@@ -17,7 +17,7 @@ Replay-safety: identical inputs (including
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.identity import ArbitrationEvaluationId
 from app.arbitration.models.case import ArbitrationCase
@@ -43,7 +43,7 @@ class ArbitrationRequest:
     tenant_id: str | None = None
     evaluator_names: tuple[str, ...] | None = None
     evaluation_id_override: ArbitrationEvaluationId | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:

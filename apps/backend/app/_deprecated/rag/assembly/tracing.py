@@ -48,7 +48,7 @@ class AssemblyTrace:
     error: str | None = None
     failed_stage: str | None = None
 
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["AssemblyTrace", "TraceStatus"]

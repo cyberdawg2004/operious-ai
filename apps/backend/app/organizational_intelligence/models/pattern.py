@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.organizational_intelligence.enums import (
     OperationalPatternKind,
@@ -40,7 +40,7 @@ class OperationalPatternObservation:
     last_seen_at: datetime
     evidence: tuple[str, ...] = ()
     tenant_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.occurrence_count < 1:
@@ -80,7 +80,7 @@ class OperationalPatternAnalysis:
     analyzer_signature: str
     observations: tuple[OperationalPatternObservation, ...]
     summary: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.analyzed_at.tzinfo is None:

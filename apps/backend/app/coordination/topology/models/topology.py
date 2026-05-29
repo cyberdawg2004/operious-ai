@@ -20,7 +20,7 @@ composition time — fail-fast.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.topology.enums import TopologyEdgeKind
 from app.coordination.topology.exceptions import (
@@ -80,7 +80,7 @@ class CoordinationTopology:
     max_chain_depth: int = _DEFAULT_MAX_CHAIN_DEPTH
     version: str = "v1"
     description: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         """Validate internal consistency at construction time."""

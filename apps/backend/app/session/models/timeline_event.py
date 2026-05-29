@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.session.enums import (
     SessionContinuityMode,
@@ -71,7 +71,7 @@ class SessionTimelineEvent:
     continuity_mode: SessionContinuityMode
     occurred_at: datetime
     recorded_at: datetime
-    payload: Mapping[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict[str, Any])
     correlation_id: SessionCorrelationId | None = None
     annotation: str | None = None
     idempotency_key: str | None = None

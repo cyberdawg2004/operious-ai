@@ -42,7 +42,7 @@ class ExecutionTrace:
     request_id: str | None = None
     error: str | None = None
     usage: TokenUsage = field(default_factory=TokenUsage)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class _TraceBuilder:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.enums import (
     BoundaryMessageType,
@@ -53,9 +53,9 @@ class BoundaryNormalizationResult:
     external_message_id: str | None = None
     external_conversation_id: str | None = None
     external_emitted_at: datetime | None = None
-    canonical_payload: Mapping[str, Any] = field(default_factory=dict)
+    canonical_payload: dict[str, Any] = field(default_factory=dict[str, Any])
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def is_ok(self) -> bool:

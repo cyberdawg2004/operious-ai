@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.hardening.identity import HardeningCorrelationId
 from app.hardening.models.violation import (
@@ -26,7 +26,7 @@ class SemanticContainmentTrace:
     violations: tuple[BoundaryViolationFinding, ...]
     started_at: datetime
     ended_at: datetime
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.started_at.tzinfo is None:

@@ -132,10 +132,14 @@ class ArbitrationEvaluationResponse(BaseModel):
     prevailing_authority_verdict: str | None = None
     reason: str
     evaluator_names: list[str] = Field(default_factory=list)
-    findings: list[ArbitrationFindingSchema] = Field(default_factory=list)
-    conflicts: list[ArbitrationConflictSchema] = Field(default_factory=list)
+    findings: list[ArbitrationFindingSchema] = Field(
+        default_factory=list[ArbitrationFindingSchema]
+    )
+    conflicts: list[ArbitrationConflictSchema] = Field(
+        default_factory=list[ArbitrationConflictSchema]
+    )
     deadlock_witnesses: list[ArbitrationDeadlockSchema] = Field(
-        default_factory=list
+        default_factory=list[ArbitrationDeadlockSchema]
     )
     signal_count: int
     recommendation_count: int
@@ -215,7 +219,9 @@ class ArbitrationEvaluationResponse(BaseModel):
 class ArbitrationEvaluationsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[ArbitrationEvaluationResponse] = Field(default_factory=list)
+    items: list[ArbitrationEvaluationResponse] = Field(
+        default_factory=list[ArbitrationEvaluationResponse]
+    )
     total: int
 
 

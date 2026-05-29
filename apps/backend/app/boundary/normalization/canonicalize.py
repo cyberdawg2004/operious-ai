@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 
 _PRIMITIVE_TYPES = (
@@ -35,7 +36,7 @@ _PRIMITIVE_TYPES = (
 )
 
 
-def canonicalize_payload(value: Any) -> Any:
+def canonicalize_payload(value: object) -> Any:
     """Recursively normalise into a canonical, JSON-serialisable shape.
 
     * Mappings → ``dict`` with keys sorted lexicographically.
@@ -49,15 +50,23 @@ def canonicalize_payload(value: Any) -> Any:
       payloads.
     """
     if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
         return {
-            key: canonicalize_payload(value[key])
-            for key in sorted(value.keys(), key=_string_key)
+            key: canonicalize_payload(mapping[key])
+            for key in sorted(mapping.keys(), key=_string_key)
         }
     if isinstance(value, (list, tuple)):
-        return [canonicalize_payload(item) for item in value]
+        sequence = cast(Sequence[object], value)
+        return [canonicalize_payload(item) for item in sequence]
     if isinstance(value, set):
+        items = cast(set[object], value)
         sorted_items = sorted(
-            value, key=lambda x: json.dumps(canonicalize_payload(x))
+            items,
+            key=lambda x: json.dumps(
+                canonicalize_payload(x),
+                default=str,
+                sort_keys=True,
+            ),
         )
         return [canonicalize_payload(item) for item in sorted_items]
     if isinstance(value, _PRIMITIVE_TYPES):
@@ -96,7 +105,7 @@ def content_fingerprint(value: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _string_key(key: Any) -> str:
+def _string_key(key: object) -> str:
     """Force keys to a canonical string representation for sorting."""
     return key if isinstance(key, str) else json.dumps(
         key, default=str, sort_keys=True

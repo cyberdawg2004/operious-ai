@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.supervisor.contracts.decisions import SupervisorDecision
 from app.supervisor.contracts.evaluations import QAEvaluation
@@ -58,7 +58,7 @@ class ExecutionInspectionResult:
     ended_at: datetime
     latency_ms: float
     tenant_authority_source: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["ExecutionInspectionResult"]

@@ -13,7 +13,7 @@ decision's `prevailing_authority` is ``None``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.enums import ArbitrationAuthorityLevel
 
@@ -39,7 +39,7 @@ class ResolutionAuthority:
     source_id: str
     verdict: str
     reason: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["ResolutionAuthority"]

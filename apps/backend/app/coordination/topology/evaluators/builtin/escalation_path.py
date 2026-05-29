@@ -38,7 +38,10 @@ from app.coordination.topology.enums import (
 from app.coordination.topology.evaluators.base import (
     BaseCoordinationTopologyEvaluator,
 )
-from app.coordination.topology.identity import derive_finding_id
+from app.coordination.topology.identity import (
+    TopologyNodeId,
+    derive_finding_id,
+)
 from app.coordination.topology.models.findings import (
     CoordinationTopologyFinding,
 )
@@ -135,8 +138,8 @@ class EscalationPathEvaluator(BaseCoordinationTopologyEvaluator):
         code: CoordinationTopologyFindingCode,
         message: str,
         ordinal: int,
-        source_node_id=None,  # type: ignore[no-untyped-def]
-        target_node_id=None,  # type: ignore[no-untyped-def]
+        source_node_id: TopologyNodeId | None = None,
+        target_node_id: TopologyNodeId | None = None,
         path_id: str | None = None,
     ) -> CoordinationTopologyFinding:
         seed_uuid = (

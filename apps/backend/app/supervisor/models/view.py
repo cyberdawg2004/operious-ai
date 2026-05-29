@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.agents.enums import ExecutionState, ToolInvocationStatus
 
@@ -49,7 +49,7 @@ class ToolInvocationView:
     latency_ms: float
     governance_decision_id: uuid.UUID | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +72,7 @@ class GovernanceDecisionView:
     reason: str
     decided_at: datetime
     correlation_id: uuid.UUID | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +100,7 @@ class InspectionView:
     error: str | None
     tool_invocations: tuple[ToolInvocationView, ...]
     governance_decisions: tuple[GovernanceDecisionView, ...]
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

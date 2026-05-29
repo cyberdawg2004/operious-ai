@@ -11,6 +11,8 @@ in-memory store is single-event-loop by design.
 
 from __future__ import annotations
 
+from typing import cast
+
 from app.supervisor.exceptions import SupervisorPersistenceError
 from app.supervisor.persistence.models import InspectionQuery, RecordPage
 from app.supervisor.persistence.records import (
@@ -169,7 +171,8 @@ def _require_inspection_id(metadata: object) -> str:
     typically store the relationship as a column.
     """
     if isinstance(metadata, dict) and "inspection_id" in metadata:
-        return str(metadata["inspection_id"])
+        typed_metadata = cast(dict[object, object], metadata)
+        return str(typed_metadata["inspection_id"])
     raise SupervisorPersistenceError(
         "RuntimeFindingRecord.metadata must carry an 'inspection_id' key "
         "when persisted via the in-memory repository"

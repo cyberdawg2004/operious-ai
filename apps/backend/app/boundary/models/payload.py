@@ -20,7 +20,7 @@ adapters are the only layer that interprets it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +47,7 @@ class IngressPayload:
 
     body: Any
     content_type: str | None = None
-    headers: Mapping[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict[str, str])
     signature: str | None = None
     raw_bytes: bytes | None = None
 
@@ -73,7 +73,7 @@ class EgressPayload:
 
     body: Any
     content_type: str | None = None
-    headers: Mapping[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict[str, str])
     target_uri: str | None = None
     method: str | None = None
 

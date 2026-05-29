@@ -37,7 +37,7 @@ The request is replay-safe: passing identical inputs (including
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.enums import (
     CoordinationDirection,
@@ -80,7 +80,7 @@ class CoordinationTopologyEvaluationRequest:
     chain_depth: int = 0
     evaluator_names: tuple[str, ...] | None = None
     evaluation_id_override: CoordinationTopologyEvaluationId | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:

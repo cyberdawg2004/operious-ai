@@ -10,7 +10,7 @@ construction time.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +33,7 @@ class SessionContext:
 
     environment: str | None = None
     labels: tuple[str, ...] = ()
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
     notes: str | None = None
 
     def __post_init__(self) -> None:

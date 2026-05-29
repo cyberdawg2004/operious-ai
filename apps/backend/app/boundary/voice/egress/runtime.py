@@ -83,9 +83,9 @@ class VoiceEgressRuntime:
         provider: BaseTextToSpeechProvider,
         persistence: VoicePersistenceProtocol,
         runtime_instance_id: uuid.UUID | None = None,
-        capability_governance: GovernanceRuntime,
+        capability_governance: GovernanceRuntime | None,
     ) -> None:
-        if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
+        if capability_governance is None:
             raise VoiceConfigurationError(
                 "VoiceEgressRuntime requires capability_governance. "
                 "Voice synthesis is an external action and must be "

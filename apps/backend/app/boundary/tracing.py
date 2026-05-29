@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.enums import (
     BoundaryDirection,
@@ -92,7 +92,7 @@ class BoundaryTrace:
     # tenant_authority_source to reconstruct the attribution chain
     # across every substrate that processed a request.
     tenant_authority_source: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["BoundaryTraceContext", "BoundaryTrace"]

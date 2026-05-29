@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.session.enums import (
     SessionContinuityMode,
@@ -44,11 +44,11 @@ class SessionRecord:
     revision: int
     context_environment: str | None = None
     context_labels: tuple[str, ...] = ()
-    context_attributes: Mapping[str, Any] = field(
-        default_factory=dict
+    context_attributes: dict[str, Any] = field(
+        default_factory=dict[str, Any]
     )
     context_notes: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,14 +62,14 @@ class SessionEventRecord:
     continuity_mode: SessionContinuityMode
     occurred_at: datetime
     recorded_at: datetime
-    payload: Mapping[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict[str, Any])
     correlation_id: SessionCorrelationId | None = None
     annotation: str | None = None
     idempotency_key: str | None = None
     # 2.5-G3: governance join axes (mirrors CoordinationRecord).
     governance_decision_id: uuid.UUID | None = None
     governance_chain_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +83,8 @@ class SessionCorrelationRecord:
     recorded_at: datetime
     external_correlation_id: str | None = None
     annotation: str | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

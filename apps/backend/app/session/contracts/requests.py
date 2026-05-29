@@ -64,7 +64,7 @@ class OpenSessionRequest:
     session_id_override: SessionId | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:
@@ -106,13 +106,13 @@ class AppendEventRequest:
     continuity_mode: SessionContinuityMode = (
         SessionContinuityMode.SYNCHRONOUS
     )
-    payload: Mapping[str, Any] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=dict[str, Any])
     annotation: str | None = None
     external_correlation_id: str | None = None
     correlation_id: str | None = None
     request_id: str | None = None
     idempotency_key: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.idempotency_key is None:
@@ -148,7 +148,7 @@ class RecordLifecycleRequest:
     recorded_at: datetime | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +165,7 @@ class RecordContextRequest:
     recorded_at: datetime | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,11 +181,11 @@ class RecordCorrelationRequest:
     external_id: str
     external_correlation_id: str | None = None
     annotation: str | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
     recorded_at: datetime | None = None
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +218,7 @@ class ReconstructSessionRequest:
     include_correlations: bool = True
     correlation_id: str | None = None
     request_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

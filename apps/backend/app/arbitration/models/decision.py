@@ -15,7 +15,7 @@ arbitration substrate.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.enums import ArbitrationOutcome
 from app.arbitration.models.authority import ResolutionAuthority
@@ -39,7 +39,7 @@ class ArbitrationDecision:
     outcome: ArbitrationOutcome
     prevailing_authority: ResolutionAuthority | None = None
     reason: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def is_resolved(self) -> bool:

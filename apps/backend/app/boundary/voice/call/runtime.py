@@ -89,13 +89,13 @@ class VoiceCallSessionRuntime:
         self,
         *,
         voice_runtime: VoiceRuntime,
-        capability_governance: GovernanceRuntime,
+        capability_governance: GovernanceRuntime | None,
         silence_detector: SilenceDetector | None = None,
         bargein_detector: BargeinDetector | None = None,
         language_detector: _LanguageDetector | None = None,
         timeline_appender: VoiceTimelineAppender | None = None,
     ) -> None:
-        if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
+        if capability_governance is None:
             raise VoiceConfigurationError(
                 "VoiceCallSessionRuntime requires capability_governance"
             )

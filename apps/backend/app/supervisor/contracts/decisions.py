@@ -25,7 +25,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from app.core.deterministic_identity import derive_runtime_id
 from app.supervisor.enums import (
@@ -54,7 +54,7 @@ class EscalationDecision:
     reason: str
     triggering_finding_ids: tuple[uuid.UUID, ...]
     decided_at: datetime
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +88,7 @@ class SupervisorDecision:
     escalations: tuple[EscalationDecision, ...]
     reason: str
     decided_at: datetime
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def is_accept(self) -> bool:
@@ -154,7 +154,7 @@ def build_supervisor_decision(
     """
     from app.supervisor.contracts.evaluations import QAEvaluation
 
-    typed_evaluations: tuple[QAEvaluation, ...] = tuple(evaluations)  # type: ignore[assignment]
+    typed_evaluations = cast(tuple[QAEvaluation, ...], tuple(evaluations))
     decided_at = decided_at or datetime.now(timezone.utc)
     decision_id = decision_id or derive_runtime_id(
         namespace=_DECISION_NAMESPACE,
@@ -247,7 +247,7 @@ def _evaluation_seed(
 ) -> tuple[tuple[object, ...], ...]:
     from app.supervisor.contracts.evaluations import QAEvaluation
 
-    typed: tuple[QAEvaluation, ...] = tuple(evaluations)  # type: ignore[assignment]
+    typed = cast(tuple[QAEvaluation, ...], tuple(evaluations))
     return tuple(
         (
             evaluation.evaluator_name,

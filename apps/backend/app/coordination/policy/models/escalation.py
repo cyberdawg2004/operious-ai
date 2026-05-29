@@ -14,7 +14,7 @@ proceeding dispatch, while an escalation blocks it pending review.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.policy.enums import CoordinationEscalationType
 
@@ -43,7 +43,7 @@ class CoordinationPolicyEscalation:
     reason: str = ""
     policy_id: str | None = None
     rule_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,7 +57,7 @@ class CoordinationPolicyEscalation:
 
     @classmethod
     def from_dict(
-        cls, data: Mapping[str, Any]
+        cls, data: dict[str, Any]
     ) -> "CoordinationPolicyEscalation":
         return cls(
             kind=CoordinationEscalationType(data["kind"]),

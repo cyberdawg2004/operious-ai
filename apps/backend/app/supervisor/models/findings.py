@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 from app.supervisor.enums import FindingCategory, FindingSeverity
 from app.supervisor.models.evidence import EvaluationEvidence
@@ -43,7 +43,7 @@ class RuntimeFinding:
     detected_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +61,7 @@ class ExecutionAnomaly:
     severity: FindingSeverity
     evidence: EvaluationEvidence
     description: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["RuntimeFinding", "ExecutionAnomaly"]

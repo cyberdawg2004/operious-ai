@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.enums import (
     ArbitrationAuthorityLevel,
@@ -40,7 +40,7 @@ class ArbitrationFindingRecord:
     related_conflict_id: ArbitrationConflictId | None
     related_deadlock_witness_id: uuid.UUID | None
     authority: ArbitrationAuthorityLevel | None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +52,7 @@ class ArbitrationConflictRecord:
     participants: tuple[str, ...]
     participant_authorities: tuple[ArbitrationAuthorityLevel, ...]
     summary: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +64,7 @@ class ArbitrationDeadlockRecord:
     contributing_ids: tuple[str, ...]
     summary: str
     iteration_count: int
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +100,7 @@ class ArbitrationRecord:
     # 2.5-G2: governance join axes (mirrors CoordinationRecord).
     governance_decision_id: uuid.UUID | None = None
     governance_chain_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = [

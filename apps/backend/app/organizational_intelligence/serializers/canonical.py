@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, cast
 
 from app.organizational_intelligence.models.approval import (
     ApprovalRecord,
@@ -34,20 +35,25 @@ from app.organizational_intelligence.models.tonality import (
 _PRIMITIVES = (str, int, float, bool, type(None))
 
 
-def canonicalize_payload(value: Any) -> Any:
+def canonicalize_payload(value: object) -> Any:
     """Recursively normalise into a canonical JSON-safe shape."""
     if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
         return {
-            key: canonicalize_payload(value[key])
-            for key in sorted(value.keys(), key=_string_key)
+            key: canonicalize_payload(mapping[key])
+            for key in sorted(mapping.keys(), key=_string_key)
         }
     if isinstance(value, (list, tuple)):
-        return [canonicalize_payload(i) for i in value]
+        sequence = cast(Sequence[object], value)
+        return [canonicalize_payload(i) for i in sequence]
     if isinstance(value, set):
+        items = cast(set[object], value)
         sorted_items = sorted(
-            value,
+            items,
             key=lambda x: json.dumps(
-                canonicalize_payload(x), default=str
+                canonicalize_payload(x),
+                default=str,
+                sort_keys=True,
             ),
         )
         return [canonicalize_payload(i) for i in sorted_items]
@@ -60,19 +66,16 @@ def canonicalize_payload(value: Any) -> Any:
     return str(value)
 
 
-def canonicalize_attributes(
-    attributes: Mapping[str, Any],
-) -> dict[str, Any]:
-    if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
-        attributes, Mapping
-    ):
+def canonicalize_attributes(attributes: object) -> dict[str, Any]:
+    if not isinstance(attributes, Mapping):
         raise TypeError(
             f"canonicalize_attributes expected a Mapping, got "
             f"{type(attributes).__name__!r}"
         )
+    mapping = cast(Mapping[str, Any], attributes)
     return {
-        key: canonicalize_payload(attributes[key])
-        for key in sorted(attributes.keys(), key=_string_key)
+        key: canonicalize_payload(mapping[key])
+        for key in sorted(mapping.keys(), key=_string_key)
     }
 
 
@@ -373,7 +376,7 @@ def serialize_approval(approval: ApprovalRecord) -> dict[str, Any]:
     )
 
 
-def _string_key(key: Any) -> str:
+def _string_key(key: object) -> str:
     return (
         key
         if isinstance(key, str)

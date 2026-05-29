@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,7 @@ class EvaluationEvidence:
     tool_invocation_ids: tuple[uuid.UUID, ...] = ()
     governance_decision_ids: tuple[uuid.UUID, ...] = ()
     state_transition_indices: tuple[int, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 __all__ = ["EvaluationEvidence"]

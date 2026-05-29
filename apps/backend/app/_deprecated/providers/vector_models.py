@@ -31,7 +31,7 @@ class VectorRecord:
 
     id: uuid.UUID
     vector: tuple[float, ...]
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +46,7 @@ class VectorQuery:
 
     vector: tuple[float, ...]
     top_k: int = 10
-    filter: Mapping[str, Any] = field(default_factory=dict)
+    filter: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +55,7 @@ class VectorHit:
 
     id: uuid.UUID
     score: float
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class VectorDistance(str, Enum):

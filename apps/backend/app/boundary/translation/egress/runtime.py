@@ -106,9 +106,9 @@ class TranslationEgressRuntime:
         normalizer: BoundaryNormalizer | None = None,
         validator: SemanticPreservationValidator | None = None,
         runtime_instance_id: uuid.UUID | None = None,
-        capability_governance: GovernanceRuntime,
+        capability_governance: GovernanceRuntime | None,
     ) -> None:
-        if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
+        if capability_governance is None:
             raise TranslationConfigurationError(
                 "TranslationEgressRuntime requires capability_governance. "
                 "Translation egress is an external action and must be "

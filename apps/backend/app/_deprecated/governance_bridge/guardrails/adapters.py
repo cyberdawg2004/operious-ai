@@ -76,7 +76,7 @@ class GovernedAssemblyRequest:
     assembly: AssemblyRequest
     tenant_id: str | None = None
     actor: str = "system"
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +116,7 @@ class GovernedAssemblyEnvelope:
     pre_retrieval_envelope: GovernanceEnvelope | None = None
     context_envelope: ContextEnvelope | None = None
     pre_execution_envelope: GovernanceEnvelope | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
     def is_ok(self) -> bool:

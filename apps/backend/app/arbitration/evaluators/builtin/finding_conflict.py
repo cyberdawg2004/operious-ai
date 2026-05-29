@@ -40,6 +40,7 @@ from app.arbitration.identity import (
 )
 from app.arbitration.models.conflict import ArbitrationConflict
 from app.arbitration.models.findings import ArbitrationFinding
+from app.arbitration.models.signal import ArbitrationSignal
 from app.arbitration.taxonomy import (
     ArbitrationFindingCode,
     is_authorisation_verdict,
@@ -167,7 +168,10 @@ class FindingConflictEvaluator(BaseArbitrationEvaluator):
         )
 
     @staticmethod
-    def _classify_pair(left, right) -> ArbitrationConflictKind | None:  # type: ignore[no-untyped-def]
+    def _classify_pair(
+        left: ArbitrationSignal,
+        right: ArbitrationSignal,
+    ) -> ArbitrationConflictKind | None:
         a = left.verdict
         b = right.verdict
         if is_contradiction(a, b):

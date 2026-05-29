@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, cast
 
 
 _PRIMITIVES = (str, int, float, bool, type(None))
@@ -28,7 +29,7 @@ def text_fingerprint(text: str, *, language: str) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def canonicalize_payload(value: Any) -> Any:
+def canonicalize_payload(value: object) -> Any:
     """Recursively normalise into a canonical JSON-safe shape.
 
     Mapping keys are projected through :func:`_string_key` before sorting
@@ -37,16 +38,23 @@ def canonicalize_payload(value: Any) -> Any:
     doctrine).
     """
     if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
         return {
-            key: canonicalize_payload(value[key])
-            for key in sorted(value.keys(), key=_string_key)
+            key: canonicalize_payload(mapping[key])
+            for key in sorted(mapping.keys(), key=_string_key)
         }
     if isinstance(value, (list, tuple)):
-        return [canonicalize_payload(item) for item in value]
+        sequence = cast(Sequence[object], value)
+        return [canonicalize_payload(item) for item in sequence]
     if isinstance(value, set):
+        items = cast(set[object], value)
         sorted_items = sorted(
-            value,
-            key=lambda x: json.dumps(canonicalize_payload(x), default=str),
+            items,
+            key=lambda x: json.dumps(
+                canonicalize_payload(x),
+                default=str,
+                sort_keys=True,
+            ),
         )
         return [canonicalize_payload(item) for item in sorted_items]
     if isinstance(value, datetime):
@@ -58,20 +66,17 @@ def canonicalize_payload(value: Any) -> Any:
     return str(value)
 
 
-def canonicalize_attributes(
-    attributes: Mapping[str, Any],
-) -> dict[str, Any]:
+def canonicalize_attributes(attributes: object) -> dict[str, Any]:
     """Canonicalise an attribute mapping (typed wrapper)."""
-    if not isinstance(  # pyright: ignore[reportUnnecessaryIsInstance]
-        attributes, Mapping
-    ):
+    if not isinstance(attributes, Mapping):
         raise TypeError(
             f"boundary/translation canonicalize_attributes expected a "
             f"Mapping, got {type(attributes).__name__!r}"
         )
+    mapping = cast(Mapping[str, Any], attributes)
     return {
-        key: canonicalize_payload(attributes[key])
-        for key in sorted(attributes.keys(), key=_string_key)
+        key: canonicalize_payload(mapping[key])
+        for key in sorted(mapping.keys(), key=_string_key)
     }
 
 
@@ -88,7 +93,7 @@ def content_fingerprint(value: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _string_key(key: Any) -> str:
+def _string_key(key: object) -> str:
     """Project a Mapping key to a deterministic sort string.
 
     See ``docs/canonicalization/string-key-projection.md`` for the

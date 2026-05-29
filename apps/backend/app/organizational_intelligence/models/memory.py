@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.organizational_intelligence.enums import (
     IntelligenceScope,
@@ -81,7 +81,7 @@ class CandidatePattern:
     extractor_signature: str
     scope: IntelligenceScope = IntelligenceScope.TENANT
     tenant_id: str | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.summary:
@@ -135,7 +135,7 @@ class MemoryEvolutionProposal:
     status: MemoryArtifactStatus = (
         MemoryArtifactStatus.CANDIDATE
     )
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.rationale:
@@ -175,7 +175,7 @@ class ApprovedPattern:
     scope: IntelligenceScope
     tenant_id: str | None = None
     approver_handle: str | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.body:
@@ -289,7 +289,7 @@ class OrganizationalMemoryArtifact:
     updated_at: datetime
     revision: int = 1
     superseded_by: MemoryArtifactId | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.created_at.tzinfo is None:

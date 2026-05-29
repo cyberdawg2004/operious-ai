@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.session.enums import SessionCorrelationKind
 from app.session.identity import (
@@ -46,7 +46,7 @@ class SessionCorrelation:
     recorded_at: datetime
     external_correlation_id: str | None = None
     annotation: str | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.external_id:

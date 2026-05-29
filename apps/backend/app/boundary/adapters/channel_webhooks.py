@@ -12,10 +12,11 @@ import base64
 import hashlib
 import hmac
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import getaddresses, parsedate_to_datetime
-from typing import Any, Mapping, cast
+from typing import Any, cast
 
 from app.boundary.adapters.base import BaseIngressAdapter
 from app.boundary.enums import (
@@ -223,22 +224,28 @@ class TenantWhatsAppWebhookAdapter(BaseIngressAdapter):
         )
         if route != self._routing_address:
             return _malformed_result("whatsapp routing address mismatch")
-        messages = value.get("messages")
-        if not isinstance(messages, list) or not messages:
+        messages_value = value.get("messages")
+        messages = (
+            cast(list[object], messages_value)
+            if isinstance(messages_value, list)
+            else []
+        )
+        if not messages:
             return BoundaryNormalizationResult(
                 status=BoundaryNormalizationStatus.UNSUPPORTED_TYPE,
                 error="whatsapp webhook contains no messages",
             )
-        first = messages[0]
-        if not isinstance(first, Mapping):
+        first = _mapping_or_none(messages[0])
+        if first is None:
             return _malformed_result("whatsapp message must be a mapping")
         message_id = _first_text(first.get("id"))
         sender = _first_text(first.get("from"))
         if message_id is None:
             return _malformed_result("missing whatsapp message id")
         text = None
-        if isinstance(first.get("text"), Mapping):
-            text = _first_text(first["text"].get("body"))
+        text_value = _mapping_or_none(first.get("text"))
+        if text_value is not None:
+            text = _first_text(text_value.get("body"))
         return _ok_result(
             channel="whatsapp",
             message_id=message_id,
@@ -605,7 +612,9 @@ def extract_whatsapp_routing_address(
     headers: Mapping[str, str],
 ) -> str:
     value = _first_whatsapp_value(body)
-    metadata = _mapping_or_empty(value.get("metadata")) if value else {}
+    metadata = _mapping_or_empty(
+        value.get("metadata") if value is not None else None
+    )
     route = _first_text(
         body.get("routing_address"),
         metadata.get("phone_number_id"),
@@ -723,9 +732,10 @@ def _malformed_result(error: str) -> BoundaryNormalizationResult:
 
 
 def _mapping_body(payload: IngressPayload, error: str) -> Mapping[str, Any]:
-    if not isinstance(payload.body, Mapping):
+    body_object: object = payload.body
+    if not isinstance(body_object, Mapping):
         raise BoundaryNormalizationError(error)
-    return payload.body
+    return cast(Mapping[str, Any], body_object)
 
 
 def _verify_sha256_signature(
@@ -759,14 +769,16 @@ def _verify_twilio_signature(
     payload: IngressPayload,
 ) -> bool:
     signature = _header(payload.headers, "x-twilio-signature")
-    if not signature or not isinstance(payload.body, Mapping):
+    body_object: object = payload.body
+    if not signature or not isinstance(body_object, Mapping):
         return False
+    body = cast(Mapping[str, Any], body_object)
     webhook_url = _header(payload.headers, "x-operious-webhook-url")
     if not webhook_url:
         return False
     pieces = [webhook_url]
-    for key in sorted(str(k) for k in payload.body.keys()):
-        value = payload.body.get(key)
+    for key in sorted(str(k) for k in body.keys()):
+        value = body.get(key)
         pieces.append(key)
         pieces.append("" if value is None else str(value))
     expected = base64.b64encode(
@@ -827,27 +839,38 @@ def _require_secret(value: str) -> str:
     return text
 
 
-def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+def _mapping_or_empty(value: object) -> Mapping[str, Any]:
     return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
 
 
-def _first_whatsapp_value(body: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    entries = body.get("entry")
-    if not isinstance(entries, list) or not entries:
-        return None
-    first_entry = entries[0]
-    if not isinstance(first_entry, Mapping):
-        return None
-    first_entry = cast(Mapping[str, Any], first_entry)
-    changes = first_entry.get("changes")
-    if not isinstance(changes, list) or not changes:
-        return None
-    first_change = changes[0]
-    if not isinstance(first_change, Mapping):
-        return None
-    first_change = cast(Mapping[str, Any], first_change)
-    value = first_change.get("value")
+def _mapping_or_none(value: object) -> Mapping[str, Any] | None:
     return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else None
+
+
+def _first_whatsapp_value(body: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    entries_value = body.get("entry")
+    entries = (
+        cast(list[object], entries_value)
+        if isinstance(entries_value, list)
+        else []
+    )
+    if not entries:
+        return None
+    first_entry = _mapping_or_none(entries[0])
+    if first_entry is None:
+        return None
+    changes_value = first_entry.get("changes")
+    changes = (
+        cast(list[object], changes_value)
+        if isinstance(changes_value, list)
+        else []
+    )
+    if not changes:
+        return None
+    first_change = _mapping_or_none(changes[0])
+    if first_change is None:
+        return None
+    return _mapping_or_none(first_change.get("value"))
 
 
 def _is_twilio_whatsapp(body: Mapping[str, Any]) -> bool:
@@ -867,26 +890,28 @@ def _first_text(*values: Any) -> str | None:
 
 def _first_sequence_text(value: Any) -> str | None:
     if isinstance(value, list | tuple):
-        for item in value:
+        items = cast(Sequence[object], value)
+        for item in items:
             text = _first_text(item)
             if text is not None:
                 return text
     return _first_text(value)
 
 
-def _nested(value: Mapping[str, Any], *keys: str) -> Any:
-    current: Any = value
+def _nested(value: Mapping[str, Any], *keys: str) -> object | None:
+    current: object = value
     for key in keys:
-        if not isinstance(current, Mapping):
+        current_mapping = _mapping_or_none(current)
+        if current_mapping is None:
             return None
-        current = current.get(key)
+        current = current_mapping.get(key)
     return current
 
 
 def _attachments(body: Mapping[str, Any]) -> tuple[object, ...]:
     value = body.get("attachments")
     if isinstance(value, list):
-        return tuple(value)
+        return tuple(cast(list[object], value))
     return ()
 
 
@@ -899,11 +924,13 @@ def _lark_text(content: Any) -> str | None:
             decoded = json.loads(text)
         except json.JSONDecodeError:
             return text
-        if isinstance(decoded, Mapping):
-            return _first_text(decoded.get("text"))
+        decoded_mapping = _mapping_or_none(decoded)
+        if decoded_mapping is not None:
+            return _first_text(decoded_mapping.get("text"))
         return text
-    if isinstance(content, Mapping):
-        return _first_text(content.get("text"))
+    content_mapping = _mapping_or_none(content)
+    if content_mapping is not None:
+        return _first_text(content_mapping.get("text"))
     return None
 
 

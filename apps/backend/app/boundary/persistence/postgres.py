@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -540,15 +540,17 @@ def _egress_row_to_record(
 # ─── JSONB coercion ─────────────────────────────────────────────────────
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
+def _as_dict(value: object) -> dict[str, Any]:
     if isinstance(value, dict):
-        return {str(k): v for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType]
+        mapping = cast(dict[object, object], value)
+        return {str(k): v for k, v in mapping.items()}
     return {}
 
 
-def _as_dict_of_str(value: Any) -> dict[str, str]:
+def _as_dict_of_str(value: object) -> dict[str, str]:
     if isinstance(value, dict):
-        return {str(k): str(v) for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType]
+        mapping = cast(dict[object, object], value)
+        return {str(k): str(v) for k, v in mapping.items()}
     return {}
 
 

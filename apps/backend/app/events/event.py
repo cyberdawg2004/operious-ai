@@ -85,7 +85,9 @@ class OperationalEvent:
     governance_decision_id: str | None = None
 
     # Opaque payload.
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(
+        default_factory=dict[str, Any]
+    )
 
     def __post_init__(self) -> None:
         if self.causality.is_root and self.causality.root_event_id != self.event_id:

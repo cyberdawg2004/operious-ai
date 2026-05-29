@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.enums import ArbitrationOutcome
 from app.arbitration.identity import (
@@ -64,7 +64,7 @@ class ArbitrationTrace:
     ended_at: datetime
     latency_ms: float
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     tenant_authority_source: str | None = None
     # 2.5-G2: governance join axes — same pattern as
     # ``CoordinationEnvelope`` / ``BoundaryTrace``. ID-only;

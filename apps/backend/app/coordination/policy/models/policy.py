@@ -17,7 +17,7 @@ declarative configuration. This keeps replay semantics trivial
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.policy.enums import CoordinationPolicyScope
 from app.coordination.policy.identity import CoordinationPolicyId
@@ -47,7 +47,7 @@ class CoordinationPolicy:
     scope: CoordinationPolicyScope
     rules: tuple[CoordinationPolicyRule, ...]
     description: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {

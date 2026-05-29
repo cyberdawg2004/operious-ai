@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.enums import (
     CoordinationDirection,
@@ -88,7 +88,7 @@ class CoordinationPolicyEvaluationRequest:
     request_id: str | None = None
     evaluator_names: tuple[str, ...] | None = None
     evaluation_id_override: CoordinationPolicyEvaluationId | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     authority: AuthorityContext | None = None
 
     def __post_init__(self) -> None:

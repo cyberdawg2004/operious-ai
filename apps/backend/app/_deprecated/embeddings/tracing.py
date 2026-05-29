@@ -42,7 +42,7 @@ class EmbeddingTrace:
     request_id: str | None = None
     error: str | None = None
     usage: EmbeddingUsage = field(default_factory=EmbeddingUsage)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class _EmbeddingTraceBuilder:

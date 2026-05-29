@@ -39,7 +39,7 @@ class TenantAuditExport:
 class TicketReplayTrace:
     ingress_id: str
     events: tuple[Mapping[str, Any], ...]
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,18 +371,22 @@ def _event_matches_ingress(
         return True
 
     source_payload = metadata.get("source_canonical_payload")
-    if isinstance(source_payload, Mapping) and (
-        source_payload.get("ticket_id") == ticket_id
-        or source_payload.get("message_id") == ticket_id
-    ):
-        return True
+    if isinstance(source_payload, Mapping):
+        typed_source_payload = cast(Mapping[str, Any], source_payload)
+        if (
+            typed_source_payload.get("ticket_id") == ticket_id
+            or typed_source_payload.get("message_id") == ticket_id
+        ):
+            return True
 
     source_metadata = metadata.get("source_metadata")
-    if isinstance(source_metadata, Mapping) and (
-        source_metadata.get("ticket.external_id") == ticket_id
-        or source_metadata.get("ticket_id") == ticket_id
-    ):
-        return True
+    if isinstance(source_metadata, Mapping):
+        typed_source_metadata = cast(Mapping[str, Any], source_metadata)
+        if (
+            typed_source_metadata.get("ticket.external_id") == ticket_id
+            or typed_source_metadata.get("ticket_id") == ticket_id
+        ):
+            return True
 
     return False
 

@@ -14,7 +14,7 @@ tables".
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -352,25 +352,29 @@ def _dict_to_deadlock(d: dict[str, Any]) -> ArbitrationDeadlockRecord:
 # ─── JSONB coercion helpers ─────────────────────────────────────────────
 
 
-def _as_list_of_str(value: Any) -> list[str]:
+def _as_list_of_str(value: object) -> list[str]:
     if isinstance(value, list):
-        return [str(v) for v in value]  # pyright: ignore[reportUnknownVariableType]
+        items = cast(list[object], value)
+        return [str(v) for v in items]
     return []
 
 
-def _as_list_of_dict(value: Any) -> list[dict[str, Any]]:
+def _as_list_of_dict(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
+    items = cast(list[object], value)
     out: list[dict[str, Any]] = []
-    for item in value:  # pyright: ignore[reportUnknownVariableType]
+    for item in items:
         if isinstance(item, dict):
-            out.append({str(k): v for k, v in item.items()})  # pyright: ignore[reportUnknownVariableType]
+            mapping = cast(dict[object, object], item)
+            out.append({str(k): v for k, v in mapping.items()})
     return out
 
 
-def _as_dict(value: Any) -> dict[str, Any]:
+def _as_dict(value: object) -> dict[str, Any]:
     if isinstance(value, dict):
-        return {str(k): v for k, v in value.items()}  # pyright: ignore[reportUnknownVariableType]
+        mapping = cast(dict[object, object], value)
+        return {str(k): v for k, v in mapping.items()}
     return {}
 
 

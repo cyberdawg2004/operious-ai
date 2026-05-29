@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.boundary.translation.enums import (
     LocalizationFormality,
@@ -22,7 +22,7 @@ class LocalizationContext:
     target_language: str
     formality: LocalizationFormality
     timezone: str | None = None
-    attributes: Mapping[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if not self.target_language:

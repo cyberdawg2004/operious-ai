@@ -27,7 +27,7 @@ dispatch precedes the recipient's execution.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.coordination.contracts.messages import CoordinationMessage
 from app.coordination.enums import CoordinationDirection
@@ -123,8 +123,8 @@ class CoordinationDispatchRequest:
     enforcement_stage: EnforcementStage = EnforcementStage.PRE_EXECUTION
     coordination_id_override: CoordinationId | None = None
     chain_depth: int = 0
-    governance_metadata: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    governance_metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         check_tenant_authority_coexistence(

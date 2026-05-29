@@ -19,13 +19,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.arbitration.identity import (
     ArbitrationCaseId,
     ArbitrationChainId,
     ArbitrationEvaluationId,
 )
+from app.arbitration.enums import ArbitrationOutcome
 from app.arbitration.models.conflict import ArbitrationConflict
 from app.arbitration.models.deadlock import DeadlockWitness
 from app.arbitration.models.decision import ArbitrationDecision
@@ -87,10 +88,10 @@ class ArbitrationResult:
     request_id: str | None = None
     tenant_id: str | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @property
-    def outcome(self):  # type: ignore[no-untyped-def]
+    def outcome(self) -> ArbitrationOutcome:
         return self.decision.outcome
 
     @property

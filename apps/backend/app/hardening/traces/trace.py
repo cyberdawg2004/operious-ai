@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from app.hardening.enums import HardeningTraceKind
 from app.hardening.identity import HardeningTraceId
@@ -38,7 +38,7 @@ class HardeningTrace:
     tenant_id: str | None = None
     audit_seed: str | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     tenant_authority_source: str | None = None
 
 

@@ -50,7 +50,7 @@ class InferenceRequest:
     model: str
     temperature: float | None = None
     max_output_tokens: int | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
     timeout_s: float | None = None
 
 

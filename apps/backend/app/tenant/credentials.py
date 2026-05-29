@@ -12,7 +12,7 @@ import base64
 import json
 import os
 from collections.abc import Mapping
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -85,7 +85,8 @@ class TenantCredentialEncryptor:
             raise TenantCredentialEncryptionError(
                 "credential payload must decode to a JSON object"
             )
-        return dict(decoded)
+        decoded_payload = cast(dict[object, object], decoded)
+        return {str(key): value for key, value in decoded_payload.items()}
 
     def _derive_key(self, tenant_id: str) -> bytes:
         return HKDF(
