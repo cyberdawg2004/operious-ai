@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Mapping
@@ -92,6 +93,7 @@ class GovernanceRuntime:
         self._handlers = handler_registry
         self._chains: dict[EnforcementStage, PolicyChain] = dict(chains)
         self._persistence = persistence
+        self._reload_lock = threading.RLock()
 
         # Fail-fast at composition: the registry MUST cover every
         # Decision value the substrate emits.
@@ -105,6 +107,21 @@ class GovernanceRuntime:
 
     def chain_for(self, stage: EnforcementStage) -> PolicyChain | None:
         return self._chains.get(stage)
+
+    def replace_chains(
+        self,
+        chains: Mapping[EnforcementStage, PolicyChain],
+    ) -> None:
+        """Replace active policy chains after an invalidation signal.
+
+        The runtime keeps chain lookup stateless at evaluation time:
+        every ``evaluate()`` call reads ``self._chains``. Swapping the
+        mapping updates future evaluations without restarting the
+        runtime instance; in-flight evaluations keep the chain object
+        they already resolved.
+        """
+        with self._reload_lock:
+            self._chains = dict(chains)
 
     async def get_persisted_decision(
         self,

@@ -8,9 +8,11 @@ intentionally boring.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Mapping, cast
 
 import sentry_sdk
@@ -18,6 +20,8 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -55,8 +59,10 @@ from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine, get_session_factory
 from app.governance.capability.runtime import (
+    build_capability_governance_chains,
     build_capability_governance_runtime,
 )
+from app.governance.enforcement.runtime import GovernanceRuntime
 from app.hardening.observability import (
     OperationalMetricsCollector,
     initialize_alert_evaluator,
@@ -95,6 +101,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://operious-ai-command-center.vercel.app",
 ]
+
+_POLICY_INVALIDATION_PATTERN = "governance:policy:invalidate:*"
 
 
 def _build_cors_origins(raw: str) -> list[str]:
@@ -172,6 +180,91 @@ def _init_sentry(settings: Settings) -> None:
     logger.info("sentry_init_complete")
 
 
+async def _governance_policy_invalidation_listener(app: FastAPI) -> None:
+    """Subscribe to governance policy invalidations for web singletons.
+
+    Coordination runtimes are request-scoped in the current web
+    composition, so there is no app-state coordination singleton to
+    reload here. Newly created dispatch services receive freshly
+    composed runtimes.
+    """
+    logger = get_logger(__name__)
+    redis_client = cast(
+        Redis, getattr(app.state, "redis_client", get_redis_client())
+    )
+    while True:
+        pubsub: PubSub = redis_client.pubsub()  # type: ignore[reportUnknownMemberType]
+        try:
+            await pubsub.psubscribe(_POLICY_INVALIDATION_PATTERN)
+            async for raw_message in _iter_pubsub_messages(pubsub):
+                message = cast(Mapping[str, object], raw_message)
+                if message.get("type") != "pmessage":
+                    continue
+                try:
+                    tenant_id = _tenant_id_from_invalidation_message(
+                        message.get("data")
+                    )
+                    _reload_governance_policy_singletons(app)
+                    logger.info(
+                        "governance_policies_reloaded",
+                        extra={"tenant_id": tenant_id},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "governance_invalidation_handler_error",
+                        extra={"error": str(exc)},
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "governance_invalidation_listener_failed",
+                extra={"error": str(exc)},
+            )
+            await asyncio.sleep(1.0)
+        finally:
+            await _close_pubsub(pubsub)
+
+
+def _tenant_id_from_invalidation_message(data: object) -> str:
+    if isinstance(data, bytes):
+        data = data.decode("utf-8")
+    if isinstance(data, str):
+        payload = json.loads(data)
+    elif isinstance(data, Mapping):
+        payload = cast(Mapping[str, object], data)
+    else:
+        raise ValueError("governance invalidation message payload is invalid")
+    tenant_id = payload.get("tenant_id")
+    if not isinstance(tenant_id, str) or not tenant_id:
+        raise ValueError("governance invalidation message missing tenant_id")
+    return tenant_id
+
+
+async def _iter_pubsub_messages(pubsub: PubSub) -> AsyncIterator[object]:
+    async for message in pubsub.listen():  # type: ignore[reportUnknownMemberType]
+        yield message
+
+
+def _reload_governance_policy_singletons(app: FastAPI) -> None:
+    runtime = getattr(app.state, "capability_governance_runtime", None)
+    if isinstance(runtime, GovernanceRuntime):
+        runtime.replace_chains(build_capability_governance_chains())
+
+
+async def _close_pubsub(pubsub: Any) -> None:
+    close = getattr(pubsub, "aclose", None)
+    if close is not None:
+        await close()
+        return
+    close = getattr(pubsub, "close", None)
+    if close is None:
+        return
+    result = close()
+    if isinstance(result, Awaitable):
+        await result
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings: Settings = get_settings()
@@ -186,10 +279,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         },
     )
     init_shared_http_client()
+    redis_client = get_redis_client()
+    app.state.redis_client = redis_client
     await verify_redis_memory_policy(
-        redis_client=cast(RedisConfigClient, get_redis_client()),
+        redis_client=cast(RedisConfigClient, redis_client),
         expected_policy=settings.REDIS_REQUIRED_MAXMEMORY_POLICY,
         check_logger=logger,
+    )
+    invalidation_listener = asyncio.create_task(
+        _governance_policy_invalidation_listener(app),
+        name="governance-policy-invalidation-listener",
     )
     logger.info("lifespan_yield_begin")
     try:
@@ -206,6 +305,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         quota_runtime = getattr(app.state, "quota_runtime", None)
         if isinstance(quota_runtime, TenantQuotaRuntime):
             await quota_runtime.close()
+        invalidation_listener.cancel()
+        with suppress(asyncio.CancelledError):
+            await invalidation_listener
         await close_shared_http_client()
         await dispose_engine()
         await close_redis()
@@ -394,6 +496,8 @@ def create_app(
     logger.info("boundary_media_runtime_register_begin")
     capability_governance_runtime = build_capability_governance_runtime()
     app.state.capability_governance_runtime = capability_governance_runtime
+    redis_client = get_redis_client()
+    app.state.redis_client = redis_client
 
     voice_persistence = InMemoryVoicePersistence()
     app.state.voice_runtime = VoiceRuntime(
@@ -408,7 +512,7 @@ def create_app(
         ),
     )
     app.state.voice_capacity_counter = VoiceCapacityCounter(
-        redis_client=cast(VoiceCapacityRedisClient, get_redis_client()),
+        redis_client=cast(VoiceCapacityRedisClient, redis_client),
         limit=settings.VOICE_CAPACITY_LIMIT,
     )
 

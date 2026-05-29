@@ -22,6 +22,17 @@ from app.governance.policies.builtin import RBACPolicy
 from app.governance.policies.chain import PolicyChain
 
 
+def build_capability_governance_chains() -> dict[EnforcementStage, PolicyChain]:
+    """Build the current capability-governance policy chains."""
+    return {
+        EnforcementStage.PRE_REQUEST: PolicyChain(
+            chain_id="capability-legality",
+            stage=EnforcementStage.PRE_REQUEST,
+            policies=(RBACPolicy(),),
+        )
+    }
+
+
 def build_capability_governance_runtime(
     *,
     persistence: BaseGovernanceRepository | None = None,
@@ -39,15 +50,12 @@ def build_capability_governance_runtime(
     return GovernanceRuntime(
         engine=PolicyEvaluationEngine(),
         handler_registry=registry,
-        chains={
-            EnforcementStage.PRE_REQUEST: PolicyChain(
-                chain_id="capability-legality",
-                stage=EnforcementStage.PRE_REQUEST,
-                policies=(RBACPolicy(),),
-            )
-        },
+        chains=build_capability_governance_chains(),
         persistence=persistence or InMemoryGovernanceRepository(),
     )
 
 
-__all__ = ["build_capability_governance_runtime"]
+__all__ = [
+    "build_capability_governance_chains",
+    "build_capability_governance_runtime",
+]

@@ -373,6 +373,9 @@ async def get_conversation_service(
     )
     service = build_conversation_service(
         session_repository=PostgresSessionPersistence(session),
+        # CoordinationRuntime is composed per request. There is no
+        # app-state CoordinationPolicyRuntime singleton to invalidate;
+        # each newly created service receives the current composition.
         coordination_runtime=CoordinationRuntime(
             governance_runtime=_dispatch_governance_runtime(
                 PostgresGovernanceRepository(session)
@@ -435,6 +438,8 @@ async def get_dispatch_service(
     )
     session_repository = PostgresSessionPersistence(session)
     service = DispatchService(
+        # Request-scoped coordination runtime: no cross-request policy
+        # registry cache exists in the web process.
         coordination_runtime=CoordinationRuntime(
             governance_runtime=_dispatch_governance_runtime(
                 PostgresGovernanceRepository(session)
@@ -532,6 +537,7 @@ def get_escalation_service(
 
 
 def get_tenant_configuration_service(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> TenantConfigurationService:
     """Return the tenant-owned configuration service for this request."""
@@ -542,7 +548,11 @@ def get_tenant_configuration_service(
             platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
         ),
     )
-    return TenantConfigurationService(runtime=runtime, session=session)
+    return TenantConfigurationService(
+        runtime=runtime,
+        session=session,
+        redis_client=getattr(request.app.state, "redis_client", get_redis_client()),
+    )
 
 
 def get_cognition_service(

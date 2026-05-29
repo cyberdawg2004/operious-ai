@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.sop_intelligence import ApprovalRecord, ApprovalStatus
 from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
@@ -48,6 +50,8 @@ from app.tenant.persistence import (
 from app.tenant.runtime import TenantConfigurationRuntime
 
 _SERVICE_APPROVAL_NAMESPACE = uuid.UUID("f4ff1200-0940-5537-9752-c7693db8b5f6")
+_POLICY_INVALIDATION_CHANNEL_PREFIX = "governance:policy:invalidate"
+_logger = get_logger(__name__)
 
 
 class TenantConfigurationService:
@@ -58,9 +62,11 @@ class TenantConfigurationService:
         *,
         runtime: TenantConfigurationRuntime,
         session: AsyncSession,
+        redis_client: Any,
     ) -> None:
         self._runtime = runtime
         self._session = session
+        self._redis_client = redis_client
 
     async def configure_channel(
         self,
@@ -103,6 +109,27 @@ class TenantConfigurationService:
         )
         await self._session.commit()
         return record
+
+    async def _publish_governance_policy_invalidation(
+        self,
+        *,
+        tenant_id: str,
+    ) -> None:
+        try:
+            await self._redis_client.publish(
+                f"{_POLICY_INVALIDATION_CHANNEL_PREFIX}:{tenant_id}",
+                json.dumps(
+                    {
+                        "tenant_id": tenant_id,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning(
+                "governance_policy_invalidation_publish_failed",
+                extra={"tenant_id": tenant_id, "error": str(exc)},
+            )
 
     async def verify_channel(
         self,
@@ -252,6 +279,7 @@ class TenantConfigurationService:
             approval=approval,
         )
         await self._session.commit()
+        await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
         return record
 
     async def update_governance_policy(
@@ -288,6 +316,7 @@ class TenantConfigurationService:
             approval=approval,
         )
         await self._session.commit()
+        await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
         return record
 
     async def configure_execution_governance(

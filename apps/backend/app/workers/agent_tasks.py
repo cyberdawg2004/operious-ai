@@ -787,6 +787,14 @@ async def _persist_diagnostic_success(
                         "tenant_id": work_item.tenant_id,
                     }
 
+                # GovernanceRuntime is constructed fresh per task invocation.
+                # Policies are current as of this task's start time. The
+                # staleness window within a running diagnostic task is the
+                # task duration, typically < 90s. Crisis policies and new
+                # governance rules take effect on the next task that starts
+                # after deployment; in-flight tasks at deployment time see
+                # the prior policy. This is acceptable for the pilot; see
+                # docs/slo.md.
                 cognition_result = await _diagnostic_cognition_runtime(
                     session
                 ).persist_reasoning_result(
@@ -1128,6 +1136,8 @@ async def _append_resolution_proposal_after_diagnostic(
             proposal = await ResolutionRuntime(
                 persistence=resolution_persistence,
                 governance_gate=ResolutionGovernanceGate(
+                    # Per-task runtime construction bounds policy staleness
+                    # to the current task; new tasks pick up new composition.
                     governance_runtime=build_resolution_governance_runtime(
                         persistence=PostgresGovernanceRepository(session)
                     )
@@ -1216,6 +1226,8 @@ def _action_orchestration_runtime(
     return ActionOrchestrationRuntime(
         tool_invoker=ToolInvoker(
             tool_registry=build_action_tool_registry(),
+            # Per-task runtime construction bounds policy staleness to the
+            # current task; new tasks pick up new composition.
             governance_runtime=build_action_tool_governance_runtime(
                 persistence=PostgresGovernanceRepository(session)
             ),
@@ -1228,6 +1240,8 @@ def _action_orchestration_runtime(
 def _translation_runtime(session: AsyncSession) -> TranslationRuntime:
     persistence = InMemoryTranslationPersistence()
     provider = IdentityTranslationProvider()
+    # Per-task runtime construction bounds policy staleness to the current
+    # task; new tasks pick up new composition.
     governance = build_capability_governance_runtime(
         persistence=PostgresGovernanceRepository(session)
     )
