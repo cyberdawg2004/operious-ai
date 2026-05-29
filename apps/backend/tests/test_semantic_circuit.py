@@ -300,6 +300,7 @@ async def test_ingress_continues_after_trip() -> None:
         raw_content="the charger stopped working after one week of use",
         language_code="en",
         expected_tenant_id="tenant-a",
+        semantic_quarantine_enabled=False,
     )
 
     assert result.ingress_id

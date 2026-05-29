@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.v1.schemas.ingress import (
@@ -28,7 +28,11 @@ from app.services.ticket_ingress_service import (
 router = APIRouter(tags=["ingress"])
 
 
-@router.post("/ingress", response_model=TicketIngressResponse)
+@router.post(
+    "/ingress",
+    response_model=TicketIngressResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def create_ticket_ingress(
     request: TicketIngressRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
@@ -49,6 +53,8 @@ async def create_ticket_ingress(
     return TicketIngressResponse(
         ingress_id=result.ingress_id,
         canonical_envelope_id=result.canonical_envelope_id,
+        quarantine_id=result.quarantine_id,
+        status=result.status,
     )
 
 

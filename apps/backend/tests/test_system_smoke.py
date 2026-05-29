@@ -139,7 +139,7 @@ async def test_ticket_ingress_chain():
             },
             headers=SMOKE_HEADERS
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = response.json()
         assert "ingress_id" in data
         assert "canonical_envelope_id" in data
@@ -169,7 +169,7 @@ async def test_dispatch_governance_chain():
             },
             headers=SMOKE_HEADERS
         )
-        assert ingress.status_code == 200
+        assert ingress.status_code == 202
         ingress_id = ingress.json()["ingress_id"]
 
         response = await client.post(
@@ -211,7 +211,7 @@ async def test_full_ticket_to_timeline_chain():
             },
             headers=SMOKE_HEADERS
         )
-        assert ingress.status_code == 200
+        assert ingress.status_code == 202
         ingress_id = ingress.json()["ingress_id"]
 
         # Step 2 — dispatch through governance

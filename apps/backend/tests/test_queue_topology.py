@@ -24,6 +24,7 @@ from app.queues import (
     QUEUE_DIAGNOSTIC_HIGH,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_DIAGNOSTIC_RETRY,
+    QUEUE_SEMANTIC_QUARANTINE,
     QUEUE_WEBHOOK_MAINTENANCE,
 )
 
@@ -42,6 +43,7 @@ EXPECTED_QUEUES = {
     "knowledge_indexing",
     "webhook_maintenance",
     "dead_letter",
+    "semantic_quarantine",
 }
 
 BACKEND_ROOT = Path(__file__).parent.parent
@@ -151,6 +153,10 @@ def test_execution_publishers_reference_queue_constants() -> None:
 
 def test_dead_letter_queue_constant_is_declared() -> None:
     assert QUEUE_DEAD_LETTER == "dead_letter"
+
+
+def test_semantic_quarantine_queue_constant_is_declared() -> None:
+    assert QUEUE_SEMANTIC_QUARANTINE == "semantic_quarantine"
 
 
 def _bare_queue_string_violations(

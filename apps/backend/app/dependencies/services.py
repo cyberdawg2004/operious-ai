@@ -135,6 +135,7 @@ from app.semantic import (
     SemanticCircuitEventRepository,
     TextFingerprinter,
 )
+from app.semantic.quarantine_publisher import CelerySemanticQuarantinePublisher
 from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
@@ -168,10 +169,11 @@ from app.services.operational_observability_service import (
     OperationalObservabilityService,
 )
 from app.services.quota_operations_service import QuotaOperationsService
+from app.services.quarantine_service import QuarantineService
 from app.services.queue_operations_service import QueueOperationsService
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.supervisor_inbox_service import SupervisorInboxService
-from app.services.ticket_ingress_service import TicketIngressService
+from app.services.ticket_ingress_service import TicketChannel, TicketIngressService
 from app.services.trainer_service import TrainerRecommendationService
 from app.qa.persistence import PostgresQAPersistence
 from app.queues import DIAGNOSTIC_QUEUE_PRIORITY
@@ -300,12 +302,50 @@ def get_ticket_ingress_service(
             request.app.state.semantic_circuit_breaker,
         ),
         circuit_event_repo=SemanticCircuitEventRepository(session),
+        quarantine_service=QuarantineService(
+            session,
+            governance_repository=PostgresGovernanceRepository(session),
+            publisher=CelerySemanticQuarantinePublisher(),
+        ),
         webhook_queue_by_channel={
             TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.LARK: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.SHULEX: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.WHATSAPP: DIAGNOSTIC_QUEUE_PRIORITY,
         },
+    )
+
+
+def get_quarantine_service(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> QuarantineService:
+    """Return the semantic quarantine service for this request."""
+
+    async def _ticket_reingest(
+        *,
+        external_id: str,
+        channel: str,
+        raw_content: str,
+        language_code: str,
+        expected_tenant_id: str,
+        semantic_quarantine_enabled: bool,
+    ) -> object:
+        service = get_ticket_ingress_service(request=request, session=session)
+        return await service.process(
+            external_id=external_id,
+            channel=cast(TicketChannel, channel),
+            raw_content=raw_content,
+            language_code=language_code,
+            expected_tenant_id=expected_tenant_id,
+            semantic_quarantine_enabled=semantic_quarantine_enabled,
+        )
+
+    return QuarantineService(
+        session,
+        governance_repository=PostgresGovernanceRepository(session),
+        publisher=CelerySemanticQuarantinePublisher(),
+        ticket_reingest=_ticket_reingest,
     )
 
 
@@ -1036,6 +1076,7 @@ __all__ = [
     "get_operational_event_service",
     "get_operational_observability_service",
     "get_queue_operations_service",
+    "get_quarantine_service",
     "get_quota_operations_service",
     "get_quota_runtime",
     "get_session_repository",

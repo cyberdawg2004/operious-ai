@@ -37,6 +37,7 @@ from app.api.v1.routers.quota_operations import (
 from app.api.v1.routers.queue_operations import (
     router as queue_operations_router,
 )
+from app.api.v1.routers.semantic import router as semantic_router
 from app.api.v1.routers.session import router as session_router
 from app.api.v1.routers.sop_intelligence import (
     router as sop_intelligence_router,
@@ -80,6 +81,7 @@ api_router_v1.include_router(
 api_router_v1.include_router(trainer_router, prefix="/trainer")
 api_router_v1.include_router(quota_operations_router, prefix="/quota")
 api_router_v1.include_router(queue_operations_router)
+api_router_v1.include_router(semantic_router, prefix="/semantic")
 api_router_v1.include_router(voice_router, prefix="/voice")
 
 __all__ = ["api_router_v1"]

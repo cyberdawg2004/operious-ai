@@ -11,8 +11,9 @@ class TicketIngressRequest(BaseModel):
 
 
 class TicketIngressResponse(BaseModel):
-    ingress_id: str
-    canonical_envelope_id: str
+    ingress_id: str | None = None
+    canonical_envelope_id: str | None = None
+    quarantine_id: str | None = None
     status: str = "received"
 
 

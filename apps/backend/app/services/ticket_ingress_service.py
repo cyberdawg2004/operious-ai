@@ -66,6 +66,7 @@ from app.semantic import (
     TextFingerprinter,
 )
 from app.services.admission_service import AdmissionService
+from app.services.quarantine_service import QuarantineService
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
 from app.tenant.runtime import TenantConfigurationRuntime
@@ -79,8 +80,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class TicketIngressServiceResult:
-    ingress_id: str
-    canonical_envelope_id: str
+    ingress_id: str | None
+    canonical_envelope_id: str | None
+    quarantine_id: str | None = None
+    status: str = "received"
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +108,7 @@ class TicketIngressService:
         fingerprinter: TextFingerprinter | None = None,
         circuit_breaker: SemanticCircuitBreaker | None = None,
         circuit_event_repo: SemanticCircuitEventRepository | None = None,
+        quarantine_service: QuarantineService | None = None,
         webhook_queue_by_channel: (
             Mapping[TenantChannelType, Sequence[str]] | None
         ) = None,
@@ -118,6 +122,7 @@ class TicketIngressService:
         self._fingerprinter = fingerprinter or TextFingerprinter()
         self._circuit_breaker = circuit_breaker
         self._circuit_event_repo = circuit_event_repo
+        self._quarantine_service = quarantine_service
         self._webhook_queue_by_channel = {
             channel_type: tuple(queue_names)
             for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
@@ -131,6 +136,7 @@ class TicketIngressService:
         raw_content: str,
         language_code: str,
         expected_tenant_id: str,
+        semantic_quarantine_enabled: bool = True,
     ) -> TicketIngressServiceResult:
         canonical_content, source_language = await self._canonicalize_ticket_text(
             raw_text=raw_content,
@@ -139,12 +145,41 @@ class TicketIngressService:
             request_id=external_id,
         )
         fingerprint_metadata = self._fingerprint_metadata(canonical_content)
+        fingerprint = _fingerprint_from_metadata(fingerprint_metadata)
         circuit_state, cluster_size = await self._evaluate_semantic_circuit(
             tenant_id=expected_tenant_id,
             channel=channel,
             ticket_id=external_id,
-            fingerprint_metadata=fingerprint_metadata,
+            fingerprint=fingerprint,
         )
+        if (
+            semantic_quarantine_enabled
+            and circuit_state is SemanticCircuitState.TRIPPED
+            and self._quarantine_service is not None
+        ):
+            await self._record_semantic_circuit_trip(
+                tenant_id=expected_tenant_id,
+                channel=channel,
+                trigger_ticket_id=None,
+                cluster_size=cluster_size,
+            )
+            quarantine_id = await self._quarantine_ticket(
+                tenant_id=expected_tenant_id,
+                channel=channel,
+                external_id=external_id,
+                raw_content=raw_content,
+                language_code=language_code,
+                source_language=source_language,
+                fingerprint=fingerprint,
+                cluster_size=cluster_size,
+            )
+            await self._session.commit()
+            return TicketIngressServiceResult(
+                ingress_id=None,
+                canonical_envelope_id=None,
+                quarantine_id=quarantine_id,
+                status="quarantined",
+            )
         runtime = BoundaryIngressRuntime(
             adapters=_adapter_registry(),
             persistence=self._persistence,
@@ -257,11 +292,10 @@ class TicketIngressService:
         tenant_id: str,
         channel: str,
         ticket_id: str,
-        fingerprint_metadata: Mapping[str, object],
+        fingerprint: tuple[int, ...] | None,
     ) -> tuple[SemanticCircuitState, int]:
         if self._circuit_breaker is None:
             return SemanticCircuitState.CLOSED, 0
-        fingerprint = _fingerprint_from_metadata(fingerprint_metadata)
         if fingerprint is None:
             return SemanticCircuitState.CLOSED, 0
         try:
@@ -283,7 +317,7 @@ class TicketIngressService:
         *,
         tenant_id: str,
         channel: str,
-        trigger_ticket_id: str,
+        trigger_ticket_id: str | None,
         cluster_size: int,
     ) -> None:
         if self._circuit_event_repo is None or self._circuit_breaker is None:
@@ -316,6 +350,44 @@ class TicketIngressService:
                 "semantic_circuit_event_write_failed",
                 extra={"tenant_id": tenant_id, "channel": channel, "error": str(exc)},
             )
+
+    async def _quarantine_ticket(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        external_id: str,
+        raw_content: str,
+        language_code: str,
+        source_language: str,
+        fingerprint: tuple[int, ...] | None,
+        cluster_size: int,
+    ) -> str:
+        if self._quarantine_service is None:
+            raise TicketIngressServiceError(
+                "semantic quarantine service is not configured"
+            )
+        if self._circuit_breaker is None:
+            raise TicketIngressServiceError(
+                "semantic circuit breaker is not configured"
+            )
+        return await self._quarantine_service.quarantine_ticket(
+            tenant_id=tenant_id,
+            channel=channel,
+            external_id=external_id,
+            ticket_payload=_extract_quarantine_payload(
+                tenant_id=tenant_id,
+                channel=channel,
+                external_id=external_id,
+                raw_content=raw_content,
+                language_code=language_code,
+                source_language=source_language,
+            ),
+            fingerprint=list(fingerprint or ()),
+            cluster_size=cluster_size,
+            similarity_threshold=self._circuit_breaker.similarity_threshold,
+            expected_tenant_id=tenant_id,
+        )
 
     async def process_channel_webhook(
         self,
@@ -771,6 +843,28 @@ def _fingerprint_from_metadata(
             return None
         fingerprint.append(value)
     return tuple(fingerprint)
+
+
+def _extract_quarantine_payload(
+    *,
+    tenant_id: str,
+    channel: str,
+    external_id: str,
+    raw_content: str,
+    language_code: str,
+    source_language: str,
+) -> dict[str, Any]:
+    return {
+        "content": raw_content,
+        "channel": channel,
+        "tenant_id": tenant_id,
+        "external_id": external_id,
+        "language_code": language_code,
+        "metadata": {
+            "source_language": source_language,
+            "fingerprint_version": FINGERPRINT_VERSION,
+        },
+    }
 
 
 def _source_type_for_channel(channel: TicketChannel) -> BoundarySourceType:

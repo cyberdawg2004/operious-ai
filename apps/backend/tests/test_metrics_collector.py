@@ -155,11 +155,11 @@ def test_collector_returns_instance_after_initialization(
 
 
 @pytest.mark.asyncio
-async def test_health_returns_all_14_queues() -> None:
+async def test_health_returns_all_15_queues() -> None:
     response = await _health_response(_MetricsRedis())
 
     assert set(ALL_QUEUES).issubset(response.queues)
-    assert len(ALL_QUEUES) == 14
+    assert len(ALL_QUEUES) == 15
     assert response.queues[QUEUE_DIAGNOSTIC_NORMAL].status == "ok"
 
 

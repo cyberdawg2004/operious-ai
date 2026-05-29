@@ -74,7 +74,7 @@ async def queue_client(
 
 
 @pytest.mark.asyncio
-async def test_queue_status_returns_all_14_queues(
+async def test_queue_status_returns_all_15_queues(
     queue_client: tuple[httpx.AsyncClient, Any],
     pg_session: AsyncSession,
 ) -> None:
@@ -95,7 +95,7 @@ async def test_queue_status_returns_all_14_queues(
     assert response.status_code == 200
     body = response.json()
     assert set(body["queues"]) == set(ALL_QUEUES)
-    assert len(body["queues"]) == 14
+    assert len(body["queues"]) == 15
     assert body["queues"][QUEUE_DIAGNOSTIC_NORMAL]["depth"] == 7
     assert body["queues"][QUEUE_DIAGNOSTIC_NORMAL]["status"] == "ok"
 

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, Index, Integer, String, func, text
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,4 +63,72 @@ class SemanticCircuitEventRow(Base):
     )
 
 
-__all__ = ["SemanticCircuitEventRow"]
+class SemanticQuarantineRecordRow(Base):
+    """Mutable operator-review record for semantically clustered tickets."""
+
+    __tablename__ = "semantic_quarantine_records"
+
+    quarantine_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    channel: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_queue: Mapped[str] = mapped_column(String(255), nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ticket_payload_json: Mapped[dict[str, Any]] = mapped_column(
+        "ticket_payload_json",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    fingerprint_json: Mapped[list[int]] = mapped_column(
+        "fingerprint_json",
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    cluster_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    similarity_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_semantic_quarantine_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+
+__all__ = ["SemanticCircuitEventRow", "SemanticQuarantineRecordRow"]

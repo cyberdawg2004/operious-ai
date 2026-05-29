@@ -27,6 +27,8 @@ QUEUE_KNOWLEDGE_INDEXING = "knowledge_indexing"
 # Maintenance queues
 QUEUE_WEBHOOK_MAINTENANCE = "webhook_maintenance"
 QUEUE_DEAD_LETTER = "dead_letter"
+# Frozen queue -- no auto-retry, operator release only.
+QUEUE_SEMANTIC_QUARANTINE = "semantic_quarantine"
 
 # Ordered tuple for priority consumption -- diagnostic workers consume in this order
 DIAGNOSTIC_QUEUE_PRIORITY: tuple[str, ...] = (
@@ -51,4 +53,5 @@ ALL_QUEUES: tuple[str, ...] = (
     QUEUE_KNOWLEDGE_INDEXING,
     QUEUE_WEBHOOK_MAINTENANCE,
     QUEUE_DEAD_LETTER,
+    QUEUE_SEMANTIC_QUARANTINE,
 )
