@@ -36,6 +36,10 @@ from app.observability.persistence import (
     OperationalMetricsQuery,
     OperationalTraceSpanQuery,
 )
+from app.observability.persistence.calculations import (
+    ExecutionLatencySample,
+    build_metrics_snapshot,
+)
 from app.observability.runtime import OperationalObservabilityRuntime
 from app.qa.persistence.records import QAScoreRecord
 
@@ -74,6 +78,7 @@ async def test_metrics_are_tenant_scoped_and_deterministic() -> None:
     assert first.execution_latency_ms_avg == 750.0
     assert first.execution_latency_ms_p50 == 500.0
     assert first.execution_latency_ms_p95 == 1000.0
+    assert first.execution_latency_ms_p99 is None
     assert first.qa_score_count == 2
     assert first.qa_score_average == 0.65
     assert [bucket.count for bucket in first.qa_score_distribution] == [
@@ -114,6 +119,51 @@ async def test_dead_letter_read_surface_is_tenant_scoped() -> None:
     assert own.items[0].tenant_id == "tenant-acme"
     assert other.total == 0
     assert cross.total == 0
+
+
+def test_execution_latency_p99_requires_100_samples() -> None:
+    small = build_metrics_snapshot(
+        tenant_id="tenant-acme",
+        window_start=_dt(0),
+        window_end=_dt(60),
+        ticket_throughput=0,
+        governance_decisions=(),
+        executions=(
+            ExecutionLatencySample(
+                requested_at=_dt(0),
+                completed_at=_dt(0) + timedelta(milliseconds=10),
+                failed_at=None,
+                state="completed",
+            ),
+        ),
+        qa_scores=(),
+        escalation_count=0,
+        dlq_count=0,
+    )
+    assert small.execution_latency_ms_p99 is None
+
+    samples = tuple(
+        ExecutionLatencySample(
+            requested_at=_dt(0),
+            completed_at=_dt(0) + timedelta(milliseconds=index),
+            failed_at=None,
+            state="completed",
+        )
+        for index in range(1, 101)
+    )
+    full = build_metrics_snapshot(
+        tenant_id="tenant-acme",
+        window_start=_dt(0),
+        window_end=_dt(60),
+        ticket_throughput=0,
+        governance_decisions=(),
+        executions=samples,
+        qa_scores=(),
+        escalation_count=0,
+        dlq_count=0,
+    )
+
+    assert full.execution_latency_ms_p99 == 99.0
 
 
 @pytest.mark.asyncio

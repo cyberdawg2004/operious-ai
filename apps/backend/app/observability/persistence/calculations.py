@@ -57,6 +57,11 @@ def build_metrics_snapshot(
         execution_latency_ms_avg=_average(latencies),
         execution_latency_ms_p50=_percentile(latencies, 0.50),
         execution_latency_ms_p95=_percentile(latencies, 0.95),
+        execution_latency_ms_p99=_percentile(
+            latencies,
+            0.99,
+            minimum_count=100,
+        ),
         qa_score_count=len(qa_scores),
         qa_score_average=qa_average,
         qa_score_distribution=_qa_distribution(qa_scores),
@@ -80,6 +85,8 @@ def metric_value(
         return float(snapshot.execution_latency_ms_p50 or 0.0)
     if metric_name == "execution_latency_ms_p95":
         return float(snapshot.execution_latency_ms_p95 or 0.0)
+    if metric_name == "execution_latency_ms_p99":
+        return float(snapshot.execution_latency_ms_p99 or 0.0)
     if metric_name == "qa_score_average":
         return float(snapshot.qa_score_average or 0.0)
     if metric_name == "escalation_rate":
@@ -102,8 +109,13 @@ def _average(values: tuple[float, ...]) -> float | None:
     return round(sum(values) / len(values), 6)
 
 
-def _percentile(values: tuple[float, ...], percentile: float) -> float | None:
-    if not values:
+def _percentile(
+    values: tuple[float, ...],
+    percentile: float,
+    *,
+    minimum_count: int = 1,
+) -> float | None:
+    if not values or len(values) < minimum_count:
         return None
     ordered = sorted(values)
     index = max(0, min(len(ordered) - 1, int(len(ordered) * percentile + 0.999999) - 1))

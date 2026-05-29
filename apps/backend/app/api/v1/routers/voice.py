@@ -97,10 +97,18 @@ async def _handle_voice_call(
                     session_id=session_id,
                     tenant_id=tenant_id,
                 )
-                await runtime.handle_audio_chunk(
+                context = await runtime.handle_audio_chunk(
                     call_id=call_id,
                     audio_handle=audio,
                     expected_tenant_id=tenant_id,
+                )
+                await websocket.send_json(
+                    {
+                        "event": "phase_a_ack",
+                        "call_id": call_id,
+                        "state": context.state.value,
+                        "turn_count": context.turn_count,
+                    }
                 )
                 continue
             if event.event == "stop":

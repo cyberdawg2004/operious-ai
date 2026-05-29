@@ -57,6 +57,7 @@ async def test_metrics_endpoint_uses_request_tenant_scope(
     body = response.json()
     assert body["tenant_id"] == "tenant-acme"
     assert body["ticket_throughput"] == 7
+    assert body["execution_latency_ms_p99"] is None
     assert service.metric_calls == [("tenant-acme", _START, _END)]
 
 
@@ -110,6 +111,7 @@ class _FakeService:
             execution_latency_ms_avg=None,
             execution_latency_ms_p50=None,
             execution_latency_ms_p95=None,
+            execution_latency_ms_p99=None,
             qa_score_count=0,
             qa_score_average=None,
             qa_score_distribution=(),

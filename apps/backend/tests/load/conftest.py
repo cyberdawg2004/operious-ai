@@ -61,6 +61,13 @@ class TimingCollector:
         idx = int(len(sorted_d) * 0.95)
         return sorted_d[min(idx, len(sorted_d) - 1)]
 
+    def p50(self) -> float:
+        if not self._durations:
+            return 0.0
+        sorted_d = sorted(self._durations)
+        idx = int(len(sorted_d) * 0.50)
+        return sorted_d[min(idx, len(sorted_d) - 1)]
+
     def p99(self) -> float:
         if not self._durations:
             return 0.0

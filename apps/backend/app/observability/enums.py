@@ -13,6 +13,7 @@ class OperationalMetricName(StrEnum):
     EXECUTION_LATENCY_MS_AVG = "execution_latency_ms_avg"
     EXECUTION_LATENCY_MS_P50 = "execution_latency_ms_p50"
     EXECUTION_LATENCY_MS_P95 = "execution_latency_ms_p95"
+    EXECUTION_LATENCY_MS_P99 = "execution_latency_ms_p99"
     QA_SCORE_AVERAGE = "qa_score_average"
     ESCALATION_RATE = "escalation_rate"
     DLQ_COUNT = "dlq_count"

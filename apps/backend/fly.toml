@@ -4,6 +4,10 @@ primary_region = "sin"
 
 [build]
 
+# Pilot scaling: manually invoke `fly scale count N --process-group <name>
+# --app operious-ai-imad` to scale within the bounds below.
+# See docs/runbooks/autoscaling.md for thresholds.
+
 [processes]
   web = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
   worker_diagnostic = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=4"
@@ -56,36 +60,47 @@ primary_region = "sin"
   cpu_kind = "shared"
   cpus = 1
   min_machines_running = 1
+  max_machines_running = 2
 
 [[vm]]
   processes = ["worker_diagnostic"]
   memory = "1024mb"
   cpu_kind = "shared"
   cpus = 2
+  min_machines_running = 1
+  max_machines_running = 3
 
 [[vm]]
   processes = ["worker_escalation"]
   memory = "256mb"
   cpu_kind = "shared"
   cpus = 1
+  min_machines_running = 1
+  max_machines_running = 2
 
 [[vm]]
   processes = ["worker_supervisor"]
   memory = "256mb"
   cpu_kind = "shared"
   cpus = 1
+  min_machines_running = 1
+  max_machines_running = 2
 
 [[vm]]
   processes = ["worker_sop"]
   memory = "256mb"
   cpu_kind = "shared"
   cpus = 1
+  min_machines_running = 1
+  max_machines_running = 2
 
 [[vm]]
   processes = ["worker_maintenance"]
   memory = "256mb"
   cpu_kind = "shared"
   cpus = 1
+  min_machines_running = 1
+  max_machines_running = 1
 
 [[vm]]
   processes = ["worker_voice_realtime"]
@@ -93,3 +108,4 @@ primary_region = "sin"
   cpu_kind = "shared"
   cpus = 2
   min_machines_running = 1
+  max_machines_running = 2

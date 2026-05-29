@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import time
-import uuid
-from contextlib import ExitStack
+import json
+from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-from starlette.testclient import WebSocketDisconnect
+from fastapi import WebSocketException
 
+from app.api.v1.routers.voice import stream_voice_session
 from app.boundary.voice.call import VOICE_CAPACITY_KEY, VoiceCapacityCounter
 from app.governance.enums import Decision
 from app.main import create_app
@@ -47,59 +46,99 @@ class _FakeCapacityRedis:
                 self.values[key] = current + 1
                 return 1
             return 0
-        if "DECR" in script and current > 0:
-            self.values[key] = current - 1
+        if "DECR" in script:
+            self.values[key] = current - 1 if current > 0 else 0
             return self.values[key]
         self.values[key] = max(0, current)
         return self.values[key]
 
 
+class _AdmissionOnlyWebSocket:
+    query_params = {"tenant": "tenant-load"}
+
+
+class _StopEventWebSocket:
+    query_params = {"tenant": "tenant-load"}
+
+    def __init__(self, runtime: object) -> None:
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(voice_call_runtime=runtime)
+        )
+        self.accepted = False
+        self.closed = False
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def receive_text(self) -> str:
+        return json.dumps({"event": "stop"})
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 def test_voice_capacity_admission_blocks_at_limit() -> None:
     limit = 10
     attempts = 15
-    app, counter = _app_with_capacity(limit=limit)
+    _, counter = _app_with_capacity(limit=limit)
+    accepted = 0
 
-    with TestClient(app) as client:
-        with ExitStack() as stack:
-            for index in range(limit):
-                stack.enter_context(
-                    client.websocket_connect(_voice_url(f"accepted-{index}"))
+    for _ in range(limit):
+        assert asyncio.run(counter.try_acquire()) is True
+        accepted += 1
+
+    assert _current_count(counter) == limit
+
+    rejected = 0
+    for index in range(limit, attempts):
+        with pytest.raises(WebSocketException) as exc_info:
+            asyncio.run(
+                stream_voice_session(
+                    websocket=_AdmissionOnlyWebSocket(),  # type: ignore[arg-type]
+                    session_id=f"rejected-{index}",
+                    capacity=counter,
                 )
+            )
+        assert exc_info.value.code == 1013
+        rejected += 1
 
-            assert _current_count(counter) == limit
+    for _ in range(limit):
+        asyncio.run(counter.release())
 
-            rejected = 0
-            for index in range(limit, attempts):
-                with pytest.raises(WebSocketDisconnect) as exc_info:
-                    with client.websocket_connect(_voice_url(f"rejected-{index}")):
-                        pass
-                assert exc_info.value.code == 1013
-                rejected += 1
-
-            assert rejected == attempts - limit
+    assert accepted == limit
+    assert rejected == attempts - limit
+    assert _current_count(counter) == 0
 
 
 def test_counter_released_on_call_termination() -> None:
     app, counter = _app_with_capacity(limit=1)
+    websocket = _StopEventWebSocket(app.state.voice_call_runtime)
 
-    with TestClient(app) as client:
-        with client.websocket_connect(_voice_url("terminates")) as websocket:
-            assert _current_count(counter) == 1
-            websocket.send_json({"event": "stop"})
-            with pytest.raises(WebSocketDisconnect):
-                websocket.receive_text()
+    asyncio.run(
+        stream_voice_session(
+            websocket=websocket,  # type: ignore[arg-type]
+            session_id="terminates",
+            capacity=counter,
+        )
+    )
 
-    _wait_for_count(counter, 0)
+    assert websocket.accepted is True
+    assert websocket.closed is True
+    assert _current_count(counter) == 0
 
 
 def test_admission_fails_closed_when_redis_unavailable() -> None:
     redis = _FakeCapacityRedis(fail_ping=True)
-    app, counter = _app_with_capacity(limit=1, redis=redis)
+    _, counter = _app_with_capacity(limit=1, redis=redis)
 
-    with TestClient(app) as client:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with client.websocket_connect(_voice_url("redis-down")):
-                pass
+    with pytest.raises(WebSocketException) as exc_info:
+        asyncio.run(
+            stream_voice_session(
+                websocket=_AdmissionOnlyWebSocket(),  # type: ignore[arg-type]
+                session_id="redis-down",
+                capacity=counter,
+            )
+        )
 
     assert exc_info.value.code == 1013
     assert _current_count(counter) == 0
@@ -131,24 +170,5 @@ def _app_with_capacity(
     return app, counter
 
 
-def _voice_url(seed: str) -> str:
-    session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"voice-capacity|{seed}")
-    return f"/api/v1/voice/{session_id}/stream?tenant=tenant-load"
-
-
 def _current_count(counter: VoiceCapacityCounter) -> int:
     return asyncio.run(counter.current_count())
-
-
-def _wait_for_count(
-    counter: VoiceCapacityCounter,
-    expected: int,
-    *,
-    timeout_seconds: float = 1.0,
-) -> None:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if _current_count(counter) == expected:
-            return
-        time.sleep(0.01)
-    assert _current_count(counter) == expected

@@ -133,12 +133,19 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             "epoch",
             ended_at - ExecutionRow.requested_at,
         ) * 1000.0
-        latency_avg, latency_p50, latency_p95 = (
+        latency_avg, latency_p50, latency_p95, latency_p99 = (
             await self.session.execute(
                 select(
                     func.avg(latency_ms),
                     func.percentile_disc(0.50).within_group(latency_ms),
                     func.percentile_disc(0.95).within_group(latency_ms),
+                    case(
+                        (
+                            func.count(latency_ms) >= 100,
+                            func.percentile_disc(0.99).within_group(latency_ms),
+                        ),
+                        else_=None,
+                    ),
                 ).where(
                     ExecutionRow.tenant_id == expected_tenant_id,
                     ExecutionRow.requested_at >= query.window_start,
@@ -231,6 +238,7 @@ class PostgresOperationalObservabilityPersistence(BaseRepository):
             execution_latency_ms_avg=_optional_float(latency_avg),
             execution_latency_ms_p50=_optional_float(latency_p50),
             execution_latency_ms_p95=_optional_float(latency_p95),
+            execution_latency_ms_p99=_optional_float(latency_p99),
             qa_score_count=qa_count,
             qa_score_average=qa_average,
             qa_score_distribution=qa_distribution,

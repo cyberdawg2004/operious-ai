@@ -44,6 +44,7 @@ class OperationalMetricsSnapshotRecord:
     execution_latency_ms_avg: float | None
     execution_latency_ms_p50: float | None
     execution_latency_ms_p95: float | None
+    execution_latency_ms_p99: float | None
     qa_score_count: int
     qa_score_average: float | None
     qa_score_distribution: tuple[QAScoreBucketRecord, ...]

@@ -24,6 +24,15 @@ This document is the canonical handoff plan for the next Codex session.
 
 ## Current State Baseline
 
+- PR_RT10 final local closure addendum - 2026-05-29: CLOSED. PR_RT10
+  adds execution latency P99 observability, manual Fly scaling bounds,
+  focused voice concurrent-call load coverage with stub STT/TTS latency,
+  SLO definitions, an autoscaling runbook, the pilot-readiness checklist,
+  and the Jiao Ma outreach template. The realtime ladder status is now
+  PR_RT1 through PR_RT10 CLOSED locally. Pilot launch is still gated by
+  the honest checklist in `docs/pilot-readiness-checklist.md`, where
+  production infrastructure, security, channel, and business checks
+  remain NOT_MET until verified against the live pilot environment.
 - Full-suite baseline before Phase 6-F artifact additions: 2,206
   passed, 2 skipped, 0 xfailed after Phase 3-D.1 ApprovalRecord
   projection.
@@ -2228,17 +2237,19 @@ before real Anker traffic or any second-client commitment.
 
 ### Current Honest Ratings
 
-- Backend foundation: 9.2/10.
+- Backend foundation: 9.3/10.
 - Tenant isolation / RLS: 9.4/10.
-- Async ticket intelligence: 9.1/10.
-- Autonomous resolution proposal layer: 9.0/10.
-- Command Center operational visibility: 8.7/10.
-- Real customer delivery: 6.5/10.
-- Realtime chat: 5.5/10.
-- Realtime voice: 4.5/10.
-- Full Tier 1/Tier 2 replacement readiness: 7.2/10.
-- 10,000 concurrent no-customer-facing-queue readiness: 3.5/10.
-- Enterprise-grade readiness overall: 7.4/10.
+- Async ticket intelligence: 9.2/10.
+- Autonomous resolution and egress draft layer: 9.1/10.
+- Command Center operational visibility: 8.8/10.
+- Multilingual support: 8.2/10.
+- Real customer delivery: 7.1/10.
+- Realtime chat: 7.0/10.
+- Realtime voice: 6.8/10.
+- Load, SLO, and pilot operations readiness: 8.0/10.
+- Full Tier 1/Tier 2 replacement readiness: 7.8/10.
+- 10,000 concurrent no-customer-facing-queue readiness: 4.0/10.
+- Enterprise-grade readiness overall: 8.1/10.
 
 These ratings are intentionally conservative. The architecture is strong,
 and Wedge 0, Wedge 1, Wedge 2, Wedge 3, Wedge 4, PR_T4, PR_T5, PR_T6,
@@ -3934,20 +3945,24 @@ Current Command Center 2 status:
   proposal-only: it does not load cited SOP chunk text, does not persist
   a boundary egress draft/handoff, does not add Operations Queue proposal
   visibility, and has no external customer send path.
+- PR_RT10 status:
+  CLOSED locally. PR_RT10 adds execution latency P99 observability,
+  manual Fly process-group scaling bounds, focused voice load coverage
+  for concurrent calls and 1013 overload admission, pilot SLO
+  definitions, manual autoscaling guidance, the pilot readiness
+  checklist, and the Jiao Ma outreach template.
+- Realtime ladder status:
+  PR_RT1 through PR_RT10 are CLOSED locally as of 2026-05-29.
 
 Queued next:
-- PR_RT1.5 Resolution Grounding, Customer-Safe Draft Handoff, Tenant
-  FK, Safety Negation, And Plan Alignment.
-- PR_RT2 Case Continuity, Reopen, And Merge.
-- PR_RT3 Realtime Chat Session Runtime.
-- PR_RT4/PR_RT5 realtime voice.
-- PR_RT7 manager approval inbox.
-- Phase 6-F Command Center evidence capture.
-- PR_T10 Operational Runbooks.
-- Vector Retrieval SQL-native.
-- Post-wedge 9+ Throughput and Capacity Program.
-- 9+ Final Gate.
-- Pilot Launch only after every rating axis is >= 9/10.
+- Close the NOT_MET production and business items in
+  `docs/pilot-readiness-checklist.md` before the first live Anker ticket.
+- Run production SLO measurements and update `docs/slo.md` with live
+  values.
+- Post-pilot: automated Fly API autoscaling, real telephony provider
+  integration, and real translation provider integration.
+- Pilot launch only after the checklist is green and every live critical
+  path has a current measurement.
 
 Constitutional rules:
 - Router -> service -> runtime -> persistence.

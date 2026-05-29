@@ -120,4 +120,5 @@ async def test_empty_postgres_metric_snapshot_is_deterministic(
     assert first.ticket_throughput == 0
     assert first.governance_deny_rate == 0.0
     assert first.execution_latency_ms_p95 is None
+    assert first.execution_latency_ms_p99 is None
     assert first.qa_score_distribution[-1].count == 0
