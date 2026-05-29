@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ from app.hardening.admission import (
 )
 from app.identity import AuthorityContext, TenantId
 from app.language import LanguageDetector
+from app.semantic import FINGERPRINT_VERSION, TextFingerprinter
 from app.services.admission_service import AdmissionService
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
@@ -64,6 +66,7 @@ TicketChannel = Literal["email", "whatsapp", "voice"]
 WebhookTicketChannel = Literal["email", "whatsapp", "shulex", "lark"]
 WEBHOOK_FRESHNESS_WINDOW_SECONDS = 300
 WEBHOOK_NONCE_TTL_SECONDS = 24 * 60 * 60
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +94,7 @@ class TicketIngressService:
         admission_service: AdmissionService | None = None,
         translation_runtime: TranslationRuntime | None = None,
         language_detector: LanguageDetector | None = None,
+        fingerprinter: TextFingerprinter | None = None,
         webhook_queue_by_channel: (
             Mapping[TenantChannelType, Sequence[str]] | None
         ) = None,
@@ -101,6 +105,7 @@ class TicketIngressService:
         self._admission_service = admission_service
         self._translation_runtime = translation_runtime
         self._language_detector = language_detector or LanguageDetector()
+        self._fingerprinter = fingerprinter or TextFingerprinter()
         self._webhook_queue_by_channel = {
             channel_type: tuple(queue_names)
             for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
@@ -121,6 +126,7 @@ class TicketIngressService:
             correlation_id=external_id,
             request_id=external_id,
         )
+        fingerprint_metadata = self._fingerprint_metadata(canonical_content)
         runtime = BoundaryIngressRuntime(
             adapters=_adapter_registry(),
             persistence=self._persistence,
@@ -133,6 +139,7 @@ class TicketIngressService:
                 language_code="en",
                 expected_tenant_id=expected_tenant_id,
                 source_language=source_language,
+                metadata=fingerprint_metadata,
             )
         )
         if envelope.error is not None:
@@ -203,6 +210,21 @@ class TicketIngressService:
         if envelope.is_fully_clean and isinstance(canonical_text, str):
             return canonical_text, detected_language
         return raw_text, "en"
+
+    def _fingerprint_metadata(self, canonical_text: str) -> dict[str, object]:
+        # Fail-open fingerprinting: forensics must never block ingestion.
+        try:
+            fingerprint = self._fingerprinter.fingerprint(canonical_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "text_fingerprint_failed",
+                extra={"error": str(exc)},
+            )
+            return {}
+        return {
+            "text_fingerprint": list(fingerprint),
+            "fingerprint_version": FINGERPRINT_VERSION,
+        }
 
     async def process_channel_webhook(
         self,
@@ -332,6 +354,7 @@ class TicketIngressService:
         )
         source_language = "en"
         canonical_body = body
+        fingerprint_metadata: dict[str, object] = {}
         ticket_text = _extract_webhook_ticket_text(
             channel_type=tenant_channel_type,
             body=body,
@@ -348,6 +371,7 @@ class TicketIngressService:
                 body=body,
                 text=canonical_text,
             )
+            fingerprint_metadata = self._fingerprint_metadata(canonical_text)
         payload = IngressPayload(
             body=canonical_body,
             content_type=content_type,
@@ -401,6 +425,7 @@ class TicketIngressService:
                         channel_config.routing_address
                     ),
                     "source_language": source_language,
+                    **fingerprint_metadata,
                 },
             )
         )
@@ -605,6 +630,7 @@ def _to_boundary_request(
     language_code: str,
     expected_tenant_id: str,
     source_language: str = "en",
+    metadata: Mapping[str, object] | None = None,
 ) -> BoundaryIngressRequest:
     return BoundaryIngressRequest(
         source=BoundarySource(
@@ -636,6 +662,7 @@ def _to_boundary_request(
             "ticket.channel": channel,
             "ticket.language_code": language_code,
             "source_language": source_language,
+            **dict(metadata or {}),
         },
     )
 

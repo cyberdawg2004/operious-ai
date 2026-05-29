@@ -130,6 +130,7 @@ from app.runtime.tenant_production_hardening import (
 )
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.semantic import TextFingerprinter
 from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
@@ -281,6 +282,14 @@ def get_ticket_ingress_service(
         translation_runtime=cast(
             TranslationRuntime,
             request.app.state.translation_runtime,
+        ),
+        fingerprinter=cast(
+            TextFingerprinter,
+            getattr(
+                request.app.state,
+                "text_fingerprinter",
+                TextFingerprinter(),
+            ),
         ),
         webhook_queue_by_channel={
             TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,

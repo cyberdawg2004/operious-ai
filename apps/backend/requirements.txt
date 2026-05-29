@@ -23,7 +23,7 @@
 # * implicit telemetry exfiltration:
 #     posthog
 #
-# Their transitives (appdirs, mmh3, onnxruntime, pdfminer.six,
+# Their transitives (appdirs, onnxruntime, pdfminer.six,
 # pdfplumber, pypdfium2, pillow, openpyxl, et_xmlfile, pybase64,
 # pyroaring, flatbuffers, ormsgpack, xxhash, sse-starlette, durationpy,
 # websocket-client, requests-oauthlib, oauthlib, PyPika, jsonref,
@@ -117,6 +117,7 @@ markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mdit-py-plugins==0.6.1
 mdurl==0.1.2
+mmh3==5.2.1
 multidict==6.7.1
 mypy_extensions==1.1.0
 numpy==2.4.4

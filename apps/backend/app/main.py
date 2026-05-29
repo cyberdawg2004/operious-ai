@@ -85,6 +85,7 @@ from app.runtime.tenant_production_hardening import (
     TenantProductionHardeningRuntime,
 )
 from app.runtime.timeline_runtime import TimelineRuntime
+from app.semantic import TextFingerprinter
 from app.session.persistence import PostgresSessionPersistence
 from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.survivability import (
@@ -573,6 +574,7 @@ def create_app(
             capability_governance=capability_governance_runtime,
         ),
     )
+    app.state.text_fingerprinter = TextFingerprinter()
     logger.info("boundary_media_runtime_register_complete")
 
     logger.info("exception_handlers_register_begin")
