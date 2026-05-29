@@ -105,6 +105,38 @@ GOVERNANCE_POLICIES: tuple[dict[str, Any], ...] = (
         "status": "active",
     },
     {
+        "policy_type": "anker_action_tools",
+        "parameters": {
+            "phase": "RT6",
+            "tools": {
+                "warranty.claim": {
+                    "allow": {
+                        "confidence_gte": 0.85,
+                        "issue_category_in": [
+                            "charging_issue",
+                            "product_defect",
+                        ],
+                    },
+                    "else": "require_approval",
+                },
+                "replacement.order": {
+                    "always": "require_approval",
+                },
+                "refund.request": {
+                    "allow": {"refund_amount_cents_lte": 5000},
+                    "else": "require_approval",
+                },
+                "warehouse.repair.report": {
+                    "allow": {"severity_in": ["low", "medium"]},
+                    "require_approval": {
+                        "severity_in": ["high", "critical"],
+                    },
+                },
+            },
+        },
+        "status": "active",
+    },
+    {
         "policy_type": "anker_escalation_rules",
         "parameters": {
             "phase": "6-F",

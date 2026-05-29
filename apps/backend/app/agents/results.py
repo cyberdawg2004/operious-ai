@@ -52,6 +52,10 @@ class ToolInvocationResult:
 
     output: MetadataMap = field(default_factory=_empty_json_object)
     metadata: MetadataMap = field(default_factory=_empty_json_object)
+    status: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

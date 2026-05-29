@@ -608,8 +608,87 @@ def _recommended_actions(
                 "requires_execution": False,
             },
             {
+                "type": "warranty_claim",
+                "label": "Prepare a warranty claim for the charging issue",
+                "requires_execution": True,
+                "tool_name": "warranty.claim",
+                "payload": {
+                    "order_id": "unknown_order",
+                    "product_sku": "unknown_sku",
+                    "issue_category": "charging_issue",
+                    "customer_description": "Charging issue reported by customer.",
+                },
+                "target_resource_id": "warranty:charging_issue",
+            },
+            {
                 "type": "collect_context",
                 "label": "Collect model, order details, and indicator behavior",
+                "requires_execution": False,
+            },
+        )
+    if category == "product_defect":
+        return (
+            {
+                "type": "customer_reply_draft",
+                "label": "Draft a grounded product-defect response",
+                "requires_execution": False,
+            },
+            {
+                "type": "warranty_claim",
+                "label": "Prepare a warranty claim for the product defect",
+                "requires_execution": True,
+                "tool_name": "warranty.claim",
+                "payload": {
+                    "order_id": "unknown_order",
+                    "product_sku": "unknown_sku",
+                    "issue_category": "product_defect",
+                    "customer_description": "Product defect reported by customer.",
+                },
+                "target_resource_id": "warranty:product_defect",
+            },
+            {
+                "type": "warehouse_repair",
+                "label": "Create a warehouse repair report for defect review",
+                "requires_execution": True,
+                "tool_name": "warehouse.repair.report",
+                "payload": {
+                    "product_sku": "unknown_sku",
+                    "batch_id": None,
+                    "defect_description": "Product defect reported by customer.",
+                    "severity": "high",
+                    "session_id": "unknown_session",
+                },
+                "target_resource_id": "warehouse:repair:product_defect",
+            },
+            {
+                "type": "collect_context",
+                "label": "Ask for model number and defect evidence",
+                "requires_execution": False,
+            },
+        )
+    if category == "refund_requested":
+        return (
+            {
+                "type": "customer_reply_draft",
+                "label": "Draft a grounded refund response",
+                "requires_execution": False,
+            },
+            {
+                "type": "refund_request",
+                "label": "Prepare a refund request for policy review",
+                "requires_execution": True,
+                "tool_name": "refund.request",
+                "payload": {
+                    "order_id": "unknown_order",
+                    "product_sku": "unknown_sku",
+                    "refund_amount_cents": 5000,
+                    "refund_reason": "Customer requested refund.",
+                },
+                "target_resource_id": "refund:requested",
+            },
+            {
+                "type": "human_policy_review",
+                "label": "Route refund for policy review when needed",
                 "requires_execution": False,
             },
         )

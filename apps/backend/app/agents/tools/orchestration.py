@@ -1,0 +1,514 @@
+"""Bridge SEND_ELIGIBLE resolution proposals to governed action tools."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Literal, Protocol, cast
+
+from app.agents.context import AgentExecutionContext
+from app.agents.identity import derive_action_idempotency_key
+from app.agents.results import ToolInvocationRequest
+from app.agents.tools.approvals import (
+    ActionApprovalRepository,
+    build_pending_action_approval,
+)
+from app.agents.tools.invoker import ToolInvoker
+from app.governance.enums import Decision
+from app.resolution.persistence.records import ResolutionProposalRecord
+from app.types.json import JsonObject, JsonValue
+
+logger = logging.getLogger(__name__)
+
+_ACTION_EXECUTED = "action_executed"
+_ACTION_PENDING_APPROVAL = "action_pending_approval"
+_ACTION_DENIED = "action_denied"
+_ACTION_SKIPPED = "action_skipped"
+_ACTION_ERROR = "action_error"
+
+_ACTION_TOOL_BY_TYPE = {
+    "warranty_claim": "warranty.claim",
+    "replacement_order": "replacement.order",
+    "refund_request": "refund.request",
+    "warehouse_repair": "warehouse.repair.report",
+}
+
+
+class ActionTimelineAppender(Protocol):
+    async def append_event(
+        self,
+        *,
+        session_id: str,
+        dispatch_id: str,
+        tenant_id: str,
+        event_type: str,
+        payload: Mapping[str, Any] | None = None,
+        timestamp: datetime | None = None,
+        idempotency_key: str | None = None,
+    ) -> object: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ActionOutcome:
+    tool_name: str
+    idempotency_key: str
+    status: Literal["executed", "pending_approval", "denied", "error"]
+    governance_decision_id: str | None
+    approval_record_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ActionOrchestrationResult:
+    session_id: str
+    outcomes: tuple[ActionOutcome, ...]
+    all_executed: bool
+    any_pending_approval: bool
+    any_denied: bool
+
+
+class ActionOrchestrationRuntime:
+    def __init__(
+        self,
+        *,
+        tool_invoker: ToolInvoker,
+        approval_repository: ActionApprovalRepository,
+        timeline_runtime: ActionTimelineAppender | None = None,
+        session_runtime: ActionTimelineAppender | None = None,
+    ) -> None:
+        self._tool_invoker = tool_invoker
+        self._approval_repository = approval_repository
+        runtime = timeline_runtime or session_runtime
+        if runtime is None:
+            raise ValueError(
+                "ActionOrchestrationRuntime requires a timeline appender"
+            )
+        self._timeline_runtime = runtime
+
+    async def execute_proposal_actions(
+        self,
+        *,
+        proposal: ResolutionProposalRecord,
+        execution_context: AgentExecutionContext,
+        expected_tenant_id: str,
+    ) -> ActionOrchestrationResult:
+        if proposal.tenant_id != expected_tenant_id:
+            raise ValueError("proposal tenant does not match expected tenant")
+
+        outcomes: list[ActionOutcome] = []
+        actions = tuple(
+            dict(action)
+            for action in proposal.recommended_actions
+            if action.get("requires_execution") is True
+        )
+        for ordinal, action in enumerate(actions, start=1):
+            outcome = await self._execute_action(
+                proposal=proposal,
+                action=action,
+                execution_context=execution_context,
+                expected_tenant_id=expected_tenant_id,
+                invocation_ordinal=ordinal,
+            )
+            outcomes.append(outcome)
+
+        return ActionOrchestrationResult(
+            session_id=proposal.session_id,
+            outcomes=tuple(outcomes),
+            all_executed=all(
+                outcome.status == "executed" for outcome in outcomes
+            ),
+            any_pending_approval=any(
+                outcome.status == "pending_approval" for outcome in outcomes
+            ),
+            any_denied=any(
+                outcome.status == "denied" for outcome in outcomes
+            ),
+        )
+
+    async def _execute_action(
+        self,
+        *,
+        proposal: ResolutionProposalRecord,
+        action: dict[str, Any],
+        execution_context: AgentExecutionContext,
+        expected_tenant_id: str,
+        invocation_ordinal: int,
+    ) -> ActionOutcome:
+        action_type = _text(action.get("type")) or "unknown"
+        tool_name = _tool_name_for(action)
+        if tool_name is None:
+            logger.warning("unknown resolution action type: %s", action_type)
+            await self._append_event(
+                proposal=proposal,
+                event_type=_ACTION_SKIPPED,
+                idempotency_key=f"action:skipped:{action_type}",
+                payload={
+                    "action_type": action_type,
+                    "reason": "unknown_action_type",
+                },
+            )
+            return ActionOutcome(
+                tool_name=action_type,
+                idempotency_key="",
+                status="error",
+                governance_decision_id=None,
+                approval_record_id=None,
+            )
+
+        payload = _payload_for_action(
+            action=action,
+            proposal=proposal,
+            action_type=action_type,
+            tool_name=tool_name,
+        )
+        target_resource = _target_resource(
+            action=action,
+            tool_name=tool_name,
+            payload=payload,
+        )
+        idempotency_key = derive_action_idempotency_key(
+            tenant_id=expected_tenant_id,
+            session_id=proposal.session_id,
+            tool_name=tool_name,
+            target_resource=target_resource,
+        )
+        request = ToolInvocationRequest(
+            tool_name=tool_name,
+            payload=payload,
+            metadata=_request_metadata(
+                proposal=proposal,
+                action=action,
+                action_type=action_type,
+                tool_name=tool_name,
+                target_resource=target_resource,
+                idempotency_key=str(idempotency_key),
+            ),
+        )
+        envelope = await self._tool_invoker.invoke(
+            request,
+            execution_context,
+            invocation_ordinal=invocation_ordinal,
+        )
+        governance_decision_id = (
+            str(envelope.trace.governance_decision_id)
+            if envelope.trace.governance_decision_id is not None
+            else None
+        )
+        if envelope.is_ok and envelope.result is not None:
+            await self._append_event(
+                proposal=proposal,
+                event_type=_ACTION_EXECUTED,
+                idempotency_key=f"action:executed:{idempotency_key}",
+                payload={
+                    "tool_name": tool_name,
+                    "action_type": action_type,
+                    "idempotency_key": str(idempotency_key),
+                    "governance_decision_id": governance_decision_id,
+                    "result": dict(envelope.result.output),
+                },
+            )
+            return ActionOutcome(
+                tool_name=tool_name,
+                idempotency_key=str(idempotency_key),
+                status="executed",
+                governance_decision_id=governance_decision_id,
+                approval_record_id=None,
+            )
+
+        if envelope.is_denied:
+            decision = _text(envelope.trace.metadata.get("governance_decision"))
+            if decision == Decision.REQUIRE_APPROVAL.value:
+                approval = await self._approval_repository.create_pending_approval(
+                    build_pending_action_approval(
+                        tenant_id=expected_tenant_id,
+                        session_id=proposal.session_id,
+                        execution_id=proposal.execution_id,
+                        tool_name=tool_name,
+                        idempotency_key=str(idempotency_key),
+                        payload_json=payload,
+                        governance_decision_id=governance_decision_id,
+                        metadata={
+                            "proposal_id": str(proposal.proposal_id),
+                            "action_type": action_type,
+                            "target_resource": target_resource,
+                        },
+                    ),
+                    expected_tenant_id=expected_tenant_id,
+                )
+                await self._append_event(
+                    proposal=proposal,
+                    event_type=_ACTION_PENDING_APPROVAL,
+                    idempotency_key=f"action:pending:{idempotency_key}",
+                    payload={
+                        "approval_id": approval.approval_id,
+                        "tool_name": tool_name,
+                        "action_type": action_type,
+                        "idempotency_key": str(idempotency_key),
+                        "governance_decision_id": governance_decision_id,
+                    },
+                )
+                return ActionOutcome(
+                    tool_name=tool_name,
+                    idempotency_key=str(idempotency_key),
+                    status="pending_approval",
+                    governance_decision_id=governance_decision_id,
+                    approval_record_id=approval.approval_id,
+                )
+
+            await self._append_event(
+                proposal=proposal,
+                event_type=_ACTION_DENIED,
+                idempotency_key=f"action:denied:{idempotency_key}",
+                payload={
+                    "tool_name": tool_name,
+                    "action_type": action_type,
+                    "idempotency_key": str(idempotency_key),
+                    "governance_decision_id": governance_decision_id,
+                    "reason": envelope.trace.metadata.get("reason"),
+                    "governance_decision": decision,
+                },
+            )
+            return ActionOutcome(
+                tool_name=tool_name,
+                idempotency_key=str(idempotency_key),
+                status="denied",
+                governance_decision_id=governance_decision_id,
+                approval_record_id=None,
+            )
+
+        await self._append_event(
+            proposal=proposal,
+            event_type=_ACTION_ERROR,
+            idempotency_key=f"action:error:{idempotency_key}",
+            payload={
+                "tool_name": tool_name,
+                "action_type": action_type,
+                "idempotency_key": str(idempotency_key),
+                "governance_decision_id": governance_decision_id,
+                "error": (
+                    str(envelope.error)
+                    if envelope.error is not None
+                    else "tool returned non-success result"
+                ),
+            },
+        )
+        return ActionOutcome(
+            tool_name=tool_name,
+            idempotency_key=str(idempotency_key),
+            status="error",
+            governance_decision_id=governance_decision_id,
+            approval_record_id=None,
+        )
+
+    async def _append_event(
+        self,
+        *,
+        proposal: ResolutionProposalRecord,
+        event_type: str,
+        idempotency_key: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        await self._timeline_runtime.append_event(
+            session_id=proposal.session_id,
+            dispatch_id=proposal.dispatch_id,
+            tenant_id=proposal.tenant_id,
+            event_type=event_type,
+            payload=payload,
+            timestamp=datetime.now(timezone.utc),
+            idempotency_key=idempotency_key,
+        )
+
+
+def _tool_name_for(action: Mapping[str, Any]) -> str | None:
+    explicit = _text(action.get("tool_name"))
+    if explicit is not None:
+        return explicit
+    action_type = _text(action.get("type"))
+    if action_type is None:
+        return None
+    return _ACTION_TOOL_BY_TYPE.get(action_type)
+
+
+def _payload_for_action(
+    *,
+    action: Mapping[str, Any],
+    proposal: ResolutionProposalRecord,
+    action_type: str,
+    tool_name: str,
+) -> JsonObject:
+    explicit = action.get("payload")
+    if isinstance(explicit, Mapping):
+        payload = _json_object(cast(Mapping[object, object], explicit))
+    else:
+        payload = _default_payload(
+            action=action,
+            proposal=proposal,
+            action_type=action_type,
+            tool_name=tool_name,
+        )
+    if tool_name == "warehouse.repair.report":
+        payload["session_id"] = proposal.session_id
+    return payload
+
+
+def _default_payload(
+    *,
+    action: Mapping[str, Any],
+    proposal: ResolutionProposalRecord,
+    action_type: str,
+    tool_name: str,
+) -> JsonObject:
+    order_id = _text(action.get("order_id")) or f"session-{proposal.session_id}"
+    product_sku = _text(action.get("product_sku")) or "unknown_sku"
+    if tool_name == "warranty.claim":
+        return {
+            "order_id": order_id,
+            "product_sku": product_sku,
+            "issue_category": _text(action.get("issue_category"))
+            or proposal.resolution_category,
+            "customer_description": proposal.proposed_customer_reply[:500]
+            or action_type,
+        }
+    if tool_name == "replacement.order":
+        return {
+            "order_id": order_id,
+            "product_sku": product_sku,
+            "replacement_reason": _text(action.get("replacement_reason"))
+            or proposal.resolution_category,
+            "shipping_address_hash": _text(action.get("shipping_address_hash"))
+            or "address_hash_unavailable",
+        }
+    if tool_name == "refund.request":
+        return {
+            "order_id": order_id,
+            "product_sku": product_sku,
+            "refund_amount_cents": _int(action.get("refund_amount_cents"))
+            or 5000,
+            "refund_reason": _text(action.get("refund_reason"))
+            or proposal.resolution_category,
+        }
+    if tool_name == "warehouse.repair.report":
+        severity = _text(action.get("severity"))
+        if severity not in {"low", "medium", "high", "critical"}:
+            severity = "high"
+        return {
+            "product_sku": product_sku,
+            "batch_id": _text(action.get("batch_id")),
+            "defect_description": _text(action.get("defect_description"))
+            or proposal.proposed_customer_reply[:500]
+            or action_type,
+            "severity": severity,
+            "session_id": proposal.session_id,
+        }
+    return {}
+
+
+def _target_resource(
+    *,
+    action: Mapping[str, Any],
+    tool_name: str,
+    payload: Mapping[str, JsonValue],
+) -> str:
+    explicit = _text(action.get("target_resource_id"))
+    if explicit is not None:
+        return explicit
+    order_id = _text(payload.get("order_id"))
+    product_sku = _text(payload.get("product_sku"))
+    if order_id is not None and product_sku is not None:
+        return f"order:{order_id}:sku:{product_sku}"
+    if product_sku is not None:
+        return f"sku:{product_sku}"
+    return tool_name
+
+
+def _request_metadata(
+    *,
+    proposal: ResolutionProposalRecord,
+    action: Mapping[str, Any],
+    action_type: str,
+    tool_name: str,
+    target_resource: str,
+    idempotency_key: str,
+) -> JsonObject:
+    metadata: JsonObject = {
+        "session_id": proposal.session_id,
+        "proposal_id": str(proposal.proposal_id),
+        "dispatch_id": proposal.dispatch_id,
+        "execution_id": proposal.execution_id,
+        "action_type": action_type,
+        "tool_name": tool_name,
+        "target_resource": target_resource,
+        "target_resource_id": target_resource,
+        "idempotency_key": idempotency_key,
+        "diagnostic_confidence": proposal.confidence,
+        "resolution_category": proposal.resolution_category,
+    }
+    for key in (
+        "issue_category",
+        "refund_amount_cents",
+        "severity",
+        "product_sku",
+        "order_id",
+    ):
+        value = _metadata_value(action, key)
+        if value is not None:
+            metadata[key] = value
+    payload = action.get("payload")
+    if isinstance(payload, Mapping):
+        payload_map = cast(Mapping[str, Any], payload)
+        for key in ("issue_category", "refund_amount_cents", "severity"):
+            value = _metadata_value(payload_map, key)
+            if value is not None:
+                metadata[key] = value
+    if "issue_category" not in metadata:
+        metadata["issue_category"] = proposal.resolution_category
+    return metadata
+
+
+def _metadata_value(mapping: Mapping[str, Any], key: str) -> JsonValue | None:
+    value = mapping.get(key)
+    if value is None or isinstance(value, str | int | float | bool):
+        return cast(JsonValue | None, value)
+    return None
+
+
+def _json_object(mapping: Mapping[object, object]) -> JsonObject:
+    return {str(key): _json_value(value) for key, value in mapping.items()}
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        items = cast(list[object], value)
+        return [_json_value(item) for item in items]
+    if isinstance(value, Mapping):
+        return _json_object(cast(Mapping[object, object], value))
+    return str(value)
+
+
+def _text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+__all__ = [
+    "ActionOrchestrationResult",
+    "ActionOrchestrationRuntime",
+    "ActionOutcome",
+]

@@ -42,6 +42,9 @@ _AGENT_EXECUTION_NAMESPACE = uuid.UUID(
 _TOOL_INVOCATION_NAMESPACE = uuid.UUID(
     "aa6e7001-0003-4003-8003-000000000003"
 )
+_ACTION_IDEMPOTENCY_NAMESPACE = uuid.UUID(
+    "aa6e7001-0006-4006-8006-000000000006"
+)
 
 
 def derive_agent_runtime_instance_id(
@@ -117,6 +120,27 @@ def derive_tool_invocation_id(
     )
 
 
+def derive_action_idempotency_key(
+    *,
+    tenant_id: str,
+    session_id: str,
+    tool_name: str,
+    target_resource: str,
+) -> uuid.UUID:
+    """Derive the deterministic idempotency key for one action tool call."""
+
+    return derive_runtime_id(
+        namespace=_ACTION_IDEMPOTENCY_NAMESPACE,
+        tenant_id=tenant_id,
+        seed_components=(
+            "action_idempotency",
+            session_id,
+            tool_name,
+            target_resource,
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AgentIdentity:
     """Stable identity of one agent within one runtime instance.
@@ -170,5 +194,6 @@ __all__ = [
     "ExecutionIdentity",
     "derive_agent_execution_id",
     "derive_agent_runtime_instance_id",
+    "derive_action_idempotency_key",
     "derive_tool_invocation_id",
 ]

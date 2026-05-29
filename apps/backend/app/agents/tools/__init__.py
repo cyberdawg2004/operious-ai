@@ -18,10 +18,18 @@ agent layer entirely.
 from app.agents.tools.base import BaseTool
 from app.agents.tools.capability import ToolCapability
 from app.agents.tools.invoker import ToolInvoker
+from app.agents.tools.orchestration import (
+    ActionOrchestrationResult,
+    ActionOrchestrationRuntime,
+    ActionOutcome,
+)
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tools.session import AgentToolSession
 
 __all__ = [
+    "ActionOrchestrationResult",
+    "ActionOrchestrationRuntime",
+    "ActionOutcome",
     "BaseTool",
     "ToolCapability",
     "ToolRegistry",

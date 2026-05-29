@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import traceback
+import uuid
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,11 +17,31 @@ from typing import Any, TypeVar, cast
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.capabilities import (
+    AgentCapability,
+    CapabilitySet,
+    ExecutionConstraints,
+)
+from app.agents.context import AgentExecutionContext
 from app.agents.diagnostic_agent import DiagnosticAgent, DiagnosticResult
+from app.agents.enums import CapabilityScope
+from app.agents.identity import (
+    AgentIdentity,
+    ExecutionIdentity,
+    derive_agent_runtime_instance_id,
+)
 from app.agents.runtime.quota_runtime import (
     get_quota_runtime as get_initialized_quota_runtime,
 )
 from app.agents.runtime.retry_policy import RetryPolicy, get_policy
+from app.agents.tools import ToolInvoker
+from app.agents.tools.action_governance import (
+    build_action_tool_governance_runtime,
+)
+from app.agents.tools.actions import build_action_tool_registry
+from app.agents.tools.approvals import PostgresActionApprovalRepository
+from app.agents.tools.orchestration import ActionOrchestrationRuntime
+from app.agents.value_objects import CausalityMetadata
 from app.cognition import (
     AnthropicMessagesClient,
     DeterministicDiagnosticLLMClient,
@@ -1118,6 +1139,15 @@ async def _append_resolution_proposal_after_diagnostic(
                     event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
             )
+            if resolution_proposal_is_send_eligible(proposal):
+                await _action_orchestration_runtime(
+                    session=session,
+                    timeline=timeline,
+                ).execute_proposal_actions(
+                    proposal=proposal,
+                    execution_context=_action_execution_context(work_item),
+                    expected_tenant_id=work_item.tenant_id,
+                )
         if (
             resolution_proposal_is_send_eligible(proposal)
             and proposal.governance_decision_id is not None
@@ -1137,6 +1167,77 @@ async def _append_resolution_proposal_after_diagnostic(
             exc=exc,
         )
         return _ResolutionAppendResult(success=False)
+
+
+def _action_orchestration_runtime(
+    *,
+    session: AsyncSession,
+    timeline: TimelineRuntime,
+) -> ActionOrchestrationRuntime:
+    return ActionOrchestrationRuntime(
+        tool_invoker=ToolInvoker(
+            tool_registry=build_action_tool_registry(),
+            governance_runtime=build_action_tool_governance_runtime(
+                persistence=PostgresGovernanceRepository(session)
+            ),
+        ),
+        approval_repository=PostgresActionApprovalRepository(session),
+        timeline_runtime=timeline,
+    )
+
+
+def _action_execution_context(
+    work_item: _DiagnosticExecutionWorkItem,
+) -> AgentExecutionContext:
+    tool_names = (
+        "warranty.claim",
+        "replacement.order",
+        "refund.request",
+        "warehouse.repair.report",
+    )
+    return AgentExecutionContext(
+        identity=AgentIdentity(
+            agent_id="diagnostic-action-orchestrator",
+            runtime_instance_id=derive_agent_runtime_instance_id(
+                agent_ids=("diagnostic-action-orchestrator",)
+            ),
+        ),
+        execution=ExecutionIdentity(
+            execution_id=uuid.UUID(work_item.execution_id),
+            request_id=f"action-orchestration:{work_item.execution_id}",
+        ),
+        capabilities=CapabilitySet(
+            (
+                AgentCapability(
+                    name="tool.warranty.claim",
+                    scope=CapabilityScope.INVOKE,
+                ),
+                AgentCapability(
+                    name="tool.replacement.order",
+                    scope=CapabilityScope.INVOKE,
+                ),
+                AgentCapability(
+                    name="tool.refund.request",
+                    scope=CapabilityScope.INVOKE,
+                ),
+                AgentCapability(
+                    name="tool.warehouse.repair",
+                    scope=CapabilityScope.INVOKE,
+                ),
+            )
+        ),
+        constraints=ExecutionConstraints(allowed_tools=tool_names),
+        causality=CausalityMetadata(
+            initiator="diagnostic_agent",
+            cause="resolution_send_eligible_action_tools",
+        ),
+        tenant_id=work_item.tenant_id,
+        metadata={
+            "session_id": work_item.session_id,
+            "dispatch_id": work_item.dispatch_id,
+            "attempt_id": work_item.attempt_id,
+        },
+    )
 
 
 async def _append_conversation_phase_b_turn(
