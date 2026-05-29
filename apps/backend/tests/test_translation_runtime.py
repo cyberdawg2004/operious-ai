@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import ClassVar
+
 import pytest
 
 from app.boundary.translation import (
@@ -13,6 +16,7 @@ from app.boundary.translation import (
     IngressTranslateRequest,
     LocalizationContext,
     LocalizationFormality,
+    TranslationConfigurationError,
     TranslationContainmentError,
     TranslationDirection,
     TranslationEgressRuntime,
@@ -20,6 +24,75 @@ from app.boundary.translation import (
     TranslationPayload,
     TranslationRuntime,
 )
+from app.governance.context import GovernanceContext
+from app.governance.decisions import PolicyEvaluationResult
+from app.governance.enforcement.handlers import (
+    AllowHandler,
+    DegradeHandler,
+    DenyHandler,
+    EnforcementHandlerRegistry,
+    EscalateHandler,
+    RedactHandler,
+    RequireApprovalHandler,
+)
+from app.governance.enforcement.runtime import GovernanceRuntime
+from app.governance.enums import Decision, EnforcementStage
+from app.governance.evaluators.engine import PolicyEvaluationEngine
+from app.governance.persistence.memory import InMemoryGovernanceRepository
+from app.governance.policies.base import BaseGovernancePolicy
+from app.governance.policies.chain import PolicyChain
+from app.governance.subjects.base import SubjectKind
+
+
+class _AllowCapabilityPolicy(BaseGovernancePolicy):
+    name: ClassVar[str] = "translation_runtime_allow_capability"
+    supported_stages: ClassVar[frozenset[EnforcementStage]] = (
+        frozenset({EnforcementStage.PRE_REQUEST})
+    )
+    applicable_subject_kinds: ClassVar[frozenset[SubjectKind]] = (
+        frozenset({SubjectKind.CAPABILITY})
+    )
+
+    async def evaluate(
+        self, context: GovernanceContext
+    ) -> Sequence[PolicyEvaluationResult]:
+        return (
+            PolicyEvaluationResult(
+                policy_name=self.name,
+                rule_id="translation_runtime_allowed",
+                decision=Decision.ALLOW,
+                reason="translation runtime fixture allows capability gate",
+            ),
+        )
+
+
+def _handlers() -> EnforcementHandlerRegistry:
+    registry = EnforcementHandlerRegistry()
+    for handler in (
+        AllowHandler(),
+        DenyHandler(),
+        RedactHandler(),
+        DegradeHandler(),
+        EscalateHandler(),
+        RequireApprovalHandler(),
+    ):
+        registry.register(handler)
+    return registry
+
+
+def _allowing_governance() -> GovernanceRuntime:
+    return GovernanceRuntime(
+        engine=PolicyEvaluationEngine(),
+        handler_registry=_handlers(),
+        chains={
+            EnforcementStage.PRE_REQUEST: PolicyChain(
+                chain_id="translation-runtime-test-capability",
+                stage=EnforcementStage.PRE_REQUEST,
+                policies=(_AllowCapabilityPolicy(),),
+            )
+        },
+        persistence=InMemoryGovernanceRepository(),
+    )
 
 
 @pytest.fixture()
@@ -31,9 +104,23 @@ def runtime() -> TranslationRuntime:
             provider=provider, persistence=persistence
         ),
         egress=TranslationEgressRuntime(
-            provider=provider, persistence=persistence
+            provider=provider,
+            persistence=persistence,
+            capability_governance=_allowing_governance(),
         ),
     )
+
+
+def test_translation_egress_requires_governance_at_construction() -> None:
+    persistence = InMemoryTranslationPersistence()
+    provider = IdentityTranslationProvider()
+
+    with pytest.raises(TranslationConfigurationError):
+        TranslationEgressRuntime(
+            provider=provider,
+            persistence=persistence,
+            capability_governance=None,
+        )
 
 
 @pytest.mark.asyncio

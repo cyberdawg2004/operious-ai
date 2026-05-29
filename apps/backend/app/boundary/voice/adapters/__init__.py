@@ -20,6 +20,10 @@ from app.boundary.voice.adapters.stub import (
     DeterministicStubSpeechToTextProvider,
     DeterministicStubTextToSpeechProvider,
 )
+from app.boundary.voice.adapters.twilio import (
+    TwilioMediaStreamAdapter,
+    TwilioMediaStreamEvent,
+)
 
 __all__ = [
     "BaseSpeechToTextProvider",
@@ -30,4 +34,6 @@ __all__ = [
     "SpeechToTextProviderResponse",
     "TextToSpeechProviderRequest",
     "TextToSpeechProviderResponse",
+    "TwilioMediaStreamAdapter",
+    "TwilioMediaStreamEvent",
 ]

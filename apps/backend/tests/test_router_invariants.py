@@ -188,6 +188,8 @@ def _imports(tree: ast.Module) -> list[tuple[str, str | None]]:
 
 def _substrate_from_router_filename(name: str) -> str:
     """``governance.py`` → ``governance``; ``auth.py`` → ``auth``."""
+    if name == "voice.py":
+        return "boundary"
     return name.removesuffix(".py")
 
 

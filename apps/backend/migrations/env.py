@@ -45,6 +45,7 @@ from app.coordination.db import models as _coordination_models  # noqa: F401  # 
 from app.arbitration.db import models as _arbitration_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.supervisor.db import models as _supervisor_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.boundary.db import models as _boundary_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.boundary.voice.db import models as _voice_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.execution.db import models as _execution_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.events.db import models as _event_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.tenant.db import models as _tenant_models  # noqa: F401  # pyright: ignore[reportUnusedImport]

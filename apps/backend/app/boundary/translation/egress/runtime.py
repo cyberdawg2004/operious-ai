@@ -32,6 +32,7 @@ from app.boundary.translation.envelopes import (
     TranslationEnvelope,
 )
 from app.boundary.translation.exceptions import (
+    TranslationConfigurationError,
     TranslationContainmentError,
     TranslationError,
     TranslationProviderError,
@@ -105,8 +106,14 @@ class TranslationEgressRuntime:
         normalizer: BoundaryNormalizer | None = None,
         validator: SemanticPreservationValidator | None = None,
         runtime_instance_id: uuid.UUID | None = None,
-        capability_governance: GovernanceRuntime | None = None,
+        capability_governance: GovernanceRuntime,
     ) -> None:
+        if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
+            raise TranslationConfigurationError(
+                "TranslationEgressRuntime requires capability_governance. "
+                "Translation egress is an external action and must be "
+                "governed."
+            )
         self._provider = provider
         self._persistence = persistence
         self._normalizer = normalizer or BoundaryNormalizer()
@@ -125,7 +132,7 @@ class TranslationEgressRuntime:
             )
         )
         self._sequence = 0
-        # 2.75-\u03b1: capability legality gate. Inert when None.
+        # 2.75-\u03b1: capability legality gate.
         self._capability_governance = capability_governance
 
     @property
@@ -144,7 +151,7 @@ class TranslationEgressRuntime:
         monotonic = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
-        # 2.75-\u03b1: capability legality gate. Inert when None.
+        # 2.75-\u03b1: capability legality gate.
         denial = await gate_or_deny(
             self._capability_governance,
             act=OperationalAct.BOUNDARY_TRANSLATION_EGRESS,

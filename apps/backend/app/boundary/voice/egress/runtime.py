@@ -29,6 +29,7 @@ from app.boundary.voice.enums import (
 )
 from app.boundary.voice.envelopes import VoiceEnvelope
 from app.boundary.voice.exceptions import (
+    VoiceConfigurationError,
     VoiceContainmentError,
     VoiceError,
     VoiceProviderError,
@@ -82,8 +83,14 @@ class VoiceEgressRuntime:
         provider: BaseTextToSpeechProvider,
         persistence: VoicePersistenceProtocol,
         runtime_instance_id: uuid.UUID | None = None,
-        capability_governance: GovernanceRuntime | None = None,
+        capability_governance: GovernanceRuntime,
     ) -> None:
+        if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
+            raise VoiceConfigurationError(
+                "VoiceEgressRuntime requires capability_governance. "
+                "Voice synthesis is an external action and must be "
+                "governed."
+            )
         self._provider = provider
         self._persistence = persistence
         self._runtime_instance_id = (
@@ -98,7 +105,7 @@ class VoiceEgressRuntime:
             )
         )
         self._sequence = 0
-        # 2.75-\u03b1: capability legality gate. Inert when None.
+        # 2.75-\u03b1: capability legality gate.
         self._capability_governance = capability_governance
 
     @property
@@ -117,7 +124,7 @@ class VoiceEgressRuntime:
         monotonic = time.perf_counter()
         # P2-A: singular authority resolution.
         resolution = request_authority_resolution(request)
-        # 2.75-\u03b1: capability legality gate. Inert when None.
+        # 2.75-\u03b1: capability legality gate.
         denial = await gate_or_deny(
             self._capability_governance,
             act=OperationalAct.BOUNDARY_VOICE_EGRESS,
@@ -171,6 +178,12 @@ class VoiceEgressRuntime:
                 audio_fingerprint=audio_fp,
                 audio=audio,
                 captured_at=ended_at,
+                attributes={
+                    **dict(request.attributes),
+                    "runtime_instance_id": str(
+                        self._runtime_instance_id
+                    ),
+                },
             )
             identity = self._build_identity(request, resolution=resolution)
             lineage_entry = VoiceLineageEntry(

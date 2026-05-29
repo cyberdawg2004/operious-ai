@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 import sentry_sdk
 from fastapi import FastAPI, Request
@@ -28,12 +28,31 @@ from app.agents.runtime.quota_runtime import (
 from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import ClaimMapping, JWKSAuthProvider
+from app.boundary.translation import (
+    IdentityTranslationProvider,
+    InMemoryTranslationPersistence,
+    TranslationEgressRuntime,
+    TranslationIngressRuntime,
+    TranslationRuntime,
+)
+from app.boundary.voice import (
+    DeterministicStubSpeechToTextProvider,
+    DeterministicStubTextToSpeechProvider,
+    InMemoryVoicePersistence,
+    VoiceEgressRuntime,
+    VoiceIngressRuntime,
+    VoiceRuntime,
+)
+from app.boundary.voice.call import VoiceCallSessionRuntime
 from app.core.config import Settings, get_settings
 from app.core.http import close_shared_http_client, init_shared_http_client
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
 from app.db.session import dispose_engine, get_session_factory
+from app.governance.capability.runtime import (
+    build_capability_governance_runtime,
+)
 from app.hardening.observability import (
     OperationalMetricsCollector,
     initialize_alert_evaluator,
@@ -54,6 +73,8 @@ from app.runtime.tenant_production_hardening import (
     AUDIT_EXPORT_UNCONFIGURED_SIGNING_KEY,
     TenantProductionHardeningRuntime,
 )
+from app.runtime.timeline_runtime import TimelineRuntime
+from app.session.persistence import PostgresSessionPersistence
 from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.survivability import (
     PROBLEM_DETAILS_MEDIA_TYPE,
@@ -365,6 +386,77 @@ def create_app(
     initialize_alert_evaluator(alert_evaluator)
     app.state.alert_evaluator = alert_evaluator
     logger.info("alert_evaluator_register_complete")
+
+    logger.info("boundary_media_runtime_register_begin")
+    capability_governance_runtime = build_capability_governance_runtime()
+    app.state.capability_governance_runtime = capability_governance_runtime
+
+    voice_persistence = InMemoryVoicePersistence()
+    app.state.voice_runtime = VoiceRuntime(
+        ingress=VoiceIngressRuntime(
+            provider=DeterministicStubSpeechToTextProvider(),
+            persistence=voice_persistence,
+        ),
+        egress=VoiceEgressRuntime(
+            provider=DeterministicStubTextToSpeechProvider(),
+            persistence=voice_persistence,
+            capability_governance=capability_governance_runtime,
+        ),
+    )
+
+    async def _append_voice_call_timeline(
+        session_id: str,
+        dispatch_id: str,
+        tenant_id: str,
+        event_type: str,
+        payload: Mapping[str, object],
+    ) -> None:
+        session_factory = get_session_factory()
+        async with session_factory() as db_session:
+            try:
+                await TimelineRuntime(
+                    persistence=PostgresSessionPersistence(db_session),
+                ).append_event(
+                    session_id=session_id,
+                    dispatch_id=dispatch_id,
+                    tenant_id=tenant_id,
+                    event_type=event_type,
+                    payload=payload,
+                    idempotency_key=(
+                        f"voice:{event_type}:{dispatch_id}"
+                    ),
+                )
+                await db_session.commit()
+            except Exception:
+                await db_session.rollback()
+                logger.info(
+                    "voice_timeline_append_skipped",
+                    extra={
+                        "event_type": event_type,
+                        "session_id": session_id,
+                    },
+                )
+
+    app.state.voice_call_runtime = VoiceCallSessionRuntime(
+        voice_runtime=app.state.voice_runtime,
+        capability_governance=capability_governance_runtime,
+        timeline_appender=_append_voice_call_timeline,
+    )
+
+    translation_persistence = InMemoryTranslationPersistence()
+    translation_provider = IdentityTranslationProvider()
+    app.state.translation_runtime = TranslationRuntime(
+        ingress=TranslationIngressRuntime(
+            provider=translation_provider,
+            persistence=translation_persistence,
+        ),
+        egress=TranslationEgressRuntime(
+            provider=translation_provider,
+            persistence=translation_persistence,
+            capability_governance=capability_governance_runtime,
+        ),
+    )
+    logger.info("boundary_media_runtime_register_complete")
 
     logger.info("exception_handlers_register_begin")
     _register_exception_handlers(app)

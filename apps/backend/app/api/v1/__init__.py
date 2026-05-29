@@ -39,6 +39,7 @@ from app.api.v1.routers.sop_intelligence import (
 )
 from app.api.v1.routers.supervisor import router as supervisor_router
 from app.api.v1.routers.tenant import router as tenant_router
+from app.api.v1.routers.voice import router as voice_router
 
 api_router_v1 = APIRouter()
 api_router_v1.include_router(health_router)
@@ -69,5 +70,6 @@ api_router_v1.include_router(
 )
 api_router_v1.include_router(quota_operations_router, prefix="/quota")
 api_router_v1.include_router(queue_operations_router)
+api_router_v1.include_router(voice_router, prefix="/voice")
 
 __all__ = ["api_router_v1"]

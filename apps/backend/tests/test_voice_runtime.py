@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import ClassVar
+
 import pytest
 
 from app.boundary.voice import (
@@ -14,6 +17,7 @@ from app.boundary.voice import (
     IngressTranscribeResult,
     IngressTranscribeRequest,
     VoiceAudioHandle,
+    VoiceConfigurationError,
     VoiceContainmentError,
     VoiceDirection,
     VoiceEgressRuntime,
@@ -21,6 +25,75 @@ from app.boundary.voice import (
     VoiceRuntime,
     verify_voice_replay,
 )
+from app.governance.context import GovernanceContext
+from app.governance.decisions import PolicyEvaluationResult
+from app.governance.enforcement.handlers import (
+    AllowHandler,
+    DegradeHandler,
+    DenyHandler,
+    EnforcementHandlerRegistry,
+    EscalateHandler,
+    RedactHandler,
+    RequireApprovalHandler,
+)
+from app.governance.enforcement.runtime import GovernanceRuntime
+from app.governance.enums import Decision, EnforcementStage
+from app.governance.evaluators.engine import PolicyEvaluationEngine
+from app.governance.persistence.memory import InMemoryGovernanceRepository
+from app.governance.policies.base import BaseGovernancePolicy
+from app.governance.policies.chain import PolicyChain
+from app.governance.subjects.base import SubjectKind
+
+
+class _AllowCapabilityPolicy(BaseGovernancePolicy):
+    name: ClassVar[str] = "voice_runtime_allow_capability"
+    supported_stages: ClassVar[frozenset[EnforcementStage]] = (
+        frozenset({EnforcementStage.PRE_REQUEST})
+    )
+    applicable_subject_kinds: ClassVar[frozenset[SubjectKind]] = (
+        frozenset({SubjectKind.CAPABILITY})
+    )
+
+    async def evaluate(
+        self, context: GovernanceContext
+    ) -> Sequence[PolicyEvaluationResult]:
+        return (
+            PolicyEvaluationResult(
+                policy_name=self.name,
+                rule_id="voice_runtime_allowed",
+                decision=Decision.ALLOW,
+                reason="voice runtime fixture allows capability gate",
+            ),
+        )
+
+
+def _handlers() -> EnforcementHandlerRegistry:
+    registry = EnforcementHandlerRegistry()
+    for handler in (
+        AllowHandler(),
+        DenyHandler(),
+        RedactHandler(),
+        DegradeHandler(),
+        EscalateHandler(),
+        RequireApprovalHandler(),
+    ):
+        registry.register(handler)
+    return registry
+
+
+def _allowing_governance() -> GovernanceRuntime:
+    return GovernanceRuntime(
+        engine=PolicyEvaluationEngine(),
+        handler_registry=_handlers(),
+        chains={
+            EnforcementStage.PRE_REQUEST: PolicyChain(
+                chain_id="voice-runtime-test-capability",
+                stage=EnforcementStage.PRE_REQUEST,
+                policies=(_AllowCapabilityPolicy(),),
+            )
+        },
+        persistence=InMemoryGovernanceRepository(),
+    )
 
 
 @pytest.fixture()
@@ -33,9 +106,23 @@ def runtime() -> VoiceRuntime:
             provider=stt, persistence=persistence
         ),
         egress=VoiceEgressRuntime(
-            provider=tts, persistence=persistence
+            provider=tts,
+            persistence=persistence,
+            capability_governance=_allowing_governance(),
         ),
     )
+
+
+def test_voice_egress_requires_governance_at_construction() -> None:
+    persistence = InMemoryVoicePersistence()
+    tts = DeterministicStubTextToSpeechProvider()
+
+    with pytest.raises(VoiceConfigurationError):
+        VoiceEgressRuntime(
+            provider=tts,
+            persistence=persistence,
+            capability_governance=None,
+        )
 
 
 @pytest.mark.asyncio

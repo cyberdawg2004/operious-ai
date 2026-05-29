@@ -62,6 +62,7 @@ from app.boundary.voice.normalization.normalizer import (
 )
 from app.boundary.voice.persistence import (
     InMemoryVoicePersistence,
+    PostgresVoicePersistence,
     VoiceEgressRecord,
     VoiceIngressRecord,
     VoicePersistenceProtocol,
@@ -96,6 +97,7 @@ __all__ = [
     "InMemoryVoicePersistence",
     "IngressTranscribeRequest",
     "IngressTranscribeResult",
+    "PostgresVoicePersistence",
     "SpeechToTextProviderRequest",
     "SpeechToTextProviderResponse",
     "TextToSpeechProviderRequest",

@@ -178,6 +178,12 @@ class VoiceIngressRuntime:
                 transcript_fingerprint=transcript_fp,
                 audio=request.audio,
                 captured_at=ended_at,
+                attributes={
+                    **dict(request.attributes),
+                    "runtime_instance_id": str(
+                        self._runtime_instance_id
+                    ),
+                },
             )
             identity = self._build_identity(request, resolution=resolution)
             lineage_entry = VoiceLineageEntry(

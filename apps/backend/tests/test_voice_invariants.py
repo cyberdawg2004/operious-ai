@@ -39,6 +39,10 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # cross-substrate legality decision surface; the rest of
     # governance remains opaque to voice.
     "app.governance.capability",
+    # PR_RT4: durable voice records may use the same narrow Postgres
+    # foundation exemption as the apex boundary/session substrates.
+    "app.db.base",
+    "app.db.repository",
 )
 
 _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (
