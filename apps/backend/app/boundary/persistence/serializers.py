@@ -41,6 +41,11 @@ def ingress_result_to_record(
     received = received_at or (
         event.received_at if event is not None else result.started_at
     )
+    metadata = dict(result.metadata)
+    source_language = _source_language_from_metadata(metadata)
+    canonical_payload = dict(result.normalization.canonical_payload)
+    canonical_payload.setdefault("source_language", source_language)
+    metadata.setdefault("source_language", source_language)
     return BoundaryIngressRecord(
         ingress_id=result.ingress_id,
         direction=result.direction,
@@ -79,11 +84,10 @@ def ingress_result_to_record(
         latency_ms=result.latency_ms,
         correlation_id=result.correlation_id,
         request_id=result.request_id,
-        canonical_payload=dict(
-            result.normalization.canonical_payload
-        ),
+        canonical_payload=canonical_payload,
         error=result.error,
-        metadata=dict(result.metadata),
+        source_language=source_language,
+        metadata=metadata,
     )
 
 
@@ -105,14 +109,20 @@ def ingress_record_to_result(
         external_message_id=record.external_message_id,
         external_conversation_id=record.external_conversation_id,
         external_emitted_at=record.external_emitted_at,
-        canonical_payload=dict(record.canonical_payload),
+        canonical_payload={
+            **dict(record.canonical_payload),
+            "source_language": record.source_language,
+        },
         error=(
             record.error
             if record.normalization_status
             is not BoundaryNormalizationStatus.OK
             else None
         ),
-        metadata=dict(record.metadata),
+        metadata={
+            **dict(record.metadata),
+            "source_language": record.source_language,
+        },
     )
     event = None
     if (
@@ -131,7 +141,10 @@ def ingress_record_to_result(
             external_message_id=as_external_message_id(
                 record.external_message_id
             ),
-            canonical_payload=dict(record.canonical_payload),
+            canonical_payload={
+                **dict(record.canonical_payload),
+                "source_language": record.source_language,
+            },
             received_at=record.received_at,
             external_conversation_id=(
                 as_external_conversation_id(
@@ -142,7 +155,10 @@ def ingress_record_to_result(
             ),
             external_emitted_at=record.external_emitted_at,
             adapter_name=record.adapter_name,
-            metadata=dict(record.metadata),
+            metadata={
+                **dict(record.metadata),
+                "source_language": record.source_language,
+            },
         )
     return BoundaryIngressResult(
         ingress_id=record.ingress_id,
@@ -163,8 +179,18 @@ def ingress_record_to_result(
         request_id=record.request_id,
         tenant_id=record.tenant_id,
         error=record.error,
-        metadata=dict(record.metadata),
+        metadata={
+            **dict(record.metadata),
+            "source_language": record.source_language,
+        },
     )
+
+
+def _source_language_from_metadata(metadata: dict[str, object]) -> str:
+    language = metadata.get("source_language")
+    if isinstance(language, str) and language.strip():
+        return language.strip()
+    return "en"
 
 
 def egress_result_to_record(

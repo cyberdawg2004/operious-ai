@@ -45,6 +45,7 @@ class BoundaryIngressResponse(BaseModel):
     request_id: str | None = None
     canonical_payload: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
+    source_language: str = "en"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -93,6 +94,7 @@ class BoundaryIngressResponse(BaseModel):
             request_id=record.request_id,
             canonical_payload=dict(record.canonical_payload),
             error=record.error,
+            source_language=record.source_language,
             metadata=dict(record.metadata),
         )
 

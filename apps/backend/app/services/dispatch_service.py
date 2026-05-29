@@ -577,6 +577,7 @@ def _to_coordination_request(
                     "source_id": ingress.source_id,
                     "external_message_id": ingress.external_message_id,
                     "canonical_payload": dict(ingress.canonical_payload),
+                    "source_language": ingress.source_language,
                 },
                 schema_version="1",
             ),

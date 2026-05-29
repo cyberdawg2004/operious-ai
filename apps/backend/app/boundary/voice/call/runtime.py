@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
+from importlib import import_module
+from typing import Protocol, cast
 
 from app.boundary.voice.call.turn_taking import (
     BargeinDetector,
@@ -43,6 +45,10 @@ VoiceTimelineAppender = Callable[
 ]
 
 
+class _LanguageDetector(Protocol):
+    def detect(self, text: str) -> str: ...
+
+
 class VoiceCallState(StrEnum):
     IDLE = "idle"
     AWAITING_GREETING = "awaiting_greeting"
@@ -63,6 +69,7 @@ class VoiceCallContext:
     turn_count: int
     current_transcript: str | None
     last_activity: datetime
+    language: str = "en"
 
 
 @dataclass(frozen=True)
@@ -85,6 +92,7 @@ class VoiceCallSessionRuntime:
         capability_governance: GovernanceRuntime,
         silence_detector: SilenceDetector | None = None,
         bargein_detector: BargeinDetector | None = None,
+        language_detector: _LanguageDetector | None = None,
         timeline_appender: VoiceTimelineAppender | None = None,
     ) -> None:
         if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
@@ -95,6 +103,7 @@ class VoiceCallSessionRuntime:
         self._capability_governance = capability_governance
         self._silence_detector = silence_detector or SilenceDetector()
         self._bargein_detector = bargein_detector or BargeinDetector()
+        self._language_detector = language_detector or _default_language_detector()
         self._timeline_appender = timeline_appender
         self._contexts: dict[str, VoiceCallContext] = {}
         self._audio_chunks: dict[str, list[VoiceAudioHandle]] = {}
@@ -121,6 +130,7 @@ class VoiceCallSessionRuntime:
             turn_count=0,
             current_transcript=None,
             last_activity=now,
+            language="en",
         )
         self._contexts[call_id] = context
         self._audio_chunks[call_id] = []
@@ -183,12 +193,17 @@ class VoiceCallSessionRuntime:
             audio_handle,
         )
         chunks.clear()
+        language = self._detect_transcript_language(
+            transcript,
+            fallback=processing.language,
+        )
         return self._store(
             replace(
                 processing,
                 turn_count=processing.turn_count + 1,
                 current_transcript=transcript,
                 last_activity=datetime.now(UTC),
+                language=language,
             )
         )
 
@@ -221,7 +236,7 @@ class VoiceCallSessionRuntime:
         envelope = await self._voice_runtime.egress.synthesize(
             EgressSynthesizeRequest(
                 text=response_text,
-                target_language="en",
+                target_language=context.language,
                 audio_format=AudioFormat.OPUS,
                 sample_rate_hz=16000,
                 seed=f"voice-response|{turn_id}",
@@ -329,7 +344,7 @@ class VoiceCallSessionRuntime:
         envelope = await self._voice_runtime.ingress.transcribe(
             IngressTranscribeRequest(
                 audio=audio_handle,
-                target_language="en",
+                target_language=context.language,
                 seed=f"voice-utterance|{turn_id}",
                 correlation_id=context.call_id,
                 tenant_id=context.tenant_id,
@@ -352,6 +367,18 @@ class VoiceCallSessionRuntime:
                 "voice transcription returned no transcript"
             )
         return envelope.result.transcript.text
+
+    def _detect_transcript_language(
+        self,
+        transcript: str,
+        *,
+        fallback: str,
+    ) -> str:
+        try:
+            detected = self._language_detector.detect(transcript)
+        except Exception:  # noqa: BLE001
+            return fallback or "en"
+        return detected or fallback or "en"
 
     def _require_context(
         self, call_id: str, expected_tenant_id: str
@@ -425,6 +452,12 @@ def derive_call_id(
 
 def derive_turn_id(*, call_id: str, turn_count: int) -> str:
     return str(uuid.uuid5(_TURN_NAMESPACE, f"{call_id}|turn|{turn_count}"))
+
+
+def _default_language_detector() -> _LanguageDetector:
+    module = import_module("app.language")
+    detector_type = getattr(module, "LanguageDetector")
+    return cast(_LanguageDetector, detector_type())
 
 
 def _chunk_time(audio_handle: VoiceAudioHandle, now: datetime) -> datetime:

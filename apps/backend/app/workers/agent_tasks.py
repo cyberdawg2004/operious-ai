@@ -72,6 +72,13 @@ from app.coordination.persistence import (
     CoordinationRecord,
     PostgresCoordinationPersistence,
 )
+from app.boundary.translation import (
+    IdentityTranslationProvider,
+    InMemoryTranslationPersistence,
+    TranslationEgressRuntime,
+    TranslationIngressRuntime,
+    TranslationRuntime,
+)
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.db.session import dispose_engine, get_session_factory, reset_engine_state
@@ -82,6 +89,7 @@ from app.execution import (
     PostgresExecutionPersistence,
 )
 from app.governance.persistence import PostgresGovernanceRepository
+from app.governance.capability.runtime import build_capability_governance_runtime
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
@@ -282,7 +290,14 @@ class _DiagnosticExecutionWorkItem:
     session_id: str
     tenant_id: str
     content: str
+    source_language: str = "en"
     conversation_turn_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _DispatchContentContext:
+    content: str
+    source_language: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,7 +401,7 @@ async def _prepare_diagnostic_execution(
         )
         await session.commit()
 
-        content = await _load_dispatch_content(
+        content_context = await _load_dispatch_content(
             coordination_repo=coordination_repo,
             session_repo=session_repo,
             dispatch_id=dispatch_id,
@@ -401,7 +416,8 @@ async def _prepare_diagnostic_execution(
             dispatch_id=dispatch_id,
             session_id=session_id,
             tenant_id=tenant_id,
-            content=content,
+            content=content_context.content,
+            source_language=content_context.source_language,
             conversation_turn_id=conversation_turn_id,
         )
 
@@ -465,6 +481,7 @@ async def _load_diagnostic_reasoning_snapshot(
                     attempt_id=work_item.attempt_id,
                     attempt_number=work_item.attempt_number,
                     worker_id=worker_id,
+                    source_language=work_item.source_language,
                 )
                 circuit_snapshot = await ProviderCircuitBreaker(
                     session=session,
@@ -1005,7 +1022,7 @@ async def _load_dispatch_content(
     dispatch_id: str,
     session_id: str,
     tenant_id: str,
-) -> str:
+) -> _DispatchContentContext:
     session_record = await session_repo.get_session(
         as_session_id(session_id),
         expected_tenant_id=tenant_id,
@@ -1025,14 +1042,34 @@ async def _load_dispatch_content(
     return _extract_content(dispatch)
 
 
-def _extract_content(dispatch: CoordinationRecord) -> str:
+def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
     body = dispatch.payload_body
+    source_language = _extract_source_language(body)
     canonical_payload = body.get("canonical_payload")
     if isinstance(canonical_payload, Mapping):
         extracted = _extract_text(cast(Mapping[str, Any], canonical_payload))
         if extracted:
-            return extracted
-    return _extract_text(body)
+            return _DispatchContentContext(
+                content=extracted,
+                source_language=source_language,
+            )
+    return _DispatchContentContext(
+        content=_extract_text(body),
+        source_language=source_language,
+    )
+
+
+def _extract_source_language(body: Mapping[str, Any]) -> str:
+    language = body.get("source_language")
+    if isinstance(language, str) and language.strip():
+        return language.strip().lower()
+    canonical_payload = body.get("canonical_payload")
+    if isinstance(canonical_payload, Mapping):
+        payload = cast(Mapping[str, Any], canonical_payload)
+        payload_language = payload.get("source_language")
+        if isinstance(payload_language, str) and payload_language.strip():
+            return payload_language.strip().lower()
+    return "en"
 
 
 def _extract_text(payload: Mapping[str, Any]) -> str:
@@ -1106,6 +1143,7 @@ async def _append_resolution_proposal_after_diagnostic(
                     diagnostic_category=result.category,
                     diagnostic_confidence=result.confidence,
                     original_content=work_item.content,
+                    source_language=work_item.source_language,
                     retrieved_citations=result.retrieved_citations,
                 )
             )
@@ -1123,6 +1161,7 @@ async def _append_resolution_proposal_after_diagnostic(
             )
             draft = await ResolutionOutboundDraftRuntime(
                 persistence=resolution_persistence,
+                translation_runtime=_translation_runtime(session),
             ).create_draft_for_proposal(proposal)
             await timeline.append_event(
                 dispatch_id=work_item.dispatch_id,
@@ -1183,6 +1222,26 @@ def _action_orchestration_runtime(
         ),
         approval_repository=PostgresActionApprovalRepository(session),
         timeline_runtime=timeline,
+    )
+
+
+def _translation_runtime(session: AsyncSession) -> TranslationRuntime:
+    persistence = InMemoryTranslationPersistence()
+    provider = IdentityTranslationProvider()
+    governance = build_capability_governance_runtime(
+        persistence=PostgresGovernanceRepository(session)
+    )
+    return TranslationRuntime(
+        ingress=TranslationIngressRuntime(
+            provider=provider,
+            persistence=persistence,
+            capability_governance=governance,
+        ),
+        egress=TranslationEgressRuntime(
+            provider=provider,
+            persistence=persistence,
+            capability_governance=governance,
+        ),
     )
 
 
@@ -1595,6 +1654,7 @@ def _dead_letter_task_payload(
         "attempt_number": work_item.attempt_number,
         "dispatch_id": work_item.dispatch_id,
         "session_id": work_item.session_id,
+        "source_language": work_item.source_language,
         "tenant_id": work_item.tenant_id,
     }
 

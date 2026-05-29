@@ -9,6 +9,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 
+from app.boundary.translation import (
+    CANONICAL_LANGUAGE,
+    EgressLocalizeRequest,
+    LocalizationContext,
+    TranslationPayload,
+    TranslationRuntime,
+    derive_formality,
+)
+from app.governance.capability import OperationalAct
+from app.identity import AuthorityContext, TenantId
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
     ResolutionGovernanceVerdict,
@@ -138,6 +148,7 @@ class ResolutionProposalRequest:
     diagnostic_category: str
     diagnostic_confidence: float
     original_content: str
+    source_language: str = "en"
     retrieved_citations: Sequence[Mapping[str, Any]] = ()
 
 
@@ -282,6 +293,7 @@ class ResolutionRuntime:
             dispatch_id=request.dispatch_id,
             diagnostic_event_id=request.diagnostic_event_id,
             proposed_customer_reply=reply,
+            source_language=_normalise_language(request.source_language),
             resolution_category=category,
             confidence=_clamp_confidence(request.diagnostic_confidence),
             recommended_actions=recommended_actions,
@@ -327,8 +339,10 @@ class ResolutionOutboundDraftRuntime:
         self,
         *,
         persistence: ResolutionOutboundDraftPersistenceProtocol,
+        translation_runtime: TranslationRuntime | None = None,
     ) -> None:
         self._persistence = persistence
+        self._translation_runtime = translation_runtime
 
     async def create_draft_for_proposal(
         self,
@@ -347,6 +361,11 @@ class ResolutionOutboundDraftRuntime:
         if existing is not None:
             return existing
 
+        canonical_reply = proposal.proposed_customer_reply
+        localized_reply = await self._localized_reply(
+            canonical_reply=canonical_reply,
+            proposal=proposal,
+        )
         now = datetime.now(tz=timezone.utc)
         record = ResolutionOutboundDraftRecord(
             draft_id=draft_id,
@@ -358,17 +377,75 @@ class ResolutionOutboundDraftRuntime:
             diagnostic_event_id=proposal.diagnostic_event_id,
             governance_decision_id=proposal.governance_decision_id,
             status=resolution_outbound_draft_status_for_proposal(proposal),
-            draft_body=proposal.proposed_customer_reply,
-            draft_body_sha256=_sha256_hex(proposal.proposed_customer_reply),
+            draft_body=localized_reply,
+            draft_body_sha256=_sha256_hex(localized_reply),
             resolution_category=proposal.resolution_category,
             confidence=proposal.confidence,
             created_at=now,
             updated_at=now,
+            metadata={
+                "canonical_reply": canonical_reply,
+                "localized_reply": localized_reply,
+                "source_language": proposal.source_language,
+            },
         )
         return await self._persistence.create_resolution_outbound_draft(
             record,
             expected_tenant_id=proposal.tenant_id,
         )
+
+    async def _localized_reply(
+        self,
+        *,
+        canonical_reply: str,
+        proposal: ResolutionProposalRecord,
+    ) -> str:
+        source_language = _normalise_language(proposal.source_language)
+        if source_language == CANONICAL_LANGUAGE:
+            return canonical_reply
+        if self._translation_runtime is None:
+            return canonical_reply
+        try:
+            envelope = await self._translation_runtime.egress.localize(
+                EgressLocalizeRequest(
+                    canonical=TranslationPayload(
+                        text=canonical_reply,
+                        language=CANONICAL_LANGUAGE,
+                    ),
+                    context=LocalizationContext(
+                        target_language=source_language,
+                        formality=derive_formality(
+                            base_language=source_language
+                        ),
+                    ),
+                    seed=(
+                        "resolution-draft|"
+                        f"{proposal.tenant_id}|{proposal.proposal_id}|"
+                        f"{source_language}"
+                    ),
+                    correlation_id=proposal.dispatch_id,
+                    request_id=str(proposal.proposal_id),
+                    tenant_id=proposal.tenant_id,
+                    authority=AuthorityContext(
+                        tenant_id=TenantId(proposal.tenant_id),
+                        capabilities=frozenset(
+                            {
+                                OperationalAct.BOUNDARY_TRANSLATION_EGRESS.value
+                            }
+                        ),
+                    ),
+                    attributes={"source_language": source_language},
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return canonical_reply
+        result = envelope.result
+        localization = getattr(result, "localization", None)
+        localized_payload = getattr(localization, "localized_payload", None)
+        localized_text = getattr(localized_payload, "text", None)
+        if envelope.is_fully_clean and isinstance(localized_text, str):
+            return localized_text
+        return canonical_reply
 
 
 def resolution_proposal_timeline_payload(
@@ -876,6 +953,11 @@ def _clamp_confidence(value: float) -> float:
     if value > 1:
         return 1.0
     return value
+
+
+def _normalise_language(language: str) -> str:
+    cleaned = language.strip().lower()
+    return cleaned or CANONICAL_LANGUAGE
 
 
 def _sha256_hex(value: str) -> str:

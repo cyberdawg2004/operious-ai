@@ -77,10 +77,14 @@ The confidence value must be a JSON number between 0.0 and 1.0, not a word.
 Use charging_issue for charger, cable, battery, or device-not-charging
 symptoms. Use product_defect for physical/manufacturing defect evidence that
 is not primarily a charging or connectivity symptom.
-Use canonical English. Preserve any governance-significant terms present in
-the input or citations, and do not invent refunds, approvals, denials,
-chargebacks, RMA, legal, fraud, compliance, replacement, credit, or escalation
-terms that are not grounded in the input or citations."""
+Use canonical English for all output.
+The customer's source language is: {source_language}.
+If source_language is not 'en', the customer will receive a translated
+response - respond in English.
+Preserve any governance-significant terms present in the input or citations,
+and do not invent refunds, approvals, denials, chargebacks, RMA, legal, fraud,
+compliance, replacement, credit, or escalation terms that are not grounded in
+the input or citations."""
 
 _DIAGNOSTIC_OUTPUT_FIELDS = frozenset(DiagnosticLLMOutput.model_fields)
 _CATEGORY_VALUES = tuple(category.value for category in DiagnosticCategory)
@@ -108,6 +112,7 @@ class DiagnosticReasoningSnapshot:
     dispatch_id: str
     session_id: str
     content: str
+    source_language: str
     attempt_id: str | None
     attempt_number: int | None
     worker_id: str | None
@@ -170,6 +175,7 @@ class DiagnosticCognitionRuntime:
         attempt_id: str | None = None,
         attempt_number: int | None = None,
         worker_id: str | None = None,
+        source_language: str = "en",
     ) -> DiagnosticReasoningResult:
         snapshot = await self.load_reasoning_snapshot(
             tenant_id=tenant_id,
@@ -180,6 +186,7 @@ class DiagnosticCognitionRuntime:
             attempt_id=attempt_id,
             attempt_number=attempt_number,
             worker_id=worker_id,
+            source_language=source_language,
         )
         try:
             completion = await self.complete_reasoning_snapshot(snapshot)
@@ -211,6 +218,7 @@ class DiagnosticCognitionRuntime:
         attempt_id: str | None = None,
         attempt_number: int | None = None,
         worker_id: str | None = None,
+        source_language: str = "en",
     ) -> DiagnosticReasoningSnapshot:
         retrieval = await self._knowledge_runtime.retrieve(
             tenant_id=tenant_id,
@@ -233,9 +241,10 @@ class DiagnosticCognitionRuntime:
             attempt_id=attempt_id,
         )
         messages = (DiagnosticLLMMessage(role="user", content=prompt),)
+        system_prompt = _render_system_prompt(source_language)
         prompt_sha256 = _sha256_text(
             _full_prompt_snapshot(
-                system_prompt=_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 messages=messages,
             )
         )
@@ -251,6 +260,7 @@ class DiagnosticCognitionRuntime:
             dispatch_id=dispatch_id,
             session_id=session_id,
             content=content,
+            source_language=_normalise_source_language(source_language),
             attempt_id=attempt_id,
             attempt_number=attempt_number,
             worker_id=worker_id,
@@ -258,7 +268,7 @@ class DiagnosticCognitionRuntime:
             retrieved_citations=tuple(
                 dict(citation) for citation in retrieved_citations
             ),
-            system_prompt=_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             messages=messages,
             usage_id=usage_id,
             provider_name=self._llm_client.provider_name,
@@ -914,6 +924,18 @@ def _extract_json(text: str) -> str:
     if start == -1 or end == -1 or end < start:
         return stripped
     return stripped[start : end + 1]
+
+
+def _render_system_prompt(source_language: str) -> str:
+    return _SYSTEM_PROMPT.replace(
+        "{source_language}",
+        _normalise_source_language(source_language),
+    )
+
+
+def _normalise_source_language(source_language: str) -> str:
+    cleaned = source_language.strip().lower()
+    return cleaned or "en"
 
 
 def _render_user_prompt(

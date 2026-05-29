@@ -125,6 +125,9 @@ class BoundaryIngressRow(Base):
         JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_language: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="en", server_default=text("'en'")
+    )
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
@@ -150,6 +153,12 @@ class BoundaryIngressRow(Base):
             "event_id",
             unique=True,
             postgresql_where=text("event_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_boundary_ingress_tenant_language",
+            "tenant_id",
+            "source_language",
+            postgresql_where=text("source_language != 'en'"),
         ),
     )
 

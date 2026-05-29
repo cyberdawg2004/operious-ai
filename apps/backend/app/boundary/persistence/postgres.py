@@ -424,6 +424,7 @@ def _ingress_record_to_values(
         "request_id": record.request_id,
         "canonical_payload": dict(record.canonical_payload),
         "error": record.error,
+        "source_language": record.source_language,
         "metadata_json": dict(record.metadata),
     }
 
@@ -469,6 +470,7 @@ def _ingress_row_to_record(
         request_id=row.request_id,
         canonical_payload=_as_dict(row.canonical_payload),
         error=row.error,
+        source_language=row.source_language,
         metadata=_as_dict(row.metadata_json),
     )
 

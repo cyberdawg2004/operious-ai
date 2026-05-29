@@ -457,6 +457,7 @@ def create_app(
         ingress=TranslationIngressRuntime(
             provider=translation_provider,
             persistence=translation_persistence,
+            capability_governance=capability_governance_runtime,
         ),
         egress=TranslationEgressRuntime(
             provider=translation_provider,

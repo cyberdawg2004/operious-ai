@@ -64,6 +64,7 @@ from app.boundary.persistence import (
     BoundaryPersistenceProtocol,
     PostgresBoundaryPersistence,
 )
+from app.boundary.translation import TranslationRuntime
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     PostgresCoordinationPersistence,
@@ -248,6 +249,7 @@ def get_boundary_repository(
 
 
 def get_ticket_ingress_service(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> TicketIngressService:
     """Return the ticket-ingress write service for this request."""
@@ -274,6 +276,10 @@ def get_ticket_ingress_service(
         session=session,
         tenant_configuration_runtime=tenant_runtime,
         admission_service=admission_service,
+        translation_runtime=cast(
+            TranslationRuntime,
+            request.app.state.translation_runtime,
+        ),
         webhook_queue_by_channel={
             TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.LARK: DIAGNOSTIC_QUEUE_PRIORITY,

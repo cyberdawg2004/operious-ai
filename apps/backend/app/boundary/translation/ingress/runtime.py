@@ -38,6 +38,7 @@ from app.boundary.translation.envelopes import (
     TranslationEnvelope,
 )
 from app.boundary.translation.exceptions import (
+    TranslationConfigurationError,
     TranslationContainmentError,
     TranslationError,
     TranslationProviderError,
@@ -110,8 +111,14 @@ class TranslationIngressRuntime:
         normalizer: BoundaryNormalizer | None = None,
         validator: SemanticPreservationValidator | None = None,
         runtime_instance_id: uuid.UUID | None = None,
-        capability_governance: GovernanceRuntime | None = None,
+        capability_governance: GovernanceRuntime,
     ) -> None:
+        if capability_governance is None:  # pyright: ignore[reportUnnecessaryComparison]
+            raise TranslationConfigurationError(
+                "TranslationIngressRuntime requires capability_governance. "
+                "Translation ingress is an inbound action and must be "
+                "governed."
+            )
         self._provider = provider
         self._persistence = persistence
         self._normalizer = normalizer or BoundaryNormalizer()
@@ -130,7 +137,7 @@ class TranslationIngressRuntime:
             )
         )
         self._sequence = 0
-        # 2.75-\u03b1: capability legality gate. Inert when None.
+        # 2.75-\u03b1: capability legality gate.
         self._capability_governance = capability_governance
 
     @property

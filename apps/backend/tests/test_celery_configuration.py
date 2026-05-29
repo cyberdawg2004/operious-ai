@@ -187,6 +187,7 @@ def test_diagnostic_dlq_metadata_carries_traceback_and_task_payload() -> None:
         "attempt_number": 4,
         "dispatch_id": "dispatch-dlq",
         "session_id": "session-dlq",
+        "source_language": "en",
         "tenant_id": "tenant-dlq",
     }
 

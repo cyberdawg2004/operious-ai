@@ -248,6 +248,7 @@ def _record_to_row(record: ResolutionProposalRecord) -> ResolutionProposalRow:
             else None
         ),
         proposed_customer_reply=record.proposed_customer_reply,
+        source_language=record.source_language,
         resolution_category=record.resolution_category,
         confidence=record.confidence,
         recommended_actions=[
@@ -281,6 +282,7 @@ def _row_to_record(row: ResolutionProposalRow) -> ResolutionProposalRecord:
             else None
         ),
         proposed_customer_reply=row.proposed_customer_reply,
+        source_language=row.source_language,
         resolution_category=row.resolution_category,
         confidence=row.confidence,
         recommended_actions=tuple(_as_list_of_dict(row.recommended_actions)),
@@ -314,6 +316,7 @@ def _draft_record_to_row(
         status=record.status.value,
         draft_body=record.draft_body,
         draft_body_sha256=record.draft_body_sha256,
+        metadata_json=dict(record.metadata),
         resolution_category=record.resolution_category,
         confidence=record.confidence,
         created_at=record.created_at,
@@ -336,6 +339,7 @@ def _draft_row_to_record(
         status=ResolutionOutboundDraftStatus(row.status),
         draft_body=row.draft_body,
         draft_body_sha256=row.draft_body_sha256,
+        metadata=_as_dict(row.metadata_json),
         resolution_category=row.resolution_category,
         confidence=row.confidence,
         created_at=row.created_at,
@@ -366,6 +370,12 @@ def _as_list_of_dict(value: object) -> list[dict[str, Any]]:
             copied_item[str(key)] = item_value
         items.append(copied_item)
     return items
+
+
+def _as_dict(value: object) -> dict[str, Any]:
+    if not _is_object_mapping(value):
+        return {}
+    return {str(key): item_value for key, item_value in value.items()}
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:

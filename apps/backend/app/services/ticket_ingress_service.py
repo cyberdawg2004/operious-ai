@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping, cast
@@ -41,12 +42,19 @@ from app.boundary.models.source import BoundarySource
 from app.boundary.persistence import BoundaryPersistenceProtocol
 from app.boundary.persistence.records import WebhookNonceRecord
 from app.boundary.registry import BoundaryAdapterRegistry
+from app.boundary.translation import (
+    IngressTranslateRequest,
+    TranslationPayload,
+    TranslationRuntime,
+)
 from app.db.tenant_context import set_current_tenant
+from app.governance.capability import OperationalAct
 from app.hardening.admission import (
     AdmissionDecision,
     AdmissionOutcome,
 )
-from app.identity import AuthorityContext
+from app.identity import AuthorityContext, TenantId
+from app.language import LanguageDetector
 from app.services.admission_service import AdmissionService
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
@@ -81,6 +89,8 @@ class TicketIngressService:
         session: AsyncSession,
         tenant_configuration_runtime: TenantConfigurationRuntime | None = None,
         admission_service: AdmissionService | None = None,
+        translation_runtime: TranslationRuntime | None = None,
+        language_detector: LanguageDetector | None = None,
         webhook_queue_by_channel: (
             Mapping[TenantChannelType, Sequence[str]] | None
         ) = None,
@@ -89,6 +99,8 @@ class TicketIngressService:
         self._session = session
         self._tenant_configuration_runtime = tenant_configuration_runtime
         self._admission_service = admission_service
+        self._translation_runtime = translation_runtime
+        self._language_detector = language_detector or LanguageDetector()
         self._webhook_queue_by_channel = {
             channel_type: tuple(queue_names)
             for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
@@ -103,6 +115,12 @@ class TicketIngressService:
         language_code: str,
         expected_tenant_id: str,
     ) -> TicketIngressServiceResult:
+        canonical_content, source_language = await self._canonicalize_ticket_text(
+            raw_text=raw_content,
+            tenant_id=expected_tenant_id,
+            correlation_id=external_id,
+            request_id=external_id,
+        )
         runtime = BoundaryIngressRuntime(
             adapters=_adapter_registry(),
             persistence=self._persistence,
@@ -111,9 +129,10 @@ class TicketIngressService:
             _to_boundary_request(
                 external_id=external_id,
                 channel=channel,
-                raw_content=raw_content,
-                language_code=language_code,
+                raw_content=canonical_content,
+                language_code="en",
                 expected_tenant_id=expected_tenant_id,
+                source_language=source_language,
             )
         )
         if envelope.error is not None:
@@ -129,6 +148,61 @@ class TicketIngressService:
             ingress_id=str(result.ingress_id),
             canonical_envelope_id=str(result.event_id),
         )
+
+    async def _canonicalize_ticket_text(
+        self,
+        *,
+        raw_text: str,
+        tenant_id: str,
+        correlation_id: str,
+        request_id: str,
+    ) -> tuple[str, str]:
+        try:
+            detected_language = self._language_detector.detect(raw_text)
+        except Exception:  # noqa: BLE001
+            return raw_text, "en"
+        if detected_language == "en":
+            return raw_text, "en"
+        if self._translation_runtime is None:
+            return raw_text, "en"
+        try:
+            envelope = await self._translation_runtime.ingress.translate(
+                IngressTranslateRequest(
+                    source=TranslationPayload(
+                        text=raw_text,
+                        language=detected_language,
+                    ),
+                    seed=(
+                        "ticket-ingress|"
+                        f"{tenant_id}|{correlation_id}|"
+                        f"{detected_language}|en"
+                    ),
+                    correlation_id=correlation_id,
+                    request_id=request_id,
+                    tenant_id=tenant_id,
+                    authority=AuthorityContext(
+                        tenant_id=TenantId(tenant_id),
+                        capabilities=frozenset(
+                            {
+                                OperationalAct.BOUNDARY_TRANSLATION_INGRESS.value
+                            }
+                        ),
+                    ),
+                    attributes={
+                        "source_language": detected_language,
+                        "target_language": "en",
+                    },
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return raw_text, "en"
+        result = envelope.result
+        projection = getattr(result, "projection", None)
+        canonical_payload = getattr(projection, "canonical_payload", None)
+        canonical_text = getattr(canonical_payload, "text", None)
+        if envelope.is_fully_clean and isinstance(canonical_text, str):
+            return canonical_text, detected_language
+        return raw_text, "en"
 
     async def process_channel_webhook(
         self,
@@ -244,8 +318,38 @@ class TicketIngressService:
             webhook_secret=webhook_secret,
             routing_address=channel_config.routing_address,
         )
-        payload = IngressPayload(
+        webhook_request_id = _webhook_request_id(
+            channel=tenant_channel_type.value,
+            routing_address=channel_config.routing_address,
             body=body,
+            raw_body=raw_body,
+        )
+        webhook_correlation_id = _webhook_correlation_id(
+            channel=tenant_channel_type.value,
+            routing_address=channel_config.routing_address,
+            body=body,
+            raw_body=raw_body,
+        )
+        source_language = "en"
+        canonical_body = body
+        ticket_text = _extract_webhook_ticket_text(
+            channel_type=tenant_channel_type,
+            body=body,
+        )
+        if ticket_text:
+            canonical_text, source_language = await self._canonicalize_ticket_text(
+                raw_text=ticket_text,
+                tenant_id=channel_config.tenant_id,
+                correlation_id=webhook_correlation_id,
+                request_id=webhook_request_id,
+            )
+            canonical_body = _replace_webhook_ticket_text(
+                channel_type=tenant_channel_type,
+                body=body,
+                text=canonical_text,
+            )
+        payload = IngressPayload(
+            body=canonical_body,
             content_type=content_type,
             headers=dict(headers),
             raw_bytes=raw_body,
@@ -267,22 +371,13 @@ class TicketIngressService:
                         "tenant_channel.config_id": str(
                             channel_config.config_id
                         ),
+                        "source_language": source_language,
                     },
                 ),
                 adapter_name=adapter.name,
                 payload=payload,
-                correlation_id=_webhook_correlation_id(
-                    channel=tenant_channel_type.value,
-                    routing_address=channel_config.routing_address,
-                    body=body,
-                    raw_body=raw_body,
-                ),
-                request_id=_webhook_request_id(
-                    channel=tenant_channel_type.value,
-                    routing_address=channel_config.routing_address,
-                    body=body,
-                    raw_body=raw_body,
-                ),
+                correlation_id=webhook_correlation_id,
+                request_id=webhook_request_id,
                 ingress_id_override=derive_ingress_id(
                     seed=_webhook_ingress_seed(
                         tenant_id=channel_config.tenant_id,
@@ -305,6 +400,7 @@ class TicketIngressService:
                     "tenant_channel.routing_address": (
                         channel_config.routing_address
                     ),
+                    "source_language": source_language,
                 },
             )
         )
@@ -508,6 +604,7 @@ def _to_boundary_request(
     raw_content: str,
     language_code: str,
     expected_tenant_id: str,
+    source_language: str = "en",
 ) -> BoundaryIngressRequest:
     return BoundaryIngressRequest(
         source=BoundarySource(
@@ -515,7 +612,10 @@ def _to_boundary_request(
             source_id=f"ticket-{channel}",
             tenant_id=expected_tenant_id,
             display_name=f"ticket {channel}",
-            metadata={"language_code": language_code},
+            metadata={
+                "language_code": language_code,
+                "source_language": source_language,
+            },
         ),
         adapter_name=_adapter_name_for_channel(channel),
         payload=IngressPayload(
@@ -535,6 +635,7 @@ def _to_boundary_request(
             "ticket.external_id": external_id,
             "ticket.channel": channel,
             "ticket.language_code": language_code,
+            "source_language": source_language,
         },
     )
 
@@ -602,6 +703,146 @@ def _payload_body_for_request(
         "To": "ticket-ingress",
         "Transcript": raw_content,
     }
+
+
+def _extract_webhook_ticket_text(
+    *,
+    channel_type: TenantChannelType,
+    body: Any,
+) -> str | None:
+    if not isinstance(body, Mapping):
+        return None
+    payload = cast(Mapping[str, Any], body)
+    if channel_type is TenantChannelType.EMAIL:
+        return _first_text_value(payload.get("text"), payload.get("message"))
+    if channel_type is TenantChannelType.WHATSAPP:
+        return _first_text_value(
+            _nested(
+                payload,
+                "entry",
+                0,
+                "changes",
+                0,
+                "value",
+                "messages",
+                0,
+                "text",
+                "body",
+            )
+        )
+    if channel_type is TenantChannelType.SHULEX:
+        return _first_text_value(payload.get("message"), payload.get("text"))
+    if channel_type is TenantChannelType.LARK:
+        content = _nested(payload, "event", "message", "content")
+        return _extract_lark_text(content)
+    return None
+
+
+def _replace_webhook_ticket_text(
+    *,
+    channel_type: TenantChannelType,
+    body: Any,
+    text: str,
+) -> Any:
+    if not isinstance(body, Mapping):
+        return body
+    updated: dict[str, Any] = deepcopy(dict(cast(Mapping[str, Any], body)))
+    try:
+        if channel_type is TenantChannelType.EMAIL:
+            if "text" in updated:
+                updated["text"] = text
+            elif "message" in updated:
+                updated["message"] = text
+            return updated
+        if channel_type is TenantChannelType.WHATSAPP:
+            message_text = _nested(
+                updated,
+                "entry",
+                0,
+                "changes",
+                0,
+                "value",
+                "messages",
+                0,
+                "text",
+            )
+            if isinstance(message_text, dict):
+                cast(dict[str, Any], message_text)["body"] = text
+            return updated
+        if channel_type is TenantChannelType.SHULEX:
+            if "message" in updated:
+                updated["message"] = text
+            elif "text" in updated:
+                updated["text"] = text
+            return updated
+        if channel_type is TenantChannelType.LARK:
+            message = _nested(updated, "event", "message")
+            if isinstance(message, dict):
+                message_payload = cast(dict[str, Any], message)
+                content = message_payload.get("content")
+                if isinstance(content, str):
+                    try:
+                        decoded = json.loads(content)
+                    except json.JSONDecodeError:
+                        message_payload["content"] = text
+                    else:
+                        if isinstance(decoded, dict):
+                            decoded_payload = cast(dict[str, Any], decoded)
+                            decoded_payload["text"] = text
+                            message_payload["content"] = json.dumps(
+                                decoded,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            )
+                        else:
+                            message_payload["content"] = text
+            return updated
+        return updated
+    except (IndexError, KeyError, TypeError):
+        return dict(cast(Mapping[str, Any], body))
+
+
+def _extract_lark_text(content: Any) -> str | None:
+    if isinstance(content, str):
+        try:
+            decoded = json.loads(content)
+        except json.JSONDecodeError:
+            return _first_text_value(content)
+        if isinstance(decoded, Mapping):
+            decoded_payload = cast(Mapping[str, Any], decoded)
+            return _first_text_value(decoded_payload.get("text"))
+        return None
+    if isinstance(content, Mapping):
+        content_payload = cast(Mapping[str, Any], content)
+        return _first_text_value(content_payload.get("text"))
+    return None
+
+
+def _nested(value: Any, *path: object) -> Any:
+    current: Any = value
+    for key in path:
+        if isinstance(key, int):
+            if not isinstance(current, Sequence) or isinstance(
+                current, (str, bytes, bytearray)
+            ):
+                return None
+            sequence = cast(Sequence[Any], current)
+            if key >= len(sequence):
+                return None
+            current = sequence[key]
+            continue
+        if not isinstance(current, Mapping):
+            return None
+        mapping = cast(Mapping[object, Any], current)
+        current = mapping.get(key)
+    return current
+
+
+def _first_text_value(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _tenant_channel_type(channel_type: str) -> TenantChannelType:

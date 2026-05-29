@@ -101,7 +101,9 @@ def runtime() -> TranslationRuntime:
     provider = IdentityTranslationProvider()
     return TranslationRuntime(
         ingress=TranslationIngressRuntime(
-            provider=provider, persistence=persistence
+            provider=provider,
+            persistence=persistence,
+            capability_governance=_allowing_governance(),
         ),
         egress=TranslationEgressRuntime(
             provider=provider,

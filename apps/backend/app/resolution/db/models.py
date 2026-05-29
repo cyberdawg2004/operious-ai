@@ -54,6 +54,12 @@ class ResolutionProposalRow(Base):
     proposed_customer_reply: Mapped[str] = mapped_column(
         Text, nullable=False
     )
+    source_language: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        default="en",
+        server_default=text("'en'"),
+    )
     resolution_category: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
@@ -195,6 +201,13 @@ class ResolutionOutboundDraftRow(Base):
     draft_body: Mapped[str] = mapped_column(Text, nullable=False)
     draft_body_sha256: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
     )
     resolution_category: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True

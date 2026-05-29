@@ -24,6 +24,10 @@ def _empty_json_list() -> tuple[Mapping[str, Any], ...]:
     return ()
 
 
+def _empty_json_mapping() -> Mapping[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class ResolutionProposalRecord:
     """Durable customer-safe response proposal."""
@@ -50,6 +54,7 @@ class ResolutionProposalRecord:
     evidence: tuple[Mapping[str, Any], ...] = field(
         default_factory=_empty_json_list
     )
+    source_language: str = "en"
 
     def to_dict(self) -> dict[str, Any]:
         """Return the API/timeline-safe representation."""
@@ -62,6 +67,7 @@ class ResolutionProposalRecord:
             "dispatch_id": self.dispatch_id,
             "diagnostic_event_id": self.diagnostic_event_id,
             "proposed_customer_reply": self.proposed_customer_reply,
+            "source_language": self.source_language,
             "resolution_category": self.resolution_category,
             "confidence": self.confidence,
             "recommended_actions": [
@@ -101,6 +107,7 @@ class ResolutionOutboundDraftRecord:
     confidence: float
     created_at: datetime
     updated_at: datetime
+    metadata: Mapping[str, Any] = field(default_factory=_empty_json_mapping)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the API/timeline-safe draft representation."""
@@ -121,6 +128,7 @@ class ResolutionOutboundDraftRecord:
             "status": self.status.value,
             "draft_body": self.draft_body,
             "draft_body_sha256": self.draft_body_sha256,
+            "metadata": dict(self.metadata),
             "resolution_category": self.resolution_category,
             "confidence": self.confidence,
             "created_at": self.created_at.isoformat(),

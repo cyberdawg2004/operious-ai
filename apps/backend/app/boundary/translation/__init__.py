@@ -80,6 +80,7 @@ from app.boundary.translation.persistence import (
 )
 from app.boundary.translation.adapters import (
     BaseTranslationProvider,
+    DeterministicStubTranslationProvider,
     IdentityTranslationProvider,
     TranslationProviderRequest,
     TranslationProviderResponse,
@@ -104,6 +105,7 @@ __all__ = [
     "BoundaryNormalizer",
     "CANONICAL_LANGUAGE",
     "CanonicalLanguageProjection",
+    "DeterministicStubTranslationProvider",
     "EgressLocalizationRecord",
     "EgressLocalizeRequest",
     "EgressLocalizeResult",

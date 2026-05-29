@@ -48,6 +48,7 @@ _CANONICAL_CHANNEL_PAYLOAD_KEYS = frozenset(
         "text",
         "attachments",
         "source_event_type",
+        "source_language",
     }
 )
 

@@ -50,6 +50,7 @@ class BoundaryIngressRecord:
     request_id: str | None
     canonical_payload: Mapping[str, Any]
     error: str | None
+    source_language: str = "en"
     # 2.5-G1 ⇒ 2.75-δ: governance provenance removed (no apex
     # producer). See ``BoundaryTrace`` docstring for the doctrine
     # rationale.
