@@ -48,6 +48,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Trace Inspector",
     description: "Replay recorded spans and inspect substrate-level execution evidence.",
   },
+  supervisor: {
+    eyebrow: "Operations",
+    title: "Supervisor Inbox",
+    description: "Risky inspections, QA score evidence, and trainer recommendations.",
+  },
   approvals: {
     eyebrow: "Governance",
     title: "Approval Inbox",

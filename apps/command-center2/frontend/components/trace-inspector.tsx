@@ -14,7 +14,11 @@ import {
   X,
 } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
-import { apiRequest } from "@/lib/api";
+import {
+  apiRequest,
+  listSupervisorInspections,
+  type QAScoreRecord,
+} from "@/lib/api";
 import { useApiResource } from "@/lib/use-api-resource";
 import { cn } from "@/lib/utils";
 
@@ -154,8 +158,19 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
     ]);
     return { timeline, sessionEvents };
   }, [loadedSessionId]);
+  const loadQAScore = useCallback(async (): Promise<QAScoreRecord | null> => {
+    if (!loadedSessionId) return null;
+    const page = await listSupervisorInspections({
+      status: "all",
+      session_id: loadedSessionId,
+      limit: 1,
+      offset: 0,
+    });
+    return page.items[0]?.qa_score ?? null;
+  }, [loadedSessionId]);
 
   const { data, error, isLoading, reload } = useApiResource(loadTrace);
+  const { data: qaScore } = useApiResource(loadQAScore);
   const trace = data ?? emptyTrace;
   const events = useMemo(() => mergeTimelineEvents(trace), [trace]);
   const selectedEvent = useMemo(
@@ -493,6 +508,8 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                     <ResolutionDraftSummary draft={selectedResolutionDraft} compact />
                   )}
 
+                  {qaScore && <TraceQAScore score={qaScore} />}
+
                   <div className="space-y-4">
                     <DetailRow label="TIMELINE EVENT ID" value={selectedEvent.timeline_event_id} />
                     <DetailRow label="SESSION ID" value={selectedEvent.session_id} />
@@ -814,6 +831,56 @@ function KnowledgeSources({ citations }: { citations: RetrievedCitation[] }) {
   );
 }
 
+function TraceQAScore({ score }: { score: QAScoreRecord }) {
+  return (
+    <section className="rounded border border-border-subtle bg-surface-sunken p-3">
+      <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+        QA Score
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <QAScoreMetric
+          label="Overall"
+          value={score.overall_score}
+          className={qaScoreColor(score.overall_score)}
+        />
+        <QAScoreMetric
+          label="Diagnostic accuracy"
+          value={score.diagnostic_accuracy}
+        />
+        <QAScoreMetric
+          label="Policy compliance"
+          value={score.policy_compliance}
+        />
+        <QAScoreMetric
+          label="Resolution quality"
+          value={score.resolution_quality}
+        />
+      </div>
+    </section>
+  );
+}
+
+function QAScoreMetric({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: number;
+  className?: string;
+}) {
+  return (
+    <div className="min-w-0 rounded border border-border-subtle px-3 py-2">
+      <div className="truncate font-mono text-[9px] uppercase tracking-[0.16em] text-ink-tertiary">
+        {label}
+      </div>
+      <div className={cn("mt-1 font-technical text-[13px] text-ink-primary", className)}>
+        {value.toFixed(2)}
+      </div>
+    </div>
+  );
+}
+
 function RawJsonModal({
   response,
   onClose,
@@ -1044,6 +1111,12 @@ function formatCitationScore(score: number): string {
 function formatConfidence(value: number): string {
   if (!Number.isFinite(value)) return "unknown";
   return `${Math.round(value * 100)}%`;
+}
+
+function qaScoreColor(score: number): string {
+  if (score >= 0.85) return "text-green-500";
+  if (score >= 0.75) return "text-amber-500";
+  return "text-red-500";
 }
 
 function stringField(value: unknown): string {

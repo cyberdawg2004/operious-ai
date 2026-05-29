@@ -8,9 +8,9 @@ or governance history.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Coroutine, Iterable, Mapping
 from datetime import datetime, timezone
-from typing import cast
+from typing import Any, cast
 
 from app.governance.persistence import (
     BaseGovernanceRepository,
@@ -166,6 +166,104 @@ class SOPIntelligenceRuntime:
                     decision.decision_id
                     for decision in governance_decisions
                 ],
+                "document_version_before": document.version,
+                "document_status": document.status.value,
+                "proposal_only": True,
+            },
+        )
+        try:
+            await self._approval_persistence.create_approval_record(
+                record,
+                expected_tenant_id=expected_tenant_id,
+            )
+        except SOPIntelligencePersistenceError:
+            existing = await self._approval_persistence.get_approval_record(
+                approval_id,
+                expected_tenant_id=expected_tenant_id,
+            )
+            if existing is not None:
+                return existing
+            raise
+        return record
+
+    def propose_from_failure_pattern(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+        category: str,
+        recommendation_count: int,
+    ) -> Coroutine[Any, Any, ApprovalRecord]:
+        """Create or return a pending SOP proposal from repeated QA failures."""
+
+        return self._propose_from_failure_pattern(
+            tenant_id=tenant_id,
+            expected_tenant_id=expected_tenant_id,
+            category=category,
+            recommendation_count=recommendation_count,
+        )
+
+    async def _propose_from_failure_pattern(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+        category: str,
+        recommendation_count: int,
+    ) -> ApprovalRecord:
+        """Create or return a pending SOP proposal from repeated QA failures."""
+
+        if tenant_id != expected_tenant_id:
+            raise SOPIntelligenceEligibilityError(
+                "tenant_id does not match expected_tenant_id"
+            )
+        if not category:
+            raise SOPIntelligenceEligibilityError("category is required")
+        if recommendation_count < 1:
+            raise SOPIntelligenceEligibilityError(
+                "recommendation_count must be positive"
+            )
+        document = await self._select_document(
+            expected_tenant_id=expected_tenant_id
+        )
+        evidence_sessions = (
+            f"training_recommendation_pattern:{category}",
+        )
+        qa_score_id = f"failure_pattern:{category}"
+        approval_id = str(
+            derive_approval_id(
+                tenant_id=expected_tenant_id,
+                document_id=document.document_id,
+                evidence_sessions=evidence_sessions,
+                qa_score_id=qa_score_id,
+            )
+        )
+        existing = await self._approval_persistence.get_approval_record(
+            approval_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if existing is not None:
+            return existing
+
+        record = ApprovalRecord(
+            approval_id=approval_id,
+            tenant_id=expected_tenant_id,
+            document_id=str(document.document_id),
+            proposed_change=_failure_pattern_proposed_change(
+                document=document,
+                category=category,
+                recommendation_count=recommendation_count,
+            ),
+            evidence_sessions=evidence_sessions,
+            confidence=_failure_pattern_confidence(recommendation_count),
+            status=ApprovalStatus.PENDING_REVIEW.value,
+            proposed_by=_PROPOSED_BY,
+            reviewed_by=None,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            metadata={
+                "failure_pattern": True,
+                "category": category,
+                "recommendation_count": recommendation_count,
                 "document_version_before": document.version,
                 "document_status": document.status.value,
                 "proposal_only": True,
@@ -447,6 +545,24 @@ def _proposed_change(
         f"{score.overall_score:.2f}. Preserve policy-chain constraints: "
         f"{chain_text}."
     )
+
+
+def _failure_pattern_proposed_change(
+    *,
+    document: TenantKnowledgeDocumentRecord,
+    category: str,
+    recommendation_count: int,
+) -> str:
+    return (
+        f"Propose updating '{document.title}' for repeated QA failures in "
+        f"{category}. Trainer recommendations flagged this category "
+        f"{recommendation_count} times in the configured lookback window; "
+        "review the SOP guidance and add corrective operator steps."
+    )
+
+
+def _failure_pattern_confidence(recommendation_count: int) -> float:
+    return round(min(0.85, 0.55 + (0.05 * max(0, recommendation_count - 3))), 4)
 
 
 __all__ = ["SOPIntelligenceRuntime"]

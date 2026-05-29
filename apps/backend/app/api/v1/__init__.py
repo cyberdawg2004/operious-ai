@@ -42,6 +42,7 @@ from app.api.v1.routers.sop_intelligence import (
 )
 from app.api.v1.routers.supervisor import router as supervisor_router
 from app.api.v1.routers.tenant import router as tenant_router
+from app.api.v1.routers.trainer import router as trainer_router
 from app.api.v1.routers.voice import router as voice_router
 
 api_router_v1 = APIRouter()
@@ -74,6 +75,7 @@ api_router_v1.include_router(observability_router, prefix="/observability")
 api_router_v1.include_router(
     operational_events_router, prefix="/operational-events"
 )
+api_router_v1.include_router(trainer_router, prefix="/trainer")
 api_router_v1.include_router(quota_operations_router, prefix="/quota")
 api_router_v1.include_router(queue_operations_router)
 api_router_v1.include_router(voice_router, prefix="/voice")

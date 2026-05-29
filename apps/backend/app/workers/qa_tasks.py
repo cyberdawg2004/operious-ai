@@ -12,12 +12,15 @@ from collections.abc import Coroutine
 from threading import Thread
 from typing import Any, TypeVar, cast
 
+from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.db.tenant_context import set_current_tenant
 from app.qa.persistence import PostgresQAPersistence
 from app.qa.persistence.records import QAScoreRecord
 from app.qa.runtime import QAAgentRuntime
 from app.supervisor.persistence import PostgresSupervisorRepository
+from app.trainer.persistence import PostgresTrainingRecommendationRepository
+from app.trainer.runtime import TrainerAgentRuntime
 from app.workers.celery_app import celery_app, enqueued_at_iso
 from app.workers.queue_admission import (
     admit_sop_intelligence_publish,
@@ -31,6 +34,7 @@ from app.workers.sop_intelligence_tasks import (
 
 _T = TypeVar("_T")
 _SOP_INTELLIGENCE_CONFIDENCE_THRESHOLD = 0.85
+_TRAINER_THRESHOLD = get_settings().TRAINER_RECOMMENDATION_THRESHOLD
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -86,6 +90,20 @@ async def score_supervisor_inspection_runtime(
             )
             await session.commit()
             sop_intelligence_queued = await _queue_sop_intelligence(score)
+            training_recommendation_count = 0
+            if _should_generate_training_recommendations(score):
+                trainer_runtime = TrainerAgentRuntime(
+                    recommendation_repository=(
+                        PostgresTrainingRecommendationRepository(session)
+                    )
+                )
+                recommendations = await trainer_runtime.generate_and_persist(
+                    qa_score=score,
+                    tenant_id=tenant_id,
+                    expected_tenant_id=tenant_id,
+                )
+                training_recommendation_count = len(recommendations)
+                await session.commit()
             return {
                 "status": "completed",
                 "inspection_id": inspection_id,
@@ -94,6 +112,7 @@ async def score_supervisor_inspection_runtime(
                 "tenant_id": score.tenant_id,
                 "overall_score": score.overall_score,
                 "sop_intelligence_queued": sop_intelligence_queued,
+                "training_recommendation_count": training_recommendation_count,
             }
     finally:
         set_current_tenant(None)
@@ -121,6 +140,13 @@ async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
         member_id=str(session_id),
     )
     return True
+
+
+def _should_generate_training_recommendations(score: QAScoreRecord) -> bool:
+    return (
+        score.overall_score < _TRAINER_THRESHOLD
+        or score.escalation_count > 0
+    )
 
 
 def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:

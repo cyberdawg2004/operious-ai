@@ -73,6 +73,9 @@ celery_app.conf.update(
         "evaluate_session_supervisor": {"queue": QUEUE_SUPERVISOR},
         "score_supervisor_inspection": {"queue": QUEUE_QA},
         "propose_sop_intelligence_change": {"queue": QUEUE_SOP_INTELLIGENCE},
+        "scan_training_recommendation_gaps": {
+            "queue": QUEUE_SOP_INTELLIGENCE
+        },
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "reconcile_stale_execution_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
@@ -128,6 +131,11 @@ celery_app.conf.update(
             "task": "operious.workers.evaluate_alert_conditions",
             "schedule": 60.0,
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        "scan-training-recommendation-gaps-daily": {
+            "task": "scan_training_recommendation_gaps",
+            "schedule": float(settings.SOP_REPEATED_FAILURE_SCAN_SECONDS),
+            "options": {"queue": QUEUE_SOP_INTELLIGENCE},
         },
     },
 )

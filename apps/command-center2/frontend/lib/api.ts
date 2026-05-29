@@ -208,6 +208,108 @@ export type ActionApprovalDetail = {
   governance_evaluated_at: string | null;
 };
 
+export type QAScoreRecord = {
+  score_id: string;
+  inspection_id: string;
+  execution_id: string;
+  tenant_id: string;
+  tenant_authority_source: string | null;
+  diagnostic_accuracy: number;
+  policy_compliance: number;
+  timeline_integrity: number;
+  resolution_quality: number;
+  overall_score: number;
+  supervisor_decision_kind: string;
+  finding_count: number;
+  evaluation_count: number;
+  escalation_count: number;
+  scored_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SupervisorInspectionSummary = {
+  inspection_id: string;
+  execution_id: string;
+  tenant_id: string | null;
+  session_id: string | null;
+  category: string;
+  decision_kind: string;
+  aggregate_score: number;
+  started_at: string;
+  ended_at: string;
+  escalation_count: number;
+  is_risky: boolean;
+  qa_score: QAScoreRecord | null;
+  inspection: Record<string, unknown>;
+};
+
+export type SupervisorInspectionDetail = {
+  inspection_id: string;
+  execution_id: string;
+  runtime_instance_id: string;
+  correlation_id: string | null;
+  request_id: string | null;
+  tenant_id: string | null;
+  inspection_mode: string;
+  started_at: string;
+  ended_at: string;
+  latency_ms: number;
+  error: string | null;
+  tenant_authority_source: string | null;
+  metadata: Record<string, unknown>;
+  inspection: Record<string, unknown>;
+  qa_score: QAScoreRecord | null;
+  findings: {
+    finding_id: string;
+    evaluator_name: string;
+    category: string;
+    severity: string;
+    code: string;
+    message: string;
+    metadata: Record<string, unknown>;
+  }[];
+  evaluations: {
+    inspection_id: string;
+    evaluator_name: string;
+    status: string;
+    score: number;
+    finding_ids: string[];
+    started_at: string;
+    ended_at: string;
+    latency_ms: number;
+    error: string | null;
+    metadata: Record<string, unknown>;
+  }[];
+  escalations: {
+    escalation_id: string;
+    inspection_id: string;
+    decision_id: string;
+    level: string;
+    reason: string;
+    triggering_finding_ids: string[];
+    decided_at: string;
+    metadata: Record<string, unknown>;
+  }[];
+  training_recommendations: TrainingRecommendation[];
+  category: string;
+  session_id: string | null;
+  is_risky: boolean;
+};
+
+export type TrainingRecommendation = {
+  recommendation_id: string;
+  tenant_id: string;
+  session_id: string;
+  qa_score_id: string;
+  category: string;
+  finding_summary: string;
+  recommendation: string;
+  priority: "low" | "medium" | "high";
+  status: "pending" | "acknowledged" | "applied" | "dismissed";
+  created_at: string;
+  metadata: Record<string, unknown>;
+};
+
 export type TenantKnowledgeDocument = {
   document_id: string;
   title: string;
@@ -664,6 +766,46 @@ export function denyActionApproval(approvalId: string, reason: string) {
     {
       method: "POST",
       body: JSON.stringify({ reason }),
+    }
+  );
+}
+
+export function listSupervisorInspections(query: {
+  status?: "all" | "risky";
+  session_id?: string;
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<ApiPage<SupervisorInspectionSummary>>("/supervisor/inspections", {
+    query,
+  });
+}
+
+export function getSupervisorInspection(inspectionId: string) {
+  return apiRequest<SupervisorInspectionDetail>(
+    `/supervisor/inspections/${encodeURIComponent(inspectionId)}`
+  );
+}
+
+export function listTrainingRecommendations(query: {
+  status?: TrainingRecommendation["status"] | "all";
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<ApiPage<TrainingRecommendation>>("/trainer/recommendations", {
+    query,
+  });
+}
+
+export function updateTrainingRecommendationStatus(
+  recommendationId: string,
+  status: "acknowledged" | "dismissed"
+) {
+  return apiRequest<TrainingRecommendation>(
+    `/trainer/recommendations/${encodeURIComponent(recommendationId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
     }
   );
 }

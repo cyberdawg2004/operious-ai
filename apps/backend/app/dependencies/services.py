@@ -162,7 +162,9 @@ from app.services.operational_observability_service import (
 from app.services.quota_operations_service import QuotaOperationsService
 from app.services.queue_operations_service import QueueOperationsService
 from app.services.sop_intelligence_service import SOPIntelligenceService
+from app.services.supervisor_inbox_service import SupervisorInboxService
 from app.services.ticket_ingress_service import TicketIngressService
+from app.services.trainer_service import TrainerRecommendationService
 from app.qa.persistence import PostgresQAPersistence
 from app.queues import DIAGNOSTIC_QUEUE_PRIORITY
 from app.session.persistence import (
@@ -182,6 +184,7 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
+from app.trainer.persistence import PostgresTrainingRecommendationRepository
 
 if TYPE_CHECKING:
     from app.services.batch_ingest_service import BatchIngestService
@@ -485,6 +488,27 @@ def get_supervisor_repository(
 ) -> BaseSupervisorRepository:
     """Return the Postgres supervisor-persistence backend for this request."""
     return PostgresSupervisorRepository(session)
+
+
+def get_supervisor_inbox_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> SupervisorInboxService:
+    """Return the supervisor inbox read service for this request."""
+    return SupervisorInboxService(
+        supervisor_repository=PostgresSupervisorRepository(session),
+        qa_persistence=PostgresQAPersistence(session),
+        training_repository=PostgresTrainingRecommendationRepository(session),
+    )
+
+
+def get_trainer_recommendation_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> TrainerRecommendationService:
+    """Return the trainer recommendation service for this request."""
+    return TrainerRecommendationService(
+        repository=PostgresTrainingRecommendationRepository(session),
+        session=session,
+    )
 
 
 def get_escalation_service(

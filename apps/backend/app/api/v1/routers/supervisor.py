@@ -17,21 +17,29 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.v1.schemas.supervisor_inbox import (
+    SupervisorInspectionDetailResponse,
+    SupervisorInspectionListResponse,
+)
 from app.api.v1.schemas.supervisor import (
     EscalationDecisionSchema,
     InspectionEscalationsResponse,
     InspectionEvaluationsResponse,
     InspectionFindingsResponse,
-    InspectionResponse,
-    InspectionsPage,
     QAEvaluationSchema,
     RuntimeFindingSchema,
 )
 from app.dependencies.authority import require_tenant_scope
-from app.dependencies.services import get_supervisor_repository
+from app.dependencies.services import (
+    get_supervisor_inbox_service,
+    get_supervisor_repository,
+)
+from app.services.supervisor_inbox_service import (
+    SupervisorInboxNotFoundError,
+    SupervisorInboxService,
+)
 from app.supervisor.persistence import (
     BaseSupervisorRepository,
-    InspectionQuery,
 )
 
 router = APIRouter(tags=["supervisor"])
@@ -43,26 +51,29 @@ _DEFAULT_LIMIT = 25
 
 @router.get(
     "/inspections/{inspection_id}",
-    response_model=InspectionResponse,
+    response_model=SupervisorInspectionDetailResponse,
 )
 async def get_inspection(
     inspection_id: str,
-    repo: BaseSupervisorRepository = Depends(get_supervisor_repository),
+    service: SupervisorInboxService = Depends(get_supervisor_inbox_service),
     expected_tenant_id: str = Depends(require_tenant_scope),
-) -> InspectionResponse:
-    record = await repo.get_inspection(
-        inspection_id, expected_tenant_id=expected_tenant_id
-    )
-    if record is None:
+) -> SupervisorInspectionDetailResponse:
+    try:
+        detail = await service.get_inspection(
+            inspection_id=inspection_id,
+            tenant_id=expected_tenant_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+    except SupervisorInboxNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail={"code": "inspection_not_found"}
-        )
-    return InspectionResponse.from_record(record)
+        ) from exc
+    return SupervisorInspectionDetailResponse.from_detail(detail)
 
 
 @router.get(
     "/inspections",
-    response_model=InspectionsPage,
+    response_model=SupervisorInspectionListResponse,
 )
 async def list_inspections(
     execution_id: str | None = Query(None),
@@ -71,29 +82,30 @@ async def list_inspections(
     runtime_instance_id: str | None = Query(None),
     decision_kind: str | None = Query(None),
     inspection_mode: str | None = Query(None),
+    status: str = Query("all", pattern="^(all|risky)$"),
+    session_id: str | None = Query(None),
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
-    repo: BaseSupervisorRepository = Depends(get_supervisor_repository),
+    service: SupervisorInboxService = Depends(get_supervisor_inbox_service),
     expected_tenant_id: str = Depends(require_tenant_scope),
-) -> InspectionsPage:
-    query = InspectionQuery(
-        execution_id=execution_id,
-        correlation_id=correlation_id,
-        request_id=request_id,
-        runtime_instance_id=runtime_instance_id,
-        decision_kind=decision_kind,
-        inspection_mode=inspection_mode,
+) -> SupervisorInspectionListResponse:
+    del (
+        execution_id,
+        correlation_id,
+        request_id,
+        runtime_instance_id,
+        decision_kind,
+        inspection_mode,
+    )
+    page = await service.list_inspections(
+        tenant_id=expected_tenant_id,
+        expected_tenant_id=expected_tenant_id,
+        status=status,
+        session_id=session_id,
         limit=limit,
         offset=offset,
     )
-    page = await repo.query_inspections(
-        query, expected_tenant_id=expected_tenant_id
-    )
-    return InspectionsPage(
-        items=[InspectionResponse.from_record(r) for r in page.items],
-        total=page.total,
-        offset=page.offset,
-    )
+    return SupervisorInspectionListResponse.from_page(page)
 
 
 @router.get(
