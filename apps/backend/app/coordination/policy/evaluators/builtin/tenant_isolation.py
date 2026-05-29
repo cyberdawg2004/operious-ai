@@ -62,6 +62,7 @@ class TenantIsolationEvaluator(BaseCoordinationPolicyEvaluator):
     """
 
     name: ClassVar[str] = "tenant_isolation"
+    is_critical: ClassVar[bool] = True
 
     def __init__(
         self,

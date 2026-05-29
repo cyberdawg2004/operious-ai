@@ -35,6 +35,7 @@ this runtime never touches governance directly.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
@@ -55,7 +56,10 @@ from app.coordination.policy.contracts.requests import (
 from app.coordination.policy.contracts.results import (
     CoordinationPolicyEvaluationResult,
 )
-from app.coordination.policy.enums import CoordinationPolicyDecision
+from app.coordination.policy.enums import (
+    CoordinationPolicyDecision,
+    CoordinationPolicyScope,
+)
 from app.coordination.policy.envelopes import (
     CoordinationPolicyEnvelope,
 )
@@ -70,6 +74,7 @@ from app.coordination.policy.identity import (
     CoordinationPolicyChainId,
     CoordinationPolicyEvaluationId,
     derive_chain_id,
+    derive_finding_id,
     generate_evaluation_id,
 )
 from app.coordination.policy.models.findings import (
@@ -94,6 +99,40 @@ from app.coordination.policy.tracing import CoordinationPolicyTrace
 from app.observability.context import get_request_id
 
 _RUNTIME_NAMESPACE = uuid.UUID("e4ed8a1a-13be-4ac1-bd19-1a2dbe506009")
+_CRITICAL_EVALUATOR_FAILURE_CODE = "critical_evaluator.failure"
+logger = logging.getLogger(__name__)
+
+
+def _synthesize_deny_finding(
+    *,
+    request: CoordinationPolicyEvaluationRequest,
+    evaluation_id: CoordinationPolicyEvaluationId,
+    evaluator_name: str,
+    evaluator_type: str,
+    error: BaseException,
+    ordinal: int,
+) -> CoordinationPolicyFinding:
+    reason = f"critical_evaluator_failure:{evaluator_type}"
+    return CoordinationPolicyFinding(
+        finding_id=derive_finding_id(
+            evaluation_id=evaluation_id,
+            evaluator_name=evaluator_name,
+            code=_CRITICAL_EVALUATOR_FAILURE_CODE,
+            ordinal=ordinal,
+        ),
+        evaluator_name=evaluator_name,
+        scope=CoordinationPolicyScope.TENANT,
+        decision=CoordinationPolicyDecision.DENY,
+        code=_CRITICAL_EVALUATOR_FAILURE_CODE,
+        message=reason,
+        detected_at=datetime.now(timezone.utc),
+        metadata={
+            "critical_evaluator": True,
+            "evaluator_type": evaluator_type,
+            "error": str(error),
+            "tenant_id": request.tenant_id,
+        },
+    )
 
 
 class CoordinationPolicyRuntime:
@@ -207,10 +246,36 @@ class CoordinationPolicyRuntime:
                 emitted = await evaluator.evaluate(request)
             except Exception as exc:  # noqa: BLE001 — substrate never re-raises
                 framework_error = exc
-                # Continue collecting findings from subsequent evaluators
-                # but record the error to surface on the envelope. The
-                # finding stream is still complete from the surviving
-                # evaluators (Rule 6 — inspectability).
+                evaluator_type = type(evaluator).__name__
+                if getattr(evaluator, "is_critical", False):
+                    logger.error(
+                        "critical_evaluator_failed_synthesizing_deny",
+                        extra={
+                            "evaluator": evaluator_type,
+                            "error": str(exc),
+                        },
+                    )
+                    findings.append(
+                        _synthesize_deny_finding(
+                            request=request,
+                            evaluation_id=evaluation_id,
+                            evaluator_name=evaluator.name,
+                            evaluator_type=evaluator_type,
+                            error=exc,
+                            ordinal=len(findings),
+                        )
+                    )
+                else:
+                    logger.warning(
+                        "non_critical_evaluator_failed_skipping",
+                        extra={
+                            "evaluator": evaluator_type,
+                            "error": str(exc),
+                        },
+                    )
+                # Continue collecting findings from subsequent evaluators.
+                # Critical failures have already contributed a synthetic
+                # DENY finding so aggregation cannot fail open.
                 continue
             findings.extend(emitted)
 

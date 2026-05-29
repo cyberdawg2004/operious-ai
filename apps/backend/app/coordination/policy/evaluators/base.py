@@ -21,6 +21,7 @@ Evaluators MAY:
 Subclassing rules:
 
 * declare `name` — stable identifier, used by the registry,
+* declare `is_critical` when evaluator failure must fail closed,
 * implement `evaluate()` returning a tuple of findings,
 * prefer emitting one finding per matching rule rather than
   consolidating — the runtime aggregator handles consolidation.
@@ -46,6 +47,7 @@ class BaseCoordinationPolicyEvaluator(ABC):
     """Abstract base for one topology-authorisation evaluator."""
 
     name: ClassVar[str] = ""
+    is_critical: ClassVar[bool] = False
 
     @abstractmethod
     async def evaluate(

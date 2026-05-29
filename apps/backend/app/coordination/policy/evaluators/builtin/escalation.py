@@ -50,6 +50,8 @@ class EscalationEvaluator(BaseCoordinationPolicyEvaluator):
     """
 
     name: ClassVar[str] = "escalation"
+    # Non-critical: escalation rule failures remain advisory substrate errors.
+    is_critical: ClassVar[bool] = False
 
     def __init__(self, policies: Sequence[CoordinationPolicy] = ()) -> None:
         self._policies: tuple[CoordinationPolicy, ...] = tuple(policies)

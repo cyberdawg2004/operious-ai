@@ -76,6 +76,8 @@ class TopologyEvaluator(BaseCoordinationPolicyEvaluator):
     """
 
     name: ClassVar[str] = "topology"
+    # Non-critical: declarative topology rules may be skipped on failure.
+    is_critical: ClassVar[bool] = False
 
     def __init__(self, policies: Sequence[CoordinationPolicy] = ()) -> None:
         self._policies: tuple[CoordinationPolicy, ...] = tuple(policies)

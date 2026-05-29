@@ -56,6 +56,13 @@ def build_policy_decision(
     from findings whose decision matches the apex.
     """
     typed = tuple(findings)
+    # INTENTIONAL: empty findings -> ALLOW.
+    # Coordination policy governs ROUTING, not authorization.
+    # An empty rule set means "no routing restrictions."
+    # Governance (fail-closed) is the authorization gate.
+    # Security invariant: TenantIsolationEvaluator is marked critical and
+    # cannot be silently skipped. Any exception synthesizes a DENY finding
+    # before reaching this aggregation.
     if not typed:
         return (
             CoordinationPolicyDecision.ALLOW,
