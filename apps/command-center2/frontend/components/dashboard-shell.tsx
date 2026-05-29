@@ -17,6 +17,7 @@ import {
   getConfiguredPrincipalId,
   getConfiguredTenantId,
   listActionApprovals,
+  listActiveCrisisDeployments,
 } from "@/lib/api";
 import { dashboardRoutes, type DashboardViewId } from "@/lib/dashboard-routes";
 import { useAuthSession } from "@/lib/use-auth-session";
@@ -129,6 +130,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [approvalCount, setApprovalCount] = useState<number | null>(null);
+  const [crisisActive, setCrisisActive] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const activeItem = getActiveItem(pathname);
@@ -179,6 +181,27 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     };
   }, [tenantId]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadCrisisState = () => {
+      listActiveCrisisDeployments()
+        .then((deployments) => {
+          if (active) setCrisisActive(deployments.length > 0);
+        })
+        .catch(() => {
+          if (active) setCrisisActive(false);
+        });
+    };
+
+    loadCrisisState();
+    const interval = window.setInterval(loadCrisisState, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [tenantId]);
+
   const navigateTo = (itemId: string) => {
     const href = dashboardRoutes[itemId as DashboardViewId];
     if (itemId === "trace") {
@@ -223,6 +246,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           userRole={principalId ?? "Principal scope not configured"}
           onTenantClick={() => navigateTo("settings")}
           approvalCount={approvalCount}
+          crisisActive={crisisActive}
         />
 
         <div className="min-w-0 flex-1 lg:flex lg:min-h-screen lg:flex-col">

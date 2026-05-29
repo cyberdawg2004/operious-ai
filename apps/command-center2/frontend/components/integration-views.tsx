@@ -53,7 +53,11 @@ type ChannelModal =
   | { type: "create" }
   | { type: "edit"; channel: TenantChannelConfiguration };
 
-export function GovernancePoliciesView() {
+export function GovernancePoliciesView({
+  headerAddon = null,
+}: {
+  headerAddon?: React.ReactNode;
+}) {
   const [modal, setModal] = useState<PolicyModal>({ type: "none" });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -108,6 +112,7 @@ export function GovernancePoliciesView() {
         actionLabel="New Policy"
         onAction={() => setModal({ type: "create" })}
       />
+      {headerAddon}
       {isLoading && <LoadingState />}
       {error && !isLoading && (
         <ErrorState title="Governance policies unavailable" message={error} onAction={reload} />

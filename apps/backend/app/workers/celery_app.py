@@ -37,6 +37,7 @@ from app.queues import (
     QUEUE_WEBHOOK_MAINTENANCE,
 )
 from app.services.alert_evaluator_factory import create_alert_evaluator
+from app.services.crisis_service import CrisisService
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -92,6 +93,9 @@ celery_app.conf.update(
         "operious.workers.evaluate_alert_conditions": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
+        "expire_crisis_deployments": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
         "process_post_call_transcript": {"queue": QUEUE_INGRESS_VOICE},
     },
     task_acks_late=True,
@@ -130,6 +134,12 @@ celery_app.conf.update(
         "alert-condition-evaluation": {
             "task": "operious.workers.evaluate_alert_conditions",
             "schedule": 60.0,
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        "expire-crisis-deployments-minutely": {
+            "task": "expire_crisis_deployments",
+            "schedule": 60.0,
+            "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
         "scan-training-recommendation-gaps-daily": {
@@ -231,6 +241,34 @@ def evaluate_alert_conditions() -> None:
     except Exception as exc:  # noqa: BLE001 - alert task is best-effort.
         logger.warning(
             "alert_evaluation_failed",
+            extra={"error": str(exc)},
+        )
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="expire_crisis_deployments",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
+    ignore_result=True,
+)
+def expire_crisis_deployments(limit: int = 100) -> None:
+    """PRIVILEGED_PATH: mark expired crisis deployments across tenants."""
+
+    async def _run() -> None:
+        async with get_owner_session_factory()() as session:
+            expired = await CrisisService(
+                session=session,
+                redis_client=get_redis_client(),
+            ).expire_due(limit=limit)
+            logger.info(
+                "crisis_deployments_expired",
+                extra={"count": expired},
+            )
+
+    try:
+        _run_async(_run())
+    except Exception as exc:  # noqa: BLE001 - maintenance task must not crash worker.
+        logger.warning(
+            "crisis_deployments_expiry_failed",
             extra={"error": str(exc)},
         )
 

@@ -348,6 +348,49 @@ export type TenantGovernancePolicy = {
   created_at: string;
 };
 
+export type CrisisTemplate =
+  | "block_sku"
+  | "halt_refunds"
+  | "escalate_all"
+  | "freeze_category";
+
+export type CrisisDeployment = {
+  deployment_id: string;
+  tenant_id: string;
+  template: CrisisTemplate;
+  scope: Record<string, unknown>;
+  ttl_minutes: number;
+  policy_id: string | null;
+  deployed_by: string;
+  deployed_at: string;
+  expires_at: string | null;
+  status: string;
+  redis_key: string;
+  decision: string;
+  metadata: Record<string, unknown>;
+};
+
+type CrisisDeploymentListResponse = {
+  items: CrisisDeployment[];
+};
+
+export type CrisisDeployRequest = {
+  template: CrisisTemplate;
+  scope: Record<string, unknown>;
+  ttl_minutes: number;
+  dry_run?: boolean;
+};
+
+export type CrisisInterceptEvent = {
+  type: "intercept";
+  execution_id: string;
+  template: string;
+  category: string | null;
+  reason: string;
+  intercepted_at: string;
+  tenant_id: string;
+};
+
 export type TenantTopologyConfiguration = {
   config_id: string;
   topology_name: string;
@@ -882,6 +925,30 @@ export function updateGovernancePolicy(
       body: JSON.stringify(request),
     }
   );
+}
+
+export function listActiveCrisisDeployments() {
+  return apiRequest<CrisisDeploymentListResponse>("/governance/crisis/active").then(
+    (response) => response.items
+  );
+}
+
+export function deployCrisisRule(request: CrisisDeployRequest) {
+  return apiRequest<CrisisDeployment>("/governance/crisis/deploy", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function deactivateCrisisDeployment(deploymentId: string) {
+  return apiRequest<CrisisDeployment>(
+    `/governance/crisis/${encodeURIComponent(deploymentId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function getCrisisTickerUrl() {
+  return `${getApiBaseUrl()}/governance/crisis/ticker`;
 }
 
 export function listTopologyConfigurations() {

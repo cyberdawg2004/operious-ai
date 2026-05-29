@@ -30,6 +30,12 @@ from app.governance.policies.builtin import (
     TenantScopePolicy,
 )
 from app.governance.policies.chain import PolicyChain
+from app.governance.policies.crisis import (
+    CrisisBlockSKUPolicy,
+    CrisisEscalateAllPolicy,
+    CrisisFreezeCategoryPolicy,
+    CrisisHaltRefundsPolicy,
+)
 from app.governance.policies.registry import PolicyRegistry
 
 __all__ = [
@@ -39,4 +45,8 @@ __all__ = [
     "TenantScopePolicy",
     "MaxQueryLengthPolicy",
     "ContentDenylistPolicy",
+    "CrisisBlockSKUPolicy",
+    "CrisisHaltRefundsPolicy",
+    "CrisisEscalateAllPolicy",
+    "CrisisFreezeCategoryPolicy",
 ]

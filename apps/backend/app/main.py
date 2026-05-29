@@ -63,6 +63,7 @@ from app.governance.capability.runtime import (
     build_capability_governance_runtime,
 )
 from app.governance.enforcement.runtime import GovernanceRuntime
+from app.governance.policies.crisis import build_crisis_policy_registry
 from app.hardening.observability import (
     OperationalMetricsCollector,
     initialize_alert_evaluator,
@@ -498,6 +499,9 @@ def create_app(
     app.state.capability_governance_runtime = capability_governance_runtime
     redis_client = get_redis_client()
     app.state.redis_client = redis_client
+    app.state.crisis_policy_registry = build_crisis_policy_registry(
+        redis=redis_client
+    )
 
     voice_persistence = InMemoryVoicePersistence()
     app.state.voice_runtime = VoiceRuntime(

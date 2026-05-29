@@ -137,6 +137,7 @@ from app.services.conversation_service import (
     ConversationService,
     build_conversation_service,
 )
+from app.services.crisis_service import CrisisService
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
@@ -599,13 +600,26 @@ def get_action_approval_service(
                 tool_registry=build_action_tool_registry(),
                 governance_runtime=build_action_tool_governance_runtime(
                     persistence=governance_repository,
+                    redis_client=get_redis_client(),
                 ),
+                redis_client=get_redis_client(),
             ),
             approval_repository=PostgresActionApprovalRepository(session),
             timeline_runtime=timeline_runtime,
         ),
         timeline_runtime=timeline_runtime,
         session=session,
+    )
+
+
+def get_crisis_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> CrisisService:
+    """Return the tenant crisis-mode service for this request."""
+
+    return CrisisService(
+        session=session,
+        redis_client=get_redis_client(),
     )
 
 

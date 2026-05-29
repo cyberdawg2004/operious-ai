@@ -52,6 +52,7 @@ from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
 from app.agents.identity import derive_tool_invocation_id
 from app.governance.context import GovernanceContext
+from app.governance.crisis import publish_crisis_intercept_event
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
 from app.governance.enums import Decision, EnforcementStage
@@ -67,6 +68,7 @@ class ToolInvoker:
         *,
         tool_registry: ToolRegistry,
         governance_runtime: GovernanceRuntime | None = None,
+        redis_client: Any | None = None,
     ) -> None:
         action_tool_names = tuple(
             tool.name
@@ -80,6 +82,7 @@ class ToolInvoker:
             )
         self._tools = tool_registry
         self._governance = governance_runtime
+        self._redis_client = redis_client
 
     async def invoke(
         self,
@@ -234,6 +237,14 @@ class ToolInvoker:
                 )
             decision = governance_envelope.unwrap()
             governance_decision_id = decision.decision_id
+            if self._redis_client is not None and context.tenant_id is not None:
+                await publish_crisis_intercept_event(
+                    redis_client=self._redis_client,
+                    tenant_id=context.tenant_id,
+                    execution_id=str(context.execution.execution_id),
+                    decision=decision,
+                    category=_metadata_str(request.metadata, "issue_category"),
+                )
             if requires_action_governance:
                 if decision.decision is not Decision.ALLOW:
                     return self._denied_envelope(
@@ -460,6 +471,13 @@ def _build_governance_context(
 def _tool_capability(tool: BaseTool) -> ToolCapability:
     raw = getattr(tool, "capability", ToolCapability.ACTION)
     return raw if isinstance(raw, ToolCapability) else ToolCapability.ACTION
+
+
+def _metadata_str(metadata: Mapping[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 __all__ = ["ToolInvoker"]

@@ -77,6 +77,7 @@ interface SidebarProps {
   onMobileClose?: () => void;
   className?: string;
   approvalCount?: number | null;
+  crisisActive?: boolean;
 }
 
 export function Sidebar({
@@ -89,6 +90,7 @@ export function Sidebar({
   onMobileClose,
   className,
   approvalCount = null,
+  crisisActive = false,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const pathname = usePathname();
@@ -244,6 +246,15 @@ export function Sidebar({
                           >
                             {approvalCount > 99 ? "99+" : approvalCount}
                           </span>
+                        )}
+                        {item.id === "governance" && crisisActive && (
+                          <span
+                            className={cn(
+                              "ml-auto h-2 w-2 rounded-full bg-red-alert",
+                              collapsed && "lg:absolute lg:right-2 lg:top-2"
+                            )}
+                            aria-label="Active crisis deployment"
+                          />
                         )}
                       </Link>
                     </li>

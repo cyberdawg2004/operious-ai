@@ -35,6 +35,7 @@ from app.cognition.models import (
 from app.cognition.persistence import CognitionUsagePersistenceProtocol
 from app.cognition.semantic import validate_governance_terms
 from app.governance.context import GovernanceContext
+from app.governance.crisis import publish_crisis_intercept_event
 from app.governance.enums import Decision, EnforcementStage
 from app.governance.enforcement.handlers import (
     AllowHandler,
@@ -50,6 +51,7 @@ from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.identity import derive_decision_id
 from app.governance.persistence import BaseGovernanceRepository
 from app.governance.policies.chain import PolicyChain
+from app.governance.policies.crisis import build_crisis_policies
 from app.governance.subjects.execution import ExecutionGovernanceSubject
 from app.identity import coerce_tenant_id
 from app.knowledge.models import KnowledgeRetrievalResult
@@ -149,6 +151,7 @@ class DiagnosticCognitionRuntime:
         llm_client: DiagnosticLLMClient,
         usage_persistence: CognitionUsagePersistenceProtocol,
         governance_repository: BaseGovernanceRepository | None = None,
+        redis_client: Any | None = None,
         config: DiagnosticCognitionRuntimeConfig | None = None,
         quota_runtime: TenantQuotaRuntime | None = None,
     ) -> None:
@@ -158,10 +161,12 @@ class DiagnosticCognitionRuntime:
         self._quota_runtime = quota_runtime
         self._governance = _governance_runtime(
             governance_repository=governance_repository,
+            redis_client=redis_client,
             require_citations=(
                 config.require_citations if config is not None else False
             ),
         )
+        self._redis_client = redis_client
         self._config = config or DiagnosticCognitionRuntimeConfig()
 
     async def reason_about_ticket(
@@ -582,6 +587,14 @@ class DiagnosticCognitionRuntime:
             if envelope.decision is not None
             else None
         )
+        if envelope.decision is not None and self._redis_client is not None:
+            await publish_crisis_intercept_event(
+                redis_client=self._redis_client,
+                tenant_id=tenant_id,
+                execution_id=execution_id,
+                decision=envelope.decision,
+                category=parsed.category.value,
+            )
         if (
             not envelope.is_ok
             or envelope.decision is None
@@ -788,6 +801,7 @@ def _safe_excerpt(content: str) -> str:
 def _governance_runtime(
     *,
     governance_repository: BaseGovernanceRepository | None,
+    redis_client: Any | None,
     require_citations: bool,
 ) -> GovernanceRuntime:
     registry = EnforcementHandlerRegistry()
@@ -808,6 +822,7 @@ def _governance_runtime(
                 chain_id="cognition.llm_diagnostic.pre_execution",
                 stage=EnforcementStage.PRE_EXECUTION,
                 policies=(
+                    *build_crisis_policies(redis=redis_client),
                     LLMDiagnosticOutputPolicy(require_citations=require_citations),
                 ),
             )

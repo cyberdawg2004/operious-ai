@@ -1229,8 +1229,10 @@ def _action_orchestration_runtime(
             # Per-task runtime construction bounds policy staleness to the
             # current task; new tasks pick up new composition.
             governance_runtime=build_action_tool_governance_runtime(
-                persistence=PostgresGovernanceRepository(session)
+                persistence=PostgresGovernanceRepository(session),
+                redis_client=get_redis_client(),
             ),
+            redis_client=get_redis_client(),
         ),
         approval_repository=PostgresActionApprovalRepository(session),
         timeline_runtime=timeline,
@@ -1885,6 +1887,7 @@ def _diagnostic_cognition_runtime(
             audit_encryptor=_cognition_audit_encryptor(),
         ),
         governance_repository=PostgresGovernanceRepository(session),
+        redis_client=get_redis_client(),
         quota_runtime=get_initialized_quota_runtime(),
         config=DiagnosticCognitionRuntimeConfig(
             max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,

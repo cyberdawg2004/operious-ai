@@ -20,6 +20,7 @@ from app.api.v1.routers.boundary import router as boundary_router
 from app.api.v1.routers.cognition import router as cognition_router
 from app.api.v1.routers.conversation import router as conversation_router
 from app.api.v1.routers.coordination import router as coordination_router
+from app.api.v1.routers.crisis import router as crisis_router
 from app.api.v1.routers.dispatch import router as dispatch_router
 from app.api.v1.routers.escalation import router as escalation_router
 from app.api.v1.routers.governance import router as governance_router
@@ -59,6 +60,7 @@ api_router_v1.include_router(
     action_approvals_router, prefix="/approvals/actions"
 )
 api_router_v1.include_router(conversation_router, prefix="/conversation")
+api_router_v1.include_router(crisis_router, prefix="/governance/crisis")
 api_router_v1.include_router(
     sop_intelligence_router, prefix="/sop-intelligence/approvals"
 )

@@ -50,8 +50,10 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -75,6 +77,71 @@ _HANDLER_NAME_WIDTH = 255
 
 
 # ─── governance_decisions ─────────────────────────────────────────────────
+
+
+class CrisisDeploymentRow(Base):
+    """ORM row for Redis-backed crisis deployments."""
+
+    __tablename__ = "crisis_deployments"
+
+    deployment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(_CHAIN_ID_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    template: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    ttl_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    policy_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    deployed_by: Mapped[str] = mapped_column(String(_CHAIN_ID_WIDTH), nullable=False)
+    deployed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="active",
+        server_default=text("'active'"),
+        index=True,
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_crisis_deployments_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
 
 
 class GovernanceDecisionRow(Base):

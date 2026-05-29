@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, FrozenSet, Sequence
+from typing import Any, ClassVar, FrozenSet, Sequence
 
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
@@ -21,6 +21,7 @@ from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.persistence import BaseGovernanceRepository
 from app.governance.policies.base import BaseGovernancePolicy
 from app.governance.policies.chain import PolicyChain
+from app.governance.policies.crisis import build_crisis_policies
 from app.governance.subjects.base import SubjectKind
 
 _CHAIN_ID = "agent.action_tools.pre_execution"
@@ -67,6 +68,7 @@ class AnkerPilotActionToolPolicy(BaseGovernancePolicy):
 def build_action_tool_governance_runtime(
     *,
     persistence: BaseGovernanceRepository | None = None,
+    redis_client: Any | None = None,
 ) -> GovernanceRuntime:
     registry = EnforcementHandlerRegistry()
     for handler in (
@@ -85,7 +87,10 @@ def build_action_tool_governance_runtime(
             EnforcementStage.PRE_EXECUTION: PolicyChain(
                 chain_id=_CHAIN_ID,
                 stage=EnforcementStage.PRE_EXECUTION,
-                policies=(AnkerPilotActionToolPolicy(),),
+                policies=(
+                    *build_crisis_policies(redis=redis_client),
+                    AnkerPilotActionToolPolicy(),
+                ),
             )
         },
         persistence=persistence,
