@@ -853,6 +853,8 @@ def _governance_handler_registry() -> EnforcementHandlerRegistry:
 class _DiagnosticExecutionIntent:
     execution_id: str
     tenant_id: str
+    outbox_id: str
+    claim_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -967,28 +969,31 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
         *,
         tenant_id: str,
     ) -> None:
+        claim = await self._execution_runtime.claim_outbox_for_execution(
+            execution_id=execution_id,
+            publisher_id=self._publisher_id,
+        )
+        if not claim.claimed or claim.outbox is None:
+            if claim.reason == "outbox_not_publishable:published":
+                return
+            raise ExecutionOutboxPublishError(
+                execution_id,
+                claim.reason or "outbox_claim_refused",
+            )
+        claim_id = _require_execution_outbox_claim_id(claim.outbox.claim_id)
         if isinstance(self._delegate, QueueBackpressureCheck):
             await self._delegate.check_backpressure(tenant_id=tenant_id)
         self._diagnostic_executions.append(
             _DiagnosticExecutionIntent(
                 execution_id=execution_id,
                 tenant_id=tenant_id,
+                outbox_id=str(claim.outbox.outbox_id),
+                claim_id=str(claim_id),
             )
         )
 
     async def flush(self) -> None:
         for intent in self._diagnostic_executions:
-            claim = await self._execution_runtime.claim_outbox_for_execution(
-                execution_id=intent.execution_id,
-                publisher_id=self._publisher_id,
-            )
-            if not claim.claimed or claim.outbox is None:
-                if claim.reason == "outbox_not_publishable:published":
-                    continue
-                raise ExecutionOutboxPublishError(
-                    intent.execution_id,
-                    claim.reason or "outbox_claim_refused",
-                )
             await self._session.commit()
             try:
                 await self._delegate.publish_execution(
@@ -997,10 +1002,8 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
                 )
             except Exception as exc:
                 await self._execution_runtime.mark_outbox_failed(
-                    outbox_id=claim.outbox.outbox_id,
-                    claim_id=_require_execution_outbox_claim_id(
-                        claim.outbox.claim_id
-                    ),
+                    outbox_id=intent.outbox_id,
+                    claim_id=intent.claim_id,
                     error=_bounded_publish_error(exc),
                 )
                 await self._session.commit()
@@ -1009,10 +1012,8 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
                     _bounded_publish_error(exc),
                 ) from exc
             published = await self._execution_runtime.mark_outbox_published(
-                outbox_id=claim.outbox.outbox_id,
-                claim_id=_require_execution_outbox_claim_id(
-                    claim.outbox.claim_id
-                ),
+                outbox_id=intent.outbox_id,
+                claim_id=intent.claim_id,
             )
             if isinstance(published, ExecutionOutboxClaimLost):
                 raise ExecutionOutboxPublishError(

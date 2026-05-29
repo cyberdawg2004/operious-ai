@@ -6,9 +6,11 @@ import ast
 import hashlib
 import uuid
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.resolution.enums import (
@@ -148,6 +150,8 @@ async def _ensure_committed_tenants(
     if seed_engine is None:
         for tenant_id in tenant_ids:
             await fallback_session.merge(TenantRow(tenant_id=tenant_id))
+        if TENANT_ID in tenant_ids:
+            await _ensure_resolution_fk_targets(fallback_session)
         await fallback_session.flush()
         return
 
@@ -160,10 +164,65 @@ async def _ensure_committed_tenants(
         try:
             for tenant_id in tenant_ids:
                 await session.merge(TenantRow(tenant_id=tenant_id))
+            if TENANT_ID in tenant_ids:
+                await _ensure_resolution_fk_targets(session)
             await session.flush()
             await session.commit()
         finally:
             await session.close()
+
+
+async def _ensure_resolution_fk_targets(session: AsyncSession) -> None:
+    now = datetime.now(timezone.utc)
+    await session.execute(
+        text(
+            """
+            INSERT INTO public.operational_sessions (
+                session_id, scope, external_handle, tenant_id, principal_id,
+                opened_at, lifecycle_phase, lifecycle_recorded_at,
+                lifecycle_reason, lineage_id, root_session_id,
+                parent_session_id, ancestor_session_ids, lineage_depth,
+                sequence_head, revision, context_environment,
+                context_labels, context_attributes, context_notes, metadata
+            )
+            VALUES (
+                :session_id, 'tenant', 'resolution-test-session',
+                :tenant_id, NULL, :now, 'active', :now, NULL,
+                :session_id, :session_id, NULL, '[]'::jsonb, 0, 0, 0,
+                NULL, '[]'::jsonb, '{}'::jsonb, NULL, '{}'::jsonb
+            )
+            ON CONFLICT (session_id) DO NOTHING
+            """
+        ),
+        {
+            "session_id": uuid.UUID(SESSION_ID),
+            "tenant_id": TENANT_ID,
+            "now": now,
+        },
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO public.execution_records (
+                execution_id, kind, dispatch_id, session_id, tenant_id,
+                state, attempt_count, requested_at, result, metadata
+            )
+            VALUES (
+                :execution_id, 'diagnostic_agent', :dispatch_id,
+                :session_id_text, :tenant_id, 'requested', 0,
+                :now, '{}'::jsonb, '{}'::jsonb
+            )
+            ON CONFLICT (tenant_id, dispatch_id, kind) DO NOTHING
+            """
+        ),
+        {
+            "execution_id": uuid.UUID(EXECUTION_ID),
+            "dispatch_id": DISPATCH_ID,
+            "session_id_text": SESSION_ID,
+            "tenant_id": TENANT_ID,
+            "now": now,
+        },
+    )
 
 
 @pytest.mark.asyncio

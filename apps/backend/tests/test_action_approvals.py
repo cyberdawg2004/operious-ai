@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.approvals import (
@@ -185,6 +186,29 @@ async def _seed_base(
     ids = _ids(seed)
     sessions = PostgresSessionPersistence(pg_session)
     await sessions.save_session(_session(ids=ids, tenant_id=tenant_id))
+    await pg_session.execute(
+        text(
+            """
+            INSERT INTO public.execution_records (
+                execution_id, kind, dispatch_id, session_id, tenant_id,
+                state, attempt_count, requested_at, result, metadata
+            )
+            VALUES (
+                :execution_id, 'diagnostic_agent', :dispatch_id,
+                :session_id, :tenant_id, 'requested', 0,
+                :requested_at, '{}'::jsonb, '{}'::jsonb
+            )
+            ON CONFLICT (tenant_id, dispatch_id, kind) DO NOTHING
+            """
+        ),
+        {
+            "execution_id": uuid.UUID(ids["execution_id"]),
+            "dispatch_id": ids["dispatch_id"],
+            "session_id": ids["session_id"],
+            "tenant_id": tenant_id,
+            "requested_at": _NOW,
+        },
+    )
     await TimelineRuntime(persistence=sessions).append_event(
         session_id=ids["session_id"],
         dispatch_id=ids["dispatch_id"],

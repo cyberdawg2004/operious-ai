@@ -122,6 +122,14 @@ celery_app.conf.update(
             "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
+        # Requeue execution outboxes left in PUBLISHING after a publisher
+        # crash so the durable execution intent is not orphaned.
+        "reconcile-stale-execution-outbox-minutely": {
+            "task": "reconcile_stale_execution_outbox",
+            "schedule": 60.0,
+            "kwargs": {"limit": 100},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
         "reconcile-failed-execution-outbox-minutely": {
             "task": "reconcile_failed_execution_outbox",
             "schedule": 60.0,

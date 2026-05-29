@@ -34,8 +34,8 @@ class ResolutionProposalRecord:
 
     proposal_id: ResolutionProposalId
     tenant_id: str
-    session_id: str
-    execution_id: str
+    session_id: str | None
+    execution_id: str | None
     dispatch_id: str
     diagnostic_event_id: str | None
     proposed_customer_reply: str

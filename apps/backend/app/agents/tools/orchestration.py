@@ -114,7 +114,9 @@ class ActionOrchestrationRuntime:
             outcomes.append(outcome)
 
         return ActionOrchestrationResult(
-            session_id=proposal.session_id,
+            session_id=_required_proposal_reference(
+                proposal.session_id, "session_id"
+            ),
             outcomes=tuple(outcomes),
             all_executed=all(
                 outcome.status == "executed" for outcome in outcomes
@@ -243,6 +245,12 @@ class ActionOrchestrationRuntime:
             action_type=action_type,
             tool_name=tool_name,
         )
+        session_id = _required_proposal_reference(
+            proposal.session_id, "session_id"
+        )
+        execution_id = _required_proposal_reference(
+            proposal.execution_id, "execution_id"
+        )
         target_resource = _target_resource(
             action=action,
             tool_name=tool_name,
@@ -250,7 +258,7 @@ class ActionOrchestrationRuntime:
         )
         idempotency_key = derive_action_idempotency_key(
             tenant_id=expected_tenant_id,
-            session_id=proposal.session_id,
+            session_id=session_id,
             tool_name=tool_name,
             target_resource=target_resource,
         )
@@ -303,8 +311,8 @@ class ActionOrchestrationRuntime:
                 approval = await self._approval_repository.create_pending_approval(
                     build_pending_action_approval(
                         tenant_id=expected_tenant_id,
-                        session_id=proposal.session_id,
-                        execution_id=proposal.execution_id,
+                        session_id=session_id,
+                        execution_id=execution_id,
                         tool_name=tool_name,
                         idempotency_key=str(idempotency_key),
                         payload_json=payload,
@@ -391,7 +399,9 @@ class ActionOrchestrationRuntime:
         payload: Mapping[str, Any],
     ) -> None:
         await self._timeline_runtime.append_event(
-            session_id=proposal.session_id,
+            session_id=_required_proposal_reference(
+                proposal.session_id, "session_id"
+            ),
             dispatch_id=proposal.dispatch_id,
             tenant_id=proposal.tenant_id,
             event_type=event_type,
@@ -598,6 +608,14 @@ def _text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _required_proposal_reference(value: str | None, field_name: str) -> str:
+    if value is None:
+        raise ValueError(
+            f"resolution proposal {field_name} is required for action orchestration"
+        )
+    return value
 
 
 def _int(value: object) -> int | None:

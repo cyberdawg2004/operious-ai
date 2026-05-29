@@ -39,11 +39,17 @@ class ResolutionProposalRow(Base):
         nullable=False,
         index=True,
     )
-    session_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("operational_sessions.session_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
-    execution_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("execution_records.execution_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     dispatch_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
@@ -83,7 +89,9 @@ class ResolutionProposalRow(Base):
         String(_ENUM_WIDTH), nullable=False, index=True
     )
     governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("governance_decisions.decision_id", ondelete="SET NULL"),
+        nullable=True,
     )
     autonomy_decision: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True

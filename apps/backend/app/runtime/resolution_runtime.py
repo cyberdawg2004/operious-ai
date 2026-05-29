@@ -371,8 +371,12 @@ class ResolutionOutboundDraftRuntime:
             draft_id=draft_id,
             tenant_id=proposal.tenant_id,
             proposal_id=proposal.proposal_id,
-            session_id=proposal.session_id,
-            execution_id=proposal.execution_id,
+            session_id=_required_proposal_lineage(
+                proposal.session_id, "session_id"
+            ),
+            execution_id=_required_proposal_lineage(
+                proposal.execution_id, "execution_id"
+            ),
             dispatch_id=proposal.dispatch_id,
             diagnostic_event_id=proposal.diagnostic_event_id,
             governance_decision_id=proposal.governance_decision_id,
@@ -446,6 +450,14 @@ class ResolutionOutboundDraftRuntime:
         if envelope.is_fully_clean and isinstance(localized_text, str):
             return localized_text
         return canonical_reply
+
+
+def _required_proposal_lineage(value: str | None, field_name: str) -> str:
+    if value is None:
+        raise ValueError(
+            f"resolution proposal {field_name} is required for draft creation"
+        )
+    return value
 
 
 def resolution_proposal_timeline_payload(

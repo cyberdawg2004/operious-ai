@@ -239,8 +239,8 @@ def _record_to_row(record: ResolutionProposalRecord) -> ResolutionProposalRow:
     return ResolutionProposalRow(
         proposal_id=UUID(str(record.proposal_id)),
         tenant_id=record.tenant_id,
-        session_id=UUID(record.session_id),
-        execution_id=UUID(record.execution_id),
+        session_id=_required_uuid(record.session_id, "session_id"),
+        execution_id=_required_uuid(record.execution_id, "execution_id"),
         dispatch_id=UUID(record.dispatch_id),
         diagnostic_event_id=(
             UUID(record.diagnostic_event_id)
@@ -273,8 +273,12 @@ def _row_to_record(row: ResolutionProposalRow) -> ResolutionProposalRecord:
     return ResolutionProposalRecord(
         proposal_id=as_resolution_proposal_id(row.proposal_id),
         tenant_id=row.tenant_id,
-        session_id=str(row.session_id),
-        execution_id=str(row.execution_id),
+        session_id=(
+            str(row.session_id) if row.session_id is not None else None
+        ),
+        execution_id=(
+            str(row.execution_id) if row.execution_id is not None else None
+        ),
         dispatch_id=str(row.dispatch_id),
         diagnostic_event_id=(
             str(row.diagnostic_event_id)
@@ -322,6 +326,14 @@ def _draft_record_to_row(
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
+
+
+def _required_uuid(value: str | None, field_name: str) -> UUID:
+    if value is None:
+        raise ValueError(
+            f"resolution proposal {field_name} is required for writes"
+        )
+    return UUID(value)
 
 
 def _draft_row_to_record(
