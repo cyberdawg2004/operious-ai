@@ -29,7 +29,12 @@ class AdmissionReason(str, enum.Enum):
 
 
 class AdmissionChannelClass(str, enum.Enum):
-    """Risk class used when admission telemetry is unavailable."""
+    """Risk class used when admission telemetry is unavailable.
+
+    Async ticket channels may fail open because queued work can recover
+    later. Voice is realtime and fails closed when capacity telemetry is
+    unavailable because overflow becomes customer-facing silence.
+    """
 
     ASYNC_TICKET = "async_ticket"
     BATCH = "batch"

@@ -2,37 +2,89 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, WebSocket, WebSocketException, status
+from typing import cast
+
+from fastapi import APIRouter, Depends, WebSocket, WebSocketException, status
 from starlette.websockets import WebSocketDisconnect
 
 from app.boundary.voice.adapters.twilio import TwilioMediaStreamAdapter
-from app.boundary.voice.call import VoiceCallSessionRuntime
+from app.boundary.voice.call import (
+    VoiceCallSessionRuntime,
+    VoiceCapacityCounter,
+)
 
 router = APIRouter(tags=["voice"])
+
+
+def get_voice_capacity_counter(
+    websocket: WebSocket,
+) -> VoiceCapacityCounter:
+    return cast(
+        VoiceCapacityCounter,
+        websocket.app.state.voice_capacity_counter,
+    )
 
 
 @router.websocket("/{session_id}/stream")
 async def stream_voice_session(
     websocket: WebSocket,
     session_id: str,
+    capacity: VoiceCapacityCounter = Depends(get_voice_capacity_counter),
 ) -> None:
     tenant_id = websocket.query_params.get("tenant")
     if not tenant_id:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
 
-    await websocket.accept()
-    adapter = TwilioMediaStreamAdapter()
+    if not await capacity.is_available():
+        raise WebSocketException(code=status.WS_1013_TRY_AGAIN_LATER)
+    acquired = await capacity.try_acquire()
+    if not acquired:
+        raise WebSocketException(code=status.WS_1013_TRY_AGAIN_LATER)
+
     runtime = websocket.app.state.voice_call_runtime
     if not isinstance(runtime, VoiceCallSessionRuntime):
-        await websocket.close(code=1011)
-        return
+        await capacity.release()
+        raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR)
 
-    context = await runtime.start_call(
-        session_id=session_id,
-        tenant_id=tenant_id,
-        call_nonce=session_id,
-    )
-    call_id = context.call_id
+    await websocket.accept()
+    adapter = TwilioMediaStreamAdapter()
+    call_id: str | None = None
+    try:
+        context = await runtime.start_call(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            call_nonce=session_id,
+        )
+        call_id = context.call_id
+        await _handle_voice_call(
+            websocket=websocket,
+            adapter=adapter,
+            runtime=runtime,
+            call_id=call_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+    finally:
+        try:
+            if call_id is not None and runtime.get_context(call_id) is not None:
+                await runtime.terminate_call(
+                    call_id=call_id,
+                    reason="websocket_handler_exit",
+                    expected_tenant_id=tenant_id,
+                )
+        finally:
+            await capacity.release()
+
+
+async def _handle_voice_call(
+    *,
+    websocket: WebSocket,
+    adapter: TwilioMediaStreamAdapter,
+    runtime: VoiceCallSessionRuntime,
+    call_id: str,
+    session_id: str,
+    tenant_id: str,
+) -> None:
     try:
         while True:
             raw = await websocket.receive_text()
@@ -60,6 +112,9 @@ async def stream_voice_session(
                 await websocket.close()
                 return
     except WebSocketDisconnect:
+        context = runtime.get_context(call_id)
+        if context is None:
+            return
         await runtime.terminate_call(
             call_id=call_id,
             reason="websocket_disconnect",
@@ -67,4 +122,4 @@ async def stream_voice_session(
         )
 
 
-__all__ = ["router"]
+__all__ = ["router", "get_voice_capacity_counter"]

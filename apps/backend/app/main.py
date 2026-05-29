@@ -43,7 +43,11 @@ from app.boundary.voice import (
     VoiceIngressRuntime,
     VoiceRuntime,
 )
-from app.boundary.voice.call import VoiceCallSessionRuntime
+from app.boundary.voice.call import (
+    VoiceCallSessionRuntime,
+    VoiceCapacityCounter,
+    VoiceCapacityRedisClient,
+)
 from app.core.config import Settings, get_settings
 from app.core.http import close_shared_http_client, init_shared_http_client
 from app.core.logging import configure_logging, get_logger
@@ -402,6 +406,10 @@ def create_app(
             persistence=voice_persistence,
             capability_governance=capability_governance_runtime,
         ),
+    )
+    app.state.voice_capacity_counter = VoiceCapacityCounter(
+        redis_client=cast(VoiceCapacityRedisClient, get_redis_client()),
+        limit=settings.VOICE_CAPACITY_LIMIT,
     )
 
     async def _append_voice_call_timeline(

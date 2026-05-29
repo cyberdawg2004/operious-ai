@@ -341,6 +341,29 @@ async def test_deliver_response_requires_governance_decision_id() -> None:
     assert tts.calls == 0
 
 
+@pytest.mark.asyncio
+async def test_terminated_call_removed_from_contexts() -> None:
+    governance, _ = _governance(Decision.ALLOW)
+    runtime = _runtime(governance=governance)
+    context = await runtime.start_call(
+        session_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "session-terminated")),
+        tenant_id="tenant-voice",
+        call_nonce="call-terminated",
+    )
+
+    assert runtime.get_context(context.call_id) is not None
+    assert runtime.active_call_count() == 1
+
+    await runtime.terminate_call(
+        call_id=context.call_id,
+        reason="test_complete",
+        expected_tenant_id="tenant-voice",
+    )
+
+    assert runtime.get_context(context.call_id) is None
+    assert runtime.active_call_count() == 0
+
+
 @requires_postgres
 @pytest.mark.asyncio
 async def test_postgres_voice_persistence_tenant_isolation(pg_session) -> None:

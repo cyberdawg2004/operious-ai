@@ -303,6 +303,11 @@ class VoiceCallSessionRuntime:
             context=terminated,
             payload={"call_id": call_id, "reason": reason},
         )
+        del self._contexts[call_id]
+        self._audio_chunks.pop(call_id, None)
+
+    def active_call_count(self) -> int:
+        return len(self._contexts)
 
     def get_context(self, call_id: str) -> VoiceCallContext | None:
         return self._contexts.get(call_id)

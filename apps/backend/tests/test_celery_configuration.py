@@ -13,6 +13,7 @@ import pytest
 
 from app.core.config import get_settings
 from app.core.redis_policy import verify_redis_memory_policy
+from app.queues import QUEUE_INGRESS_VOICE
 from app.workers.agent_tasks import (
     DiagnosticNonRetryableError,
     _DiagnosticExecutionWorkItem,
@@ -22,7 +23,7 @@ from app.workers.agent_tasks import (
     _retry_countdown,
     execute_diagnostic_agent,
 )
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import celery_app, process_post_call_transcript
 from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_outbox
 from app.workers.escalation_tasks import create_governance_escalation
 from app.workers.execution_recovery_tasks import (
@@ -55,6 +56,7 @@ _FIRE_AND_FORGET_TASKS = {
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
     "reconcile_stale_escalation_outbox": reconcile_stale_escalation_outbox,
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
+    "process_post_call_transcript": process_post_call_transcript,
 }
 _TASK_RETRY_BUDGETS = {
     "execute_diagnostic_agent": 4,
@@ -67,6 +69,7 @@ _TASK_RETRY_BUDGETS = {
     "reconcile_stale_execution_outbox": 5,
     "reconcile_stale_escalation_outbox": 5,
     "cleanup_expired_webhook_nonces": 1,
+    "process_post_call_transcript": 1,
 }
 
 
@@ -110,6 +113,12 @@ def test_celery_tasks_have_explicit_retry_budgets() -> None:
 
         assert getattr(task, "max_retries") == expected_budget, task_name
         assert getattr(task, "default_retry_delay") == 30, task_name
+
+
+def test_post_call_voice_task_routes_to_voice_queue() -> None:
+    routes = celery_app.conf.task_routes
+
+    assert routes["process_post_call_transcript"]["queue"] == QUEUE_INGRESS_VOICE
 
 
 def test_diagnostic_retry_countdown_uses_exponential_backoff() -> None:

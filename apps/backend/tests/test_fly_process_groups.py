@@ -18,6 +18,7 @@ EXPECTED_PROCESS_QUEUES = {
     "worker_supervisor": ("supervisor", "qa"),
     "worker_sop": ("sop_intelligence", "knowledge_indexing"),
     "worker_maintenance": ("webhook_maintenance", "dead_letter"),
+    "worker_voice_realtime": ("ingress.voice",),
 }
 
 EXPECTED_CONCURRENCY = {
@@ -26,6 +27,7 @@ EXPECTED_CONCURRENCY = {
     "worker_supervisor": 4,
     "worker_sop": 4,
     "worker_maintenance": 2,
+    "worker_voice_realtime": 8,
 }
 
 EXPECTED_VM_PROFILES = {
@@ -35,6 +37,7 @@ EXPECTED_VM_PROFILES = {
     "worker_supervisor": ("256mb", "shared", 1),
     "worker_sop": ("256mb", "shared", 1),
     "worker_maintenance": ("256mb", "shared", 1),
+    "worker_voice_realtime": ("512mb", "shared", 2),
 }
 
 
@@ -49,6 +52,7 @@ def test_fly_declares_required_process_groups() -> None:
         "worker_supervisor",
         "worker_sop",
         "worker_maintenance",
+        "worker_voice_realtime",
     }
     assert processes["web"] == "uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
@@ -75,6 +79,18 @@ def test_http_service_targets_web_process_only() -> None:
     assert _fly_config()["http_service"]["processes"] == ["web"]
 
 
+def test_voice_process_groups_are_pre_warmed() -> None:
+    config = _fly_config()
+    assert config["http_service"]["min_machines_running"] == 1
+    vm_min_machines = {
+        vm["processes"][0]: vm.get("min_machines_running", 0)
+        for vm in config["vm"]
+    }
+
+    assert vm_min_machines["web"] == 1
+    assert vm_min_machines["worker_voice_realtime"] == 1
+
+
 def test_vm_profiles_match_process_groups() -> None:
     vm_profiles = {
         vm["processes"][0]: (
@@ -93,7 +109,7 @@ def _fly_config() -> dict[str, object]:
 
 
 def _command_queues(command: str) -> tuple[str, ...]:
-    match = re.search(r"\s-Q\s+([^\s]+)", command)
+    match = re.search(r"(?:\s-Q|\s--queues)\s+([^\s]+)", command)
     assert match is not None, f"missing -Q flag in {command}"
     return tuple(match.group(1).split(","))
 

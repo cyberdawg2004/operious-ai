@@ -30,6 +30,7 @@ from app.queues import (
     ALL_QUEUES,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
+    QUEUE_INGRESS_VOICE,
     QUEUE_QA,
     QUEUE_SOP_INTELLIGENCE,
     QUEUE_SUPERVISOR,
@@ -88,6 +89,7 @@ celery_app.conf.update(
         "operious.workers.evaluate_alert_conditions": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
+        "process_post_call_transcript": {"queue": QUEUE_INGRESS_VOICE},
     },
     task_acks_late=True,
     task_ignore_result=True,
@@ -223,6 +225,22 @@ def evaluate_alert_conditions() -> None:
             "alert_evaluation_failed",
             extra={"error": str(exc)},
         )
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="process_post_call_transcript",
+    queue=QUEUE_INGRESS_VOICE,
+    ignore_result=True,
+    max_retries=1,
+    default_retry_delay=30,
+)
+def process_post_call_transcript(call_id: str, tenant_id: str) -> None:
+    """Stub hook for RT6/RT7 post-call voice work."""
+
+    logger.info(
+        "process_post_call_transcript_received",
+        extra={"call_id": call_id, "tenant_id": tenant_id},
+    )
 
 
 @task_prerun.connect  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -482,4 +500,5 @@ __all__ = [
     "on_task_postrun",
     "on_task_prerun",
     "on_task_retry",
+    "process_post_call_transcript",
 ]

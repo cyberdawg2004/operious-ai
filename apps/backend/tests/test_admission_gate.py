@@ -281,7 +281,7 @@ async def test_realtime_chat_defers_when_telemetry_unavailable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_voice_defers_when_telemetry_unavailable() -> None:
+async def test_voice_rejects_when_telemetry_unavailable() -> None:
     decision = await AdmissionGate(
         redis_client=_AdmissionRedis(fail_llen=True),
         thresholds=_thresholds(),
@@ -291,7 +291,7 @@ async def test_voice_defers_when_telemetry_unavailable() -> None:
         channel="voice",
     )
 
-    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.outcome is AdmissionOutcome.REJECT
     assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_VOICE
     assert decision.channel_class is AdmissionChannelClass.VOICE
 
