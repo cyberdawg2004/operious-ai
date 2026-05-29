@@ -10,8 +10,6 @@ import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Mapping
-
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
 from app.governance.enums import Decision, ViolationSeverity
@@ -137,7 +135,7 @@ class PolicyEvaluationEngine:
 
 def _count(
     results: tuple[PolicyEvaluationResult, ...] | tuple[()],
-) -> Mapping[Decision, int]:
+) -> dict[Decision, int]:
     counter: Counter[Decision] = Counter(r.decision for r in results)
     return dict(counter)
 

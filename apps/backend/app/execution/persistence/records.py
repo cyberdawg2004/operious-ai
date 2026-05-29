@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping, cast
+from typing import Any, cast
 import uuid
 
 from app.execution.envelope import ExecutionResultEnvelope
@@ -20,6 +20,10 @@ from app.execution.identity import (
     ExecutionOutboxClaimId,
     ExecutionOutboxId,
 )
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +49,7 @@ class ExecutionRecord:
         default_factory=ExecutionResultEnvelope
     )
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def __post_init__(self) -> None:
         result = cast(Any, self.result)
@@ -75,7 +79,7 @@ class ExecutionAttemptRecord:
         default_factory=ExecutionResultEnvelope
     )
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def __post_init__(self) -> None:
         result = cast(Any, self.result)
@@ -120,7 +124,7 @@ class ExecutionOutboxRecord:
     claim_id: ExecutionOutboxClaimId | None = None
     publish_attempt_count: int = 0
     last_error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)

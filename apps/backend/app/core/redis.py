@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from typing import cast
 
-from redis.asyncio import Redis, from_url
+from redis.asyncio import Redis
 
 from app.core.config import Settings, get_settings
 
@@ -23,7 +25,8 @@ _redis_client: Redis | None = None
 
 def _build_redis(settings: Settings) -> Redis:
     socket_timeout = min(5.0, settings.SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS)
-    return from_url(
+    redis_from_url = cast(Callable[..., Redis], getattr(Redis, "from_url"))
+    return redis_from_url(
         settings.redis_url,
         encoding="utf-8",
         decode_responses=True,

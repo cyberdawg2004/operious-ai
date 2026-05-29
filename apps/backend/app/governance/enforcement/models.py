@@ -15,7 +15,11 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 class EnforcementOutcome(StrEnum):
@@ -37,7 +41,7 @@ class EnforcementAction:
     outcome: EnforcementOutcome
     applied_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     detail: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 __all__ = ["EnforcementOutcome", "EnforcementAction"]

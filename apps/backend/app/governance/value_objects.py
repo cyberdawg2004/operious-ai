@@ -14,9 +14,13 @@ supervisor runtimes can reconstruct *why* a restriction is in force.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.governance.enums import Decision, RestrictionKind, ViolationSeverity
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +39,7 @@ class PolicyViolation:
     decision: Decision
     severity: ViolationSeverity
     detail: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +71,7 @@ class RuntimeRestriction:
     reason: str
     policy_name: str
     rule_id: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 __all__ = ["PolicyViolation", "RuntimeRestriction"]

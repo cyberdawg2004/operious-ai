@@ -29,6 +29,14 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
+def _empty_metadata() -> dict[str, Any]:
+    return {}
+
+
+def _empty_decision_counts() -> dict[str, int]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyEvaluationResultRecord:
     """Persistable shape of one `PolicyEvaluationResult`.
@@ -47,7 +55,7 @@ class PolicyEvaluationResultRecord:
     severity: int
     reason: str
     evaluated_at: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
     # 2.5-E: per-policy provenance. Round-trips through to_dict /
     # from_dict; legacy records without the field deserialize as
     # ``"unversioned"``.
@@ -90,7 +98,7 @@ class PolicyViolationRecord:
     decision: str
     severity: int
     detail: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,7 +132,7 @@ class RuntimeRestrictionRecord:
     reason: str
     policy_name: str
     rule_id: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -164,9 +172,11 @@ class PolicyEvaluationTraceRecord:
     ended_at: str
     latency_ms: float
     rule_count: int
-    decision_counts: Mapping[str, int] = field(default_factory=dict)
+    decision_counts: dict[str, int] = field(
+        default_factory=_empty_decision_counts
+    )
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -223,7 +233,7 @@ class GovernanceTraceRecord:
     enforcement_latency_ms: float | None
     policy_traces: tuple[PolicyEvaluationTraceRecord, ...] = ()
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -333,7 +343,7 @@ class GovernanceDecisionRecord:
     # order, including ALLOW rules. Added additively; legacy records
     # without this field still deserialize cleanly with `()`.
     evaluated_rules: tuple[PolicyEvaluationResultRecord, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -398,7 +408,7 @@ class EnforcementActionRecord:
     outcome: str
     applied_at: str
     detail: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def to_dict(self) -> dict[str, Any]:
         return {

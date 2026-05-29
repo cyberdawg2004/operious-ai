@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.governance.enums import EnforcementStage
 from app.governance.exceptions import GovernanceConfigurationError
@@ -46,6 +46,10 @@ from app.identity import (
     PrincipalId,
     TenantId,
 )
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +102,7 @@ class GovernanceContext:
     authority: AuthorityContext | None = None
     subject: BaseGovernanceSubject = field(default_factory=GenericGovernanceSubject)
     correlation_id: uuid.UUID | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     def __post_init__(self) -> None:
         # 2.5-F invariant: when both ``tenant_id`` and ``authority``

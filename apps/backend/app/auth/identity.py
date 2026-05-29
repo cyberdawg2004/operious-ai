@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from app.identity import AuthorityContext
+
+
+def _empty_claims() -> dict[str, Any]:
+    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +44,7 @@ class VerifiedIdentity:
     issuer: str | None = None
     issued_at: datetime | None = None
     expires_at: datetime | None = None
-    claims: Mapping[str, Any] = field(default_factory=dict)
+    claims: dict[str, Any] = field(default_factory=_empty_claims)
 
 
 def verified_identity_to_authority(

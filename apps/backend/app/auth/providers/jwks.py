@@ -49,7 +49,6 @@ is issued. This keeps the test surface offline-deterministic.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, ClassVar
@@ -81,12 +80,16 @@ from app.auth.providers.jwt import (
 _DEFAULT_JWKS_TTL_SECONDS: float = 3600.0
 
 
+def _empty_decode_options() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class _DecodeOptions:
     issuer: str | tuple[str, ...] | None = None
     audience: str | tuple[str, ...] | None = None
     leeway: float = 0.0
-    options: Mapping[str, Any] = field(default_factory=dict)
+    options: dict[str, Any] = field(default_factory=_empty_decode_options)
 
 
 class JWKSAuthProvider:

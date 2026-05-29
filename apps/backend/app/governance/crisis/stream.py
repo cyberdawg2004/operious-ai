@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import datetime, timezone
-from typing import Any, cast
+from inspect import isawaitable
+from typing import Any, Protocol, cast
+
+from redis.asyncio import Redis
 
 from app.governance.decisions import GovernanceDecision
 from app.governance.policies.crisis import crisis_policy_name_from_decision
@@ -15,9 +18,36 @@ from app.governance.policies.crisis import crisis_policy_name_from_decision
 logger = logging.getLogger(__name__)
 
 
+class _CrisisRedisPubSub(Protocol):
+    async def subscribe(self, channel: str) -> object:
+        ...
+
+    async def get_message(
+        self,
+        *,
+        ignore_subscribe_messages: bool,
+        timeout: float,
+    ) -> Mapping[str, object] | None:
+        ...
+
+    async def unsubscribe(self, channel: str) -> object:
+        ...
+
+
+class _CrisisRedisClient(Protocol):
+    async def publish(self, channel: str, message: str) -> object:
+        ...
+
+    def pubsub(self) -> _CrisisRedisPubSub:
+        ...
+
+
+_CloseCallback = Callable[[], Awaitable[object] | object]
+
+
 async def publish_crisis_intercept_event(
     *,
-    redis_client: Any,
+    redis_client: Redis,
     tenant_id: str,
     execution_id: str,
     decision: GovernanceDecision,
@@ -38,7 +68,8 @@ async def publish_crisis_intercept_event(
         "tenant_id": tenant_id,
     }
     try:
-        await redis_client.publish(
+        client = cast(_CrisisRedisClient, redis_client)
+        await client.publish(
             _channel(tenant_id),
             json.dumps(event, default=str, separators=(",", ":"), sort_keys=True),
         )
@@ -51,13 +82,14 @@ async def publish_crisis_intercept_event(
 
 async def subscribe_crisis_intercept_events(
     *,
-    redis_client: Any,
+    redis_client: Redis,
     expected_tenant_id: str,
     timeout_seconds: int = 300,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield tenant-scoped crisis intercept events from Redis pub/sub."""
 
-    pubsub = redis_client.pubsub()
+    client = cast(_CrisisRedisClient, redis_client)
+    pubsub = client.pubsub()
     channel = _channel(expected_tenant_id)
     await pubsub.subscribe(channel)
     try:
@@ -75,12 +107,12 @@ async def subscribe_crisis_intercept_events(
             yield event
     finally:
         await pubsub.unsubscribe(channel)
-        close = getattr(pubsub, "aclose", None)
+        close = cast(_CloseCallback | None, getattr(pubsub, "aclose", None))
         if close is None:
-            close = getattr(pubsub, "close", None)
+            close = cast(_CloseCallback | None, getattr(pubsub, "close", None))
         if close is not None:
             result = close()
-            if hasattr(result, "__await__"):
+            if isawaitable(result):
                 await result
 
 

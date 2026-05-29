@@ -24,6 +24,10 @@ from app.governance.identity.decision_ids import generate_decision_id
 from app.governance.value_objects import PolicyViolation, RuntimeRestriction
 
 
+def _empty_metadata() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyEvaluationResult:
     """One rule's verdict inside one policy invocation.
@@ -55,7 +59,7 @@ class PolicyEvaluationResult:
         default_factory=lambda: datetime.now(timezone.utc)
     )
     restrictions: tuple[RuntimeRestriction, ...] = ()
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
     # 2.5-E: per-policy version. Free-form, caller-pinned (e.g.
     # ``"2026.05.19-r1"``). Defaults to ``"unversioned"`` so legacy
     # producers continue to compile; production policies should
@@ -99,7 +103,7 @@ class GovernanceDecision:
     restrictions: tuple[RuntimeRestriction, ...]
     reason: str
     decided_at: datetime
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
     @property
     def is_allow(self) -> bool:

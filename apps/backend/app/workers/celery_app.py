@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Coroutine, Mapping
 from datetime import datetime, timezone
 from inspect import isawaitable
 from threading import Thread
-from typing import Any, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from celery import Celery
 from celery.signals import task_failure, task_postrun, task_prerun, task_retry
@@ -45,6 +45,12 @@ logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 _task_start_times: dict[str, datetime] = {}
 
+
+class _CeleryConfig(Protocol):
+    def update(self, **kwargs: object) -> object:
+        ...
+
+
 celery_app = Celery(
     "operious",
     broker=settings.redis_url,
@@ -61,7 +67,8 @@ celery_app = Celery(
     ],
 )
 
-celery_app.conf.update(
+celery_conf = cast(_CeleryConfig, getattr(celery_app, "conf"))
+celery_conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from app.governance.enums import Decision, EnforcementStage
 
@@ -36,6 +36,14 @@ TraceStatus = Literal["ok", "failed", "skipped"]
 """
 
 
+def _empty_decision_counts() -> dict[Decision, int]:
+    return {}
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyEvaluationTrace:
     """One policy invocation inside one governance evaluation."""
@@ -46,9 +54,11 @@ class PolicyEvaluationTrace:
     ended_at: datetime
     latency_ms: float
     rule_count: int
-    decision_counts: Mapping[Decision, int] = field(default_factory=dict)
+    decision_counts: dict[Decision, int] = field(
+        default_factory=_empty_decision_counts
+    )
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +99,7 @@ class GovernanceTrace:
     enforcement_status: TraceStatus | None = None
     enforcement_latency_ms: float | None = None
     error: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 __all__ = [

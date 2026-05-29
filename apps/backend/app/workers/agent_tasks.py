@@ -8,11 +8,11 @@ import os
 import sys
 import traceback
 import uuid
-from collections.abc import Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Thread
-from typing import Any, TypeVar, cast
+from typing import Any, ParamSpec, Protocol, TypeVar, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -147,6 +147,19 @@ from app.queues import (
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 
 _T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+
+class _CeleryTaskDecorator(Protocol):
+    def __call__(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+        ...
+
+
+_celery_task = cast(_CeleryTaskDecorator, getattr(celery_app, "task"))
 _STARTED = "diagnostic_execution_started"
 _COMPLETED = "diagnostic_analysis_completed"
 _FAILED = "diagnostic_execution_failed"
@@ -159,7 +172,7 @@ _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(
+@_celery_task(
     name="execute_diagnostic_agent",
     queue=QUEUE_DIAGNOSTIC_NORMAL,
     bind=True,
