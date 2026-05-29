@@ -37,6 +37,7 @@ from app.queues import (
     QUEUE_WEBHOOK_MAINTENANCE,
 )
 from app.services.alert_evaluator_factory import create_alert_evaluator
+from app.services.crisis_events import PostgresCrisisEventRepository
 from app.services.crisis_service import CrisisService
 
 settings = get_settings()
@@ -258,6 +259,7 @@ def expire_crisis_deployments(limit: int = 100) -> None:
             expired = await CrisisService(
                 session=session,
                 redis_client=get_redis_client(),
+                event_repository=PostgresCrisisEventRepository(session),
             ).expire_due(limit=limit)
             logger.info(
                 "crisis_deployments_expired",

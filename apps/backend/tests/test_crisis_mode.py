@@ -280,6 +280,24 @@ async def crisis_session_factory() -> AsyncIterator[async_sessionmaker[AsyncSess
                 """
             )
         )
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE crisis_events (
+                    event_id CHAR(36) NOT NULL PRIMARY KEY,
+                    tenant_id VARCHAR(255) NOT NULL,
+                    deployment_id CHAR(36) NOT NULL,
+                    event_kind VARCHAR(32) NOT NULL,
+                    template VARCHAR(64) NOT NULL,
+                    scope_json JSON NOT NULL DEFAULT '{}',
+                    ttl_minutes INTEGER NOT NULL DEFAULT 0,
+                    actor VARCHAR(255) NOT NULL,
+                    occurred_at DATETIME NOT NULL,
+                    metadata JSON NOT NULL DEFAULT '{}'
+                )
+                """
+            )
+        )
     try:
         yield async_sessionmaker(
             bind=engine,

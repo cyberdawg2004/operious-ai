@@ -9,6 +9,7 @@ export const dashboardRoutes = {
   cognition: "/dashboard/cognition",
   knowledge: "/dashboard/knowledge",
   governance: "/dashboard/governance",
+  crisis: "/dashboard/crisis",
   topology: "/dashboard/topology",
   channels: "/dashboard/channels",
   team: "/dashboard/team",

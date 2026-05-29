@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.v1.schemas.crisis import (
     CrisisDeploymentListResponse,
     CrisisDeploymentResponse,
     CrisisDeployRequest,
+    CrisisEventListResponse,
+    CrisisEventResponse,
     deployment_scope_from_request,
 )
 from app.dependencies.authority import (
@@ -48,6 +51,24 @@ async def deploy_crisis_rule(
     except CrisisServiceError as exc:
         raise _http_error(exc) from exc
     return CrisisDeploymentResponse.from_record(record)
+
+
+@router.get("/events", response_model=CrisisEventListResponse)
+async def list_crisis_events(
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: CrisisService = Depends(get_crisis_service),
+    since: datetime | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> CrisisEventListResponse:
+    records = await service.list_events(
+        tenant_id=expected_tenant_id,
+        expected_tenant_id=expected_tenant_id,
+        since=since,
+        limit=limit,
+    )
+    return CrisisEventListResponse(
+        items=[CrisisEventResponse.from_record(record) for record in records]
+    )
 
 
 @router.get("/active", response_model=CrisisDeploymentListResponse)

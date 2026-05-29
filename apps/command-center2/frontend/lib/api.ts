@@ -374,6 +374,21 @@ type CrisisDeploymentListResponse = {
   items: CrisisDeployment[];
 };
 
+export type CrisisEvent = {
+  event_id: string;
+  deployment_id: string;
+  event_kind: "deployed" | "deactivated" | "expired";
+  template: string;
+  scope: Record<string, unknown>;
+  actor: string;
+  occurred_at: string;
+  ttl_minutes: number;
+};
+
+type CrisisEventListResponse = {
+  items: CrisisEvent[];
+};
+
 export type CrisisDeployRequest = {
   template: CrisisTemplate;
   scope: Record<string, unknown>;
@@ -945,6 +960,15 @@ export function deactivateCrisisDeployment(deploymentId: string) {
     `/governance/crisis/${encodeURIComponent(deploymentId)}`,
     { method: "DELETE" }
   );
+}
+
+export function listCrisisEvents(query: { limit?: number; since?: string } = {}) {
+  return apiRequest<CrisisEventListResponse>("/governance/crisis/events", {
+    query: {
+      limit: query.limit ?? 100,
+      since: query.since,
+    },
+  }).then((response) => response.items);
 }
 
 export function getCrisisTickerUrl() {

@@ -51,6 +51,7 @@ const navItems: NavItem[] = [
   { id: "cognition", href: dashboardRoutes.cognition, label: "Cognition Hub", icon: Brain, group: "intelligence" },
   { id: "knowledge", href: dashboardRoutes.knowledge, label: "Knowledge Base", icon: BookOpen, group: "intelligence" },
   { id: "governance", href: dashboardRoutes.governance, label: "Governance", icon: Gavel, group: "platform" },
+  { id: "crisis", href: dashboardRoutes.crisis, label: "Crisis History", icon: ShieldAlert, group: "platform" },
   { id: "topology", href: dashboardRoutes.topology, label: "Topology", icon: GitBranch, group: "platform" },
   { id: "channels", href: dashboardRoutes.channels, label: "Channels", icon: Radio, group: "platform" },
   { id: "team", href: dashboardRoutes.team, label: "Team & Roles", icon: Users, group: "system" },
@@ -247,7 +248,7 @@ export function Sidebar({
                             {approvalCount > 99 ? "99+" : approvalCount}
                           </span>
                         )}
-                        {item.id === "governance" && crisisActive && (
+                        {(item.id === "governance" || item.id === "crisis") && crisisActive && (
                           <span
                             className={cn(
                               "ml-auto h-2 w-2 rounded-full bg-red-alert",

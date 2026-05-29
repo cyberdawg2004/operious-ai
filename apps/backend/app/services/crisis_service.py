@@ -6,9 +6,11 @@ import hashlib
 import json
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
+import sentry_sdk
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +23,15 @@ from app.governance.crisis.templates import (
 from app.governance.db.models import CrisisDeploymentRow
 from app.governance.crisis.stream import subscribe_crisis_intercept_events
 from app.governance.policies.crisis import _crisis_key
+from app.services.crisis_events import (
+    CrisisEventRecord,
+    CrisisEventRepository,
+    PostgresCrisisEventRepository,
+)
 
 _DEPLOYMENT_NAMESPACE = uuid.UUID("aa89f110-57a2-52a3-b27e-69c35314d9ad")
 _logger = get_logger(__name__)
+_SentryLevel = Literal["warning", "info"]
 
 
 class CrisisServiceError(RuntimeError):
@@ -36,9 +44,13 @@ class CrisisService:
         *,
         session: AsyncSession,
         redis_client: Any,
+        event_repository: CrisisEventRepository | None = None,
     ) -> None:
         self._session = session
         self._redis = redis_client
+        self._event_repository = event_repository or PostgresCrisisEventRepository(
+            session
+        )
 
     async def deploy(
         self,
@@ -134,6 +146,30 @@ class CrisisService:
             row.status = "active"
             row.metadata_json = metadata
         await self._session.commit()
+        await self._write_event(
+            _event_record(
+                tenant_id=tenant_id,
+                deployment_id=str(deployment_id),
+                event_kind="deployed",
+                template=template.value,
+                scope=normalized_scope,
+                ttl_minutes=ttl_minutes,
+                actor=deployed_by,
+                occurred_at=now,
+            )
+        )
+        _capture_crisis_message(
+            message=f"CRISIS RULE DEPLOYED: {template.value} on tenant {tenant_id}",
+            level="warning",
+            extras={
+                "deployment_id": str(deployment_id),
+                "template": template.value,
+                "scope": _scope_dict(normalized_scope),
+                "ttl_minutes": ttl_minutes,
+                "deployed_by": deployed_by,
+                "tenant_id": tenant_id,
+            },
+        )
         return _record_from_row(row)
 
     async def deactivate(
@@ -158,6 +194,33 @@ class CrisisService:
             "deactivated_at": _utcnow().isoformat(),
         }
         await self._session.commit()
+        await self._write_event(
+            _event_record(
+                tenant_id=tenant_id,
+                deployment_id=str(row.deployment_id),
+                event_kind="deactivated",
+                template=row.template,
+                scope=CrisisDeploymentScope.from_mapping(
+                    CrisisTemplate(row.template),
+                    row.scope_json or {},
+                ),
+                ttl_minutes=row.ttl_minutes,
+                actor=deactivated_by,
+                occurred_at=_utcnow(),
+            )
+        )
+        _capture_crisis_message(
+            message=f"Crisis rule deactivated: {row.template} on {tenant_id}",
+            level="info",
+            extras={
+                "deployment_id": str(row.deployment_id),
+                "template": row.template,
+                "scope": dict(row.scope_json or {}),
+                "ttl_minutes": row.ttl_minutes,
+                "deactivated_by": deactivated_by,
+                "tenant_id": tenant_id,
+            },
+        )
         return _record_from_row(row)
 
     async def list_active(
@@ -213,7 +276,53 @@ class CrisisService:
             }
         if rows:
             await self._session.commit()
+            for row in rows:
+                await self._write_event(
+                    _event_record(
+                        tenant_id=row.tenant_id,
+                        deployment_id=str(row.deployment_id),
+                        event_kind="expired",
+                        template=row.template,
+                        scope=CrisisDeploymentScope.from_mapping(
+                            CrisisTemplate(row.template),
+                            row.scope_json or {},
+                        ),
+                        ttl_minutes=row.ttl_minutes,
+                        actor="system",
+                        occurred_at=now,
+                    ),
+                    commit=False,
+                )
+            await self._session.commit()
+            for row in rows:
+                _capture_crisis_message(
+                    message=f"Crisis rule expired: {row.template} on {row.tenant_id}",
+                    level="info",
+                    extras={
+                        "deployment_id": str(row.deployment_id),
+                        "template": row.template,
+                        "scope": dict(row.scope_json or {}),
+                        "ttl_minutes": row.ttl_minutes,
+                        "tenant_id": row.tenant_id,
+                    },
+                )
         return len(rows)
+
+    async def list_events(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+        limit: int = 100,
+        since: datetime | None = None,
+    ) -> list[CrisisEventRecord]:
+        _assert_tenant(tenant_id, expected_tenant_id)
+        return await self._event_repository.list_for_tenant(
+            tenant_id=tenant_id,
+            expected_tenant_id=expected_tenant_id,
+            limit=limit,
+            since=since,
+        )
 
     def stream_intercepts(
         self,
@@ -224,6 +333,16 @@ class CrisisService:
             redis_client=self._redis,
             expected_tenant_id=expected_tenant_id,
         )
+
+    async def _write_event(
+        self,
+        record: CrisisEventRecord,
+        *,
+        commit: bool = True,
+    ) -> None:
+        await self._event_repository.write(record)
+        if commit:
+            await self._session.commit()
 
     async def _load_active(
         self,
@@ -337,6 +456,58 @@ def _record_from_row(row: CrisisDeploymentRow) -> CrisisDeploymentRecord:
         decision=decision,
         metadata=dict(row.metadata_json or {}),
     )
+
+
+def _event_record(
+    *,
+    tenant_id: str,
+    deployment_id: str,
+    event_kind: str,
+    template: str,
+    scope: CrisisDeploymentScope,
+    ttl_minutes: int,
+    actor: str,
+    occurred_at: datetime,
+) -> CrisisEventRecord:
+    return CrisisEventRecord(
+        event_id=str(uuid.uuid4()),  # APPROVED_EXCEPTION: immutable audit event id
+        tenant_id=tenant_id,
+        deployment_id=deployment_id,
+        event_kind=event_kind,
+        template=template,
+        scope_json=_scope_dict(scope),
+        ttl_minutes=ttl_minutes,
+        actor=actor,
+        occurred_at=occurred_at,
+        metadata={},
+    )
+
+
+def _scope_dict(scope: CrisisDeploymentScope) -> dict[str, Any]:
+    value = asdict(scope)
+    template = value.get("template")
+    if isinstance(template, CrisisTemplate):
+        value["template"] = template.value
+    return {str(key): item for key, item in value.items() if item is not None}
+
+
+def _capture_crisis_message(
+    *,
+    message: str,
+    level: _SentryLevel,
+    extras: dict[str, Any],
+) -> None:
+    try:
+        sentry_sdk.capture_message(
+            message,
+            level=level,
+            extras=extras,
+        )
+    except Exception as exc:  # noqa: BLE001 - Sentry must not block crisis ops.
+        _logger.warning(
+            "crisis_sentry_notify_failed",
+            extra={"error": str(exc)},
+        )
 
 
 def _assert_tenant(tenant_id: str, expected_tenant_id: str) -> None:

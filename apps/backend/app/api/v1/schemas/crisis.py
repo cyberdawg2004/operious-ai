@@ -11,6 +11,7 @@ from app.governance.crisis import (
     CrisisDeploymentScope,
     CrisisTemplate,
 )
+from app.services.crisis_events import CrisisEventRecord
 
 
 class CrisisDeployRequest(BaseModel):
@@ -71,6 +72,38 @@ class CrisisDeploymentListResponse(BaseModel):
     items: list[CrisisDeploymentResponse]
 
 
+class CrisisEventResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    event_id: str
+    deployment_id: str
+    event_kind: str
+    template: str
+    scope: dict[str, Any]
+    actor: str
+    occurred_at: str
+    ttl_minutes: int
+
+    @classmethod
+    def from_record(cls, record: CrisisEventRecord) -> "CrisisEventResponse":
+        return cls(
+            event_id=record.event_id,
+            deployment_id=record.deployment_id,
+            event_kind=record.event_kind,
+            template=record.template,
+            scope=dict(record.scope_json),
+            actor=record.actor,
+            occurred_at=record.occurred_at.isoformat(),
+            ttl_minutes=record.ttl_minutes,
+        )
+
+
+class CrisisEventListResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[CrisisEventResponse]
+
+
 def deployment_scope_from_request(
     template: CrisisTemplate,
     scope: dict[str, Any],
@@ -82,5 +115,7 @@ __all__ = [
     "CrisisDeployRequest",
     "CrisisDeploymentListResponse",
     "CrisisDeploymentResponse",
+    "CrisisEventListResponse",
+    "CrisisEventResponse",
     "deployment_scope_from_request",
 ]

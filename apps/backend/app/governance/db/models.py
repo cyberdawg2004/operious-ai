@@ -144,6 +144,70 @@ class CrisisDeploymentRow(Base):
     )
 
 
+class CrisisEventRow(Base):
+    """Append-only audit event for crisis deployment lifecycle changes."""
+
+    __tablename__ = "crisis_events"
+
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(_CHAIN_ID_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    deployment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "crisis_deployments.deployment_id",
+            name="fk_crisis_events_deployment_id_crisis_deployments",
+        ),
+        nullable=False,
+        index=True,
+    )
+    event_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    template: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    ttl_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    actor: Mapped[str] = mapped_column(String(_CHAIN_ID_WIDTH), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_crisis_events_tenant_occurred",
+            "tenant_id",
+            "occurred_at",
+        ),
+        Index(
+            "ix_crisis_events_deployment",
+            "deployment_id",
+        ),
+    )
+
+
 class GovernanceDecisionRow(Base):
     """ORM row for ``governance_decisions``.
 

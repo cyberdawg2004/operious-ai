@@ -74,6 +74,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Governance Policies",
     description: "Policy records, approval status, and effective runtime configuration.",
   },
+  crisis: {
+    eyebrow: "Governance",
+    title: "Crisis History",
+    description: "Emergency rule activity, active deployments, and audit events.",
+  },
   topology: {
     eyebrow: "Topology",
     title: "Topology",

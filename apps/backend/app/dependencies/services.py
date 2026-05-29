@@ -137,6 +137,7 @@ from app.services.conversation_service import (
     ConversationService,
     build_conversation_service,
 )
+from app.services.crisis_events import PostgresCrisisEventRepository
 from app.services.crisis_service import CrisisService
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
@@ -620,6 +621,7 @@ def get_crisis_service(
     return CrisisService(
         session=session,
         redis_client=get_redis_client(),
+        event_repository=PostgresCrisisEventRepository(session),
     )
 
 
