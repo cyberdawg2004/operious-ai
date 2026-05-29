@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import logging
+import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -56,7 +57,14 @@ from app.hardening.admission import (
 )
 from app.identity import AuthorityContext, TenantId
 from app.language import LanguageDetector
-from app.semantic import FINGERPRINT_VERSION, TextFingerprinter
+from app.semantic import (
+    FINGERPRINT_VERSION,
+    SemanticCircuitBreaker,
+    SemanticCircuitEventRecord,
+    SemanticCircuitEventRepository,
+    SemanticCircuitState,
+    TextFingerprinter,
+)
 from app.services.admission_service import AdmissionService
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
@@ -95,6 +103,8 @@ class TicketIngressService:
         translation_runtime: TranslationRuntime | None = None,
         language_detector: LanguageDetector | None = None,
         fingerprinter: TextFingerprinter | None = None,
+        circuit_breaker: SemanticCircuitBreaker | None = None,
+        circuit_event_repo: SemanticCircuitEventRepository | None = None,
         webhook_queue_by_channel: (
             Mapping[TenantChannelType, Sequence[str]] | None
         ) = None,
@@ -106,6 +116,8 @@ class TicketIngressService:
         self._translation_runtime = translation_runtime
         self._language_detector = language_detector or LanguageDetector()
         self._fingerprinter = fingerprinter or TextFingerprinter()
+        self._circuit_breaker = circuit_breaker
+        self._circuit_event_repo = circuit_event_repo
         self._webhook_queue_by_channel = {
             channel_type: tuple(queue_names)
             for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
@@ -127,6 +139,12 @@ class TicketIngressService:
             request_id=external_id,
         )
         fingerprint_metadata = self._fingerprint_metadata(canonical_content)
+        circuit_state, cluster_size = await self._evaluate_semantic_circuit(
+            tenant_id=expected_tenant_id,
+            channel=channel,
+            ticket_id=external_id,
+            fingerprint_metadata=fingerprint_metadata,
+        )
         runtime = BoundaryIngressRuntime(
             adapters=_adapter_registry(),
             persistence=self._persistence,
@@ -148,6 +166,13 @@ class TicketIngressService:
         if result is None or result.event_id is None:
             raise TicketIngressServiceError(
                 "ticket ingress did not produce a canonical event"
+            )
+        if circuit_state is SemanticCircuitState.TRIPPED:
+            await self._record_semantic_circuit_trip(
+                tenant_id=expected_tenant_id,
+                channel=channel,
+                trigger_ticket_id=str(result.ingress_id),
+                cluster_size=cluster_size,
             )
 
         await self._session.commit()
@@ -225,6 +250,72 @@ class TicketIngressService:
             "text_fingerprint": list(fingerprint),
             "fingerprint_version": FINGERPRINT_VERSION,
         }
+
+    async def _evaluate_semantic_circuit(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        ticket_id: str,
+        fingerprint_metadata: Mapping[str, object],
+    ) -> tuple[SemanticCircuitState, int]:
+        if self._circuit_breaker is None:
+            return SemanticCircuitState.CLOSED, 0
+        fingerprint = _fingerprint_from_metadata(fingerprint_metadata)
+        if fingerprint is None:
+            return SemanticCircuitState.CLOSED, 0
+        try:
+            return await self._circuit_breaker.evaluate(
+                tenant_id=tenant_id,
+                channel=channel,
+                ticket_id=ticket_id,
+                fingerprint=fingerprint,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "semantic_circuit_eval_failed",
+                extra={"tenant_id": tenant_id, "channel": channel, "error": str(exc)},
+            )
+            return SemanticCircuitState.CLOSED, 0
+
+    async def _record_semantic_circuit_trip(
+        self,
+        *,
+        tenant_id: str,
+        channel: str,
+        trigger_ticket_id: str,
+        cluster_size: int,
+    ) -> None:
+        if self._circuit_event_repo is None or self._circuit_breaker is None:
+            return
+        try:
+            await self._circuit_event_repo.write(
+                SemanticCircuitEventRecord(
+                    event_id=str(uuid.uuid4()),  # APPROVED_EXCEPTION: immutable audit event id
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    state=SemanticCircuitState.TRIPPED.value,
+                    trigger_ticket_id=trigger_ticket_id,
+                    cluster_size=cluster_size,
+                    similarity_threshold=(self._circuit_breaker.similarity_threshold),
+                    window_seconds=self._circuit_breaker.window_seconds,
+                    occurred_at=datetime.now(timezone.utc),
+                    metadata={},
+                )
+            )
+            logger.warning(
+                "semantic_circuit_tripped",
+                extra={
+                    "tenant_id": tenant_id,
+                    "channel": channel,
+                    "cluster_size": cluster_size,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "semantic_circuit_event_write_failed",
+                extra={"tenant_id": tenant_id, "channel": channel, "error": str(exc)},
+            )
 
     async def process_channel_webhook(
         self,
@@ -665,6 +756,21 @@ def _to_boundary_request(
             **dict(metadata or {}),
         },
     )
+
+
+def _fingerprint_from_metadata(
+    metadata: Mapping[str, object],
+) -> tuple[int, ...] | None:
+    raw = metadata.get("text_fingerprint")
+    if not isinstance(raw, Sequence) or isinstance(raw, str | bytes | bytearray):
+        return None
+    values = cast(Sequence[object], raw)
+    fingerprint: list[int] = []
+    for value in values:
+        if not isinstance(value, int):
+            return None
+        fingerprint.append(value)
+    return tuple(fingerprint)
 
 
 def _source_type_for_channel(channel: TicketChannel) -> BoundarySourceType:

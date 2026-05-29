@@ -58,6 +58,7 @@ from app.cognition.db import models as _cognition_models  # noqa: F401  # pyrigh
 from app.observability.db import models as _observability_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.runtime.db import models as _runtime_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.resolution.db import models as _resolution_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.semantic.db import models as _semantic_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 config = context.config
 

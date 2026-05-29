@@ -85,7 +85,7 @@ from app.runtime.tenant_production_hardening import (
     TenantProductionHardeningRuntime,
 )
 from app.runtime.timeline_runtime import TimelineRuntime
-from app.semantic import TextFingerprinter
+from app.semantic import SemanticCircuitBreaker, TextFingerprinter
 from app.session.persistence import PostgresSessionPersistence
 from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.survivability import (
@@ -575,6 +575,12 @@ def create_app(
         ),
     )
     app.state.text_fingerprinter = TextFingerprinter()
+    app.state.semantic_circuit_breaker = SemanticCircuitBreaker(
+        cast(Any, redis_client),
+        window_seconds=settings.SEMANTIC_CIRCUIT_WINDOW_SECONDS,
+        cluster_threshold=settings.SEMANTIC_CIRCUIT_CLUSTER_THRESHOLD,
+        similarity_threshold=settings.SEMANTIC_CIRCUIT_SIMILARITY_THRESHOLD,
+    )
     logger.info("boundary_media_runtime_register_complete")
 
     logger.info("exception_handlers_register_begin")

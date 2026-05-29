@@ -130,7 +130,11 @@ from app.runtime.tenant_production_hardening import (
 )
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.resolution.persistence import PostgresResolutionProposalPersistence
-from app.semantic import TextFingerprinter
+from app.semantic import (
+    SemanticCircuitBreaker,
+    SemanticCircuitEventRepository,
+    TextFingerprinter,
+)
 from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
@@ -291,6 +295,11 @@ def get_ticket_ingress_service(
                 TextFingerprinter(),
             ),
         ),
+        circuit_breaker=cast(
+            SemanticCircuitBreaker,
+            request.app.state.semantic_circuit_breaker,
+        ),
+        circuit_event_repo=SemanticCircuitEventRepository(session),
         webhook_queue_by_channel={
             TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.LARK: DIAGNOSTIC_QUEUE_PRIORITY,
