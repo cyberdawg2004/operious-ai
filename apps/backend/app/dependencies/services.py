@@ -171,6 +171,7 @@ from app.services.operational_observability_service import (
 from app.services.quota_operations_service import QuotaOperationsService
 from app.services.quarantine_service import QuarantineService
 from app.services.queue_operations_service import QueueOperationsService
+from app.services.semantic_circuit_service import SemanticCircuitService
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.supervisor_inbox_service import SupervisorInboxService
 from app.services.ticket_ingress_service import TicketChannel, TicketIngressService
@@ -347,6 +348,14 @@ def get_quarantine_service(
         publisher=CelerySemanticQuarantinePublisher(),
         ticket_reingest=_ticket_reingest,
     )
+
+
+def get_semantic_circuit_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> SemanticCircuitService:
+    """Return the semantic circuit read service for this request."""
+
+    return SemanticCircuitService(session)
 
 
 def get_admission_service() -> AdmissionService:
@@ -1079,6 +1088,7 @@ __all__ = [
     "get_quarantine_service",
     "get_quota_operations_service",
     "get_quota_runtime",
+    "get_semantic_circuit_service",
     "get_session_repository",
     "get_sop_intelligence_service",
     "get_supervisor_repository",

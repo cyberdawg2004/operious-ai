@@ -25,6 +25,7 @@ from app.hardening.observability.alert_evaluator import (
 from app.queues import QUEUE_DIAGNOSTIC_NORMAL
 from app.runtime.db.models import DeadLetterTaskRow, ProviderCircuitStateRow
 from app.runtime.provider_circuit_breaker import ProviderCircuitState
+from app.semantic.db.models import SemanticCircuitEventRow
 from app.tenant.db.models import TenantRow
 from tests.conftest import requires_postgres
 
@@ -267,6 +268,11 @@ async def test_one_condition_failure_does_not_block_others(
     monkeypatch.setattr(evaluator, "_check_queue_age_slo", raises)
     monkeypatch.setattr(evaluator, "_check_dlq_spike", no_results_with_session)
     monkeypatch.setattr(evaluator, "_check_provider_circuits", no_results_with_session)
+    monkeypatch.setattr(
+        evaluator,
+        "_check_semantic_circuit_tripped",
+        no_results_with_session,
+    )
     monkeypatch.setattr(evaluator, "_check_redis_memory", memory_result)
     monkeypatch.setattr(evaluator, "_check_db_pool", no_results)
     monkeypatch.setattr(evaluator, "_check_replay_mismatch", no_results_with_session)
@@ -278,6 +284,7 @@ async def test_one_condition_failure_does_not_block_others(
     ]
     assert seen == [
         "queue",
+        "with_session",
         "with_session",
         "with_session",
         "memory",
@@ -300,6 +307,11 @@ async def test_evaluator_skips_when_redis_unavailable(
 
     monkeypatch.setattr(evaluator, "_check_dlq_spike", no_results_with_session)
     monkeypatch.setattr(evaluator, "_check_provider_circuits", no_results_with_session)
+    monkeypatch.setattr(
+        evaluator,
+        "_check_semantic_circuit_tripped",
+        no_results_with_session,
+    )
     monkeypatch.setattr(evaluator, "_check_db_pool", no_results)
     monkeypatch.setattr(evaluator, "_check_replay_mismatch", no_results_with_session)
 
@@ -458,6 +470,7 @@ def _evaluator(
         queue_names=(QUEUE_DIAGNOSTIC_NORMAL,),
         dead_letter_task_row=DeadLetterTaskRow,
         provider_circuit_state_row=ProviderCircuitStateRow,
+        semantic_circuit_event_row=SemanticCircuitEventRow,
         execution_row=ExecutionRow,
         provider_open_state=ProviderCircuitState.OPEN.value,
     )

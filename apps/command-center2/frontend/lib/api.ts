@@ -513,6 +513,51 @@ export type DeadLetterReplayResponse = {
   replayed_at: string;
 };
 
+export type SemanticCircuitState = {
+  channel: string;
+  state: "CLOSED" | "TRIPPED" | "RESET";
+  cluster_size: number | null;
+  occurred_at: string;
+  similarity_threshold: number | null;
+  window_seconds: number | null;
+};
+
+export type SemanticCircuitEvent = {
+  event_id: string;
+  tenant_id: string;
+  channel: string;
+  state: "CLOSED" | "TRIPPED" | "RESET";
+  trigger_ticket_id: string | null;
+  cluster_size: number | null;
+  similarity_threshold: number | null;
+  window_seconds: number | null;
+  occurred_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SemanticQuarantineItem = {
+  quarantine_id: string;
+  tenant_id: string;
+  channel: string;
+  original_queue: string;
+  external_id: string | null;
+  ticket_payload_json: Record<string, unknown>;
+  fingerprint_json: number[];
+  cluster_size: number;
+  similarity_threshold: number;
+  status: "pending" | "fraud_confirmed" | "false_positive";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  resolution_note: string | null;
+  created_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SemanticQuarantineReleaseRequest = {
+  verdict: "false_positive" | "fraud_confirmed";
+  note?: string | null;
+};
+
 export type TenantKnowledgeCreateRequest = {
   title: string;
   content: string;
@@ -1046,6 +1091,47 @@ export function replayDeadLetter(id: string) {
   return apiRequest<DeadLetterReplayResponse>(
     `/operations/dead-letters/${encodeURIComponent(id)}/replay`,
     { method: "POST" }
+  );
+}
+
+export function listSemanticCircuitStates() {
+  return apiRequest<SemanticCircuitState[]>("/semantic/circuit-states");
+}
+
+export function listSemanticCircuitEvents(query: {
+  channel?: string | null;
+  limit?: number;
+} = {}) {
+  return apiRequest<SemanticCircuitEvent[]>("/semantic/circuit-events", {
+    query: {
+      channel: query.channel,
+      limit: query.limit ?? 50,
+    },
+  });
+}
+
+export function listSemanticQuarantine(query: {
+  status?: SemanticQuarantineItem["status"];
+  limit?: number;
+} = {}) {
+  return apiRequest<SemanticQuarantineItem[]>("/semantic/quarantine", {
+    query: {
+      status: query.status ?? "pending",
+      limit: query.limit ?? 50,
+    },
+  });
+}
+
+export function releaseSemanticQuarantine(
+  id: string,
+  request: SemanticQuarantineReleaseRequest
+) {
+  return apiRequest<SemanticQuarantineItem>(
+    `/semantic/quarantine/${encodeURIComponent(id)}/release`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    }
   );
 }
 

@@ -3,6 +3,7 @@ export const dashboardRoutes = {
   conversations: "/dashboard/conversations",
   "queue-status": "/dashboard/queue-status",
   "dlq-inspector": "/dashboard/dlq",
+  fraud: "/dashboard/fraud",
   trace: "/dashboard/traces",
   supervisor: "/dashboard/supervisor",
   approvals: "/dashboard/approvals",

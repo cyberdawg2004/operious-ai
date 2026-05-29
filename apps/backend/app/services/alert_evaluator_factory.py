@@ -15,6 +15,7 @@ from app.hardening.observability.alert_evaluator import AlertEvaluator
 from app.queues import ALL_QUEUES
 from app.runtime.db.models import DeadLetterTaskRow, ProviderCircuitStateRow
 from app.runtime.provider_circuit_breaker import ProviderCircuitState
+from app.semantic.db.models import SemanticCircuitEventRow
 
 
 def create_alert_evaluator() -> AlertEvaluator:
@@ -35,6 +36,7 @@ def create_alert_evaluator() -> AlertEvaluator:
         queue_names=ALL_QUEUES,
         dead_letter_task_row=DeadLetterTaskRow,
         provider_circuit_state_row=ProviderCircuitStateRow,
+        semantic_circuit_event_row=SemanticCircuitEventRow,
         execution_row=ExecutionRow,
         provider_open_state=ProviderCircuitState.OPEN.value,
     )

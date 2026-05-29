@@ -5,14 +5,22 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.semantic import (
+    SemanticCircuitEventResponse,
+    SemanticCircuitEventResponseList,
+    SemanticCircuitStateResponse,
+    SemanticCircuitStateResponseList,
     SemanticQuarantineReleaseRequest,
     SemanticQuarantineResponse,
     SemanticQuarantineResponseList,
     SemanticQuarantineStatus,
 )
 from app.dependencies.authority import require_authority, require_tenant_scope
-from app.dependencies.services import get_quarantine_service
+from app.dependencies.services import (
+    get_quarantine_service,
+    get_semantic_circuit_service,
+)
 from app.identity import AuthorityContext
+from app.services.semantic_circuit_service import SemanticCircuitService
 from app.services.quarantine_service import (
     QuarantineService,
     SemanticQuarantineAlreadyReviewedError,
@@ -20,6 +28,40 @@ from app.services.quarantine_service import (
 )
 
 router = APIRouter(tags=["semantic"])
+
+
+@router.get(
+    "/circuit-states",
+    response_model=SemanticCircuitStateResponseList,
+)
+async def list_semantic_circuit_states(
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: SemanticCircuitService = Depends(get_semantic_circuit_service),
+) -> list[SemanticCircuitStateResponse]:
+    records = await service.list_states(
+        tenant_id=expected_tenant_id,
+        expected_tenant_id=expected_tenant_id,
+    )
+    return [SemanticCircuitStateResponse.from_record(record) for record in records]
+
+
+@router.get(
+    "/circuit-events",
+    response_model=SemanticCircuitEventResponseList,
+)
+async def list_semantic_circuit_events(
+    channel: str | None = Query(default=None),
+    limit: int = Query(50, ge=1, le=500),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: SemanticCircuitService = Depends(get_semantic_circuit_service),
+) -> list[SemanticCircuitEventResponse]:
+    records = await service.list_events(
+        tenant_id=expected_tenant_id,
+        expected_tenant_id=expected_tenant_id,
+        channel=channel,
+        limit=limit,
+    )
+    return [SemanticCircuitEventResponse.from_record(record) for record in records]
 
 
 @router.get(

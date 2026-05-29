@@ -18,6 +18,7 @@ import {
   getConfiguredTenantId,
   listActionApprovals,
   listActiveCrisisDeployments,
+  listSemanticCircuitStates,
 } from "@/lib/api";
 import { dashboardRoutes, type DashboardViewId } from "@/lib/dashboard-routes";
 import { useAuthSession } from "@/lib/use-auth-session";
@@ -43,6 +44,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     eyebrow: "Operations",
     title: "DLQ Inspector",
     description: "Tenant-scoped dead-letter task records with replay controls.",
+  },
+  fraud: {
+    eyebrow: "Operations",
+    title: "Fraud Monitoring",
+    description: "Semantic circuit states, quarantine clusters, and fraud review.",
   },
   trace: {
     eyebrow: "Observability",
@@ -136,6 +142,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [approvalCount, setApprovalCount] = useState<number | null>(null);
   const [crisisActive, setCrisisActive] = useState(false);
+  const [fraudActive, setFraudActive] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const activeItem = getActiveItem(pathname);
@@ -180,6 +187,29 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
     loadApprovalCount();
     const interval = window.setInterval(loadApprovalCount, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [tenantId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadFraudState = () => {
+      listSemanticCircuitStates()
+        .then((states) => {
+          if (active) {
+            setFraudActive(states.some((state) => state.state === "TRIPPED"));
+          }
+        })
+        .catch(() => {
+          if (active) setFraudActive(false);
+        });
+    };
+
+    loadFraudState();
+    const interval = window.setInterval(loadFraudState, 15_000);
     return () => {
       active = false;
       window.clearInterval(interval);
@@ -252,6 +282,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           onTenantClick={() => navigateTo("settings")}
           approvalCount={approvalCount}
           crisisActive={crisisActive}
+          fraudActive={fraudActive}
         />
 
         <div className="min-w-0 flex-1 lg:flex lg:min-h-screen lg:flex-col">

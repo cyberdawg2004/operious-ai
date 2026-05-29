@@ -70,6 +70,11 @@ class AlertEvaluator:
             cooldown_seconds=120,
         ),
         AlertCondition(
+            name="semantic_circuit_tripped",
+            severity="warning",
+            cooldown_seconds=300,
+        ),
+        AlertCondition(
             name="redis_memory_pressure",
             severity="warning",
             cooldown_seconds=300,
@@ -100,6 +105,7 @@ class AlertEvaluator:
         queue_names: Sequence[str],
         dead_letter_task_row: Any,
         provider_circuit_state_row: Any,
+        semantic_circuit_event_row: Any,
         execution_row: Any,
         provider_open_state: str,
     ) -> None:
@@ -111,6 +117,7 @@ class AlertEvaluator:
         self._queue_names = tuple(queue_names)
         self._dead_letter_task_row = dead_letter_task_row
         self._provider_circuit_state_row = provider_circuit_state_row
+        self._semantic_circuit_event_row = semantic_circuit_event_row
         self._execution_row = execution_row
         self._provider_open_state = provider_open_state
 
@@ -127,9 +134,13 @@ class AlertEvaluator:
             (self.CONDITIONS[0], self._check_queue_age_slo),
             (self.CONDITIONS[1], lambda: self._check_dlq_spike(session)),
             (self.CONDITIONS[2], lambda: self._check_provider_circuits(session)),
-            (self.CONDITIONS[3], self._check_redis_memory),
-            (self.CONDITIONS[4], self._check_db_pool),
-            (self.CONDITIONS[5], lambda: self._check_replay_mismatch(session)),
+            (
+                self.CONDITIONS[3],
+                lambda: self._check_semantic_circuit_tripped(session),
+            ),
+            (self.CONDITIONS[4], self._check_redis_memory),
+            (self.CONDITIONS[5], self._check_db_pool),
+            (self.CONDITIONS[6], lambda: self._check_replay_mismatch(session)),
         )
         fired: list[AlertResult] = []
         for condition, check in checks:
@@ -272,6 +283,76 @@ class AlertEvaluator:
             )
             for row in rows
         ]
+
+    async def _check_semantic_circuit_tripped(
+        self,
+        session: AsyncSession,
+    ) -> list[AlertResult]:
+        del session
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+        row_type = self._semantic_circuit_event_row
+        try:
+            # PRIVILEGED_PATH: cross-tenant semantic circuit trip inspection.
+            async with self._owner_session_context_factory() as owner_session:
+                rows = tuple(
+                    (
+                        await owner_session.execute(
+                            select(row_type)
+                            .where(
+                                row_type.state == "TRIPPED",
+                                row_type.occurred_at > cutoff,
+                            )
+                            .order_by(
+                                row_type.occurred_at.desc(),
+                                row_type.event_id,
+                            )
+                        )
+                    ).scalars()
+                )
+        except Exception as exc:  # noqa: BLE001 - semantic alert fails open.
+            logger.warning(
+                "alert_semantic_circuit_tripped_check_failed",
+                extra={
+                    "error_class": exc.__class__.__name__,
+                    "error": str(exc),
+                },
+            )
+            return []
+
+        results: list[AlertResult] = []
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            key = (row.tenant_id, row.channel)
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(
+                AlertResult(
+                    condition_name="semantic_circuit_tripped",
+                    fired=True,
+                    severity="warning",
+                    message=(
+                        "Semantic circuit TRIPPED on tenant "
+                        f"{row.tenant_id} channel {row.channel}, "
+                        f"cluster_size={row.cluster_size}"
+                    ),
+                    resource=f"{row.tenant_id}:{row.channel}",
+                    dedup_key=(
+                        "semantic_circuit_tripped:"
+                        f"{row.tenant_id}:{row.channel}"
+                    ),
+                    metadata={
+                        "tenant_id": row.tenant_id,
+                        "channel": row.channel,
+                        "state": row.state,
+                        "cluster_size": row.cluster_size,
+                        "similarity_threshold": row.similarity_threshold,
+                        "window_seconds": row.window_seconds,
+                        "occurred_at": _iso_or_none(row.occurred_at),
+                    },
+                )
+            )
+        return results
 
     async def _check_redis_memory(self) -> list[AlertResult]:
         memory_pct = await self._admission_gate().redis_memory_pct()

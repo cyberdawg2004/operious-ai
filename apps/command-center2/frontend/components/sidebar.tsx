@@ -45,6 +45,7 @@ const navItems: NavItem[] = [
   { id: "conversations", href: dashboardRoutes.conversations, label: "Conversations", icon: MessageSquare, group: "operations" },
   { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity, group: "operations" },
   { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "DLQ Inspector", icon: AlertTriangle, group: "operations" },
+  { id: "fraud", href: dashboardRoutes.fraud, label: "Fraud Monitoring", icon: ShieldAlert, group: "operations" },
   { id: "trace", href: dashboardRoutes.trace, label: "Trace Inspector", icon: Network, group: "operations" },
   { id: "supervisor", href: dashboardRoutes.supervisor, label: "Supervisor Inbox", icon: ShieldAlert, group: "operations" },
   { id: "approvals", href: dashboardRoutes.approvals, label: "Approval Inbox", icon: Inbox, group: "intelligence" },
@@ -79,6 +80,7 @@ interface SidebarProps {
   className?: string;
   approvalCount?: number | null;
   crisisActive?: boolean;
+  fraudActive?: boolean;
 }
 
 export function Sidebar({
@@ -92,6 +94,7 @@ export function Sidebar({
   className,
   approvalCount = null,
   crisisActive = false,
+  fraudActive = false,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const pathname = usePathname();
@@ -255,6 +258,15 @@ export function Sidebar({
                               collapsed && "lg:absolute lg:right-2 lg:top-2"
                             )}
                             aria-label="Active crisis deployment"
+                          />
+                        )}
+                        {item.id === "fraud" && fraudActive && (
+                          <span
+                            className={cn(
+                              "ml-auto h-2 w-2 rounded-full bg-red-alert",
+                              collapsed && "lg:absolute lg:right-2 lg:top-2"
+                            )}
+                            aria-label="Semantic circuit tripped"
                           />
                         )}
                       </Link>
