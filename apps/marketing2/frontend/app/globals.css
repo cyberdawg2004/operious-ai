@@ -161,3 +161,23 @@ html {
 .animate-marquee {
   animation: marquee 50s linear infinite;
 }
+
+@keyframes gradient {
+  to {
+    background-position: var(--bg-size) 0;
+  }
+}
+
+.animate-gradient {
+  animation: gradient 8s linear infinite;
+}
+
+@keyframes border-beam {
+  100% {
+    offset-distance: 100%;
+  }
+}
+
+.animate-border-beam::after {
+  animation: border-beam calc(var(--duration) * 1s) infinite linear;
+}

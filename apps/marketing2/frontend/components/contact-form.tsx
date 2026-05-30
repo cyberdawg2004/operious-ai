@@ -14,6 +14,31 @@ const domains = [
   "Other regulated operations",
 ];
 
+const currentSystemOptions = [
+  "Zendesk",
+  "Salesforce Service Cloud",
+  "ServiceNow",
+  "Freshdesk",
+  "Intercom",
+  "Proprietary / internal",
+  "Other",
+];
+
+const automationInterestOptions = [
+  "Warranty and claims",
+  "Refund authorization",
+  "Escalation routing",
+  "Multilingual support",
+  "Compliance documentation",
+  "Other",
+];
+
+const timelineOptions = [
+  "Active evaluation (< 30 days)",
+  "Planning phase (1-3 months)",
+  "Research only",
+];
+
 type SubmitState =
   | { status: "idle" }
   | { status: "submitting" }
@@ -44,11 +69,20 @@ export function ContactForm({
       });
       const result = (await response.json()) as {
         message?: string;
+        error?: string;
         requestId?: string;
       };
 
       if (!response.ok) {
-        throw new Error(result.message ?? "The request could not be submitted.");
+        if (response.status === 503) {
+          throw new Error(
+            "Our contact intake is currently unavailable. Please email sales@operious.com and a solutions architect will respond within one business day."
+          );
+        }
+
+        throw new Error(
+          result.message ?? result.error ?? "The request could not be submitted."
+        );
       }
 
       setSubmitState({
@@ -145,6 +179,53 @@ export function ContactForm({
           className="rounded-md border border-border-defined px-3 py-3 text-[15px] text-ink-primary"
         />
       </label>
+      <div className="grid gap-5 sm:grid-cols-3">
+        <label className="grid gap-2 text-[13px] font-medium text-ink-body">
+          Primary support or operations platform
+          <select
+            name="currentSystems"
+            defaultValue=""
+            className="h-11 rounded-md border border-border-defined px-3 text-[15px] text-ink-primary"
+          >
+            <option value="">Select if known</option>
+            {currentSystemOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-2 text-[13px] font-medium text-ink-body">
+          Primary workflow to automate
+          <select
+            name="automationInterest"
+            defaultValue=""
+            className="h-11 rounded-md border border-border-defined px-3 text-[15px] text-ink-primary"
+          >
+            <option value="">Select if known</option>
+            {automationInterestOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-2 text-[13px] font-medium text-ink-body">
+          Evaluation timeline
+          <select
+            name="timeline"
+            defaultValue=""
+            className="h-11 rounded-md border border-border-defined px-3 text-[15px] text-ink-primary"
+          >
+            <option value="">Select if known</option>
+            {timelineOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       {submitState.status === "success" && (
         <p className="rounded-md border border-status-success/30 bg-status-success/10 p-3 text-[14px] text-status-success">
@@ -162,9 +243,13 @@ export function ContactForm({
         disabled={submitState.status === "submitting"}
         className="inline-flex h-12 items-center justify-center rounded-md bg-ink-primary px-5 text-[14px] font-semibold text-white transition-colors hover:bg-ink-body disabled:cursor-wait disabled:opacity-70"
       >
-        {submitState.status === "submitting" ? "Submitting request" : "Request enterprise access"}
+        {submitState.status === "submitting" ? "Submitting request" : "Book an Architecture Review"}
         <Send className="ml-2 h-4 w-4" />
       </button>
+      <p className="text-[12px] leading-relaxed text-ink-tertiary">
+        A solutions architect reviews every request. Response within one business day.
+        For urgent inquiries: sales@operious.com
+      </p>
     </form>
   );
 }

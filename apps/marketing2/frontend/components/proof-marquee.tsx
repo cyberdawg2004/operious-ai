@@ -1,16 +1,20 @@
 "use client";
 
 const proofPoints = [
-  "Cryptographically Audited",
-  "UUID5 Identity",
-  "FORCE RLS",
-  "Append-Only Timelines",
-  "Fail-Closed Governance",
-  "ToolInvoker Enforcement",
-  "Deterministic Replay",
-  "Tenant-Isolated",
-  "Multi-Agent Coordination",
-  "Zero Silent Drops",
+  "Policy enforced before execution",
+  "100% of decisions auditable",
+  "Full forensic replay from any checkpoint",
+  "Six languages. One governance layer.",
+  "FORCE RLS on every tenant table",
+  "Zero silent drops",
+  "Approval workflows with full evidence",
+  "Warranty, refund, escalation - governed",
+  "Defect clusters detected automatically",
+  "SOP knowledge updates on approval",
+  "Crisis deployment in under one second",
+  "Fraud quarantine before agent processing",
+  "Architecture review in 48 hours",
+  "BAA available for healthcare",
 ];
 
 export function ProofMarquee() {

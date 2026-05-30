@@ -9,6 +9,9 @@ type ContactPayload = {
   ticketVolume: string;
   useCase: string;
   context?: string;
+  currentSystems?: string;
+  automationInterest?: string;
+  timeline?: string;
 };
 
 const requiredFields = [
@@ -41,6 +44,9 @@ function normalizePayload(payload: ContactPayload, requestId: string) {
     ticketVolume: payload.ticketVolume.trim(),
     useCase: payload.useCase.trim(),
     context: payload.context?.trim() || undefined,
+    currentSystems: payload.currentSystems?.trim() || undefined,
+    automationInterest: payload.automationInterest?.trim() || undefined,
+    timeline: payload.timeline?.trim() || undefined,
   };
 }
 
@@ -48,7 +54,7 @@ async function forwardToConfiguredEndpoint(payload: ReturnType<typeof normalizeP
   const endpoint = process.env.CONTACT_ENDPOINT_URL;
 
   if (!endpoint) {
-    return { delivered: false };
+    throw new Error("Contact intake is not configured.");
   }
 
   const headers: HeadersInit = {
@@ -104,6 +110,18 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { message: "Enter a valid business email address." },
       { status: 400 }
+    );
+  }
+
+  if (!process.env.CONTACT_ENDPOINT_URL) {
+    return NextResponse.json(
+      {
+        error:
+          "Contact intake is not configured for this deployment. Please email sales@operious.com directly.",
+        message:
+          "Our contact intake is currently unavailable. Please email sales@operious.com and a solutions architect will respond within one business day.",
+      },
+      { status: 503 }
     );
   }
 

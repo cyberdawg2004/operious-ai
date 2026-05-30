@@ -14,11 +14,16 @@ import {
 import { AnimatedHeadline } from "@/components/animated-headline";
 import { ContainmentLayer } from "@/components/containment-layer";
 import { FeatureCard } from "@/components/feature-card";
+import { IntegrationArchitecture } from "@/components/integration-architecture";
 import { LiveEvidence } from "@/components/live-evidence";
+import { OperationalCapabilities } from "@/components/operational-capabilities";
+import { PilotProgram } from "@/components/pilot-program";
 import { ProofMarquee } from "@/components/proof-marquee";
 import { Reveal, RevealGroup } from "@/components/reveal";
+import { RoiGraphs } from "@/components/roi-graphs";
 import { ParallaxBlock, ScrollHighlight } from "@/components/scroll-fx";
 import { SplineHeroBg } from "@/components/spline-hero-bg";
+import { TracingBeam } from "@/components/ui/tracing-beam";
 import { Button } from "@/components/ui/button";
 
 const pillars = [
@@ -138,13 +143,13 @@ const industries = [
 ];
 
 const architectureLayers = [
-  "Boundary",
-  "Coordination",
-  "Governance",
-  "Session",
-  "Execution",
-  "Supervisor",
-  "Arbitration",
+  { title: "Boundary", label: "Receive and authenticate" },
+  { title: "Coordination", label: "Route and orchestrate" },
+  { title: "Governance", label: "Evaluate policy" },
+  { title: "Session", label: "Maintain context" },
+  { title: "Execution", label: "Execute or escalate" },
+  { title: "Supervisor", label: "Review and score" },
+  { title: "Arbitration", label: "Resolve conflicts" },
 ];
 
 const trustCards = [
@@ -163,6 +168,22 @@ const trustCards = [
     meta: "End-to-end",
     body: "Policies, credentials, knowledge, operational events, and projected state are designed to remain tenant-scoped.",
   },
+  {
+    title: "Enterprise SaaS deployment",
+    meta: "Deployment modes",
+    body: "Single-tenant SaaS available immediately. VPC and private deployment options available for enterprise agreements requiring data residency. Deployment timeline: 60-day pilot to full production.",
+  },
+  {
+    title: "Data processing addendum",
+    meta: "Data handling",
+    body: "Standard DPA available for qualifying prospects. Subprocessor list provided on request. Tenant data is never used for model training or cross-tenant analysis.",
+  },
+  {
+    title: "Architecture review in 48 hours",
+    meta: "Security review",
+    body: "Enterprise architects and CISOs can request a structured architecture review. Data flow diagrams, identity and tenancy models, encryption posture, and audit export format provided.",
+    href: "/trust/architecture",
+  },
 ];
 
 const featuredArticles = [
@@ -180,6 +201,16 @@ const featuredArticles = [
     title: "Beyond LLM wrappers",
     href: "/insights/beyond-llm-wrappers",
     body: "The seven substrates that separate governed execution infrastructure from model orchestration.",
+  },
+  {
+    title: "Why multilingual BPO operations fail at scale",
+    href: "/company/contact?topic=multilingual-enterprise-operations",
+    body: "Language detection, governance consistency, and audit trail requirements across Arabic, Indonesian, and Spanish enterprise deployments.",
+  },
+  {
+    title: "The cost of ungoverned AI operations",
+    href: "/company/contact?topic=cost-of-ungoverned-ai",
+    body: "Quantifying liability exposure, audit failure risk, and escalation leakage in AI-run enterprise support workflows.",
   },
 ];
 
@@ -226,9 +257,10 @@ export default function Home() {
             </Reveal>
             <Reveal>
               <p className="relative z-10 mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#A9B8CE] sm:text-[21px]">
-                Operious is a deterministic multi-agent system that runs Tier 1 and Tier 2
-                operational workflows with forensic auditability. Every decision is governed.
-                Every action is reconstructible. Every byte of state is tenant-isolated.
+                Operious coordinates AI agents across support, claims, warranty, refunds,
+                escalations, and approvals - enforcing policy before any customer-facing or
+                system-changing action executes. Every decision governed. Every outcome
+                replayable. Every audit trail permanent.
               </p>
             </Reveal>
             <Reveal>
@@ -238,15 +270,15 @@ export default function Home() {
                   variant="primary"
                   className="shadow-[0_12px_34px_rgba(201,168,76,0.22)] hover:shadow-[0_18px_44px_rgba(201,168,76,0.34)]"
                 >
-                  Request enterprise access
+                  Book an Architecture Review
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
                 <Button
-                  href="/platform"
+                  href="/trust/architecture"
                   variant="ghost"
                   className="bg-[#0B1120]/60 hover:shadow-[0_16px_36px_rgba(42,107,204,0.22)]"
                 >
-                  Read the architecture
+                  Get Security Overview
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </div>
@@ -318,6 +350,9 @@ export default function Home() {
         </div>
       </section>
 
+      <OperationalCapabilities />
+
+      <TracingBeam className="bg-[#05080F]">
       <section className="bg-[#05080F] px-4 py-20 text-[#D8E4F4] sm:px-8 sm:py-24 lg:px-16">
         <RevealGroup className="mx-auto grid max-w-[1280px] gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
           <Reveal>
@@ -327,7 +362,7 @@ export default function Home() {
               className="mt-5 text-[38px] font-bold leading-tight sm:text-[54px]"
               style={{ fontFamily: "var(--font-cormorant-sc)" }}
             >
-              A substrate diagram for governed execution.
+              From AI proposal to approved action - every step controlled, logged, and replayable.
             </h2>
             <ScrollHighlight
               className="mt-6 text-[16px] leading-relaxed"
@@ -351,8 +386,8 @@ export default function Home() {
             <div className="grid gap-3">
               {architectureLayers.map((layer, index) => (
                 <div
-                  key={layer}
-                  className="flex items-center justify-between rounded-md border border-[#1A2744] bg-[#05080F] px-5 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C]"
+                  key={layer.title}
+                  className="flex items-center justify-between gap-5 rounded-md border border-[#1A2744] bg-[#05080F] px-5 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C]"
                 >
                   <span
                     className="text-[12px] uppercase tracking-[0.16em] text-[#C9A84C]"
@@ -360,7 +395,12 @@ export default function Home() {
                   >
                     {String(index + 1).padStart(2, "0")}
                   </span>
-                  <span className="text-[16px] font-medium">{layer}</span>
+                  <span className="grid flex-1 gap-1 text-right">
+                    <span className="text-[16px] font-medium">{layer.title}</span>
+                    <span className="text-[12px] leading-snug text-[#7A90B4]">
+                      {layer.label}
+                    </span>
+                  </span>
                 </div>
               ))}
             </div>
@@ -377,7 +417,7 @@ export default function Home() {
         </RevealGroup>
       </section>
 
-      {/* Containment Vessel */}
+      {/* Execution Control Architecture */}
       <section className="border-t border-[#1A2744] bg-[#05080F] px-6 py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-16">
@@ -385,7 +425,7 @@ export default function Home() {
               Architecture
             </p>
             <h2 className="text-3xl font-light tracking-tight text-[#D8E4F4]">
-              The Containment Vessel
+              Execution Control Architecture
             </h2>
             <p className="mt-4 max-w-2xl leading-relaxed text-[#7A90B4]">
               Five layers that no AI model can bypass. The separation between what the
@@ -403,6 +443,9 @@ export default function Home() {
       </section>
 
       <LiveEvidence />
+      </TracingBeam>
+
+      <RoiGraphs />
 
       <section className="bg-canvas px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
         <RevealGroup className="mx-auto max-w-[1280px]">
@@ -440,12 +483,25 @@ export default function Home() {
                   {card.title}
                 </h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{card.body}</p>
+                {card.href && (
+                  <Link
+                    href={card.href}
+                    className="mt-5 inline-flex items-center text-[13px] font-medium text-gold"
+                  >
+                    Request security packet
+                    <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  </Link>
+                )}
               </article>
               </Reveal>
             ))}
           </div>
         </RevealGroup>
       </section>
+
+      <IntegrationArchitecture />
+
+      <PilotProgram />
 
       <section className="bg-surface-raised px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
         <RevealGroup className="mx-auto max-w-[1280px]">
@@ -466,7 +522,7 @@ export default function Home() {
             </Link>
           </div>
           </Reveal>
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          <div className="mt-10 grid gap-5 lg:grid-cols-3 xl:grid-cols-5">
             {featuredArticles.map((article) => (
               <Reveal key={article.href}>
               <Link
@@ -498,13 +554,13 @@ export default function Home() {
             className="text-[36px] font-bold leading-tight sm:text-[50px]"
             style={{ fontFamily: "var(--font-cormorant-sc)" }}
           >
-            See how Operious eliminates the trust gap in enterprise AI operations.
+            Enterprise AI operations require governance infrastructure, not governance promises.
           </h2>
           <Link
             href="/company/contact"
             className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.2)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.28)]"
           >
-            Request enterprise access
+            Book a 30-Minute Architecture Review
             <ArrowRight className="ml-2 h-4 w-4" />
           </Link>
           </Reveal>
