@@ -21,6 +21,7 @@ import { ParallaxBlock, ScrollHighlight } from "@/components/scroll-fx";
 import { SplineHeroBg } from "@/components/spline-hero-bg";
 import { Button } from "@/components/ui/button";
 import { MagneticWrapper } from "@/components/magnetic-button";
+import { TextRevealByWord } from "@/components/ui/text-reveal";
 
 const pillars = [
   {
@@ -299,6 +300,14 @@ export default function Home() {
       </section>
 
       <ProofMarquee />
+
+      {/* TextRevealByWord bridge */}
+      <section className="bg-[#050508] py-0">
+        <TextRevealByWord
+          text="Every enterprise AI deployment needs a governance layer between what the model proposes and what the system executes. Operious is that layer."
+          className="text-[#D8E4F4]/20"
+        />
+      </section>
 
       <section className="border-y border-border-subtle bg-canvas px-4 py-8 sm:px-8 lg:px-16">
         <RevealGroup className="mx-auto max-w-[1320px]">
