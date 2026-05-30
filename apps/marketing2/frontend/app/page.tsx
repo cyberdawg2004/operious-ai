@@ -20,6 +20,7 @@ import { Reveal, RevealGroup } from "@/components/reveal";
 import { ParallaxBlock, ScrollHighlight } from "@/components/scroll-fx";
 import { SplineHeroBg } from "@/components/spline-hero-bg";
 import { Button } from "@/components/ui/button";
+import { MagneticWrapper } from "@/components/magnetic-button";
 
 const pillars = [
   {
@@ -210,29 +211,50 @@ export default function Home() {
           }}
         />
         <RevealGroup
-          className="relative z-10 mx-auto flex max-w-[1320px] flex-col items-start gap-12 lg:min-h-[calc(100vh-160px)] lg:justify-center"
+          className="relative z-10 mx-auto flex max-w-[1320px] flex-col items-center gap-10 lg:min-h-[calc(100vh-160px)] lg:justify-center text-center"
           mode="load"
         >
-          <div className="relative z-10 w-full max-w-[960px]">
-            <Reveal>
-              <SectionLabel>Operious AI</SectionLabel>
-            </Reveal>
+          {/* Eyebrow */}
+          <Reveal>
+            <div className="inline-flex items-center gap-3">
+              <span className="w-7 h-px bg-gold-bright" />
+              <span
+                className="text-[9px] uppercase tracking-[0.22em] text-gold-bright"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                Governed Execution Infrastructure
+              </span>
+              <span className="w-7 h-px bg-gold-bright" />
+            </div>
+          </Reveal>
+
+          {/* Headline */}
+          <div className="w-full max-w-[960px]">
             <Reveal>
               <AnimatedHeadline
-                className="relative z-10 mt-6 text-[44px] font-bold leading-[0.98] sm:text-[68px] lg:text-[86px]"
+                className="text-[52px] font-extrabold leading-[0.93] tracking-[-0.02em] sm:text-[72px] lg:text-[108px] text-[#D8E4F4]"
+                accentWords={["governs", "AI"]}
               >
-                Governed execution infrastructure for regulated enterprise operations.
+                The runtime that governs AI at scale.
               </AnimatedHeadline>
             </Reveal>
-            <Reveal>
-              <p className="relative z-10 mt-7 max-w-[760px] text-[18px] leading-relaxed text-[#A9B8CE] sm:text-[21px]">
-                Operious is a deterministic multi-agent system that runs Tier 1 and Tier 2
-                operational workflows with forensic auditability. Every decision is governed.
-                Every action is reconstructible. Every byte of state is tenant-isolated.
-              </p>
-            </Reveal>
-            <Reveal>
-              <div className="relative z-10 mt-10 flex flex-col gap-3 sm:flex-row">
+          </div>
+
+          {/* Subheadline */}
+          <Reveal>
+            <p
+              className="max-w-[640px] text-[18px] leading-[1.75] text-[#7A90B4] font-normal"
+              style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+            >
+              The runtime between AI decisions and enterprise actions — governed
+              by policy, permanently reconstructible, and auditable to the byte.
+            </p>
+          </Reveal>
+
+          {/* CTAs */}
+          <Reveal>
+            <div className="flex flex-col gap-3 sm:flex-row justify-center">
+              <MagneticWrapper>
                 <Button
                   href="/company/contact"
                   variant="primary"
@@ -241,17 +263,38 @@ export default function Home() {
                   Request enterprise access
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
-                <Button
-                  href="/platform"
-                  variant="ghost"
-                  className="bg-[#0B1120]/60 hover:shadow-[0_16px_36px_rgba(42,107,204,0.22)]"
+              </MagneticWrapper>
+              <Button
+                href="/platform"
+                variant="ghost"
+                className="bg-[#0B1120]/60 hover:shadow-[0_16px_36px_rgba(42,107,204,0.22)]"
+              >
+                Explore the architecture
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </Reveal>
+
+          {/* 7-substrate strip */}
+          <Reveal>
+            <div className="flex border border-white/[0.05] rounded-xl overflow-hidden bg-white/[0.014] backdrop-blur-md max-w-[700px] w-full">
+              {["Boundary","Coordination","Governance","Session","Execution","Supervisor","Arbitration"].map((name, i) => (
+                <div
+                  key={name}
+                  className="flex-1 py-[14px] px-2 text-center border-r border-white/[0.04] last:border-r-0 hover:bg-[rgba(201,168,76,0.05)] transition-colors group cursor-default"
                 >
-                  Read the architecture
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </Reveal>
-          </div>
+                  <div
+                    className="text-[8px] text-[rgba(201,168,76,0.45)] font-mono tracking-[0.12em] mb-1 group-hover:text-[var(--gold)] transition-colors"
+                  >
+                    {String(i + 1).padStart(2, "0")}
+                  </div>
+                  <div className="text-[10px] text-[#2E3E50] font-medium tracking-[0.03em] group-hover:text-[#7A90B4] transition-colors">
+                    {name}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Reveal>
         </RevealGroup>
       </section>
 
