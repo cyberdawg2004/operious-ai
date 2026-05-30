@@ -30,6 +30,7 @@ from app.queues import (
     ALL_QUEUES,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
+    QUEUE_KNOWLEDGE_INDEXING,
     QUEUE_INGRESS_VOICE,
     QUEUE_QA,
     QUEUE_SOP_INTELLIGENCE,
@@ -62,6 +63,7 @@ celery_app = Celery(
         "app.workers.escalation_tasks",
         "app.workers.execution_recovery_tasks",
         "app.workers.failure_pattern_tasks",
+        "app.workers.knowledge_tasks",
         "app.workers.outbound_tasks",
         "app.workers.qa_tasks",
         "app.workers.sop_intelligence_tasks",
@@ -91,6 +93,7 @@ celery_conf.update(
             "queue": QUEUE_SOP_INTELLIGENCE
         },
         "detect_sop_failure_patterns": {"queue": QUEUE_SOP_INTELLIGENCE},
+        "reindex_knowledge_document": {"queue": QUEUE_KNOWLEDGE_INDEXING},
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "reconcile_stale_execution_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,

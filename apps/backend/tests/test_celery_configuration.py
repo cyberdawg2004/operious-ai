@@ -32,6 +32,7 @@ from app.workers.execution_recovery_tasks import (
     recover_stale_executions,
 )
 from app.workers.failure_pattern_tasks import detect_sop_failure_patterns
+from app.workers.knowledge_tasks import reindex_knowledge_document
 from app.workers.qa_tasks import score_supervisor_inspection
 from app.workers.sop_intelligence_tasks import propose_sop_intelligence_change
 from app.workers.supervisor_tasks import evaluate_session_supervisor
@@ -52,6 +53,7 @@ _FIRE_AND_FORGET_TASKS = {
     "score_supervisor_inspection": score_supervisor_inspection,
     "propose_sop_intelligence_change": propose_sop_intelligence_change,
     "detect_sop_failure_patterns": detect_sop_failure_patterns,
+    "reindex_knowledge_document": reindex_knowledge_document,
     "create_governance_escalation": create_governance_escalation,
     "recover_stale_executions": recover_stale_executions,
     "reconcile_failed_execution_outbox": reconcile_failed_execution_outbox,
@@ -67,6 +69,7 @@ _TASK_RETRY_SETTINGS = {
     "score_supervisor_inspection": (1, 30),
     "propose_sop_intelligence_change": (1, 30),
     "detect_sop_failure_patterns": (2, 120),
+    "reindex_knowledge_document": (3, 30),
     "recover_stale_executions": (5, 30),
     "reconcile_failed_execution_outbox": (5, 30),
     "reconcile_stale_execution_outbox": (5, 30),

@@ -215,6 +215,7 @@ async def test_propose_called_on_new_pattern(
             "category": "charging_issue",
             "recommendation_count": DLQ_THRESHOLD,
             "synthesized_proposed_change": "Synthesized charging SOP update",
+            "pattern_id": row.pattern_id,
         }
     ]
     assert row.status == "proposed"
@@ -380,6 +381,7 @@ class _FakeSOPRuntime:
         category: str,
         recommendation_count: int,
         synthesized_proposed_change: str | None = None,
+        pattern_id: str | uuid.UUID | None = None,
     ) -> _Approval:
         self.calls.append(
             {
@@ -388,6 +390,7 @@ class _FakeSOPRuntime:
                 "category": category,
                 "recommendation_count": recommendation_count,
                 "synthesized_proposed_change": synthesized_proposed_change,
+                "pattern_id": pattern_id,
             }
         )
         return _Approval(approval_id=self.approval_id)

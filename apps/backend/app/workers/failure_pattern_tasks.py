@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import sys
+import uuid
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from threading import Thread
@@ -55,6 +56,7 @@ class SOPFailurePatternProposalProtocol(Protocol):
         category: str,
         recommendation_count: int,
         synthesized_proposed_change: str | None = None,
+        pattern_id: str | uuid.UUID | None = None,
     ) -> Coroutine[Any, Any, Any]: ...
 
 
@@ -224,6 +226,7 @@ async def _detect_sop_failure_patterns_with_session(
                             category=pattern.category,
                             recommendation_count=pattern.failure_count,
                             synthesized_proposed_change=synthesized_change,
+                            pattern_id=recorded.pattern_id,
                         )
                         approval_id = str(getattr(record, "approval_id"))
                         await detector.mark_pattern_proposed(

@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Coroutine, Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any, cast
+import uuid
 
 from app.governance.persistence import (
     BaseGovernanceRepository,
@@ -194,6 +195,7 @@ class SOPIntelligenceRuntime:
         category: str,
         recommendation_count: int,
         synthesized_proposed_change: str | None = None,
+        pattern_id: str | uuid.UUID | None = None,
     ) -> Coroutine[Any, Any, ApprovalRecord]:
         """Create or return a pending SOP proposal from repeated QA failures."""
 
@@ -203,6 +205,7 @@ class SOPIntelligenceRuntime:
             category=category,
             recommendation_count=recommendation_count,
             synthesized_proposed_change=synthesized_proposed_change,
+            pattern_id=pattern_id,
         )
 
     async def _propose_from_failure_pattern(
@@ -213,6 +216,7 @@ class SOPIntelligenceRuntime:
         category: str,
         recommendation_count: int,
         synthesized_proposed_change: str | None = None,
+        pattern_id: str | uuid.UUID | None = None,
     ) -> ApprovalRecord:
         """Create or return a pending SOP proposal from repeated QA failures."""
 
@@ -278,6 +282,7 @@ class SOPIntelligenceRuntime:
                 "synthesized_proposed_change": (
                     synthesized_proposed_change is not None
                 ),
+                "pattern_id": str(pattern_id) if pattern_id is not None else None,
             },
         )
         try:

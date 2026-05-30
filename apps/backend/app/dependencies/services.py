@@ -74,6 +74,9 @@ from app.coordination.models.participants import CoordinationParticipant
 from app.coordination.runtime import CoordinationRuntime
 from app.cognition import CognitionRuntime
 from app.cognition.persistence import PostgresCognitionUsagePersistence
+from app.cognition.sop_approval_event_publisher import (
+    PostgresSOPApprovalApplyEventProjector,
+)
 from app.core.config import get_settings
 from app.core.admission import admission_thresholds_from_settings
 from app.core.redis import get_redis_client
@@ -115,6 +118,7 @@ from app.knowledge import (
     KnowledgeRuntime,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
+from app.knowledge.reindex_publisher import CeleryKnowledgeReindexPublisher
 from app.observability.persistence import (
     PostgresOperationalObservabilityPersistence,
 )
@@ -647,6 +651,10 @@ def get_cognition_service(
             session,
             audit_encryptor=audit_encryptor,
         ),
+        approval_event_projector=PostgresSOPApprovalApplyEventProjector(
+            session=session
+        ),
+        knowledge_reindex_publisher=CeleryKnowledgeReindexPublisher(),
         session=session,
     )
 

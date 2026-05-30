@@ -148,6 +148,11 @@ class CognitionRuntime:
                 "approval_id": approval.approval_id,
                 "applied_by": applied_by,
                 "previous_version": document.version,
+                "pattern_id": approval.metadata.get("pattern_id"),
+                "source_failure_pattern": approval.metadata.get(
+                    "failure_pattern",
+                    False,
+                ),
             },
         )
         await self._tenant_configuration_repository.save_knowledge_document(
