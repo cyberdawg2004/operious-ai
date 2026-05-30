@@ -1,6 +1,8 @@
 "use client";
 
 import { useRef, type RefObject } from "react";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
 import { AnimatedBeam } from "@/components/ui/animated-beam";
 import { OperioussLogo } from "@/components/logo";
@@ -131,6 +133,15 @@ export function IntegrationArchitecture() {
           system. It adds a governance and audit layer to the operational actions
           your existing systems initiate.
         </p>
+        <div className="mt-6 flex justify-center">
+          <Link
+            href="/platform/integrations"
+            className="inline-flex h-12 items-center justify-center rounded-md border border-[#1A2744] px-5 text-[14px] font-semibold text-[#D8E4F4] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C]/40 hover:text-[#C9A84C]"
+          >
+            View integration matrix
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </Link>
+        </div>
       </div>
     </section>
   );

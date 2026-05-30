@@ -82,14 +82,14 @@ const insightCards: ContentCard[] = insightLinks.slice(1).map((link) => ({
     title: "Why multilingual BPO operations fail at scale",
     body:
       "Language detection, governance consistency, and audit trail requirements across Arabic, Indonesian, and Spanish enterprise deployments.",
-    href: "/company/contact?topic=multilingual-enterprise-operations",
+    href: "/insights/multilingual-enterprise-operations",
     meta: "Article",
   },
   {
     title: "The cost of ungoverned AI operations",
     body:
       "Quantifying liability exposure, audit failure risk, and escalation leakage in AI-run enterprise support workflows.",
-    href: "/company/contact?topic=cost-of-ungoverned-ai",
+    href: "/insights/cost-of-ungoverned-ai",
     meta: "Article",
   },
 ]);

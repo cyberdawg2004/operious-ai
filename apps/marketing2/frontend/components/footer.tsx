@@ -17,7 +17,7 @@ export function Footer() {
           Governed execution infrastructure
         </p>
 
-        <div className="mt-12 grid grid-cols-2 gap-8 sm:mt-14 sm:grid-cols-3 sm:gap-10 lg:mt-16 lg:grid-cols-6 lg:gap-12">
+        <div className="mt-12 grid grid-cols-2 gap-8 sm:mt-14 sm:grid-cols-3 sm:gap-10 lg:mt-16 lg:grid-cols-7 lg:gap-10">
           {footerGroups.map((column) => (
             <div key={column.label}>
               <h4

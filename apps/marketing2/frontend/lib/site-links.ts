@@ -19,6 +19,21 @@ export const platformLinks: SiteLink[] = [
     description: "The governed execution architecture behind Operious.",
   },
   {
+    label: "Integrations",
+    href: "/platform/integrations",
+    description: "Governed adapters for helpdesk, CRM, telephony, messaging, and issue systems.",
+  },
+  {
+    label: "Implementation",
+    href: "/platform/implementation",
+    description: "The 30-day path from architecture review to production launch.",
+  },
+  {
+    label: "vs. Alternatives",
+    href: "/platform/vs-alternatives",
+    description: "How Operious differs from AI features inside support and CRM platforms.",
+  },
+  {
     label: "Constitutional governance",
     href: "/platform/governance",
     description: "Policy enforcement, fail-closed defaults, and admission tokens.",
@@ -32,6 +47,34 @@ export const platformLinks: SiteLink[] = [
     label: "Multi-agent system",
     href: "/platform/agents",
     description: "Deterministic coordination for specialized operational agents.",
+  },
+];
+
+export const solutionLinks: SiteLink[] = [
+  {
+    label: "For COOs",
+    href: "/solutions/coo",
+    description: "Cost, accountability, and board-ready operational evidence.",
+  },
+  {
+    label: "For VP Support",
+    href: "/solutions/vp-support",
+    description: "Escalation control, language coverage, and helpdesk continuity.",
+  },
+  {
+    label: "For Enterprise Architects",
+    href: "/solutions/enterprise-architect",
+    description: "Tenancy, deterministic identity, integration, and failure modes.",
+  },
+  {
+    label: "For CIOs",
+    href: "/solutions/cio",
+    description: "Security posture, deployment model, contracts, and procurement readiness.",
+  },
+  {
+    label: "For Compliance",
+    href: "/solutions/compliance",
+    description: "Audit trail, export, regulatory posture, and evidence on demand.",
   },
 ];
 
@@ -85,9 +128,14 @@ export const trustLinks: SiteLink[] = [
     description: "Security, compliance, and governance posture.",
   },
   {
-    label: "Security architecture",
+    label: "Security Architecture",
     href: "/trust/architecture",
     description: "Tenant isolation, encrypted credentials, and audit event fabric.",
+  },
+  {
+    label: "Security Overview",
+    href: "/trust/security",
+    description: "Data architecture, encryption, access control, compliance, and operational security.",
   },
   {
     label: "Compliance roadmap",
@@ -132,6 +180,16 @@ export const insightLinks: SiteLink[] = [
     href: "/insights/multi-language-operations",
     description: "Language coverage as an operational governance problem.",
   },
+  {
+    label: "Multilingual enterprise operations",
+    href: "/insights/multilingual-enterprise-operations",
+    description: "Why multilingual BPO operations fail at scale.",
+  },
+  {
+    label: "Cost of ungoverned AI",
+    href: "/insights/cost-of-ungoverned-ai",
+    description: "The operational and legal cost of ungoverned AI execution.",
+  },
 ];
 
 export const companyLinks: SiteLink[] = [
@@ -141,7 +199,7 @@ export const companyLinks: SiteLink[] = [
     description: "The mission and operating conviction behind Operious.",
   },
   {
-    label: "Request access",
+    label: "Book a Review",
     href: "/company/contact",
     description: "Start an enterprise architecture review.",
   },
@@ -160,6 +218,7 @@ export const legalLinks: SiteLink[] = [
 
 export const headerGroups: LinkGroup[] = [
   { label: "Platform", links: platformLinks },
+  { label: "Solutions", links: solutionLinks },
   { label: "Industries", links: industryLinks },
   { label: "Trust", links: trustLinks },
   { label: "Insights", links: insightLinks },
@@ -168,6 +227,7 @@ export const headerGroups: LinkGroup[] = [
 
 export const footerGroups: LinkGroup[] = [
   { label: "Platform", links: platformLinks },
+  { label: "Solutions", links: solutionLinks },
   { label: "Industries", links: industryLinks },
   { label: "Trust", links: trustLinks },
   { label: "Insights", links: insightLinks },
@@ -178,9 +238,17 @@ export const footerGroups: LinkGroup[] = [
 export const requiredRoutes = [
   "/",
   "/platform",
+  "/platform/integrations",
+  "/platform/implementation",
+  "/platform/vs-alternatives",
   "/platform/governance",
   "/platform/replay",
   "/platform/agents",
+  "/solutions/coo",
+  "/solutions/vp-support",
+  "/solutions/enterprise-architect",
+  "/solutions/cio",
+  "/solutions/compliance",
   "/industries",
   "/industries/hardware",
   "/industries/financial-services",
@@ -191,6 +259,7 @@ export const requiredRoutes = [
   "/industries/public-sector",
   "/trust",
   "/trust/architecture",
+  "/trust/security",
   "/trust/compliance",
   "/insights",
   "/insights/constitutional-ai-governance",
@@ -198,6 +267,8 @@ export const requiredRoutes = [
   "/insights/beyond-llm-wrappers",
   "/insights/audit-trail-as-product",
   "/insights/multi-language-operations",
+  "/insights/multilingual-enterprise-operations",
+  "/insights/cost-of-ungoverned-ai",
   "/pricing",
   "/company",
   "/company/contact",

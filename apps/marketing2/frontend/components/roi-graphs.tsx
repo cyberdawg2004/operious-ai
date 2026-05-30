@@ -50,6 +50,29 @@ const languageRows = [
   ["Chinese (ZH)", "93%", "Native", true, true],
 ] as const;
 
+const methodologyNotes = [
+  {
+    title: "Cost comparison",
+    body:
+      "Based on publicly available BPO industry benchmarks from Gartner, Everest Group, and HfS Research for Tier 1 and Tier 2 contact center operations (2024-2025 data). Monthly cost per 3,000 daily contacts. Operious pricing based on standard engagement tiers. Actual cost depends on workflow complexity, volume, and configuration.",
+  },
+  {
+    title: "Resolution time",
+    body:
+      "Representative scenario data based on industry benchmarks for comparable contact categories. Operious figures reflect governed AI processing time excluding human handoff latency. High-complexity contacts require human review and will exceed these times.",
+  },
+  {
+    title: "Escalation rate",
+    body:
+      "Based on 60-day pilot trajectory. Initial escalation rate reflects calibration period. Stable escalation rate reflects tuned governance policies. Actual rates depend on policy configuration and workflow complexity.",
+  },
+  {
+    title: "Audit coverage",
+    body:
+      "100% reflects architectural guarantee - every governed action produces an audit record by design. Audit record quality depends on policy configuration and data completeness at time of processing.",
+  },
+] as const;
+
 function ChartFrame({
   title,
   children,
@@ -286,6 +309,34 @@ export function RoiGraphs() {
             Representative language coverage matrix for enterprise deployment planning.
           </p>
         </ChartFrame>
+
+        <div className="mt-5 rounded-md border border-[#1A2744] bg-[#0B1120] p-5">
+          <p
+            className="text-[10px] uppercase tracking-[0.18em] text-[#C9A84C]"
+            style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
+          >
+            ROI methodology and assumptions
+          </p>
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            {methodologyNotes.map((note) => (
+              <article
+                key={note.title}
+                className="rounded-md border border-[#1A2744] bg-[#05080F] p-4"
+              >
+                <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#C9A84C]">
+                  {note.title}
+                </h3>
+                <p className="mt-3 text-[13px] leading-relaxed text-[#7A90B4]">
+                  {note.body}
+                </p>
+              </article>
+            ))}
+          </div>
+          <p className="mt-5 text-[13px] leading-relaxed text-[#A9B8CE]">
+            For a business case model specific to your workflow volume and
+            complexity, request an architecture review.
+          </p>
+        </div>
       </div>
     </section>
   );

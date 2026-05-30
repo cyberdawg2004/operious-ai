@@ -169,7 +169,7 @@ function MobileNav({
                 onClick={onClose}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#C9A84C] px-4 text-[14px] font-semibold text-[#05080F] shadow-[0_10px_28px_rgba(201,168,76,0.30)] transition-all duration-200 hover:bg-[#D4B85A] hover:shadow-[0_16px_40px_rgba(201,168,76,0.46)]"
               >
-                Request Access
+                Book a Review
               </Link>
             </footer>
           </motion.aside>
@@ -272,7 +272,7 @@ export function Navigation() {
               href="/company/contact"
               className="group hidden items-center gap-2 rounded-md bg-[#C9A84C] px-4 py-2 text-[13px] font-semibold text-[#05080F] shadow-[0_6px_18px_rgba(201,168,76,0.25)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_10px_28px_rgba(201,168,76,0.45)] md:inline-flex"
             >
-              Request Access
+              Book a Review
             </Link>
 
             <button

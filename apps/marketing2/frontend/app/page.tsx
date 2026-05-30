@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { AnimatedHeadline } from "@/components/animated-headline";
 import { ContainmentLayer } from "@/components/containment-layer";
+import { ExecutionTrace } from "@/components/execution-trace";
 import { FeatureCard } from "@/components/feature-card";
 import { IntegrationArchitecture } from "@/components/integration-architecture";
 import { LiveEvidence } from "@/components/live-evidence";
@@ -204,12 +205,12 @@ const featuredArticles = [
   },
   {
     title: "Why multilingual BPO operations fail at scale",
-    href: "/company/contact?topic=multilingual-enterprise-operations",
+    href: "/insights/multilingual-enterprise-operations",
     body: "Language detection, governance consistency, and audit trail requirements across Arabic, Indonesian, and Spanish enterprise deployments.",
   },
   {
     title: "The cost of ungoverned AI operations",
-    href: "/company/contact?topic=cost-of-ungoverned-ai",
+    href: "/insights/cost-of-ungoverned-ai",
     body: "Quantifying liability exposure, audit failure risk, and escalation leakage in AI-run enterprise support workflows.",
   },
 ];
@@ -282,6 +283,9 @@ export default function Home() {
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </div>
+            </Reveal>
+            <Reveal>
+              <ExecutionTrace />
             </Reveal>
           </div>
         </RevealGroup>

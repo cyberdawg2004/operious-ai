@@ -5,6 +5,7 @@ type ContactPageProps = {
     industry?: string;
     topic?: string;
     tier?: string;
+    subject?: string;
   }>;
 };
 
@@ -28,7 +29,7 @@ function normalizeDomain(industry?: string) {
 
 export default async function ContactPage({ searchParams }: ContactPageProps) {
   const params = searchParams ? await searchParams : {};
-  const context = params.topic ?? params.tier ?? params.industry;
+  const context = params.subject ?? params.topic ?? params.tier ?? params.industry;
 
   return (
     <main className="flex-1">

@@ -1,20 +1,21 @@
 "use client";
 
 const proofPoints = [
-  "Policy enforced before execution",
-  "100% of decisions auditable",
-  "Full forensic replay from any checkpoint",
-  "Six languages. One governance layer.",
-  "FORCE RLS on every tenant table",
-  "Zero silent drops",
-  "Approval workflows with full evidence",
-  "Warranty, refund, escalation - governed",
+  "Policy decision audit in < 15ms",
+  "100% of governed decisions produce permanent records",
+  "HMAC-SHA256 signed — every trace",
+  "Six languages — one governance standard",
+  "Arabic gap closed for consumer electronics",
+  "Warranty, refund, escalation — all governed",
+  "Zero cross-tenant data access — by architecture",
+  "Audit export available on demand",
   "Defect clusters detected automatically",
   "SOP knowledge updates on approval",
-  "Crisis deployment in under one second",
+  "Crisis governance deployed in under one second",
   "Fraud quarantine before agent processing",
-  "Architecture review in 48 hours",
   "BAA available for healthcare",
+  "Architecture review in 48 hours",
+  "30-day deployment to production",
 ];
 
 export function ProofMarquee() {

@@ -223,7 +223,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
   return (
     <main className={cn("min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8", className)}>
       <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
-        OPERATIONS - ANKER PROOF SET
+        OPERATIONS - PILOT DEPLOYMENT — CONSUMER ELECTRONICS
       </div>
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -407,10 +407,10 @@ function DemoProofTable({
     <div className="mt-6 overflow-hidden rounded-lg border border-border-subtle bg-surface">
       <div className="flex min-h-12 items-center justify-between border-b border-border-subtle bg-surface-raised px-4 py-3">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
-          Selected Demo Evidence
+          Live Governance Record
         </span>
         <span className="font-technical text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-          anker-pilot
+          pilot-account
         </span>
       </div>
 
