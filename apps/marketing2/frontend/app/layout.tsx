@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Playfair_Display, Inter } from "next/font/google";
+import { MarketingLayout } from "@/components/marketing-layout";
+import { CookieConsent } from "@/components/cookie-consent";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -14,12 +16,9 @@ const playfair = Playfair_Display({
 
 const inter = Inter({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
   variable: "--font-inter",
   display: "swap",
 });
-import { MarketingLayout } from "@/components/marketing-layout";
-import { CookieConsent } from "@/components/cookie-consent";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.operious.com"),

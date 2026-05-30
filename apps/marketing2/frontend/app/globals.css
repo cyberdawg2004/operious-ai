@@ -46,15 +46,13 @@
   --cc-destructive: #C44B4B;
   --cc-success: #4B8C5A;
   
-  /* Typography — Playfair Display serif + Inter sans */
-  --font-serif: var(--font-playfair), 'Playfair Display', Georgia, serif;
-  --font-inter: var(--font-inter), 'Inter', system-ui, sans-serif;
+  /* Typography — Playfair Display serif (Inter is injected via next/font variable) */
 
   /* Hero dark bg */
   --bg-hero: #050508;
-  /* Cream/sugar body bg (same as --canvas: #F8F5EE already defined) */
-  --bg-cream: #F8F5EE;
-  --bg-cream2: #FBF9F4;
+  /* Cream/sugar body bg mapped to existing tokens */
+  --bg-cream: var(--canvas);        /* #F8F5EE */
+  --bg-cream2: var(--surface-raised); /* #FBF9F4 */
 
   /* Legacy tokens mapped */
   --background: var(--canvas);
@@ -88,7 +86,8 @@
   --font-sans: var(--type-geometric);
   --font-mono: var(--type-technical);
   --font-serif: var(--font-playfair), 'Playfair Display', Georgia, serif;
-  
+  --font-inter: var(--font-inter);
+
   /* Shadow tokens */
   --shadow-dropdown: 0 8px 32px rgba(10, 15, 28, 0.12), 0 2px 8px rgba(10, 15, 28, 0.08);
   --shadow-card: 0 1px 3px rgba(10, 15, 28, 0.04);
