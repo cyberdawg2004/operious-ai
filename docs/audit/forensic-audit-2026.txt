@@ -1,0 +1,469 @@
+FORENSIC AUDIT — Operious AI
+Date: 2026-05-30
+Auditor: Codex (autonomous read-only pass)
+
+Scope read:
+- apps/backend/app/: 1,025 Python modules inventoried, import-scanned, type-scanned, and targeted-read for all defects listed below.
+- apps/backend/migrations/versions/: 62 migrations inventoried and scanned for RLS, FORCE RLS, policies, FK ondelete, and silent raw SQL.
+- apps/backend/app/workers/: all Celery task modules and celery_app.py audited.
+- apps/backend/fly.toml: audited.
+- apps/frontend/: NO — directory does not exist.
+- apps/command-center2/frontend/: 52 first-party TypeScript/TSX files audited, excluding node_modules and .next.
+
+Item key:
+CC1 Router -> service -> runtime layering enforced.
+CC2 No sibling substrate imports.
+CC3 Tenant isolation enforced on every DB read.
+CC4 Governance fail-closed.
+CC5 SessionTimelineEvent append-only.
+CC6 UUID5 deterministic identity throughout lineage paths.
+CC7 Tenant credentials fetched at runtime, never hardcoded.
+CC8 LLM proposes, governance enforces.
+TS1 No Mapping[str, Any] on first-class domain fields.
+TS2 No bare Any on public method signatures.
+TS3 LLM output schemas use ConfigDict(extra="forbid").
+TS4 Dataclasses use frozen=True where appropriate.
+TC1 Every runtime has at least one test file.
+TC2 Every constitutional invariant has a regression test.
+TC3 FORCE RLS tenant isolation tested with pg_session restricted role.
+TC4 Fail-open / fail-closed behavior explicitly tested.
+MD1 Tenant-scoped tables ENABLE ROW LEVEL SECURITY.
+MD2 Tenant-scoped tables FORCE ROW LEVEL SECURITY.
+MD3 RLS tables have tenant_isolation policy.
+MD4 FK constraints use appropriate ondelete behavior.
+MD5 No raw SQL in migrations that could fail silently.
+CL1 Every Celery task has max_retries explicitly set.
+CL2 Every Celery task has default_retry_delay explicitly set.
+CL3 Every Celery task has queue routing in celery_app.task_routes.
+CL4 Cross-tenant tasks use PRIVILEGED_PATH marker.
+CL5 Terminal task failures write to dead_letter_tasks.
+CL6 set_current_tenant() is called before DB work in tenant tasks.
+EH1 Provider/LLM failures never propagate uncaught to callers.
+EH2 Redis admission/capacity failures follow documented fail-open/fail-closed policy.
+EH3 Cross-substrate FK violations handled gracefully.
+EH4 Empty result sets handled without unsafe [0].
+SEC1 No secrets or credentials in log output.
+SEC2 No credentials returned in API responses.
+SEC3 Channel adapters do not import governance substrate.
+SEC4 Webhook signatures validated before any processing.
+SEC5 Auth0 JWKS validation enforced on protected routes.
+EL1 Every significant state change appends an OperationalEvent.
+EL2 Every cluster/report/pattern/approval has traceable lineage to trigger.
+EL3 All JSONB payloads carry _schema_version.
+PF1 No N+1 queries in list endpoints.
+PF2 Time-window queries use indexed columns.
+PF3 Tenant-scoped queries use tenant_id index.
+PF4 Vector retrieval uses LIMIT and tenant filter in SQL.
+DOC1 Every public runtime class has a docstring.
+DOC2 Every constitutional constraint has a WHY comment.
+DOC3 Intentional fail-open/fail-closed decisions documented.
+DOC4 Empty coordination -> ALLOW intentional comment exists in aggregator.py.
+
+════════════════════════════════════════
+SUBSTRATE: governance
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=YES
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=NO CL2=NO CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: execution
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=NO CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=NO EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: session
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=NO CC2=NO CC3=NO CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: boundary
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=NO CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=YES
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=NO SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: coordination
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=YES
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: arbitration
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: escalation
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: sop_intelligence
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=NO EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: supervisor
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: qa
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: trainer
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: cognition
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=YES
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: knowledge
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=NO EH2=YES EH3=YES EH4=NO
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: tenant
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=NO CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: hardening
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=NO CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=YES
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=NO CL2=NO CL3=NO CL4=YES CL5=NO CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: events
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: identity
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=YES CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=YES TS2=YES TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=NO
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=YES SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+SUBSTRATE: auth
+════════════════════════════════════════
+CONSTITUTIONAL COMPLIANCE: CC1=YES CC2=NO CC3=YES CC4=YES CC5=YES CC6=YES CC7=YES CC8=YES
+TYPE SAFETY: TS1=NO TS2=NO TS3=YES TS4=YES
+TEST COVERAGE: TC1=YES TC2=NO TC3=NO TC4=YES
+MIGRATION DISCIPLINE: MD1=YES MD2=YES MD3=YES MD4=NO MD5=NO
+CELERY TASK DISCIPLINE: CL1=YES CL2=YES CL3=YES CL4=YES CL5=YES CL6=YES
+ERROR HANDLING: EH1=YES EH2=YES EH3=YES EH4=YES
+SECURITY: SEC1=YES SEC2=NO SEC3=YES SEC4=YES SEC5=YES
+EVENT LINEAGE: EL1=NO EL2=YES EL3=NO
+PERFORMANCE: PF1=YES PF2=YES PF3=YES PF4=YES
+DOCUMENTATION: DOC1=YES DOC2=NO DOC3=YES DOC4=YES
+
+════════════════════════════════════════
+CROSS-CUTTING CONCERNS
+════════════════════════════════════════
+
+MIGRATION AUDIT
+table | has RLS | FORCE RLS | tenant policy
+action_approval_records | YES | YES | YES
+admission_records | YES | YES | YES
+approval_records | YES | YES | YES
+arbitration_evaluations | YES | YES | YES
+boundary_egress | YES | YES | YES
+boundary_ingress | YES | YES | YES
+cognition_audit_records | YES | YES | YES
+cognition_llm_usage_records | YES | YES | YES
+coordination_envelopes | YES | YES | YES
+crisis_deployments | YES | YES | YES
+crisis_events | YES | YES | YES
+dead_letter_tasks | YES | YES | YES
+defect_cluster_records | YES | YES | YES
+defect_report_records | YES | YES | YES
+escalation_outbox | YES | YES | YES
+escalation_records | YES | YES | YES
+execution_attempts | YES | YES | YES
+execution_outbox | YES | YES | YES
+execution_records | YES | YES | YES
+governance_decisions | YES | YES | YES
+governance_enforcement_actions | YES | YES | YES
+governance_traces | YES | YES | YES
+operational_events | YES | YES | YES
+operational_sessions | YES | YES | YES
+operational_slo_definitions | YES | YES | YES
+operational_trace_spans | YES | YES | YES
+outbound_dispatch_records | YES | YES | YES
+provider_circuit_states | YES | YES | YES
+provider_quota_records | YES | YES | YES
+qa_score_records | YES | YES | YES
+resolution_outbound_drafts | YES | YES | YES
+resolution_proposals | YES | YES | YES
+semantic_circuit_events | YES | YES | YES
+semantic_quarantine_records | YES | YES | YES
+session_correlations | YES | YES | YES
+session_events | YES | YES | YES
+sop_failure_patterns | YES | YES | YES
+supervisor_escalations | YES | YES | YES
+supervisor_evaluations | YES | YES | YES
+supervisor_findings | YES | YES | YES
+supervisor_inspections | YES | YES | YES
+tenant_channel_configurations | YES | YES | YES
+tenant_execution_circuit_breakers | YES | YES | YES
+tenant_execution_governance_configurations | YES | YES | YES
+tenant_governance_policies | YES | YES | YES
+tenant_knowledge_chunks | YES | YES | YES
+tenant_knowledge_document_versions | YES | YES | YES
+tenant_knowledge_documents | YES | YES | YES
+tenant_knowledge_vectors | YES | YES | YES
+tenant_topology_configurations | YES | YES | YES
+tenants | YES | YES | YES
+training_recommendations | YES | YES | YES
+voice_egress_records | YES | YES | YES
+voice_ingress_records | YES | YES | YES
+webhook_nonce_records | YES | YES | YES
+
+Migration FK ondelete discipline: NO — apps/backend/migrations/versions/0054_crisis_events.py:61 defines fk_crisis_events_deployment_id_crisis_deployments without ondelete.
+Migration silent raw SQL discipline: NO — apps/backend/migrations/versions/0034_force_rls.py:76 uses a DO block with to_regclass(... ) IS NOT NULL, so a missing table is silently skipped.
+
+CELERY TASK AUDIT
+task | max_retries | default_retry_delay | task_routes | PRIVILEGED_PATH | terminal DLQ | tenant context
+execute_diagnostic_agent | YES | YES | YES | YES | YES | YES
+operious.workers.emit_queue_depth_snapshot | NO | NO | NO | YES | NO | YES
+operious.workers.evaluate_alert_conditions | NO | NO | YES | YES | NO | YES
+expire_crisis_deployments | NO | NO | YES | YES | NO | YES
+process_post_call_transcript | YES | YES | YES | YES | NO | YES
+scan_for_defect_clusters | YES | YES | YES | YES | NO | YES
+reconcile_stale_escalation_outbox | YES | YES | YES | YES | NO | YES
+create_governance_escalation | YES | YES | YES | YES | NO | YES
+recover_stale_executions | YES | YES | YES | YES | NO | YES
+reconcile_stale_execution_outbox | YES | YES | YES | YES | NO | YES
+reconcile_failed_execution_outbox | YES | YES | YES | YES | NO | YES
+recover_dead_letter_replays | YES | YES | NO | YES | NO | YES
+detect_sop_failure_patterns | YES | YES | YES | YES | NO | YES
+reindex_knowledge_document | YES | YES | YES | YES | NO | YES
+dispatch_defect_report | YES | YES | YES | YES | YES | YES
+score_supervisor_inspection | YES | YES | YES | YES | NO | YES
+propose_sop_intelligence_change | YES | YES | YES | YES | NO | YES
+scan_training_recommendation_gaps | YES | YES | YES | YES | NO | YES
+evaluate_session_supervisor | YES | YES | YES | YES | NO | YES
+cleanup_expired_webhook_nonces | YES | YES | YES | YES | NO | YES
+
+SECURITY AUDIT — credential access points
+apps/backend/app/tenant/runtime.py:113 — credentials accepted and encrypted before persistence: YES.
+apps/backend/app/tenant/runtime.py:288 — load_channel_credentials decrypts credentials at runtime: YES.
+apps/backend/app/api/v1/schemas/tenant.py:50 — TenantChannelConfigurationResponse redacts credentials and webhook_secret: YES.
+apps/backend/app/services/ticket_ingress_service.py:452 — webhook secret selected only after tenant channel lookup: YES for runtime fetch, NO for signature-before-processing.
+apps/backend/app/services/outbound_dispatch_service.py:265 — outbound credentials fetched at runtime: YES.
+apps/backend/app/services/shopify_enrichment_service.py:149 — Shopify credentials fetched at runtime: YES.
+apps/command-center2/frontend/app/api/auth/access-token/route.ts:15 — access token returned in JSON response: NO.
+apps/command-center2/frontend/components/integration-views.tsx:420 — bearer token stored in localStorage: NO additional security finding.
+apps/backend/fly.toml — no raw secret values found; AUDIT_EXPORT_HMAC_SECRET is documented as Fly secret: YES.
+
+NO FINDINGS AND REQUIRED FIXES
+1. [session] apps/backend/app/api/v1/routers/session.py:47 imports SessionRuntime directly, bypassing service layering. Fix: move timeline reconstruction behind a session service dependency and have the router call that service only.
+2. [session] apps/backend/app/api/v1/routers/session.py:76 instantiates SessionRuntime inside the router. Fix: inject a service/runtime adapter through app.dependencies.services and keep runtime construction out of transport.
+3. [session] apps/backend/app/session/reconstruction/reconstructor.py:91 calls persistence.get_session(request.session_id) without expected_tenant_id. Fix: add expected_tenant_id to ReconstructSessionRequest or reconstruct(...) and pass it to every persistence read.
+4. [session] apps/backend/app/session/reconstruction/reconstructor.py:145 calls list_events(...) without expected_tenant_id. Fix: forward expected_tenant_id into list_events.
+5. [session] apps/backend/app/session/reconstruction/reconstructor.py:197 calls list_correlations(...) without expected_tenant_id. Fix: forward expected_tenant_id into list_correlations.
+6. [boundary] apps/backend/app/services/ticket_ingress_service.py:412 resolves a tenant by routing address before webhook signature validation. Fix: perform signature header preflight before DB lookup and document the minimal unavoidable secret lookup, or refactor to authenticate route material before tenant processing.
+7. [tenant] apps/backend/app/tenant/runtime.py:279 exposes resolve_tenant_by_routing_address without expected_tenant_id. Fix: either mark it as a privileged unauthenticated routing resolver with tests and comments, or require a scoped resolver for all tenant reads.
+8. [all substrates except identity] import scan found 147 strict sibling-substrate imports, e.g. apps/backend/app/coordination/runtime/runtime.py:152 imports app.governance.capability. Fix: move shared contracts to app.types/app.core or enforce service-boundary calls instead of direct sibling imports.
+9. [type safety] apps/backend/app/events/event.py:88 uses metadata: Mapping[str, Any] as a first-class domain field. Fix: change first-class metadata fields to dict[str, Any] or typed dataclasses.
+10. [type safety] apps/backend/app/knowledge/models.py:38 and apps/backend/app/tenant/persistence/records.py:77 use Mapping[str, Any] on domain records. Fix: replace with dict[str, Any] or narrower typed value objects.
+11. [type safety] apps/backend/app/identity/request_adapter.py:38, apps/backend/app/boundary/registry/registry.py:40, and multiple public helpers expose bare Any. Fix: replace public Any with protocols, typed unions, or object plus explicit narrowing.
+12. [hardening] apps/backend/app/hardening/identity/__init__.py:66 derives HardeningAuditId with uuid.uuid4(). Fix: use uuid.uuid5 with a deterministic substrate seed for lineage identifiers.
+13. [organizational intelligence] apps/backend/app/organizational_intelligence/identity/__init__.py:148 derives PatternLineageId with uuid.uuid4(). Fix: derive PatternLineageId via uuid.uuid5 from tenant, candidate pattern, approved pattern, and source trigger.
+14. [migrations] apps/backend/migrations/versions/0054_crisis_events.py:61 lacks ondelete on deployment_id FK. Fix: choose and declare ondelete, likely CASCADE for child crisis events or RESTRICT if deployments must be retained.
+15. [migrations] apps/backend/migrations/versions/0034_force_rls.py:76 silently skips missing tables. Fix: fail loudly when an expected RLS table is absent, or assert the expected table set before the DO block.
+16. [celery] apps/backend/app/workers/celery_app.py:224, :248, and :284 define tasks without max_retries/default_retry_delay. Fix: add explicit retry settings or document ignore_result/no-retry with max_retries=0 and delay=0.
+17. [celery] apps/backend/app/workers/celery_app.py:84 task_routes omits operious.workers.emit_queue_depth_snapshot. Fix: add an explicit task_routes entry for the full task name.
+18. [celery] apps/backend/app/workers/celery_app.py:84 task_routes omits recover_dead_letter_replays. Fix: add recover_dead_letter_replays to task_routes with QUEUE_WEBHOOK_MAINTENANCE.
+19. [celery] most maintenance tasks log terminal exceptions without writing dead_letter_tasks, e.g. apps/backend/app/workers/celery_app.py:270. Fix: record terminal task failures through PostgresDeadLetterTaskPersistence or declare and test an explicit non-DLQ exception.
+20. [knowledge] apps/backend/app/knowledge/runtime.py:207 indexes embed_texts(...)[0]. Fix: check that exactly one query embedding was returned and raise a typed KnowledgeError on empty provider output.
+21. [knowledge] apps/backend/app/knowledge/runtime.py:207 lets embedding provider exceptions propagate directly. Fix: catch provider exceptions and fold them into a typed retrieval failure envelope/error.
+22. [events] apps/backend/app/events/runtime.py:28 documents that other substrates do not yet emit events universally. Fix: wire OperationalEventRuntime into every state-changing runtime or document exact excluded state transitions with tests.
+23. [event lineage] apps/backend/app/runtime/failure_pattern_runtime.py:206 stores aggregate pattern metadata but not triggering DLQ/admission row IDs. Fix: persist trigger row identifiers in metadata_json or a child lineage table.
+24. [event payloads] apps/backend/app/events/event.py:88 and apps/backend/app/runtime/db/models.py:325 allow JSONB metadata default {} without _schema_version. Fix: require _schema_version in JSONB payload constructors and DB defaults.
+25. [frontend/auth] apps/command-center2/frontend/app/api/auth/access-token/route.ts:15 returns { accessToken: token }. Fix: proxy backend API calls server-side or use HttpOnly/session-mediated access rather than returning bearer credentials to JavaScript.
+26. [frontend/security] apps/command-center2/frontend/components/integration-views.tsx:420 stores operious_access_token in localStorage. Fix: remove localStorage token persistence and rely on Auth0 session or an HttpOnly token bridge.
+27. [documentation] apps/backend/app/agents/tools/orchestration.py:72 defines ActionOrchestrationRuntime without a class docstring. Fix: add a public runtime docstring explaining authority, governance, and failure semantics.
+28. [documentation] constitutional WHY comments are incomplete across the codebase. Fix: add WHY comments next to enforced constraints, especially boundary exceptions, router invariants, and tenant routing exceptions.
+29. [tests] strict sibling-import, router-layering, universal OperationalEvent, JSONB _schema_version, and Celery DLQ invariants are not fully enforced by regression tests. Fix: add failing invariant tests for each NO above.
+30. [tests] pg_session restricted-role coverage does not cover every FORCE RLS table. Fix: add table-by-table restricted-role tests or a generated RLS matrix test that exercises all FORCE RLS tables.
+
+ADDITIONAL FINDINGS
+1. apps/frontend is absent, while the directive expected apps/frontend/ and apps/command-center2/. Fix: either add the app, remove it from the audit contract, or document the migration to apps/command-center2/frontend.
+2. apps/backend/app/_deprecated/governance_bridge/guardrails/adapters.py:347 still uses uuid.uuid4() for a governance decision id under app/. Fix: remove quarantined deprecated code from audited runtime paths or convert to deterministic identity.
+3. apps/backend/app/events/event.py:88 explicitly documents opaque Mapping[str, Any] metadata, conflicting with the type-safety rule. Fix: update doctrine and code together.
+
+SUMMARY
+Total substrate checklist items audited: 846
+YES: 631
+NO: 215
+
+ITEMS REQUIRING IMPLEMENTATION:
+1. [session] apps/backend/app/api/v1/routers/session.py:47 remove direct runtime import and route through service.
+2. [session] apps/backend/app/session/reconstruction/reconstructor.py:91 pass expected_tenant_id through reconstruct/session/event/correlation reads.
+3. [boundary] apps/backend/app/services/ticket_ingress_service.py:412 validate webhook signature before tenant processing, or isolate and document the minimal routing-secret lookup.
+4. [tenant] apps/backend/app/tenant/runtime.py:279 close or explicitly mark the unscoped routing-address resolver.
+5. [all substrates] replace direct sibling imports with app.types/app.core contracts or service boundaries.
+6. [type safety] replace Mapping[str, Any] first-class domain fields and public bare Any signatures.
+7. [identity] replace uuid.uuid4() lineage fallbacks with deterministic uuid.uuid5().
+8. [migrations] add missing FK ondelete and remove silent RLS migration skips.
+9. [celery] add explicit retry settings, missing task_routes, and terminal DLQ writes or documented exceptions.
+10. [knowledge] guard empty embedding-provider output and normalize provider failures.
+11. [events] wire OperationalEvent appends into all significant state changes.
+12. [event lineage] add trigger row IDs for failure patterns and require _schema_version in JSONB payloads.
+13. [frontend/auth] stop returning/storing bearer tokens in JavaScript-accessible responses/storage.
+14. [tests] add regression coverage for every strict invariant marked NO.
