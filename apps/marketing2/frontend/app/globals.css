@@ -46,6 +46,16 @@
   --cc-destructive: #C44B4B;
   --cc-success: #4B8C5A;
   
+  /* Typography — Playfair Display serif + Inter sans */
+  --font-serif: var(--font-playfair), 'Playfair Display', Georgia, serif;
+  --font-inter: var(--font-inter), 'Inter', system-ui, sans-serif;
+
+  /* Hero dark bg */
+  --bg-hero: #050508;
+  /* Cream/sugar body bg (same as --canvas: #F8F5EE already defined) */
+  --bg-cream: #F8F5EE;
+  --bg-cream2: #FBF9F4;
+
   /* Legacy tokens mapped */
   --background: var(--canvas);
   --foreground: var(--ink-primary);

@@ -1,7 +1,23 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { Playfair_Display, Inter } from "next/font/google";
 import "./globals.css";
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  weight: ["700", "800", "900"],
+  style: ["normal", "italic"],
+  variable: "--font-playfair",
+  display: "swap",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-inter",
+  display: "swap",
+});
 import { MarketingLayout } from "@/components/marketing-layout";
 import { CookieConsent } from "@/components/cookie-consent";
 
@@ -41,7 +57,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased bg-canvas`}
+      className={`${GeistSans.variable} ${GeistMono.variable} ${playfair.variable} ${inter.variable} h-full antialiased bg-canvas`}
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary">
         <MarketingLayout>{children}</MarketingLayout>
