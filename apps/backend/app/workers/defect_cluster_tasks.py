@@ -25,6 +25,8 @@ from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.runtime.defect_cluster_runtime import DefectClusterDetectionRuntime
 from app.runtime.db.models import DefectClusterRow, DefectReportRow
+from app.services.shopify_enrichment_service import ShopifyEnrichmentService
+from app.services.sku_extraction_service import SKUExtractionService
 from app.tenant.db.models import TenantRow
 from app.queues import QUEUE_SUPERVISOR
 from app.workers.celery_app import celery_app
@@ -41,6 +43,36 @@ class DefectReportSynthesisProtocol(Protocol):
         cluster: DefectClusterRow,
         expected_tenant_id: str,
     ) -> str: ...
+
+
+class SKUExtractionProtocol(Protocol):
+    async def extract_sku_for_cluster(
+        self,
+        *,
+        execution_ids: tuple[str, ...],
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> str | None: ...
+
+    async def update_cluster_sku_hint(
+        self,
+        *,
+        cluster_id: str,
+        sku: str,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> bool: ...
+
+
+class ShopifyEnrichmentProtocol(Protocol):
+    async def enrich_cluster(
+        self,
+        *,
+        cluster_id: str,
+        sku_hint: str | None,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> bool: ...
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -65,6 +97,8 @@ async def scan_for_defect_clusters_runtime(
     tenant_ids: tuple[str, ...] | None = None,
     session: AsyncSession | None = None,
     synthesis_agent: DefectReportSynthesisProtocol | None = None,
+    sku_extraction_service: SKUExtractionProtocol | None = None,
+    shopify_enrichment_service: ShopifyEnrichmentProtocol | None = None,
 ) -> dict[str, object]:
     settings = get_settings()
     if session is not None:
@@ -74,6 +108,8 @@ async def scan_for_defect_clusters_runtime(
             window_hours=settings.DEFECT_CLUSTER_WINDOW_HOURS,
             threshold=settings.DEFECT_CLUSTER_THRESHOLD,
             synthesis_agent=synthesis_agent,
+            sku_extraction_service=sku_extraction_service,
+            shopify_enrichment_service=shopify_enrichment_service,
         )
 
     # PRIVILEGED_PATH: enumerate tenant ids under owner privileges, then
@@ -86,6 +122,8 @@ async def scan_for_defect_clusters_runtime(
             window_hours=settings.DEFECT_CLUSTER_WINDOW_HOURS,
             threshold=settings.DEFECT_CLUSTER_THRESHOLD,
             synthesis_agent=synthesis_agent,
+            sku_extraction_service=sku_extraction_service,
+            shopify_enrichment_service=shopify_enrichment_service,
         )
 
 
@@ -96,6 +134,8 @@ async def _scan_for_defect_clusters_with_session(
     window_hours: int,
     threshold: int,
     synthesis_agent: DefectReportSynthesisProtocol | None,
+    sku_extraction_service: SKUExtractionProtocol | None,
+    shopify_enrichment_service: ShopifyEnrichmentProtocol | None,
 ) -> dict[str, object]:
     tenants = (
         tenant_ids
@@ -107,8 +147,14 @@ async def _scan_for_defect_clusters_with_session(
 
     runtime = DefectClusterDetectionRuntime(session=session)
     synthesis = synthesis_agent or _defect_report_synthesis_agent(session)
+    sku_extractor = sku_extraction_service or SKUExtractionService(session=session)
+    shopify_enrichment = (
+        shopify_enrichment_service
+        or ShopifyEnrichmentService(session=session)
+    )
     detected: list[dict[str, object]] = []
     failed: list[dict[str, object]] = []
+    enrichment_failed: list[dict[str, object]] = []
     synthesis_failed: list[dict[str, object]] = []
     dispatch_jobs: list[tuple[str, str]] = []
     for tenant_id in tenants:
@@ -132,6 +178,42 @@ async def _scan_for_defect_clusters_with_session(
                     uuid.UUID(cluster_id),
                 )
                 if cluster is not None and cluster.status != "reported":
+                    try:
+                        sku = await sku_extractor.extract_sku_for_cluster(
+                            execution_ids=candidate.execution_ids,
+                            tenant_id=tenant_id,
+                            expected_tenant_id=tenant_id,
+                        )
+                        if sku is not None:
+                            await sku_extractor.update_cluster_sku_hint(
+                                cluster_id=cluster_id,
+                                sku=sku,
+                                tenant_id=tenant_id,
+                                expected_tenant_id=tenant_id,
+                            )
+                            cluster.sku_hint = sku
+                            await shopify_enrichment.enrich_cluster(
+                                cluster_id=cluster_id,
+                                sku_hint=sku,
+                                tenant_id=tenant_id,
+                                expected_tenant_id=tenant_id,
+                            )
+                    except Exception as exc:  # noqa: BLE001 - enrichment is optional.
+                        enrichment_failed.append(
+                            {
+                                "tenant_id": tenant_id,
+                                "cluster_id": cluster_id,
+                                "reason": exc.__class__.__name__,
+                            }
+                        )
+                        logger.warning(
+                            "defect_cluster_shopify_enrichment_failed",
+                            extra={
+                                "tenant_id": tenant_id,
+                                "cluster_id": cluster_id,
+                                "error_class": exc.__class__.__name__,
+                            },
+                        )
                     try:
                         report_id = await synthesis.synthesize(
                             cluster=cluster,
@@ -202,6 +284,7 @@ async def _scan_for_defect_clusters_with_session(
         "clusters_detected": len(detected),
         "clusters": detected,
         "failed": failed,
+        "enrichment_failed": enrichment_failed,
         "synthesis_failed": synthesis_failed,
         "dispatch_enqueued": dispatch_enqueued,
     }

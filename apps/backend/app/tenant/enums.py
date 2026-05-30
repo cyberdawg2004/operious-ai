@@ -8,6 +8,11 @@ from enum import StrEnum
 class TenantChannelType(StrEnum):
     EMAIL = "email"
     WHATSAPP = "whatsapp"
+    # SHOPIFY: Read-only product enrichment.
+    # routing_address = shop_domain (e.g. "anker.myshopify.com")
+    # credentials_enc = {"access_token": "shpat_..."}
+    # webhook_secret = "" (unused, required by schema)
+    SHOPIFY = "shopify"
     SHULEX = "shulex"
     LARK = "lark"
     ZENDESK = "zendesk"
