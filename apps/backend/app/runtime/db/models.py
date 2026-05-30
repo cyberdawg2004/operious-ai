@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     String,
@@ -278,4 +279,98 @@ class DefectClusterRow(Base):
     )
 
 
-__all__ = ["DeadLetterTaskRow", "DefectClusterRow", "ProviderCircuitStateRow"]
+class DefectReportRow(Base):
+    """LLM-synthesized engineering report for a detected defect cluster."""
+
+    __tablename__ = "defect_report_records"
+
+    report_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    cluster_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "defect_cluster_records.cluster_id",
+            name="fk_defect_report_records_cluster_id_defect_cluster_records",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    executive_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_impact: Mapped[str] = mapped_column(Text, nullable=False)
+    root_cause_hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
+    recommended_actions: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence_quality: Mapped[str] = mapped_column(String(16), nullable=False)
+    incident_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    governance_status: Mapped[str] = mapped_column(
+        String(_STATE_WIDTH),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
+    llm_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cognition_audit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint(
+            "confidence >= 0.0 AND confidence <= 1.0",
+            name="defect_report_confidence_range",
+        ),
+        CheckConstraint(
+            "incident_count >= 1",
+            name="defect_report_incident_count_positive",
+        ),
+        CheckConstraint(
+            "evidence_quality IN ('high', 'medium', 'low')",
+            name="defect_report_evidence_quality_valid",
+        ),
+        CheckConstraint(
+            "governance_status IN ('pending', 'allowed', 'blocked')",
+            name="defect_report_governance_status_valid",
+        ),
+        Index(
+            "ix_defect_reports_tenant_cluster",
+            "tenant_id",
+            "cluster_id",
+        ),
+    )
+
+
+__all__ = [
+    "DeadLetterTaskRow",
+    "DefectClusterRow",
+    "DefectReportRow",
+    "ProviderCircuitStateRow",
+]

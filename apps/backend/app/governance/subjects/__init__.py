@@ -21,6 +21,7 @@ Layout:
 * `manager_approval` — `ManagerApprovalGovernanceSubject`.
 * `communication`   — `CommunicationGovernanceSubject`,
                       `AttachmentSummary` (stub for comms runtime).
+* `cluster`         — `ClusterGovernanceSubject`.
 
 Subjects do NOT reference Sprint H runtime types. They reference
 small value-object summaries (`CandidateSummary`, `AttachmentSummary`)
@@ -45,6 +46,7 @@ from app.governance.subjects.base import (
 from app.governance.subjects.capability import (
     CapabilityGovernanceSubject,
 )
+from app.governance.subjects.cluster import ClusterGovernanceSubject
 from app.governance.subjects.communication import (
     AttachmentSummary,
     CommunicationGovernanceSubject,
@@ -64,6 +66,7 @@ __all__ = [
     "BaseGovernanceSubject",
     "CandidateSummary",
     "CapabilityGovernanceSubject",
+    "ClusterGovernanceSubject",
     "CommunicationGovernanceSubject",
     "ExecutionGovernanceSubject",
     "GenericGovernanceSubject",

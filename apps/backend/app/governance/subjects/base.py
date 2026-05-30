@@ -61,6 +61,7 @@ class SubjectKind(StrEnum):
     MANAGER_APPROVAL = "manager_approval"
     COMMUNICATION = "communication"
     CAPABILITY = "capability"
+    CLUSTER = "defect_cluster"
 
 
 class BaseGovernanceSubject:

@@ -4,23 +4,41 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
+import uuid
 from collections.abc import Coroutine
 from threading import Thread
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.defect_report_agent import (
+    DefectReportSynthesisAgent,
+    DeterministicDefectReportLLMClient,
+)
+from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMClient
 from app.core.config import get_settings
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.runtime.defect_cluster_runtime import DefectClusterDetectionRuntime
+from app.runtime.db.models import DefectClusterRow
 from app.tenant.db.models import TenantRow
 from app.queues import QUEUE_SUPERVISOR
 from app.workers.celery_app import celery_app
 
 _T = TypeVar("_T")
 logger = logging.getLogger(__name__)
+
+
+class DefectReportSynthesisProtocol(Protocol):
+    async def synthesize(
+        self,
+        *,
+        cluster: DefectClusterRow,
+        expected_tenant_id: str,
+    ) -> str: ...
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -44,6 +62,7 @@ async def scan_for_defect_clusters_runtime(
     *,
     tenant_ids: tuple[str, ...] | None = None,
     session: AsyncSession | None = None,
+    synthesis_agent: DefectReportSynthesisProtocol | None = None,
 ) -> dict[str, object]:
     settings = get_settings()
     if session is not None:
@@ -52,6 +71,7 @@ async def scan_for_defect_clusters_runtime(
             tenant_ids=tenant_ids,
             window_hours=settings.DEFECT_CLUSTER_WINDOW_HOURS,
             threshold=settings.DEFECT_CLUSTER_THRESHOLD,
+            synthesis_agent=synthesis_agent,
         )
 
     # PRIVILEGED_PATH: enumerate tenant ids under owner privileges, then
@@ -63,6 +83,7 @@ async def scan_for_defect_clusters_runtime(
             tenant_ids=tenant_ids,
             window_hours=settings.DEFECT_CLUSTER_WINDOW_HOURS,
             threshold=settings.DEFECT_CLUSTER_THRESHOLD,
+            synthesis_agent=synthesis_agent,
         )
 
 
@@ -72,6 +93,7 @@ async def _scan_for_defect_clusters_with_session(
     tenant_ids: tuple[str, ...] | None,
     window_hours: int,
     threshold: int,
+    synthesis_agent: DefectReportSynthesisProtocol | None,
 ) -> dict[str, object]:
     tenants = (
         tenant_ids
@@ -82,8 +104,10 @@ async def _scan_for_defect_clusters_with_session(
         tenants = (str(get_current_tenant()),)
 
     runtime = DefectClusterDetectionRuntime(session=session)
+    synthesis = synthesis_agent or _defect_report_synthesis_agent(session)
     detected: list[dict[str, object]] = []
     failed: list[dict[str, object]] = []
+    synthesis_failed: list[dict[str, object]] = []
     for tenant_id in tenants:
         set_current_tenant(tenant_id)
         await _set_db_tenant_context(session, tenant_id)
@@ -99,12 +123,39 @@ async def _scan_for_defect_clusters_with_session(
                     candidate=candidate,
                     expected_tenant_id=tenant_id,
                 )
+                report_id: str | None = None
+                cluster = await session.get(
+                    DefectClusterRow,
+                    uuid.UUID(cluster_id),
+                )
+                if cluster is not None and cluster.status != "reported":
+                    try:
+                        report_id = await synthesis.synthesize(
+                            cluster=cluster,
+                            expected_tenant_id=tenant_id,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - retry next beat.
+                        synthesis_failed.append(
+                            {
+                                "tenant_id": tenant_id,
+                                "cluster_id": cluster_id,
+                                "reason": exc.__class__.__name__,
+                            }
+                        )
+                        logger.exception(
+                            "defect_report_synthesis_failed",
+                            extra={
+                                "tenant_id": tenant_id,
+                                "cluster_id": cluster_id,
+                            },
+                        )
                 detected.append(
                     {
                         "tenant_id": tenant_id,
                         "category": candidate.category,
                         "cluster_id": cluster_id,
                         "execution_count": candidate.execution_count,
+                        "report_id": report_id,
                     }
                 )
         except Exception as exc:  # noqa: BLE001 - fail open per tenant.
@@ -126,6 +177,7 @@ async def _scan_for_defect_clusters_with_session(
         "clusters_detected": len(detected),
         "clusters": detected,
         "failed": failed,
+        "synthesis_failed": synthesis_failed,
     }
 
 
@@ -143,6 +195,32 @@ async def _set_db_tenant_context(session: AsyncSession, tenant_id: str) -> None:
         text("SELECT set_config('app.current_tenant_id', :t, true)"),
         {"t": tenant_id},
     )
+
+
+def _defect_report_synthesis_agent(
+    session: AsyncSession,
+) -> DefectReportSynthesisAgent:
+    return DefectReportSynthesisAgent(
+        session=session,
+        llm_client=_defect_report_llm_client(),
+    )
+
+
+def _defect_report_llm_client() -> DiagnosticLLMClient:
+    settings = get_settings()
+    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+        return DeterministicDefectReportLLMClient()
+    return AnthropicMessagesClient(
+        api_key=settings.ANTHROPIC_API_KEY,
+        model=settings.ANTHROPIC_DEFAULT_MODEL,
+        base_url=settings.ANTHROPIC_BASE_URL,
+        anthropic_version=settings.ANTHROPIC_VERSION,
+        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
+    )
+
+
+def _running_under_pytest() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
 
 def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:

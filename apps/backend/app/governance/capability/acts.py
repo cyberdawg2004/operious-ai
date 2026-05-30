@@ -122,6 +122,7 @@ class OperationalAct(StrEnum):
 
     # ─── supervisor ─────────────────────────────────────────────────
     DEFECT_CLUSTER_DETECTED = "supervisor:defect_cluster_detected"
+    DEFECT_REPORT_GENERATED = "supervisor:defect_report_generated"
     SUPERVISOR_INSPECT = "supervisor:inspect"
 
 

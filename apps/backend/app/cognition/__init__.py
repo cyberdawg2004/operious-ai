@@ -22,6 +22,7 @@ from app.cognition.diagnostic_runtime import (
     DiagnosticCognitionRuntimeConfig,
     DiagnosticReasoningSnapshot,
 )
+from app.cognition.defect_report_models import DefectReportLLMOutput
 from app.cognition.llm import (
     AnthropicMessagesClient,
     DeterministicDiagnosticLLMClient,
@@ -63,6 +64,7 @@ __all__ = [
     "ProviderRateLimitError",
     "ProviderTransientError",
     "DeterministicDiagnosticLLMClient",
+    "DefectReportLLMOutput",
     "DiagnosticCognitionRuntime",
     "DiagnosticCognitionRuntimeConfig",
     "DiagnosticLLMClient",
