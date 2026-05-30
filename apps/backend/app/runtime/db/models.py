@@ -209,6 +209,81 @@ class DeadLetterTaskRow(Base):
     )
 
 
+class SOPFailurePatternRow(Base):
+    """Detected repeated failures that may indicate an SOP gap."""
+
+    __tablename__ = "sop_failure_patterns"
+
+    pattern_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        nullable=False,
+        index=True,
+    )
+    pattern_source: Mapped[str] = mapped_column(
+        String(_STATE_WIDTH), nullable=False
+    )
+    category: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    threshold_used: Mapped[int] = mapped_column(Integer, nullable=False)
+    sop_proposal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(_STATE_WIDTH),
+        nullable=False,
+        default="detected",
+        server_default=text("'detected'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint(
+            "pattern_source IN ('dlq', 'admission', 'combined')",
+            name="sop_failure_pattern_source_valid",
+        ),
+        CheckConstraint("length(category) > 0", name="category_nonempty"),
+        CheckConstraint(
+            "failure_count >= 0",
+            name="sop_failure_pattern_count_nonnegative",
+        ),
+        CheckConstraint("window_hours >= 1", name="sop_failure_window_positive"),
+        CheckConstraint(
+            "threshold_used >= 1",
+            name="sop_failure_threshold_positive",
+        ),
+        CheckConstraint(
+            "status IN ('detected', 'proposed', 'acknowledged')",
+            name="sop_failure_pattern_status_valid",
+        ),
+        Index(
+            "ix_sop_failure_patterns_tenant_category",
+            "tenant_id",
+            "category",
+            "created_at",
+        ),
+    )
+
+
 class DefectClusterRow(Base):
     """Detected diagnostic-category cluster over completed executions."""
 
@@ -457,4 +532,5 @@ __all__ = [
     "DefectReportRow",
     "OutboundDispatchRow",
     "ProviderCircuitStateRow",
+    "SOPFailurePatternRow",
 ]

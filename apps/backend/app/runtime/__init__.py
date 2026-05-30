@@ -33,6 +33,14 @@ from app.runtime.defect_cluster_runtime import (
     DefectClusterDetectionRuntime,
     derive_defect_cluster_id,
 )
+from app.runtime.failure_pattern_runtime import (
+    DLQ_THRESHOLD,
+    DLQ_WINDOW_HOURS,
+    FailurePattern,
+    FailurePatternDetectionRuntime,
+    RecordedFailurePattern,
+    derive_sop_failure_pattern_id,
+)
 from app.runtime.escalation_event_projection import (
     EscalationEventProjectionError,
     EscalationOperationalEventProjection,
@@ -128,6 +136,8 @@ __all__ = [
     "DispatchArbitrationEvaluation",
     "DispatchArbitrationProposal",
     "DispatchArbitrationRuntime",
+    "DLQ_THRESHOLD",
+    "DLQ_WINDOW_HOURS",
     "ExecutionEventProjectionError",
     "ExecutionGovernanceEvaluation",
     "ExecutionGovernanceRuntime",
@@ -136,6 +146,8 @@ __all__ = [
     "EscalationEventProjectionError",
     "EscalationOperationalEventProjection",
     "EscalationOperationalEventProjector",
+    "FailurePattern",
+    "FailurePatternDetectionRuntime",
     "GovernanceDecisionEventLineage",
     "GovernanceEventProjectionError",
     "GovernanceOperationalEventProjection",
@@ -147,6 +159,7 @@ __all__ = [
     "ProviderCircuitOpenError",
     "ProviderCircuitSnapshot",
     "ProviderCircuitState",
+    "RecordedFailurePattern",
     "ResolutionCommunicationPolicy",
     "ResolutionGovernanceGateProtocol",
     "ResolutionGovernanceGateRequest",
@@ -173,6 +186,7 @@ __all__ = [
     "TimelineRuntime",
     "build_coordination_topology_runtime",
     "derive_defect_cluster_id",
+    "derive_sop_failure_pattern_id",
     "make_postgres_sop_approval_event_projector",
     "make_postgres_dispatch_arbitration_runtime",
     "project_arbitration_record",

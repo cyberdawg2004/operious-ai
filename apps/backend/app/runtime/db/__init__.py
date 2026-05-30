@@ -5,6 +5,7 @@ from app.runtime.db.models import (
     DefectClusterRow,
     DefectReportRow,
     ProviderCircuitStateRow,
+    SOPFailurePatternRow,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "DefectClusterRow",
     "DefectReportRow",
     "ProviderCircuitStateRow",
+    "SOPFailurePatternRow",
 ]

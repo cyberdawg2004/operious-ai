@@ -61,6 +61,7 @@ celery_app = Celery(
         "app.workers.escalation_recovery_tasks",
         "app.workers.escalation_tasks",
         "app.workers.execution_recovery_tasks",
+        "app.workers.failure_pattern_tasks",
         "app.workers.outbound_tasks",
         "app.workers.qa_tasks",
         "app.workers.sop_intelligence_tasks",
@@ -89,6 +90,7 @@ celery_conf.update(
         "scan_training_recommendation_gaps": {
             "queue": QUEUE_SOP_INTELLIGENCE
         },
+        "detect_sop_failure_patterns": {"queue": QUEUE_SOP_INTELLIGENCE},
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "reconcile_stale_execution_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
@@ -170,6 +172,11 @@ celery_conf.update(
         "scan-training-recommendation-gaps-daily": {
             "task": "scan_training_recommendation_gaps",
             "schedule": float(settings.SOP_REPEATED_FAILURE_SCAN_SECONDS),
+            "options": {"queue": QUEUE_SOP_INTELLIGENCE},
+        },
+        "detect-sop-failure-patterns-every-two-hours": {
+            "task": "detect_sop_failure_patterns",
+            "schedule": 7200.0,
             "options": {"queue": QUEUE_SOP_INTELLIGENCE},
         },
     },

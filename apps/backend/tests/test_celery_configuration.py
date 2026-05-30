@@ -31,6 +31,7 @@ from app.workers.execution_recovery_tasks import (
     reconcile_stale_execution_outbox,
     recover_stale_executions,
 )
+from app.workers.failure_pattern_tasks import detect_sop_failure_patterns
 from app.workers.qa_tasks import score_supervisor_inspection
 from app.workers.sop_intelligence_tasks import propose_sop_intelligence_change
 from app.workers.supervisor_tasks import evaluate_session_supervisor
@@ -50,6 +51,7 @@ _FIRE_AND_FORGET_TASKS = {
     "evaluate_session_supervisor": evaluate_session_supervisor,
     "score_supervisor_inspection": score_supervisor_inspection,
     "propose_sop_intelligence_change": propose_sop_intelligence_change,
+    "detect_sop_failure_patterns": detect_sop_failure_patterns,
     "create_governance_escalation": create_governance_escalation,
     "recover_stale_executions": recover_stale_executions,
     "reconcile_failed_execution_outbox": reconcile_failed_execution_outbox,
@@ -58,18 +60,19 @@ _FIRE_AND_FORGET_TASKS = {
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
     "process_post_call_transcript": process_post_call_transcript,
 }
-_TASK_RETRY_BUDGETS = {
-    "execute_diagnostic_agent": 4,
-    "create_governance_escalation": 2,
-    "evaluate_session_supervisor": 1,
-    "score_supervisor_inspection": 1,
-    "propose_sop_intelligence_change": 1,
-    "recover_stale_executions": 5,
-    "reconcile_failed_execution_outbox": 5,
-    "reconcile_stale_execution_outbox": 5,
-    "reconcile_stale_escalation_outbox": 5,
-    "cleanup_expired_webhook_nonces": 1,
-    "process_post_call_transcript": 1,
+_TASK_RETRY_SETTINGS = {
+    "execute_diagnostic_agent": (4, 30),
+    "create_governance_escalation": (2, 30),
+    "evaluate_session_supervisor": (1, 30),
+    "score_supervisor_inspection": (1, 30),
+    "propose_sop_intelligence_change": (1, 30),
+    "detect_sop_failure_patterns": (2, 120),
+    "recover_stale_executions": (5, 30),
+    "reconcile_failed_execution_outbox": (5, 30),
+    "reconcile_stale_execution_outbox": (5, 30),
+    "reconcile_stale_escalation_outbox": (5, 30),
+    "cleanup_expired_webhook_nonces": (1, 30),
+    "process_post_call_transcript": (1, 30),
 }
 
 
@@ -107,12 +110,12 @@ def test_fire_and_forget_tasks_ignore_results() -> None:
 
 
 def test_celery_tasks_have_explicit_retry_budgets() -> None:
-    assert set(_TASK_RETRY_BUDGETS) == set(_FIRE_AND_FORGET_TASKS)
-    for task_name, expected_budget in _TASK_RETRY_BUDGETS.items():
+    assert set(_TASK_RETRY_SETTINGS) == set(_FIRE_AND_FORGET_TASKS)
+    for task_name, (expected_budget, expected_delay) in _TASK_RETRY_SETTINGS.items():
         task = _FIRE_AND_FORGET_TASKS[task_name]
 
         assert getattr(task, "max_retries") == expected_budget, task_name
-        assert getattr(task, "default_retry_delay") == 30, task_name
+        assert getattr(task, "default_retry_delay") == expected_delay, task_name
 
 
 def test_post_call_voice_task_routes_to_voice_queue() -> None:

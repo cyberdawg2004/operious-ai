@@ -101,6 +101,7 @@ class OperationalAct(StrEnum):
     OI_SOP_APPROVAL_APPROVE = "oi_sop:approval_approve"
     OI_SOP_APPROVAL_REJECT = "oi_sop:approval_reject"
     OI_SOP_APPROVAL_APPLY = "oi_sop:approval_apply"
+    SOP_FAILURE_PATTERN_DETECTED = "oi_sop:failure_pattern_detected"
     OI_TONALITY_CLASSIFY = "oi_tonality:classify"
 
     # ─── QA chronology projection ───────────────────────────────────
