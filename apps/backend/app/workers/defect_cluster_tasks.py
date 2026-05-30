@@ -9,7 +9,7 @@ import sys
 import uuid
 from collections.abc import Coroutine
 from threading import Thread
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, cast
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,16 +17,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.defect_report_agent import (
     DefectReportSynthesisAgent,
     DeterministicDefectReportLLMClient,
+    derive_defect_report_id,
 )
 from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMClient
 from app.core.config import get_settings
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.runtime.defect_cluster_runtime import DefectClusterDetectionRuntime
-from app.runtime.db.models import DefectClusterRow
+from app.runtime.db.models import DefectClusterRow, DefectReportRow
 from app.tenant.db.models import TenantRow
 from app.queues import QUEUE_SUPERVISOR
 from app.workers.celery_app import celery_app
+from app.workers.outbound_tasks import dispatch_defect_report
 
 _T = TypeVar("_T")
 logger = logging.getLogger(__name__)
@@ -108,6 +110,7 @@ async def _scan_for_defect_clusters_with_session(
     detected: list[dict[str, object]] = []
     failed: list[dict[str, object]] = []
     synthesis_failed: list[dict[str, object]] = []
+    dispatch_jobs: list[tuple[str, str]] = []
     for tenant_id in tenants:
         set_current_tenant(tenant_id)
         await _set_db_tenant_context(session, tenant_id)
@@ -149,6 +152,20 @@ async def _scan_for_defect_clusters_with_session(
                                 "cluster_id": cluster_id,
                             },
                         )
+                if cluster is not None and cluster.status == "reported":
+                    report_id = report_id or str(
+                        derive_defect_report_id(cluster.cluster_id)
+                    )
+                    report = await session.get(
+                        DefectReportRow,
+                        uuid.UUID(report_id),
+                    )
+                    if (
+                        report is not None
+                        and report.governance_status == "allowed"
+                        and report.dispatched_at is None
+                    ):
+                        dispatch_jobs.append((report_id, tenant_id))
                 detected.append(
                     {
                         "tenant_id": tenant_id,
@@ -170,6 +187,14 @@ async def _scan_for_defect_clusters_with_session(
                 extra={"tenant_id": tenant_id},
             )
     await session.commit()
+    dispatch_enqueued = 0
+    for report_id, tenant_id in dispatch_jobs:
+        cast(Any, dispatch_defect_report).delay(
+            report_id=report_id,
+            tenant_id=tenant_id,
+            attempt_number=1,
+        )
+        dispatch_enqueued += 1
     set_current_tenant(None)
     return {
         "status": "completed",
@@ -178,6 +203,7 @@ async def _scan_for_defect_clusters_with_session(
         "clusters": detected,
         "failed": failed,
         "synthesis_failed": synthesis_failed,
+        "dispatch_enqueued": dispatch_enqueued,
     }
 
 

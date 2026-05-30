@@ -12,6 +12,8 @@ class TenantChannelType(StrEnum):
     LARK = "lark"
     ZENDESK = "zendesk"
     VOICE = "voice"
+    JIRA = "jira"
+    LINEAR = "linear"
 
 
 class TenantChannelStatus(StrEnum):

@@ -61,6 +61,7 @@ celery_app = Celery(
         "app.workers.escalation_recovery_tasks",
         "app.workers.escalation_tasks",
         "app.workers.execution_recovery_tasks",
+        "app.workers.outbound_tasks",
         "app.workers.qa_tasks",
         "app.workers.sop_intelligence_tasks",
         "app.workers.supervisor_tasks",
@@ -82,6 +83,7 @@ celery_conf.update(
         "create_governance_escalation": {"queue": QUEUE_ESCALATION},
         "evaluate_session_supervisor": {"queue": QUEUE_SUPERVISOR},
         "scan_for_defect_clusters": {"queue": QUEUE_SUPERVISOR},
+        "dispatch_defect_report": {"queue": QUEUE_SUPERVISOR},
         "score_supervisor_inspection": {"queue": QUEUE_QA},
         "propose_sop_intelligence_change": {"queue": QUEUE_SOP_INTELLIGENCE},
         "scan_training_recommendation_gaps": {

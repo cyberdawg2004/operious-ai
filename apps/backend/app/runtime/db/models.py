@@ -368,9 +368,93 @@ class DefectReportRow(Base):
     )
 
 
+class OutboundDispatchRow(Base):
+    """Delivery attempt ledger for governed outbound defect reports."""
+
+    __tablename__ = "outbound_dispatch_records"
+
+    dispatch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    report_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "defect_report_records.report_id",
+            name="fk_outbound_dispatch_records_report_id_defect_report_records",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+    channel_type: Mapped[str] = mapped_column(String(_STATE_WIDTH), nullable=False)
+    target_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(_STATE_WIDTH),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
+    http_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint("length(channel_type) > 0", name="channel_type_nonempty"),
+        CheckConstraint("length(target_url) > 0", name="target_url_nonempty"),
+        CheckConstraint(
+            "attempt_number >= 1",
+            name="outbound_dispatch_attempt_positive",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'success', 'failed', 'dead_lettered')",
+            name="outbound_dispatch_status_valid",
+        ),
+        Index(
+            "ix_outbound_dispatch_report_id",
+            "report_id",
+            "attempt_number",
+        ),
+        Index(
+            "ix_outbound_dispatch_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+
 __all__ = [
     "DeadLetterTaskRow",
     "DefectClusterRow",
     "DefectReportRow",
+    "OutboundDispatchRow",
     "ProviderCircuitStateRow",
 ]
