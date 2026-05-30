@@ -9,6 +9,11 @@ from app.core.http import get_shared_http_client
 
 _MAX_RESPONSE_BODY_CHARS = 2048
 
+# WHY: Channel adapters never import Governance substrate.
+# Constitutional rule: the adapter layer is a pure transport
+# layer. Governance decisions are made above the adapter by
+# the dispatch/orchestration layer before the adapter is called.
+
 
 @dataclass(frozen=True, slots=True)
 class OutboundWebhookRequest:

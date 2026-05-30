@@ -420,6 +420,10 @@ class CoordinationRuntime:
         # 3. Invoke coordination-policy (topology authorisation rules)
         # when a policy runtime is composed. Sprint L2 Rule 2 — policy
         # denial and governance denial remain DISTINCT semantics.
+        # WHY: TenantIsolationEvaluator is marked critical so that
+        # a DB error during cross-tenant checking cannot silently
+        # permit cross-tenant data access. Fail-closed on evaluator
+        # exception is the only safe option for tenant security.
         policy_envelope: CoordinationPolicyEnvelope | None = None
         substrate_metadata: dict[str, object] = dict(topology_metadata)
         if self._policy_runtime is not None:

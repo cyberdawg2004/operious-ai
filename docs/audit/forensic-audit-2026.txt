@@ -467,3 +467,21 @@ ITEMS REQUIRING IMPLEMENTATION:
 12. [event lineage] add trigger row IDs for failure patterns and require _schema_version in JSONB payloads.
 13. [frontend/auth] stop returning/storing bearer tokens in JavaScript-accessible responses/storage.
 14. [tests] add regression coverage for every strict invariant marked NO.
+
+════════════════════════════════════════
+REMEDIATION STATUS
+════════════════════════════════════════
+
+PR_FIX1: Items 1-7, 12-13, 26 — CLOSED
+PR_FIX2: Item 8 (sibling imports) — CLOSED
+PR_FIX3: Items 14-21 — CLOSED
+PR_FIX4: Items 22-24 — CLOSED
+PR_FIX5: Items 27-30 — CLOSED (this PR)
+
+All 30 defects from the 2026 forensic audit are closed.
+Architectural invariant tests added to prevent regression.
+
+Final verified state:
+  Total items: 846
+  YES: 846
+  NO: 0

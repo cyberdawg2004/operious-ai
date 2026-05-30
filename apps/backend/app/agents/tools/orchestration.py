@@ -70,6 +70,17 @@ class ActionOrchestrationResult:
 
 
 class ActionOrchestrationRuntime:
+    """Bridge resolution proposals to governed tool invocations.
+
+    This runtime turns SEND_ELIGIBLE proposal actions into concrete
+    tool calls. Authority is per invocation: every tool execution must
+    receive its own persisted ALLOW decision from the tool governance
+    gate, and the proposal's earlier governance decision is never
+    reused as execution authority. DENY appends an ``action_denied``
+    timeline event; REQUIRE_APPROVAL creates a pending approval record
+    instead of invoking the tool.
+    """
+
     def __init__(
         self,
         *,

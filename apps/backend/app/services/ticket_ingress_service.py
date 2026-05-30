@@ -412,6 +412,11 @@ class TicketIngressService:
             body=body,
             headers=headers,
         )
+        # WHY: Signature validation precedes all tenant processing
+        # to prevent unauthenticated callers from triggering tenant
+        # DB work. The minimal routing lookup is unavoidable because
+        # the webhook secret is per-tenant, but all other processing
+        # is gated on valid HMAC.
         if not _webhook_signature_header_present(
             channel_type=tenant_channel_type,
             headers=headers,

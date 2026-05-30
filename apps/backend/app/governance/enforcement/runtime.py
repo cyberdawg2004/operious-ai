@@ -156,6 +156,10 @@ class GovernanceRuntime:
 
         chain = self._chains.get(context.stage)
         if chain is None:
+            # WHY: Governance fail-closed is a constitutional rule.
+            # An empty chain has no policies to evaluate. Returning
+            # ALLOW would silently bypass governance on misconfigured
+            # tenants. DENY surfaces the misconfiguration immediately.
             return await self._fail_envelope(
                 error=GovernanceConfigurationError(
                     f"no policy chain configured for stage "

@@ -82,6 +82,11 @@ class SessionReconstructor:
         persistence: SessionPersistenceProtocol,
     ) -> _ReconstructionPayload:
         """Run the reconstruction pipeline."""
+        # WHY: Session reconstruction reads timeline events and
+        # correlations. Without expected_tenant_id enforcement,
+        # a session_id collision between tenants could return
+        # another tenant's events. RLS enforces this at DB level;
+        # the parameter enforces it at application level too.
         record = await persistence.get_session(
             request.session_id,
             expected_tenant_id=request.expected_tenant_id,
