@@ -53,6 +53,259 @@ type ChannelModal =
   | { type: "create" }
   | { type: "edit"; channel: TenantChannelConfiguration };
 
+type ChannelCredentialField = {
+  key: string;
+  label: string;
+  type: "text" | "password" | "number";
+  placeholder: string;
+  required: boolean;
+  helpText?: string;
+};
+
+const CHANNEL_TYPE_LABELS: Record<string, string> = {
+  email: "Email (SMTP)",
+  whatsapp: "WhatsApp Business",
+  voice: "Voice (Twilio)",
+  zendesk: "Zendesk",
+  jira: "Jira",
+  linear: "Linear",
+  shopify: "Shopify",
+  shulex: "Shulex",
+  lark: "Lark",
+};
+
+const CHANNEL_TYPE_OPTIONS = [
+  "email",
+  "whatsapp",
+  "voice",
+  "zendesk",
+  "jira",
+  "linear",
+  "shopify",
+  "shulex",
+  "lark",
+];
+
+const CHANNEL_CREDENTIAL_FIELDS: Record<string, ChannelCredentialField[]> = {
+  email: [
+    {
+      key: "smtp_host",
+      label: "SMTP Host",
+      type: "text",
+      placeholder: "smtp.example.com",
+      required: true,
+    },
+    {
+      key: "smtp_port",
+      label: "SMTP Port",
+      type: "number",
+      placeholder: "587",
+      required: true,
+    },
+    {
+      key: "smtp_user",
+      label: "SMTP Username",
+      type: "text",
+      placeholder: "sender@example.com",
+      required: true,
+    },
+    {
+      key: "smtp_password",
+      label: "SMTP Password",
+      type: "password",
+      placeholder: "••••••••",
+      required: true,
+    },
+    {
+      key: "from_address",
+      label: "From Address",
+      type: "text",
+      placeholder: "support@yourcompany.com",
+      required: true,
+    },
+  ],
+  whatsapp: [
+    {
+      key: "phone_number_id",
+      label: "Phone Number ID",
+      type: "text",
+      placeholder: "1234567890",
+      required: true,
+      helpText: "Found in Meta Business Suite > WhatsApp > API Setup",
+    },
+    {
+      key: "access_token",
+      label: "Permanent Access Token",
+      type: "password",
+      placeholder: "EAAxxxxxxxx",
+      required: true,
+    },
+    {
+      key: "verify_token",
+      label: "Webhook Verify Token",
+      type: "text",
+      placeholder: "your_verify_token",
+      required: true,
+      helpText: "Set this in Meta webhook configuration",
+    },
+  ],
+  voice: [
+    {
+      key: "account_sid",
+      label: "Twilio Account SID",
+      type: "text",
+      placeholder: "ACxxxxxxxxxxxxxxxx",
+      required: true,
+    },
+    {
+      key: "auth_token",
+      label: "Twilio Auth Token",
+      type: "password",
+      placeholder: "••••••••••••••••",
+      required: true,
+    },
+    {
+      key: "phone_number",
+      label: "Twilio Phone Number",
+      type: "text",
+      placeholder: "+15551234567",
+      required: true,
+    },
+  ],
+  zendesk: [
+    {
+      key: "subdomain",
+      label: "Zendesk Subdomain",
+      type: "text",
+      placeholder: "yourcompany",
+      required: true,
+      helpText: "yourcompany.zendesk.com - enter only 'yourcompany'",
+    },
+    {
+      key: "email",
+      label: "Agent Email",
+      type: "text",
+      placeholder: "agent@yourcompany.com",
+      required: true,
+    },
+    {
+      key: "api_token",
+      label: "API Token",
+      type: "password",
+      placeholder: "••••••••••••••••",
+      required: true,
+    },
+  ],
+  jira: [
+    {
+      key: "base_url",
+      label: "Jira Base URL",
+      type: "text",
+      placeholder: "https://yourcompany.atlassian.net",
+      required: true,
+    },
+    {
+      key: "email",
+      label: "Account Email",
+      type: "text",
+      placeholder: "admin@yourcompany.com",
+      required: true,
+    },
+    {
+      key: "api_token",
+      label: "API Token",
+      type: "password",
+      placeholder: "••••••••••••••••",
+      required: true,
+      helpText: "Generate at id.atlassian.com/manage-profile/security/api-tokens",
+    },
+    {
+      key: "project_key",
+      label: "Default Project Key",
+      type: "text",
+      placeholder: "OPS",
+      required: false,
+    },
+  ],
+  linear: [
+    {
+      key: "api_key",
+      label: "Linear API Key",
+      type: "password",
+      placeholder: "lin_api_xxxxxxxxxxxx",
+      required: true,
+      helpText: "Generate at linear.app/settings/api",
+    },
+    {
+      key: "team_id",
+      label: "Team ID",
+      type: "text",
+      placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      required: false,
+      helpText: "Found in Linear team settings URL",
+    },
+  ],
+  shopify: [
+    {
+      key: "shop_domain",
+      label: "Shop Domain",
+      type: "text",
+      placeholder: "yourstore.myshopify.com",
+      required: true,
+    },
+    {
+      key: "access_token",
+      label: "Admin API Access Token",
+      type: "password",
+      placeholder: "shpat_xxxxxxxxxxxx",
+      required: true,
+      helpText: "Custom app access token from Shopify Partners",
+    },
+  ],
+  shulex: [
+    {
+      key: "api_key",
+      label: "Shulex API Key",
+      type: "password",
+      placeholder: "••••••••••••••••",
+      required: true,
+    },
+    {
+      key: "store_id",
+      label: "Store ID",
+      type: "text",
+      placeholder: "your-store-id",
+      required: true,
+    },
+  ],
+  lark: [
+    {
+      key: "app_id",
+      label: "Lark App ID",
+      type: "text",
+      placeholder: "cli_xxxxxxxxxxxx",
+      required: true,
+    },
+    {
+      key: "app_secret",
+      label: "App Secret",
+      type: "password",
+      placeholder: "••••••••••••••••",
+      required: true,
+    },
+  ],
+};
+
+const GENERIC_CREDENTIAL_FIELDS: ChannelCredentialField[] = [
+  {
+    key: "credentials",
+    label: "Credentials (JSON)",
+    type: "text",
+    placeholder: '{"key": "value"}',
+    required: false,
+  },
+];
+
 export function GovernancePoliciesView({
   headerAddon = null,
 }: {
@@ -637,19 +890,53 @@ function ChannelForm({
   isSubmitting: boolean;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
+  const [channelType, setChannelType] = useState(channel?.channel_type ?? "email");
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({});
+  const credentialFields =
+    CHANNEL_CREDENTIAL_FIELDS[channelType] ?? GENERIC_CREDENTIAL_FIELDS;
+  const usesGenericCredentials = credentialFields === GENERIC_CREDENTIAL_FIELDS;
+  const hasCredentialInput = Object.values(credentialValues).some(
+    (value) => value.trim() !== ""
+  );
+  const requiresCredentialSet = !channel || hasCredentialInput;
+  const credentialPayload = buildCredentialPayload(
+    credentialFields,
+    credentialValues
+  );
+  const credentialJson = requiresCredentialSet
+    ? JSON.stringify(credentialPayload)
+    : "";
+  const channelTypeOptions = CHANNEL_TYPE_OPTIONS.includes(channelType)
+    ? CHANNEL_TYPE_OPTIONS
+    : [channelType, ...CHANNEL_TYPE_OPTIONS];
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <h2 className="font-display text-[24px] font-semibold text-ink-primary">
         {channel ? "Edit Channel" : "New Channel"}
       </h2>
       {error && <FormError message={error} />}
-      <SelectInput
-        name="channel_type"
-        label="Channel type"
-        defaultValue={channel?.channel_type ?? "email"}
-        disabled={Boolean(channel)}
-        options={["email", "whatsapp", "shulex", "lark", "zendesk", "voice"]}
-      />
+      <label className="block">
+        <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+          Channel type
+        </span>
+        <select
+          name="channel_type"
+          value={channelType}
+          disabled={Boolean(channel)}
+          onChange={(event) => {
+            setChannelType(event.target.value);
+            setCredentialValues({});
+          }}
+          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
+        >
+          {channelTypeOptions.map((option) => (
+            <option key={option} value={option}>
+              {CHANNEL_TYPE_LABELS[option] ?? formatLabel(option)}
+            </option>
+          ))}
+        </select>
+      </label>
       <TextInput name="routing_address" label="Routing address" defaultValue={channel?.routing_address ?? ""} required />
       <SelectInput
         name="status"
@@ -657,16 +944,105 @@ function ChannelForm({
         defaultValue={channel?.status ?? "pending_verification"}
         options={["pending_verification", "active", "paused", "error"]}
       />
-      <JsonInput
-        name="credentials"
-        label="Credentials JSON"
-        defaultValue={channel ? "" : "{}"}
-        required={!channel}
-      />
+      {channel && (
+        <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
+          Credentials are set. Enter new values to rotate.
+        </div>
+      )}
+      {usesGenericCredentials ? (
+        <label className="block">
+          <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+            {GENERIC_CREDENTIAL_FIELDS[0].label}
+          </span>
+          <textarea
+            name="credentials"
+            defaultValue={channel ? "" : "{}"}
+            placeholder={GENERIC_CREDENTIAL_FIELDS[0].placeholder}
+            rows={8}
+            required={!channel}
+            className="w-full rounded border border-border-subtle bg-surface-raised px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-primary focus:outline-none focus:border-gold-primary"
+          />
+        </label>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <input type="hidden" name="credentials" value={credentialJson} />
+          {credentialFields.map((field) => (
+            <CredentialInput
+              key={field.key}
+              field={field}
+              value={credentialValues[field.key] ?? ""}
+              isEditMode={Boolean(channel)}
+              required={field.required && requiresCredentialSet}
+              onChange={(value) =>
+                setCredentialValues((previous) => ({
+                  ...previous,
+                  [field.key]: value,
+                }))
+              }
+            />
+          ))}
+        </div>
+      )}
       <TextInput name="webhook_secret" label="Webhook secret" type="password" required={!channel} />
       <SubmitButton isSubmitting={isSubmitting} label={channel ? "Save channel" : "Create channel"} />
     </form>
   );
+}
+
+function CredentialInput({
+  field,
+  value,
+  isEditMode,
+  required,
+  onChange,
+}: {
+  field: ChannelCredentialField;
+  value: string;
+  isEditMode: boolean;
+  required: boolean;
+  onChange: (value: string) => void;
+}) {
+  const placeholder =
+    isEditMode && field.type === "password"
+      ? "Leave blank to keep current value"
+      : field.placeholder;
+
+  return (
+    <label className="block">
+      <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+        {field.label}
+        {required && <span className="ml-1 text-red-alert">*</span>}
+      </span>
+      <input
+        type={field.type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        required={required}
+        autoComplete={field.type === "password" ? "new-password" : "off"}
+        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+      />
+      {field.helpText && (
+        <span className="mt-1 block text-[12px] leading-relaxed text-ink-tertiary">
+          {field.helpText}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function buildCredentialPayload(
+  fields: ChannelCredentialField[],
+  credentialValues: Record<string, string>
+): Record<string, string> {
+  const payload: Record<string, string> = {};
+  for (const field of fields) {
+    const value = credentialValues[field.key]?.trim();
+    if (value) {
+      payload[field.key] = value;
+    }
+  }
+  return payload;
 }
 
 function TextInput({
