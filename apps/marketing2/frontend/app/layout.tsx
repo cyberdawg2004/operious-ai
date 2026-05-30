@@ -1,30 +1,16 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { Playfair_Display, Inter } from "next/font/google";
+import "./globals.css";
 import { MarketingLayout } from "@/components/marketing-layout";
 import { CookieConsent } from "@/components/cookie-consent";
-import "./globals.css";
-
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  weight: ["700", "800", "900"],
-  style: ["normal", "italic"],
-  variable: "--font-playfair",
-  display: "swap",
-});
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.operious.com"),
-  title: "Operious AI — Operational Governance Infrastructure",
+  title: "Operious AI — Governed Execution Infrastructure",
   description:
-    "Enterprise operational workflows with enforced policy, complete governance, and a forensic record of every decision made.",
+    "The layer between what AI proposes and what your " +
+    "business executes. Governed. Audited. Immutable.",
   icons: {
     icon: [{ url: "/icon", type: "image/png" }],
     shortcut: [{ url: "/icon", type: "image/png" }],
@@ -33,16 +19,17 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Operious AI",
     description:
-      "Operational governance infrastructure for enterprise support, warranty, claims, escalations, and approvals.",
+      "Governed AI execution infrastructure. " +
+      "The containment layer between AI models and your business.",
     url: "https://www.operious.com",
     siteName: "Operious AI",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Operious AI — Operational Governance Infrastructure",
+    title: "Operious AI — Governed Execution Infrastructure",
     description:
-      "Enterprise workflows that scale. Decisions that hold up in any audit.",
+      "The containment layer between AI models and your business.",
   },
 };
 
@@ -54,7 +41,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable} ${playfair.variable} ${inter.variable} h-full antialiased bg-canvas`}
+      className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased bg-canvas`}
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary">
         <MarketingLayout>{children}</MarketingLayout>

@@ -14,24 +14,24 @@ export const commandCenterUrl =
 
 export const platformLinks: SiteLink[] = [
   {
-    label: "How Operious Works",
+    label: "Platform overview",
     href: "/platform",
-    description: "How Operious governs operational decisions before execution.",
+    description: "The governed execution architecture behind Operious.",
   },
   {
-    label: "Policy Enforcement",
+    label: "Constitutional governance",
     href: "/platform/governance",
-    description: "Fail-closed policy checks before customer-impacting actions.",
+    description: "Policy enforcement, fail-closed defaults, and admission tokens.",
   },
   {
-    label: "Audit Evidence",
+    label: "Forensic replay",
     href: "/platform/replay",
     description: "Reconstruct operational decisions from source state and events.",
   },
   {
-    label: "AI Operations Control",
+    label: "Multi-agent system",
     href: "/platform/agents",
-    description: "Controlled agent work across support, claims, approvals, and escalation.",
+    description: "Deterministic coordination for specialized operational agents.",
   },
 ];
 
@@ -141,8 +141,8 @@ export const companyLinks: SiteLink[] = [
     description: "The mission and operating conviction behind Operious.",
   },
   {
-    label: "Book a Review",
-    href: "/company/contact?topic=architecture-review",
+    label: "Request access",
+    href: "/company/contact",
     description: "Start an enterprise architecture review.",
   },
   {

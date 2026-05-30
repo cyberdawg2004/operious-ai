@@ -3,7 +3,7 @@
 const proofPoints = [
   "Cryptographically Audited",
   "UUID5 Identity",
-  "Force RLS on Every Table",
+  "FORCE RLS",
   "Append-Only Timelines",
   "Fail-Closed Governance",
   "ToolInvoker Enforcement",
@@ -11,23 +11,21 @@ const proofPoints = [
   "Tenant-Isolated",
   "Multi-Agent Coordination",
   "Zero Silent Drops",
-  "Six Languages Native",
 ];
 
 export function ProofMarquee() {
   const doubled = [...proofPoints, ...proofPoints];
+
   return (
-    <div className="w-full overflow-hidden border-y border-white/[0.04] bg-[#050508] py-5">
-      <div className="flex animate-marquee gap-0 whitespace-nowrap">
+    <div className="w-full overflow-hidden border-y border-[#1A2744] bg-[#05080F] py-5">
+      <div className="flex animate-marquee gap-16 whitespace-nowrap">
         {doubled.map((item, i) => (
-          <span key={i} className="flex shrink-0 items-center gap-3 px-7">
-            <span className="w-[3px] h-[3px] rounded-full bg-[#30D158] shadow-[0_0_5px_rgba(48,209,88,0.7)]" />
-            <span
-              className="text-[9px] uppercase tracking-[0.12em] text-[#1A2E3E]"
-              style={{ fontFamily: "var(--font-mono)" }}
-            >
-              {item}
-            </span>
+          <span
+            key={i}
+            className="flex shrink-0 items-center gap-16 text-xs font-mono uppercase tracking-[0.2em] text-[#2A5CAA]/50"
+          >
+            {item}
+            <span className="text-[#1A2744]">·</span>
           </span>
         ))}
       </div>
