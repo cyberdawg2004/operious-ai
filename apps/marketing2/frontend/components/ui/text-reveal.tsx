@@ -1,6 +1,6 @@
 "use client";
 import { FC, ReactNode, useRef } from "react";
-import { motion, MotionValue, useScroll, useTransform } from "framer-motion";
+import { motion, MotionValue, useScroll, useTransform, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 interface TextRevealByWordProps {
@@ -9,9 +9,20 @@ interface TextRevealByWordProps {
 }
 
 const TextRevealByWord: FC<TextRevealByWordProps> = ({ text, className }) => {
+  const reducedMotion = useReducedMotion();
   const targetRef = useRef<HTMLDivElement | null>(null);
   const { scrollYProgress } = useScroll({ target: targetRef });
   const words = text.split(" ");
+
+  if (reducedMotion) {
+    return (
+      <div className={cn("relative z-0", className)}>
+        <p className="max-w-4xl mx-auto p-5 text-2xl font-bold md:p-8 md:text-3xl lg:p-10 lg:text-4xl xl:text-5xl text-ink-primary" style={{ fontFamily: "var(--font-serif)" }}>
+          {text}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div ref={targetRef} className={cn("relative z-0 h-[200vh]", className)}>

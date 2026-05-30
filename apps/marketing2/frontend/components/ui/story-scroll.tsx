@@ -54,7 +54,7 @@ const FlowArt: React.FC<FlowArtProps> = ({
   className,
   "aria-label": ariaLabel = "Story scroll",
 }) => {
-  const containerRef = useRef<HTMLElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
@@ -110,13 +110,14 @@ const FlowArt: React.FC<FlowArtProps> = ({
   );
 
   return (
-    <main
+    <div
+      role="region"
       ref={containerRef}
       aria-label={ariaLabel}
       className={cx("w-full overflow-x-hidden", className)}
     >
       {children}
-    </main>
+    </div>
   );
 };
 

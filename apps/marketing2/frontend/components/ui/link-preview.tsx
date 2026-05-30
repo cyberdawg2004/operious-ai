@@ -2,7 +2,7 @@
 import * as RdxHoverCard from "@radix-ui/react-hover-card";
 import { encode } from "qss";
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { AnimatePresence, motion, useMotionValue, useSpring } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useSpring, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 function usePreviewSource(
@@ -70,6 +70,7 @@ export const HoverPeek = ({
   imageSrc = "",
   enableMouseFollow = true,
 }: HoverPeekProps) => {
+  const reducedMotion = useReducedMotion();
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const finalImageSrc = usePreviewSource(url, peekWidth, peekHeight, isStatic, imageSrc);
   const { isPeeking, handleOpenChange, handlePointerMove, followX } = useHoverState(enableMouseFollow);
@@ -96,17 +97,12 @@ export const HoverPeek = ({
         >
           <AnimatePresence>
             {isPeeking && (
-              <motion.div
-                initial={{ opacity: 0, rotateY: -90 }}
-                animate={{ opacity: 1, rotateY: 0, transition: { type: "spring", stiffness: 200, damping: 18 } }}
-                exit={{ opacity: 0, rotateY: 90, transition: { duration: 0.15 } }}
-                style={{ x: enableMouseFollow ? followX : 0 }}
-              >
+              reducedMotion ? (
                 <a
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="relative block overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] shadow-lg p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--gold)]"
+                  className="relative block overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] shadow-lg p-0.5"
                   aria-label={`Open preview for ${url}`}
                 >
                   {imageLoadFailed ? (
@@ -128,7 +124,41 @@ export const HoverPeek = ({
                     />
                   )}
                 </a>
-              </motion.div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, rotateY: -90 }}
+                  animate={{ opacity: 1, rotateY: 0, transition: { type: "spring", stiffness: 200, damping: 18 } }}
+                  exit={{ opacity: 0, rotateY: 90, transition: { duration: 0.15 } }}
+                  style={{ x: enableMouseFollow ? followX : 0 }}
+                >
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative block overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] shadow-lg p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--gold)]"
+                    aria-label={`Open preview for ${url}`}
+                  >
+                    {imageLoadFailed ? (
+                      <div
+                        className="flex items-center justify-center bg-[var(--surface-raised)] text-ink-secondary text-xs"
+                        style={{ width: peekWidth, height: peekHeight }}
+                      >
+                        Preview unavailable
+                      </div>
+                    ) : (
+                      <img
+                        src={finalImageSrc}
+                        width={peekWidth}
+                        height={peekHeight}
+                        className="block rounded-[5px] pointer-events-none bg-[var(--surface-raised)]"
+                        alt={`Preview for ${url}`}
+                        onError={() => setImageLoadFailed(true)}
+                        loading="lazy"
+                      />
+                    )}
+                  </a>
+                </motion.div>
+              )
             )}
           </AnimatePresence>
         </RdxHoverCard.Content>

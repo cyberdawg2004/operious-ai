@@ -1,5 +1,5 @@
 "use client";
-import { useScroll, useTransform, motion } from "framer-motion";
+import { useScroll, useTransform, motion, useReducedMotion } from "framer-motion";
 import { useRef } from "react";
 
 interface ZoomImage {
@@ -12,7 +12,8 @@ interface ZoomParallaxProps {
 }
 
 export function ZoomParallax({ images }: ZoomParallaxProps) {
-  const container = useRef(null);
+  const reducedMotion = useReducedMotion();
+  const container = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({
     target: container,
     offset: ["start start", "end end"],
@@ -24,6 +25,18 @@ export function ZoomParallax({ images }: ZoomParallaxProps) {
   const scale8 = useTransform(scrollYProgress, [0, 1], [1, 8]);
   const scale9 = useTransform(scrollYProgress, [0, 1], [1, 9]);
   const scales = [scale4, scale5, scale6, scale5, scale6, scale8, scale9];
+
+  if (reducedMotion) {
+    return (
+      <div className="relative grid grid-cols-3 gap-4 p-8">
+        {images.slice(0, 6).map(({ src, alt }, index) => (
+          <div key={index} className="relative h-[20vh]">
+            <img src={src} alt={alt ?? `Platform image ${index + 1}`} className="h-full w-full object-cover rounded-lg" loading="lazy" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div ref={container} className="relative h-[300vh]">
