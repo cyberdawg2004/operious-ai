@@ -59,8 +59,6 @@ from app.hardening.identity import (
     derive_correlation_id,
     derive_failure_record_id,
     derive_trace_id,
-    generate_correlation_id as generate_correlation_id,
-    generate_trace_id,
 )
 from app.hardening.integrity.contamination import (
     detect_contamination,
@@ -698,7 +696,12 @@ class HardeningRuntime:
                 )
             )
         else:
-            trace_id = generate_trace_id()
+            trace_id = derive_trace_id(
+                seed=(
+                    f"{kind.value}|no-correlation|{request_id}|"
+                    f"{self._runtime_instance_id}|{sequence}"
+                )
+            )
         trace = HardeningTrace(
             trace_id=trace_id,
             kind=kind,
@@ -742,7 +745,12 @@ class HardeningRuntime:
                 )
             )
         else:
-            trace_id = generate_trace_id()
+            trace_id = derive_trace_id(
+                seed=(
+                    f"{kind.value}|no-correlation|{request_id}|"
+                    f"err|{self._runtime_instance_id}|{sequence}"
+                )
+            )
         trace = HardeningTrace(
             trace_id=trace_id,
             kind=kind,

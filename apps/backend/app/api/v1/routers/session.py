@@ -30,8 +30,10 @@ from app.api.v1.schemas.session import (
     SessionsPage,
 )
 from app.dependencies.authority import require_tenant_scope
-from app.dependencies.services import get_session_repository
-from app.session.contracts.results import ReconstructSessionResult
+from app.dependencies.services import (
+    get_session_read_service,
+    get_session_repository,
+)
 from app.session.enums import SessionLifecyclePhase
 from app.session.identity import (
     SessionCorrelationId,
@@ -44,7 +46,11 @@ from app.session.persistence import (
     SessionPersistenceProtocol,
     SessionQuery,
 )
-from app.session.runtime import SessionRuntime
+from app.services.session_read_service import (
+    SessionReadService,
+    SessionReadServiceError,
+    SessionTimelineNotFoundError,
+)
 
 router = APIRouter(tags=["session"])
 
@@ -72,30 +78,25 @@ def _parse_uuid_or_404(raw: str, *, kind: str) -> UUID:
 )
 async def get_session_timeline(
     session_id: str,
-    repo: SessionPersistenceProtocol = Depends(get_session_repository),
+    service: SessionReadService = Depends(get_session_read_service),
     expected_tenant_id: str = Depends(require_tenant_scope),
 ) -> SessionTimelineResponse:
-    sid = SessionId(_parse_uuid_or_404(session_id, kind="session"))
-    record = await repo.get_session(
-        sid, expected_tenant_id=expected_tenant_id
-    )
-    if record is None:
+    _parse_uuid_or_404(session_id, kind="session")
+    try:
+        timeline = await service.get_timeline(
+            session_id=session_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+    except SessionTimelineNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail={"code": "session_not_found"}
-        )
-
-    envelope = await SessionRuntime(persistence=repo).get_timeline(sid)
-    if not envelope.is_ok or envelope.result is None:
+        ) from exc
+    except SessionReadServiceError as exc:
         raise HTTPException(
             status_code=500, detail={"code": "timeline_read_failed"}
-        )
-    result = envelope.result
-    if not isinstance(result, ReconstructSessionResult):
-        raise HTTPException(
-            status_code=500, detail={"code": "timeline_read_failed"}
-        )
+        ) from exc
     return SessionTimelineResponse.from_timeline(
-        result.timeline,
+        timeline,
         fallback_tenant_id=expected_tenant_id,
     )
 

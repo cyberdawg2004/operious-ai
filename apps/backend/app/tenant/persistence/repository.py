@@ -36,6 +36,7 @@ from app.tenant.persistence.records import (
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
     TenantTopologyConfigurationRecord,
+    TenantWebhookRoutingSecretRecord,
 )
 
 
@@ -80,8 +81,16 @@ class TenantConfigurationRepository(Protocol):
     async def resolve_tenant_by_routing_address(
         self,
         *,
+        channel_type: str,
         routing_address: str,
     ) -> str | None: ...
+
+    async def resolve_webhook_routing_secret(
+        self,
+        *,
+        channel_type: str,
+        routing_address: str,
+    ) -> TenantWebhookRoutingSecretRecord | None: ...
 
     async def save_knowledge_document(
         self,

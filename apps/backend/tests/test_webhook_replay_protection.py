@@ -20,7 +20,10 @@ from app.boundary.persistence import (
     WebhookNonceRecord,
 )
 from app.tenant.db.models import TenantRow
-from app.services.ticket_ingress_service import TicketIngressService
+from app.services.ticket_ingress_service import (
+    TicketIngressRejected,
+    TicketIngressService,
+)
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
@@ -85,6 +88,43 @@ async def test_webhook_with_replayed_nonce_rejected() -> None:
         expected_tenant_id=TENANT_ID,
     )
     assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_webhook_signature_validated_before_nonce() -> None:
+    boundary_store = InMemoryBoundaryPersistence()
+    service = await _service_with_channel(
+        boundary_store=boundary_store,
+        session=_FakeSession(),
+        webhook_secret="email-secret",
+    )
+    body = {
+        "message_id": "email-invalid-signature-001",
+        "to": "support@example.com",
+        "text": "hello",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    raw_body = _raw(body)
+
+    with pytest.raises(TicketIngressRejected) as exc_info:
+        await service.process_channel_webhook(
+            channel_type="email",
+            body=body,
+            headers=_signed_headers(
+                secret="wrong-secret",
+                raw_body=raw_body,
+            ),
+            raw_body=raw_body,
+            content_type="application/json",
+        )
+
+    assert getattr(exc_info.value, "code", None) == "invalid_signature"
+    assert not await boundary_store.webhook_nonce_exists(
+        tenant_id=TENANT_ID,
+        channel_type="email",
+        nonce="email-invalid-signature-001",
+        now=datetime.now(timezone.utc),
+    )
 
 
 @pytest.mark.asyncio

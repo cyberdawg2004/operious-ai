@@ -401,11 +401,6 @@ export function TeamRolesView() {
 }
 
 export function SettingsView({ authSession }: { authSession: AuthSessionState }) {
-  const [token, setToken] = useState(() =>
-    typeof window === "undefined"
-      ? ""
-      : window.localStorage.getItem("operious_access_token") ?? ""
-  );
   const principal = authSession.principal;
   const rows = [
     ["API base URL", getApiBaseUrl()],
@@ -415,17 +410,6 @@ export function SettingsView({ authSession }: { authSession: AuthSessionState })
     ["Authority source", principal?.authority_source ?? "Not verified"],
     ["Capabilities", principal?.capabilities.join(", ") || "No capabilities returned"],
   ] as const;
-
-  const saveToken = () => {
-    window.localStorage.setItem("operious_access_token", token.trim());
-    authSession.reload();
-  };
-
-  const clearToken = () => {
-    window.localStorage.removeItem("operious_access_token");
-    setToken("");
-    authSession.reload();
-  };
 
   return (
     <main className="min-w-0 flex-1 bg-canvas p-4 sm:p-6 lg:p-8">
@@ -462,26 +446,7 @@ export function SettingsView({ authSession }: { authSession: AuthSessionState })
               {authSession.error}
             </div>
           )}
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <input
-              type="password"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              placeholder="Bearer token"
-              className="h-11 min-w-0 flex-1 rounded border border-border-subtle bg-surface-raised px-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary focus:outline-none focus:border-gold-primary"
-            />
-            <button
-              onClick={saveToken}
-              className="h-11 rounded bg-ink-primary px-4 text-[13px] font-medium text-white hover:opacity-90"
-            >
-              Save
-            </button>
-            <button
-              onClick={clearToken}
-              className="h-11 rounded border border-border-subtle px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
-            >
-              Clear
-            </button>
+          <div className="flex justify-end">
             <button
               onClick={authSession.reload}
               className="h-11 rounded border border-border-subtle px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"

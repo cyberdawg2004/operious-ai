@@ -28,6 +28,7 @@ from app.tenant.persistence.records import (
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
     TenantTopologyConfigurationRecord,
+    TenantWebhookRoutingSecretRecord,
 )
 from app.tenant.persistence.repository import TenantConfigurationRepository
 
@@ -56,4 +57,5 @@ __all__ = [
     "TenantTopologyConfigurationPage",
     "TenantTopologyConfigurationQuery",
     "TenantTopologyConfigurationRecord",
+    "TenantWebhookRoutingSecretRecord",
 ]

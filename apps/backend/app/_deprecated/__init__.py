@@ -47,4 +47,7 @@ submodule must be addressed by its full dotted path so import-graph
 auditors can detect each individual coupling.
 """
 
+# No live code imports from this directory.
+# Constitutional rule enforced by AST scan.
+
 __all__: list[str] = []

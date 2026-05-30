@@ -176,6 +176,7 @@ from app.services.quota_operations_service import QuotaOperationsService
 from app.services.quarantine_service import QuarantineService
 from app.services.queue_operations_service import QueueOperationsService
 from app.services.semantic_circuit_service import SemanticCircuitService
+from app.services.session_read_service import SessionReadService
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.supervisor_inbox_service import SupervisorInboxService
 from app.services.ticket_ingress_service import TicketChannel, TicketIngressService
@@ -186,6 +187,7 @@ from app.session.persistence import (
     PostgresSessionPersistence,
     SessionPersistenceProtocol,
 )
+from app.session.runtime import SessionRuntime
 from app.sop_intelligence.persistence import PostgresSOPApprovalPersistence
 from app.sop_intelligence.runtime import SOPIntelligenceRuntime
 from app.supervisor.persistence import (
@@ -239,6 +241,13 @@ def get_session_repository(
 ) -> SessionPersistenceProtocol:
     """Return the Postgres session-persistence backend for this request."""
     return PostgresSessionPersistence(session)
+
+
+def get_session_read_service(
+    repo: SessionPersistenceProtocol = Depends(get_session_repository),
+) -> SessionReadService:
+    """Return the service boundary for read-only session runtime access."""
+    return SessionReadService(session_runtime=SessionRuntime(persistence=repo))
 
 
 def get_coordination_repository(
@@ -1098,6 +1107,7 @@ __all__ = [
     "get_quota_operations_service",
     "get_quota_runtime",
     "get_semantic_circuit_service",
+    "get_session_read_service",
     "get_session_repository",
     "get_sop_intelligence_service",
     "get_supervisor_repository",

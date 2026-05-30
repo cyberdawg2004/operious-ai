@@ -254,12 +254,14 @@ async def test_routing_address_tenant_resolution_is_unique_and_active() -> None:
 
     assert (
         await runtime.resolve_tenant_by_routing_address(
+            channel_type=TenantChannelType.EMAIL,
             routing_address="support@example.com"
         )
         == "tenant-acme"
     )
     assert (
         await runtime.resolve_tenant_by_routing_address(
+            channel_type=TenantChannelType.EMAIL,
             routing_address="paused@example.com"
         )
         is None
@@ -274,7 +276,61 @@ async def test_routing_address_tenant_resolution_is_unique_and_active() -> None:
     )
     assert (
         await runtime.resolve_tenant_by_routing_address(
+            channel_type=TenantChannelType.EMAIL,
             routing_address="support@example.com"
+        )
+        == "tenant-acme"
+    )
+    assert (
+        await runtime.resolve_tenant_by_routing_address(
+            channel_type=TenantChannelType.WHATSAPP,
+            routing_address="support@example.com"
+        )
+        == "tenant-other"
+    )
+
+
+@pytest.mark.asyncio
+async def test_routing_resolver_requires_channel_type() -> None:
+    runtime = _runtime()
+    with pytest.raises(TypeError):
+        await runtime.resolve_tenant_by_routing_address(
+            routing_address="support@example.com"
+        )
+
+
+@pytest.mark.asyncio
+async def test_webhook_routing_secret_is_scoped_by_channel_type() -> None:
+    runtime = _runtime()
+    await runtime.configure_channel(
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.EMAIL,
+        routing_address="support@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="email-secret",
+        status=TenantChannelStatus.ACTIVE,
+    )
+    await runtime.configure_channel(
+        tenant_id="tenant-other",
+        channel_type=TenantChannelType.WHATSAPP,
+        routing_address="support@example.com",
+        credentials={"api_key": "secret"},
+        webhook_secret="whatsapp-secret",
+        status=TenantChannelStatus.ACTIVE,
+    )
+
+    record = await runtime.resolve_webhook_routing_secret(
+        channel_type=TenantChannelType.WHATSAPP,
+        routing_address="support@example.com",
+    )
+    assert record is not None
+    assert record.tenant_id == "tenant-other"
+    assert record.webhook_secret == "whatsapp-secret"
+
+    assert (
+        await runtime.resolve_webhook_routing_secret(
+            channel_type=TenantChannelType.LARK,
+            routing_address="support@example.com",
         )
         is None
     )

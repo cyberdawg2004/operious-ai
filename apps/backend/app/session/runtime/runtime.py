@@ -760,6 +760,7 @@ class SessionRuntime:
         reconstruction_id = derive_reconstruction_id(
             seed=(
                 f"{request.session_id}|"
+                f"{request.expected_tenant_id}|"
                 f"{request.as_of.isoformat() if request.as_of else ''}|"
                 f"{request.from_sequence}|{request.to_sequence}|"
                 f"{request.include_lineage}|{request.include_correlations}"
@@ -882,10 +883,14 @@ class SessionRuntime:
         )
 
     async def get_timeline(
-        self, session_id: SessionId
+        self,
+        session_id: SessionId,
+        *,
+        expected_tenant_id: str,
     ) -> SessionEnvelope:
         request = ReconstructSessionRequest(
             session_id=session_id,
+            expected_tenant_id=expected_tenant_id,
             include_lineage=False,
             include_correlations=False,
         )

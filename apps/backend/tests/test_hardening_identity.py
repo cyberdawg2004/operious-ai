@@ -94,6 +94,15 @@ def test_derive_helpers_reject_empty_seed() -> None:
         derive_dependency_audit_id(seed="")
 
 
+def test_hardening_lineage_ids_are_deterministic() -> None:
+    assert derive_trace_id(seed="runtime|no-correlation|1") == derive_trace_id(
+        seed="runtime|no-correlation|1"
+    )
+    assert derive_trace_id(seed="runtime|no-correlation|1") != derive_trace_id(
+        seed="runtime|no-correlation|2"
+    )
+
+
 def test_generators_emit_distinct_identifiers() -> None:
     seen = {
         generate_audit_id(),

@@ -46,6 +46,17 @@ class TenantChannelConfigurationRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class TenantWebhookRoutingSecretRecord:
+    tenant_id: str
+    config_id: TenantChannelConfigurationId
+    channel_type: TenantChannelType
+    routing_address: str
+    webhook_secret: str
+    previous_webhook_secret: str | None = None
+    credential_rotation_expires_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TenantKnowledgeDocumentRecord:
     document_id: TenantKnowledgeDocumentId
     tenant_id: str
@@ -152,4 +163,5 @@ __all__ = [
     "TenantKnowledgeDocumentRecord",
     "TenantKnowledgeDocumentVersionRecord",
     "TenantTopologyConfigurationRecord",
+    "TenantWebhookRoutingSecretRecord",
 ]

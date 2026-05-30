@@ -68,7 +68,10 @@ from app.semantic import (
 from app.services.admission_service import AdmissionService
 from app.services.quarantine_service import QuarantineService
 from app.tenant.enums import TenantChannelType
-from app.tenant.persistence import TenantChannelConfigurationRecord
+from app.tenant.persistence import (
+    TenantChannelConfigurationRecord,
+    TenantWebhookRoutingSecretRecord,
+)
 from app.tenant.runtime import TenantConfigurationRuntime
 
 TicketChannel = Literal["email", "whatsapp", "voice"]
@@ -409,37 +412,6 @@ class TicketIngressService:
             body=body,
             headers=headers,
         )
-        resolved_tenant_id = (
-            await self._tenant_configuration_runtime.resolve_tenant_by_routing_address(
-                routing_address=routing_address,
-            )
-        )
-        await _end_read_only_routing_transaction(self._session)
-        if resolved_tenant_id is None:
-            raise TicketIngressRejected(
-                code="unknown_channel_route",
-                reason="channel route is not configured or active",
-            )
-        if tenant_hint is not None and tenant_hint != resolved_tenant_id:
-            raise TicketIngressRejected(
-                code="tenant_route_mismatch",
-                reason="channel route does not belong to tenant scope",
-            )
-        set_current_tenant(resolved_tenant_id)
-        channel_config = (
-            await self._tenant_configuration_runtime
-            .resolve_active_channel_for_routing_address(
-                channel_type=tenant_channel_type,
-                routing_address=routing_address,
-                expected_tenant_id=resolved_tenant_id,
-            )
-        )
-        if channel_config is None:
-            raise TicketIngressRejected(
-                code="unknown_channel_route",
-                reason="channel route is not configured or active",
-            )
-
         if not _webhook_signature_header_present(
             channel_type=tenant_channel_type,
             headers=headers,
@@ -449,9 +421,28 @@ class TicketIngressService:
                 reason="webhook signature header is required",
                 status_code=401,
             )
+        routing_secret = (
+            await self._tenant_configuration_runtime
+            .resolve_webhook_routing_secret(
+                channel_type=tenant_channel_type,
+                routing_address=routing_address,
+            )
+        )
+        await _end_read_only_routing_transaction(self._session)
+        if routing_secret is None:
+            raise TicketIngressRejected(
+                code="unknown_channel_route",
+                reason="channel route is not configured or active",
+            )
+        resolved_tenant_id = routing_secret.tenant_id
+        if tenant_hint is not None and tenant_hint != resolved_tenant_id:
+            raise TicketIngressRejected(
+                code="tenant_route_mismatch",
+                reason="channel route does not belong to tenant scope",
+            )
         webhook_secret = _select_webhook_secret(
             channel_type=tenant_channel_type,
-            channel_config=channel_config,
+            channel_config=routing_secret,
             body=body,
             headers=headers,
             raw_body=raw_body,
@@ -467,6 +458,20 @@ class TicketIngressService:
                 code="invalid_signature",
                 reason="invalid_signature",
                 status_code=401,
+            )
+        set_current_tenant(resolved_tenant_id)
+        channel_config = (
+            await self._tenant_configuration_runtime
+            .resolve_active_channel_for_routing_address(
+                channel_type=tenant_channel_type,
+                routing_address=routing_address,
+                expected_tenant_id=resolved_tenant_id,
+            )
+        )
+        if channel_config is None:
+            raise TicketIngressRejected(
+                code="unknown_channel_route",
+                reason="channel route is not configured or active",
             )
         security_context = self._validated_webhook_security_context(
             channel_type=tenant_channel_type.value,
@@ -1228,7 +1233,9 @@ def _enforce_webhook_freshness(
 def _select_webhook_secret(
     *,
     channel_type: TenantChannelType,
-    channel_config: TenantChannelConfigurationRecord,
+    channel_config: (
+        TenantChannelConfigurationRecord | TenantWebhookRoutingSecretRecord
+    ),
     body: Any,
     headers: Mapping[str, str],
     raw_body: bytes | None,

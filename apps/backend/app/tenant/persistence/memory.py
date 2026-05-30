@@ -46,6 +46,7 @@ from app.tenant.persistence.records import (
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
     TenantTopologyConfigurationRecord,
+    TenantWebhookRoutingSecretRecord,
 )
 
 
@@ -155,18 +156,48 @@ class InMemoryTenantConfigurationRepository:
     async def resolve_tenant_by_routing_address(
         self,
         *,
+        channel_type: str,
         routing_address: str,
     ) -> str | None:
         matches = [
             r.tenant_id
             for r in self._channels.values()
-            if r.routing_address == routing_address
+            if r.channel_type.value == channel_type
+            and r.routing_address == routing_address
             and r.status.value == "active"
         ]
         unique_matches = set(matches)
         if len(unique_matches) != 1 or len(matches) != 1:
             return None
         return matches[0]
+
+    async def resolve_webhook_routing_secret(
+        self,
+        *,
+        channel_type: str,
+        routing_address: str,
+    ) -> TenantWebhookRoutingSecretRecord | None:
+        matches = [
+            r
+            for r in self._channels.values()
+            if r.channel_type.value == channel_type
+            and r.routing_address == routing_address
+            and r.status.value == "active"
+        ]
+        if len(matches) != 1:
+            return None
+        record = matches[0]
+        return TenantWebhookRoutingSecretRecord(
+            tenant_id=record.tenant_id,
+            config_id=record.config_id,
+            channel_type=record.channel_type,
+            routing_address=record.routing_address,
+            webhook_secret=record.webhook_secret,
+            previous_webhook_secret=record.previous_webhook_secret,
+            credential_rotation_expires_at=(
+                record.credential_rotation_expires_at
+            ),
+        )
 
     async def save_knowledge_document(
         self,

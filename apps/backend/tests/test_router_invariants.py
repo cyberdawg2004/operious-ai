@@ -142,6 +142,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
     "get_quota_operations_service",
     "get_quota_runtime",
     "get_semantic_circuit_service",
+    "get_session_read_service",
     "get_session_repository",
     "get_sop_intelligence_service",
     "get_supervisor_repository",
@@ -244,6 +245,16 @@ def test_router_imports_no_sibling_substrate(
         f"({own_substrate!r}) plus the cross-cutting infrastructure "
         f"packages {_ROUTER_ALLOWED_APP_PACKAGES}."
     )
+
+
+def test_session_router_does_not_import_runtime() -> None:
+    tree = _parse(_ROUTERS_DIR / "session.py")
+    runtime_imports = [
+        f"{module}.{name}" if name is not None else module
+        for module, name in _imports(tree)
+        if module == "app.session.runtime" or name == "SessionRuntime"
+    ]
+    assert runtime_imports == []
 
 
 # ─── Invariant 2: cross-router imports ───────────────────────────────────

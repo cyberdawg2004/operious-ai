@@ -144,8 +144,11 @@ def generate_memory_evolution_proposal_id() -> (
     return MemoryEvolutionProposalId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
 
 
-def generate_pattern_lineage_id() -> PatternLineageId:
-    return PatternLineageId(uuid.uuid4())  # EPHEMERAL: envelope-local fallback only
+def generate_pattern_lineage_id(
+    *,
+    root_artifact_id: uuid.UUID,
+) -> PatternLineageId:
+    return derive_pattern_lineage_id(root_artifact_id=root_artifact_id)
 
 
 def generate_operational_pattern_observation_id() -> (

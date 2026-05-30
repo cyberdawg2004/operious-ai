@@ -85,7 +85,7 @@ async def test_open_session_persists_opened_event() -> None:
     session = await _open(rt)
     sid = session.identity.session_id
     env = await rt.reconstruct(
-        ReconstructSessionRequest(session_id=sid)
+        ReconstructSessionRequest(session_id=sid, expected_tenant_id="t1")
     )
     assert env.is_ok
     assert isinstance(env.result, ReconstructSessionResult)
@@ -195,7 +195,7 @@ async def test_append_event_idempotency_key_replays_existing_event() -> None:
     assert second.result.metadata["idempotent_replay"] is True
 
     timeline = await rt.reconstruct(
-        ReconstructSessionRequest(session_id=sid)
+        ReconstructSessionRequest(session_id=sid, expected_tenant_id="t1")
     )
     assert timeline.is_ok
     assert isinstance(timeline.result, ReconstructSessionResult)
@@ -476,7 +476,7 @@ async def test_reconstruct_pristine() -> None:
             )
         )
     env = await rt.reconstruct(
-        ReconstructSessionRequest(session_id=sid)
+        ReconstructSessionRequest(session_id=sid, expected_tenant_id="t1")
     )
     assert env.is_ok
     assert isinstance(env.result, ReconstructSessionResult)
@@ -508,6 +508,7 @@ async def test_reconstruct_partial_with_window() -> None:
     env = await rt.reconstruct(
         ReconstructSessionRequest(
             session_id=sid,
+            expected_tenant_id="t1",
             from_sequence=1,
             to_sequence=2,
         )
@@ -526,7 +527,8 @@ async def test_reconstruct_not_found() -> None:
     rt = _runtime()
     env = await rt.reconstruct(
         ReconstructSessionRequest(
-            session_id=generate_session_id()
+            session_id=generate_session_id(),
+            expected_tenant_id="t1",
         )
     )
     assert env.is_ok
@@ -534,6 +536,63 @@ async def test_reconstruct_not_found() -> None:
     assert (
         env.result.status is SessionReconstructionStatus.NOT_FOUND
     )
+
+
+@pytest.mark.asyncio
+async def test_reconstructor_passes_tenant_id() -> None:
+    class CapturingSessionPersistence(InMemorySessionPersistence):
+        def __init__(self) -> None:
+            super().__init__()
+            self.expected_tenant_reads: list[tuple[str, str | None]] = []
+
+        async def get_session(self, session_id, *, expected_tenant_id=None):
+            self.expected_tenant_reads.append(
+                ("get_session", expected_tenant_id)
+            )
+            return await super().get_session(
+                session_id,
+                expected_tenant_id=expected_tenant_id,
+            )
+
+        async def list_events(self, query, *, expected_tenant_id=None):
+            self.expected_tenant_reads.append(
+                ("list_events", expected_tenant_id)
+            )
+            return await super().list_events(
+                query,
+                expected_tenant_id=expected_tenant_id,
+            )
+
+        async def list_correlations(self, query, *, expected_tenant_id=None):
+            self.expected_tenant_reads.append(
+                ("list_correlations", expected_tenant_id)
+            )
+            return await super().list_correlations(
+                query,
+                expected_tenant_id=expected_tenant_id,
+            )
+
+    persistence = CapturingSessionPersistence()
+    rt = SessionRuntime(persistence=persistence)
+    session = await _open(rt)
+    sid = session.identity.session_id
+    persistence.expected_tenant_reads.clear()
+
+    with pytest.raises(TypeError):
+        ReconstructSessionRequest(session_id=sid)
+
+    env = await rt.reconstruct(
+        ReconstructSessionRequest(
+            session_id=sid,
+            expected_tenant_id="t1",
+        )
+    )
+    assert env.is_ok
+    assert persistence.expected_tenant_reads == [
+        ("get_session", "t1"),
+        ("list_events", "t1"),
+        ("list_correlations", "t1"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -552,10 +611,10 @@ async def test_replay_equivalence_byte_identical_ids() -> None:
             )
         )
     env_a = await rt.reconstruct(
-        ReconstructSessionRequest(session_id=sid)
+        ReconstructSessionRequest(session_id=sid, expected_tenant_id="t1")
     )
     env_b = await rt.reconstruct(
-        ReconstructSessionRequest(session_id=sid)
+        ReconstructSessionRequest(session_id=sid, expected_tenant_id="t1")
     )
     assert isinstance(env_a.result, ReconstructSessionResult)
     assert isinstance(env_b.result, ReconstructSessionResult)
@@ -585,7 +644,7 @@ async def test_get_timeline_returns_reconstruct_result() -> None:
     rt = _runtime()
     parent = await _open(rt)
     sid = parent.identity.session_id
-    env = await rt.get_timeline(sid)
+    env = await rt.get_timeline(sid, expected_tenant_id="t1")
     assert env.is_ok
     assert isinstance(env.result, ReconstructSessionResult)
     assert env.result.timeline is not None

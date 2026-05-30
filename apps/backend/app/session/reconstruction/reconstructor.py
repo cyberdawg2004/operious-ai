@@ -82,7 +82,10 @@ class SessionReconstructor:
         persistence: SessionPersistenceProtocol,
     ) -> _ReconstructionPayload:
         """Run the reconstruction pipeline."""
-        record = await persistence.get_session(request.session_id)
+        record = await persistence.get_session(
+            request.session_id,
+            expected_tenant_id=request.expected_tenant_id,
+        )
         if record is None:
             return _ReconstructionPayload(
                 status=SessionReconstructionStatus.NOT_FOUND,
@@ -114,6 +117,7 @@ class SessionReconstructor:
         if request.include_correlations:
             correlations = await self._reconstruct_correlations(
                 session_id=request.session_id,
+                expected_tenant_id=request.expected_tenant_id,
                 persistence=persistence,
             )
 
@@ -155,7 +159,8 @@ class SessionReconstructor:
                 from_sequence=request.from_sequence,
                 to_sequence=request.to_sequence,
                 occurred_before_or_at=request.as_of,
-            )
+            ),
+            expected_tenant_id=request.expected_tenant_id,
         )
         events: list[SessionTimelineEvent] = []
         prev_sequence: int | None = None
@@ -201,10 +206,12 @@ class SessionReconstructor:
         self,
         *,
         session_id: SessionId,
+        expected_tenant_id: str,
         persistence: SessionPersistenceProtocol,
     ) -> tuple[SessionCorrelation, ...]:
         page = await persistence.list_correlations(
-            SessionCorrelationQuery(session_id=session_id)
+            SessionCorrelationQuery(session_id=session_id),
+            expected_tenant_id=expected_tenant_id,
         )
         return tuple(
             correlation_record_to_model(r) for r in page.correlations

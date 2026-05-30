@@ -86,6 +86,7 @@ from app.tenant.persistence import (
     TenantTopologyConfigurationPage,
     TenantTopologyConfigurationQuery,
     TenantTopologyConfigurationRecord,
+    TenantWebhookRoutingSecretRecord,
 )
 
 if TYPE_CHECKING:
@@ -279,10 +280,31 @@ class TenantConfigurationRuntime:
     async def resolve_tenant_by_routing_address(
         self,
         *,
+        channel_type: TenantChannelType,
         routing_address: str,
     ) -> str | None:
+        # PRIVILEGED_PATH: this resolver is called before tenant
+        # authentication to discover tenant scope for incoming webhooks.
+        # The SQL function is SECURITY DEFINER. It must only be called
+        # for webhook routing. No other call site is permitted.
         return await self._repository.resolve_tenant_by_routing_address(
+            channel_type=channel_type.value,
             routing_address=routing_address
+        )
+
+    async def resolve_webhook_routing_secret(
+        self,
+        *,
+        channel_type: TenantChannelType,
+        routing_address: str,
+    ) -> TenantWebhookRoutingSecretRecord | None:
+        # PRIVILEGED_PATH: this single pre-auth query returns only
+        # routing scope and webhook secrets required for immediate HMAC
+        # validation. Full tenant configuration is loaded after the
+        # signature passes and tenant context is set.
+        return await self._repository.resolve_webhook_routing_secret(
+            channel_type=channel_type.value,
+            routing_address=routing_address,
         )
 
     async def load_channel_credentials(

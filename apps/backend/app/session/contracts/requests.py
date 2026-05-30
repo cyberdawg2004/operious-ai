@@ -194,6 +194,8 @@ class ReconstructSessionRequest:
 
     Attributes:
         session_id:           Target session.
+        expected_tenant_id:   Tenant scope that every persistence read
+                              must enforce during reconstruction.
         as_of:                Optional inclusive upper-bound on
                                `occurred_at`. Events after this
                                instant are excluded.
@@ -211,6 +213,7 @@ class ReconstructSessionRequest:
     """
 
     session_id: SessionId
+    expected_tenant_id: str
     as_of: datetime | None = None
     from_sequence: int | None = None
     to_sequence: int | None = None

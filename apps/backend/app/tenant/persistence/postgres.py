@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
@@ -66,6 +67,7 @@ from app.tenant.persistence.records import (
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
     TenantTopologyConfigurationRecord,
+    TenantWebhookRoutingSecretRecord,
 )
 
 
@@ -168,12 +170,67 @@ class PostgresTenantConfigurationRepository(BaseRepository):
     async def resolve_tenant_by_routing_address(
         self,
         *,
+        channel_type: str,
         routing_address: str,
     ) -> str | None:
-        stmt = select(func.resolve_tenant_by_routing_address(routing_address))
+        stmt = select(
+            func.resolve_tenant_by_routing_address(
+                channel_type,
+                routing_address,
+            )
+        )
         return cast(
             str | None,
             (await self.session.execute(stmt)).scalar_one_or_none(),
+        )
+
+    async def resolve_webhook_routing_secret(
+        self,
+        *,
+        channel_type: str,
+        routing_address: str,
+    ) -> TenantWebhookRoutingSecretRecord | None:
+        stmt = text(
+            """
+            select
+                tenant_id,
+                config_id,
+                channel_type,
+                routing_address,
+                webhook_secret,
+                previous_webhook_secret,
+                credential_rotation_expires_at
+            from public.resolve_webhook_routing_secret(
+                :channel_type,
+                :routing_address
+            )
+            """
+        )
+        row = (
+            await self.session.execute(
+                stmt,
+                {
+                    "channel_type": channel_type,
+                    "routing_address": routing_address,
+                },
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        return TenantWebhookRoutingSecretRecord(
+            tenant_id=cast(str, row["tenant_id"]),
+            config_id=TenantChannelConfigurationId(row["config_id"]),
+            channel_type=TenantChannelType(cast(str, row["channel_type"])),
+            routing_address=cast(str, row["routing_address"]),
+            webhook_secret=cast(str, row["webhook_secret"]),
+            previous_webhook_secret=cast(
+                str | None,
+                row["previous_webhook_secret"],
+            ),
+            credential_rotation_expires_at=cast(
+                datetime | None,
+                row["credential_rotation_expires_at"],
+            ),
         )
 
     async def save_knowledge_document(

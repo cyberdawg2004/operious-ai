@@ -23,6 +23,7 @@ from app.organizational_intelligence.identity import (
     derive_sop_version_id,
     derive_tonality_analysis_id,
     derive_trace_id,
+    generate_pattern_lineage_id,
     generate_sop_id,
 )
 
@@ -40,6 +41,18 @@ def test_sop_id_deterministic() -> None:
     c = derive_sop_id(tenant_id="t2", external_handle="sop-1")
     assert a == b
     assert a != c
+
+
+def test_generate_pattern_lineage_id_is_deterministic_from_root_artifact() -> None:
+    root = uuid.uuid4()
+    other = uuid.uuid4()
+
+    assert generate_pattern_lineage_id(
+        root_artifact_id=root
+    ) == derive_pattern_lineage_id(root_artifact_id=root)
+    assert generate_pattern_lineage_id(
+        root_artifact_id=root
+    ) != generate_pattern_lineage_id(root_artifact_id=other)
 
 
 def test_sop_id_rejects_empty_handle() -> None:
