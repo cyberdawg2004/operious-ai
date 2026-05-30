@@ -98,6 +98,15 @@ class Settings(BaseSettings):
     # they are fail-closed. Set explicitly to force either posture.
     LEGACY_HEADER_AUTHORITY_ENABLED: bool | None = None
 
+    # Separation of duties for tenant configuration application (S-03).
+    # When ``None`` (default), a tenant admin may self-approve (apply)
+    # their own knowledge / policy / execution-governance change
+    # everywhere EXCEPT production. In production, applying additionally
+    # requires the distinct ``tenant.config.approve`` capability so write
+    # and approve duties can be separated. Set explicitly to force either
+    # posture.
+    TENANT_CONFIG_ALLOW_SELF_APPROVAL: bool | None = None
+
     AUTH0_DOMAIN: str | None = None
     AUTH0_ISSUER: str | None = None
     AUTH0_AUDIENCE: str | None = None
@@ -376,6 +385,18 @@ class Settings(BaseSettings):
         """
         if self.LEGACY_HEADER_AUTHORITY_ENABLED is not None:
             return self.LEGACY_HEADER_AUTHORITY_ENABLED
+        return not self.is_production
+
+    @property
+    def tenant_config_self_approval_allowed(self) -> bool:
+        """Whether a tenant admin may apply their own config change (S-03).
+
+        Fail-closed in production unless explicitly overridden — applying
+        a knowledge / policy / execution-governance change there requires
+        the distinct ``tenant.config.approve`` capability.
+        """
+        if self.TENANT_CONFIG_ALLOW_SELF_APPROVAL is not None:
+            return self.TENANT_CONFIG_ALLOW_SELF_APPROVAL
         return not self.is_production
 
     @property

@@ -27,6 +27,7 @@ from app.api.v1.schemas.tenant import (
     TenantTopologyConfigurationResponse,
 )
 from app.dependencies.authority import (
+    require_config_apply_authorization,
     require_tenant_admin,
     require_tenant_scope,
 )
@@ -182,7 +183,7 @@ async def list_channels(
 async def create_knowledge_document(
     request: TenantKnowledgeCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_admin),
+    authority: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     record = await service.create_knowledge_document(
@@ -204,7 +205,7 @@ async def update_knowledge_document(
     document_id: str,
     request: TenantKnowledgeUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_admin),
+    authority: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     try:
@@ -258,7 +259,7 @@ async def list_knowledge_documents(
 async def create_governance_policy(
     request: TenantGovernancePolicyCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_admin),
+    authority: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     record = await service.create_governance_policy(
@@ -280,7 +281,7 @@ async def update_governance_policy(
     policy_id: str,
     request: TenantGovernancePolicyUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_admin),
+    authority: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     try:
@@ -335,7 +336,7 @@ async def list_governance_policies(
 async def configure_execution_governance(
     request: TenantExecutionGovernanceCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_admin),
+    authority: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantExecutionGovernanceResponse:
     record = await service.configure_execution_governance(
@@ -419,7 +420,7 @@ async def list_execution_circuit_breakers(
 async def configure_topology(
     request: TenantTopologyConfigurationCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_admin),
+    authority: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantTopologyConfigurationResponse:
     try:

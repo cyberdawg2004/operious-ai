@@ -83,6 +83,9 @@ ROLE_CAPABILITY_MAP: Final[dict[str, str]] = {
     "Operator": "operator",
     "TenantAdmin": "tenant_admin",
     "TenantViewer": "tenant_read",
+    # Separation of duties (S-03): the approve duty is a DISTINCT role so
+    # it can be granted to a different principal than ``TenantAdmin``.
+    "TenantApprover": "tenant.config.approve",
 }
 
 

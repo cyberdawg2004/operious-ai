@@ -73,8 +73,9 @@ from __future__ import annotations
 
 from typing import Callable, Final
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 
+from app.core.config import get_settings
 from app.identity.authority import AuthorityContext
 
 #: Stable error code for "anonymous request hit tenant-scoped read".
@@ -110,6 +111,20 @@ ERROR_CODE_CAPABILITY_REQUIRED: Final[str] = "capability_required"
 #: is NOT sufficient; without this capability a tenant-scoped caller
 #: can only READ configuration.
 TENANT_ADMIN_CAPABILITY: Final[str] = "tenant_admin"
+
+#: Stable error code for "config change may be PROPOSED but not APPLIED
+#: by this caller" (S-03). Separation of duties: applying a knowledge /
+#: policy / execution-governance change requires an independent approval
+#: capability distinct from the write capability.
+ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED: Final[str] = (
+    "independent_approval_required"
+)
+
+#: Capability required to APPROVE / APPLY a tenant governance, knowledge,
+#: or execution-governance change (S-03). Deliberately DISTINCT from
+#: ``tenant_admin`` so an organisation can separate the write duty from
+#: the approve duty. Granted by the ``TenantApprover`` Auth0 role.
+TENANT_CONFIG_APPROVE_CAPABILITY: Final[str] = "tenant.config.approve"
 
 
 def request_authority_opt(request: Request) -> AuthorityContext | None:
@@ -265,6 +280,40 @@ def require_tenant_admin(request: Request) -> AuthorityContext:
     return authority
 
 
+def require_config_apply_authorization(
+    authority: AuthorityContext = Depends(require_tenant_admin),
+) -> AuthorityContext:
+    """Authorize APPLYING a tenant configuration change (S-03).
+
+    The caller must already be a tenant admin (proposer). Whether they
+    may also APPLY (self-approve) the change depends on the deployment
+    posture:
+
+    * non-production (default) → self-approval is allowed; the proposer
+      applies their own change. Preserves developer ergonomics.
+    * production → applying additionally requires the distinct
+      :data:`TENANT_CONFIG_APPROVE_CAPABILITY`. A tenant admin who lacks
+      it may propose but is rejected with 403
+      ``independent_approval_required`` — closing the silent
+      self-approval gap where any tenant admin minted their own approval.
+
+    Wraps :func:`require_tenant_admin` via ``Depends`` so dependency
+    overrides and the tenant-axis / capability checks compose correctly.
+    """
+
+    if get_settings().tenant_config_self_approval_allowed:
+        return authority
+    if TENANT_CONFIG_APPROVE_CAPABILITY in authority.capabilities:
+        return authority
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED,
+            "capability": TENANT_CONFIG_APPROVE_CAPABILITY,
+        },
+    )
+
+
 def request_tenant_scope_opt(request: Request) -> str | None:
     """FastAPI dependency: return the request's tenant scope or
     ``None`` (unconstrained).
@@ -293,14 +342,17 @@ def request_tenant_scope_opt(request: Request) -> str | None:
 __all__ = [
     "ERROR_CODE_AUTHORITY_REQUIRED",
     "ERROR_CODE_CAPABILITY_REQUIRED",
+    "ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED",
     "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
     "ERROR_CODE_TENANT_AXIS_MISSING",
     "OPERATOR_CAPABILITY",
     "TENANT_ADMIN_CAPABILITY",
+    "TENANT_CONFIG_APPROVE_CAPABILITY",
     "request_authority_opt",
     "request_tenant_scope_opt",
     "require_authority",
     "require_capability",
+    "require_config_apply_authorization",
     "require_operator_authority",
     "require_tenant_admin",
     "require_tenant_scope",
