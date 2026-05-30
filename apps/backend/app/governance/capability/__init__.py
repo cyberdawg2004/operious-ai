@@ -44,13 +44,13 @@ from app.governance.capability.acts import (
     CAPABILITY_GOVERNED_ACTS,
     OperationalAct,
 )
-from app.governance.capability.adoption import (
+from app.core.capability_gate import (
     CapabilityDenied,
     CapabilityGateOutcome,
-    GovernanceRuntime,
     evaluate_capability_gate,
     gate_or_deny,
 )
+from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.capability.gate import (
     CapabilityLegalityRequest,
     build_capability_context,

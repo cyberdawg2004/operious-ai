@@ -18,10 +18,10 @@ import uuid
 from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 
+from app.core.capability_gate import gate_or_deny
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
 )
 from app.identity import project_optional_str
 from app.identity import request_authority_resolution

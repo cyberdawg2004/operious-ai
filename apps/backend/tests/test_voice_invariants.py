@@ -33,11 +33,11 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # `app.core.deterministic_identity` is a substrate-neutral identity
     # primitive used to avoid ambient runtime UUID generation.
     "app.core.deterministic_identity",
-    # `app.governance.capability` is the institutional legality
-    # gate (P2-B). Wedge 2.75-\u03b1 adopts the gate at every P2-A
-    # entry, including voice ingress/egress. The singular
-    # cross-substrate legality decision surface; the rest of
-    # governance remains opaque to voice.
+    # PR_FIX2: capability gate helpers are shared infrastructure
+    # and therefore live under app.core. Governance capability
+    # remains narrowly allowed for `OperationalAct` and
+    # `GovernanceRuntime`; the rest of governance stays opaque.
+    "app.core.capability_gate",
     "app.governance.capability",
     # PR_RT4: durable voice records may use the same narrow Postgres
     # foundation exemption as the apex boundary/session substrates.

@@ -78,10 +78,10 @@ from app.arbitration.taxonomy import (
     ArbitrationMetadataKey,
 )
 from app.arbitration.tracing import ArbitrationTrace
+from app.core.capability_gate import evaluate_capability_gate
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    evaluate_capability_gate,
 )
 
 _logger = logging.getLogger(__name__)

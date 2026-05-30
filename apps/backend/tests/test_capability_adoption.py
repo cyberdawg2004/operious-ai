@@ -24,7 +24,10 @@ These tests pin the adoption contract on three axes:
 from __future__ import annotations
 
 import ast
+import os
 import re
+import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +59,37 @@ from app.identity import (
     AuthoritySource,
     TenantId,
 )
+
+
+def test_gate_or_deny_importable_from_core() -> None:
+    from app.core.capability_gate import gate_or_deny as core_gate_or_deny
+
+    assert callable(core_gate_or_deny)
+
+
+def test_governance_capability_re_export_unchanged() -> None:
+    from app.governance.capability import gate_or_deny as governance_gate_or_deny
+
+    assert callable(governance_gate_or_deny)
+
+
+def test_no_new_circular_imports() -> None:
+    for module in (
+        "app.core.capability_gate",
+        "app.governance.capability",
+    ):
+        env = {
+            **os.environ,
+            "PYTHONPATH": str(_BACKEND_APP.parent),
+        }
+        completed = subprocess.run(
+            [sys.executable, "-c", f"import {module}"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
 
 
 # ─── Stub governance runtime helpers ─────────────────────────────────

@@ -20,10 +20,10 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.core.capability_gate import gate_or_deny
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
 )
 from app.identity import request_authority_resolution
 from app.organizational_intelligence.contracts.requests import (

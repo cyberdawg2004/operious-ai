@@ -149,10 +149,12 @@ from app.coordination.topology.taxonomy import (
     is_blocking_topology_decision,
 )
 from app.coordination.tracing import CoordinationTrace
-from app.governance.capability import (
-    OperationalAct,
-    gate_or_deny,
-)
+from app.core.capability_gate import gate_or_deny
+# CROSS_SUBSTRATE_ACCEPTED: coordination builds governance
+# context and calls GovernanceRuntime for dispatch evaluation.
+# Extraction to app.types requires GovernanceContext protocol.
+# Tracked for future governance protocol refactor.
+from app.governance.capability import OperationalAct
 from app.governance.context import GovernanceContext
 from app.governance.decisions import is_blocking_decision
 from app.governance.enforcement.runtime import GovernanceRuntime

@@ -34,14 +34,11 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # `app.core.deterministic_identity` is a substrate-neutral identity
     # primitive used to avoid ambient runtime UUID generation.
     "app.core.deterministic_identity",
-    # `app.governance.capability` is the institutional legality
-    # gate (P2-B). Wedge 2.75-\u03b1 adopts it at every P2-A entry,
-    # including translation ingress/egress. The capability gate is
-    # the SINGULAR cross-substrate legality decision surface — its
-    # adoption does not give translation access to the rest of the
-    # governance substrate; the imported symbols (`OperationalAct`,
-    # `gate_or_deny`) are the only governance surface translation
-    # is permitted to consume.
+    # PR_FIX2: capability gate helpers are shared infrastructure
+    # and therefore live under app.core. Governance capability
+    # remains narrowly allowed for `OperationalAct` and
+    # `GovernanceRuntime`; the rest of governance stays opaque.
+    "app.core.capability_gate",
     "app.governance.capability",
 )
 

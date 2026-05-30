@@ -47,9 +47,11 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # substrate (see app/identity/__init__.py); importing from it
     # never introduces a cross-substrate dependency.
     "app.identity",
-    # 2.75-\u03b1: capability legality gate (P2-B). The singular
-    # cross-substrate legality decision surface; the rest of
-    # governance remains opaque to hardening.
+    # PR_FIX2: capability gate helpers are shared infrastructure
+    # and therefore live under app.core. Governance capability
+    # remains narrowly allowed for vocabulary/runtime types used
+    # at that boundary.
+    "app.core.capability_gate",
     "app.governance.capability",
 )
 

@@ -24,6 +24,11 @@ from app.agents.persistence.records import (
     AgentExecutionRecord,
     ToolInvocationRecord,
 )
+# CROSS_SUBSTRATE_ACCEPTED: supervisor view builder reads
+# governance envelopes as evidence for inspection views.
+# Moving GovernanceDecisionRecord to a shared read-model
+# in app.types is the clean fix; deferred to governance
+# protocol refactor.
 from app.governance.decisions import (
     is_allow_decision,
     is_blocking_decision,

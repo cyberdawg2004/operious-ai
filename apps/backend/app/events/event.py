@@ -32,6 +32,10 @@ from app.events.chronology import EventChronology
 from app.events.exceptions import EventCausalityError
 from app.events.identity import EventId
 from app.events.substrates import OperationalSubstrate
+# CROSS_SUBSTRATE_ACCEPTED: events fabric uses OperationalAct
+# and Decision as shared vocabulary from governance.
+# These will be moved to app.types in a future vocabulary
+# extraction PR.
 from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
 

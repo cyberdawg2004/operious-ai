@@ -35,10 +35,10 @@ from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.capability_gate import evaluate_capability_gate
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    evaluate_capability_gate,
 )
 from app.core.deterministic_identity import derive_runtime_id
 from app.identity import (

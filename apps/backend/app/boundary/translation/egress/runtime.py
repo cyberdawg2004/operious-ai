@@ -5,10 +5,10 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
+from app.core.capability_gate import gate_or_deny
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
 )
 from app.core.deterministic_identity import derive_runtime_id
 from app.identity import (

@@ -11,10 +11,10 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.core.capability_gate import gate_or_deny
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
 )
 from app.identity import request_authority_resolution
 from app.hardening.audits.recorder import (

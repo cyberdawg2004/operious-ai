@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from typing import Any, cast
 import uuid
 
+# CROSS_SUBSTRATE_ACCEPTED: SOP intelligence is a
+# cross-substrate evidence aggregator by design.
+# It reads from session, supervisor, qa, governance, and
+# tenant substrates to synthesize SOP proposals.
+# Refactoring requires a dedicated SOPEvidenceService.
 from app.governance.persistence import (
     BaseGovernanceRepository,
     GovernanceDecisionRecord,

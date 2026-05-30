@@ -40,11 +40,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
+from app.core.capability_gate import gate_or_deny
 from app.core.deterministic_identity import derive_runtime_id
 from app.governance.capability import (
     GovernanceRuntime,
     OperationalAct,
-    gate_or_deny,
 )
 from app.identity import (
     AuthorityResolution,
