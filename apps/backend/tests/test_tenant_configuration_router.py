@@ -10,7 +10,10 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.dependencies.authority import require_tenant_admin
 from app.dependencies.database import get_db_session
+from app.identity.authority import AuthorityContext
+from app.identity.primitives import PrincipalId, TenantId
 from app.main import create_app
 from tests.conftest import requires_postgres
 
@@ -36,7 +39,18 @@ async def tenant_client(
     async def _override() -> AsyncIterator[AsyncSession]:
         yield pg_session
 
+    # These tests verify configuration BEHAVIOUR under header auth, which
+    # carries no capabilities. Tenant mutation routes now require the
+    # ``tenant_admin`` capability (S-02), so stand in an admin authority.
+    def _admin_authority() -> AuthorityContext:
+        return AuthorityContext(
+            tenant_id=TenantId("tenant-acme"),
+            principal_id=PrincipalId("principal-a"),
+            capabilities=frozenset({"tenant_admin"}),
+        )
+
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_admin] = _admin_authority
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,

@@ -26,7 +26,10 @@ from app.api.v1.schemas.tenant import (
     TenantTopologyConfigurationPage,
     TenantTopologyConfigurationResponse,
 )
-from app.dependencies.authority import require_authority, require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_admin,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_tenant_configuration_service
 from app.identity import AuthorityContext
 from app.services.tenant_configuration_service import (
@@ -67,6 +70,7 @@ _DEFAULT_LIMIT = 25
 async def configure_channel(
     request: TenantChannelCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _admin: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -94,6 +98,7 @@ async def update_channel(
     config_id: str,
     request: TenantChannelUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _admin: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -125,6 +130,7 @@ async def update_channel(
 async def verify_channel(
     config_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _admin: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -176,7 +182,7 @@ async def list_channels(
 async def create_knowledge_document(
     request: TenantKnowledgeCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     record = await service.create_knowledge_document(
@@ -198,7 +204,7 @@ async def update_knowledge_document(
     document_id: str,
     request: TenantKnowledgeUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     try:
@@ -252,7 +258,7 @@ async def list_knowledge_documents(
 async def create_governance_policy(
     request: TenantGovernancePolicyCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     record = await service.create_governance_policy(
@@ -274,7 +280,7 @@ async def update_governance_policy(
     policy_id: str,
     request: TenantGovernancePolicyUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     try:
@@ -329,7 +335,7 @@ async def list_governance_policies(
 async def configure_execution_governance(
     request: TenantExecutionGovernanceCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantExecutionGovernanceResponse:
     record = await service.configure_execution_governance(
@@ -413,7 +419,7 @@ async def list_execution_circuit_breakers(
 async def configure_topology(
     request: TenantTopologyConfigurationCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_admin),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantTopologyConfigurationResponse:
     try:

@@ -71,7 +71,7 @@ invariant test (``test_tenant_scope_dependency_invariants``).
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Callable, Final
 
 from fastapi import HTTPException, Request, status
 
@@ -94,6 +94,22 @@ ERROR_CODE_AUTHORITY_REQUIRED: Final[str] = "authority_required"
 ERROR_CODE_TENANT_AXIS_MISSING: Final[str] = "tenant_axis_missing"
 ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED: Final[str] = "operator_authority_required"
 OPERATOR_CAPABILITY: Final[str] = "operator"
+
+#: Stable error code for "authority present but lacks the capability
+#: a mutation route requires" (S-02). Distinct from
+#: ``tenant_axis_missing`` (which is a tenant-axis problem) and from
+#: ``authority_required`` (which is the anonymous state) so the
+#: frontend / SDK can surface a precise "insufficient privilege"
+#: message rather than a sign-in redirect.
+ERROR_CODE_CAPABILITY_REQUIRED: Final[str] = "capability_required"
+
+#: Capability required to MUTATE tenant configuration — channels,
+#: knowledge, governance policy, execution governance, and topology.
+#: Granted by the ``TenantAdmin`` Auth0 role (see
+#: ``app.auth.providers.jwt.ROLE_CAPABILITY_MAP``). Tenant scope alone
+#: is NOT sufficient; without this capability a tenant-scoped caller
+#: can only READ configuration.
+TENANT_ADMIN_CAPABILITY: Final[str] = "tenant_admin"
 
 
 def request_authority_opt(request: Request) -> AuthorityContext | None:
@@ -193,6 +209,62 @@ def require_operator_authority(request: Request) -> AuthorityContext:
     return authority
 
 
+def require_capability(
+    capability: str,
+) -> Callable[[Request], AuthorityContext]:
+    """Build a dependency that requires ``capability`` on the authority.
+
+    The returned dependency:
+
+    * rejects anonymous requests with 401 ``authority_required``
+      (delegated to :func:`require_authority`), and
+    * rejects an authenticated request that does not hold
+      ``capability`` with 403 ``capability_required``.
+
+    Capabilities are sourced exclusively from the verified bearer
+    identity (JWT ``capabilities`` / ``roles`` / ``permissions`` claims
+    mapped at :mod:`app.auth.providers.jwt`). A spoofable ``X-*-ID``
+    header carries NO capabilities, so a header-mode caller can never
+    satisfy a capability gate — which is the intended posture for
+    privileged mutations.
+    """
+
+    def _dependency(request: Request) -> AuthorityContext:
+        authority = require_authority(request)
+        if capability not in authority.capabilities:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                    "capability": capability,
+                },
+            )
+        return authority
+
+    return _dependency
+
+
+def require_tenant_admin(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant-admin capability (S-02).
+
+    Default gate for every tenant-configuration MUTATION route.
+    Reusing a module-level function (rather than a closure) keeps the
+    dependency identity stable so tests can override it via
+    ``app.dependency_overrides[require_tenant_admin]``.
+    """
+
+    authority = require_authority(request)
+    if TENANT_ADMIN_CAPABILITY not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                "capability": TENANT_ADMIN_CAPABILITY,
+            },
+        )
+    return authority
+
+
 def request_tenant_scope_opt(request: Request) -> str | None:
     """FastAPI dependency: return the request's tenant scope or
     ``None`` (unconstrained).
@@ -220,12 +292,16 @@ def request_tenant_scope_opt(request: Request) -> str | None:
 
 __all__ = [
     "ERROR_CODE_AUTHORITY_REQUIRED",
+    "ERROR_CODE_CAPABILITY_REQUIRED",
     "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
     "ERROR_CODE_TENANT_AXIS_MISSING",
     "OPERATOR_CAPABILITY",
+    "TENANT_ADMIN_CAPABILITY",
     "request_authority_opt",
     "request_tenant_scope_opt",
     "require_authority",
+    "require_capability",
     "require_operator_authority",
+    "require_tenant_admin",
     "require_tenant_scope",
 ]

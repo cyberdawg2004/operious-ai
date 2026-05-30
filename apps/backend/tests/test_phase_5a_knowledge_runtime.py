@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.routers import knowledge as knowledge_router
 from app.core.config import get_settings
+from app.dependencies.authority import require_tenant_admin
 from app.dependencies.database import get_db_session
+from app.identity.authority import AuthorityContext
+from app.identity.primitives import PrincipalId
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
@@ -603,7 +606,17 @@ async def knowledge_client(
     async def _override() -> AsyncIterator[AsyncSession]:
         yield pg_session
 
+    # Tenant knowledge writes now require the ``tenant_admin``
+    # capability (S-02); header auth carries none, so stand in an
+    # admin authority for these behaviour tests.
+    def _admin_authority() -> AuthorityContext:
+        return AuthorityContext(
+            principal_id=PrincipalId("principal-admin"),
+            capabilities=frozenset({"tenant_admin"}),
+        )
+
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_admin] = _admin_authority
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,

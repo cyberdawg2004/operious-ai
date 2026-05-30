@@ -56,10 +56,25 @@ def _create_app():
     if database_url_skip_reason() is None:
         os.environ["DATABASE_URL"] = os.environ[TEST_DATABASE_URL_ENV]
     from app.core.config import get_settings
+    from app.dependencies.authority import require_tenant_admin
+    from app.identity.authority import AuthorityContext
+    from app.identity.primitives import PrincipalId
     from app.main import create_app
 
     get_settings.cache_clear()
-    return create_app()
+    app = create_app()
+
+    # Tenant configuration writes now require the ``tenant_admin``
+    # capability (S-02). Smoke tests authenticate with X-Tenant-ID
+    # headers (no capabilities), so stand in an admin authority.
+    def _admin_authority() -> AuthorityContext:
+        return AuthorityContext(
+            principal_id=PrincipalId("smoke-operator"),
+            capabilities=frozenset({"tenant_admin"}),
+        )
+
+    app.dependency_overrides[require_tenant_admin] = _admin_authority
+    return app
 
 
 # Single authority source for all smoke tests.
