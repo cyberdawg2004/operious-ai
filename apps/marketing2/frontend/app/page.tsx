@@ -2,62 +2,27 @@ import Link from "next/link";
 import {
   ArrowRight,
   Cpu,
-  FileSearch,
   Landmark,
-  Network,
   RadioTower,
-  Scale,
   ShieldCheck,
   Stethoscope,
   Truck,
 } from "lucide-react";
 import { AnimatedHeadline } from "@/components/animated-headline";
 import { ContainmentLayer } from "@/components/containment-layer";
-import { FeatureCard } from "@/components/feature-card";
 import { LiveEvidence } from "@/components/live-evidence";
 import { ProofMarquee } from "@/components/proof-marquee";
 import { Reveal, RevealGroup } from "@/components/reveal";
-import { ParallaxBlock, ScrollHighlight } from "@/components/scroll-fx";
 import { SplineHeroBg } from "@/components/spline-hero-bg";
 import { Button } from "@/components/ui/button";
 import { MagneticWrapper } from "@/components/magnetic-button";
 import { TextRevealByWord } from "@/components/ui/text-reveal";
-
-const pillars = [
-  {
-    title: "Constitutional Governance",
-    body: "Policies execute, not suggest. Decisions cannot bypass the governance layer.",
-    href: "/platform/governance",
-    icon: Scale,
-    iconName: "governance" as const,
-  },
-  {
-    title: "Reconstructible Truth",
-    body: "Replay any operational decision at any point in time with cryptographic certainty.",
-    href: "/platform/replay",
-    icon: FileSearch,
-    iconName: "replay" as const,
-  },
-  {
-    title: "Multi-Agent Coordination",
-    body: "Deterministic agent orchestration with structural guarantees against deadlock and conflict.",
-    href: "/platform/agents",
-    icon: Network,
-    iconName: "agents" as const,
-  },
-  {
-    title: "AGI-Ready Governance",
-    body:
-      "Enterprise AI models are becoming more powerful every month. " +
-      "Most companies are afraid to deploy them — there is no safety " +
-      "layer between what the model decides and what it executes. " +
-      "Operious is that layer. Any autonomous AI model. Any action. " +
-      "Governed. Audited. Replayable.",
-    href: "/platform/governance",
-    icon: ShieldCheck,
-    iconName: "agi" as const,
-  },
-];
+import { ContainerScroll } from "@/components/ui/container-scroll-animation";
+import { CommandCenterPreview } from "@/components/command-center-preview";
+import SkewCards from "@/components/ui/gradient-card-showcase";
+import type { SkewCardProps } from "@/components/ui/gradient-card-showcase";
+import { ZoomParallax } from "@/components/ui/zoom-parallax";
+import FlowArt, { FlowSection } from "@/components/ui/story-scroll";
 
 const containmentLayers = [
   {
@@ -137,16 +102,6 @@ const industries = [
     icon: Truck,
     body: "Shipment exceptions, cross-border documentation, and delivery dispute resolution.",
   },
-];
-
-const architectureLayers = [
-  "Boundary",
-  "Coordination",
-  "Governance",
-  "Session",
-  "Execution",
-  "Supervisor",
-  "Arbitration",
 ];
 
 const trustCards = [
@@ -309,6 +264,38 @@ export default function Home() {
         />
       </section>
 
+      {/* M7: ContainerScroll — Command Center reveal */}
+      <section className="bg-[#F8F5EE] pt-20 pb-0">
+        <ContainerScroll
+          titleComponent={
+            <div className="mb-8">
+              <p
+                className="text-[9px] uppercase tracking-[0.2em] text-gold-bright mb-3"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                Command Center
+              </p>
+              <h2
+                className="text-[38px] font-extrabold leading-[1.05] tracking-[-0.02em] text-ink-primary sm:text-[54px]"
+                style={{ fontFamily: "var(--font-serif)" }}
+              >
+                The operational intelligence layer
+                <br />
+                your team actually uses.
+              </h2>
+              <p
+                className="mt-4 text-[16px] text-ink-secondary max-w-[520px] mx-auto leading-[1.7]"
+                style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+              >
+                A live view of every session, every governance decision, every approval — in one place.
+              </p>
+            </div>
+          }
+        >
+          <CommandCenterPreview />
+        </ContainerScroll>
+      </section>
+
       <section className="border-y border-border-subtle bg-canvas px-4 py-8 sm:px-8 lg:px-16">
         <RevealGroup className="mx-auto max-w-[1320px]">
           <Reveal>
@@ -342,92 +329,227 @@ export default function Home() {
         </RevealGroup>
       </section>
 
-      <section className="bg-canvas px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
+      {/* M8: SkewCards — Capabilities */}
+      <section className="bg-[#F8F5EE] px-4 py-20 sm:px-8 sm:py-24 lg:px-16">
         <div className="mx-auto max-w-[1280px]">
           <RevealGroup>
             <Reveal>
-              <SectionLabel>Core features</SectionLabel>
+              <SectionLabel>Capabilities</SectionLabel>
               <h2
-                className="mt-5 max-w-[760px] text-[38px] font-bold leading-tight text-ink-primary sm:text-[54px]"
-                style={{ fontFamily: "var(--font-cormorant-sc)" }}
+                className="mt-5 max-w-[760px] text-[38px] font-extrabold leading-tight text-ink-primary sm:text-[54px]"
+                style={{ fontFamily: "var(--font-serif)" }}
               >
-                The control plane enterprise AI operations usually lacks.
+                The infrastructure enterprise AI actually requires.
               </h2>
             </Reveal>
-            <div className="mt-10 grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
-              {pillars.map((pillar, index) => (
-                <FeatureCard
-                  key={pillar.title}
-                  title={pillar.title}
-                  body={pillar.body}
-                  href={pillar.href}
-                  iconName={pillar.iconName}
-                  index={index}
-                />
-              ))}
-            </div>
           </RevealGroup>
+          <SkewCards
+            cards={[
+              {
+                title: "Constitutional Governance",
+                desc: "Policy chains evaluate every proposed action. Fail-closed: no model output executes without passing governance. Empty chains return DENY.",
+                gradientFrom: "#A8882C",
+                gradientTo: "#C9A84C",
+                ctaHref: "/platform/governance",
+                ctaLabel: "Explore →",
+              },
+              {
+                title: "Forensic Reconstructibility",
+                desc: "Replay any decision at any point in time. UUID5 identity, HMAC signatures, and append-only timelines make every outcome defensible.",
+                gradientFrom: "#1A4A9A",
+                gradientTo: "#00C7FF",
+                ctaHref: "/platform/replay",
+                ctaLabel: "Explore →",
+              },
+              {
+                title: "Multi-Agent Coordination",
+                desc: "Deterministic orchestration across Diagnostic, Resolution, Supervisor, and Trainer agents — structural guarantees against deadlock.",
+                gradientFrom: "#0D4A2A",
+                gradientTo: "#30D158",
+                ctaHref: "/platform/agents",
+                ctaLabel: "Explore →",
+              },
+              {
+                title: "Multilingual Operations",
+                desc: "Arabic, English, and four further languages — language context preserved through triage, governance, and customer reply. Never silently dropped.",
+                gradientFrom: "#4A1A7A",
+                gradientTo: "#8B5CF6",
+              },
+              {
+                title: "Crisis Override Control",
+                desc: "Emergency rules activate in milliseconds. Block a SKU, halt a refund class, escalate a category — with automatic expiry and full audit evidence.",
+                gradientFrom: "#7A1A1A",
+                gradientTo: "#FF453A",
+              },
+              {
+                title: "SOP Citation Intelligence",
+                desc: "Every proposed resolution cited against your tenant SOP documents. No uncited claims. Every customer reply grounded in your own policies.",
+                gradientFrom: "#3A4A1A",
+                gradientTo: "#84CC16",
+              },
+            ] as SkewCardProps[]}
+          />
         </div>
       </section>
 
-      <section className="bg-[#05080F] px-4 py-20 text-[#D8E4F4] sm:px-8 sm:py-24 lg:px-16">
-        <RevealGroup className="mx-auto grid max-w-[1280px] gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-          <Reveal>
-          <div>
-            <SectionLabel>Value proposition</SectionLabel>
-            <h2
-              className="mt-5 text-[38px] font-bold leading-tight sm:text-[54px]"
-              style={{ fontFamily: "var(--font-cormorant-sc)" }}
+      {/* M9: ZoomParallax — Platform showcase */}
+      <section className="bg-[#050508] relative overflow-hidden">
+        <div className="absolute top-16 left-16 z-10 pointer-events-none">
+          <p
+            className="text-[9px] uppercase tracking-[0.2em] text-[rgba(201,168,76,0.6)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            Platform
+          </p>
+        </div>
+        <div className="absolute bottom-16 left-16 z-10 pointer-events-none">
+          <h2
+            className="text-[clamp(32px,5vw,64px)] font-extrabold leading-[1.05] tracking-[-0.02em] text-[#D8E4F4]"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
+            Built for the<br />
+            <em
+              className="not-italic"
+              style={{
+                background: "linear-gradient(135deg,#A8882C,#C9A84C,#E8C76A)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+                fontStyle: "italic",
+              }}
             >
-              A substrate diagram for governed execution.
-            </h2>
-            <ScrollHighlight
-              className="mt-6 text-[16px] leading-relaxed"
-              text="Operious does not place a chatbot over an enterprise queue. The runtime separates authority into seven substrates so tenant boundaries, agent coordination, policy admission, execution, supervision, and conflict handling can be inspected independently."
-              baseColor="#5C6B85"
-              litColor="#D8E4F4"
-              accentColor="#C9A84C"
-            />
-            <Link
-              href="/platform"
-              className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-5 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.18)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.26)]"
-            >
-              Explore platform architecture
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
-          </div>
-          </Reveal>
-          <Reveal>
-          <ParallaxBlock intensity={0.22}>
-          <div className="rounded-md border border-[#1A2744] bg-[#0B1120] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.24)]">
-            <div className="grid gap-3">
-              {architectureLayers.map((layer, index) => (
-                <div
-                  key={layer}
-                  className="flex items-center justify-between rounded-md border border-[#1A2744] bg-[#05080F] px-5 py-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C9A84C]"
-                >
-                  <span
-                    className="text-[12px] uppercase tracking-[0.16em] text-[#C9A84C]"
-                    style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
-                  >
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <span className="text-[16px] font-medium">{layer}</span>
-                </div>
-              ))}
-            </div>
-            <p
-              className="mt-5 text-[12px] uppercase tracking-[0.16em] text-[#7A90B4]"
-              style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
-            >
-              Boundary -&gt; Coordination -&gt; Governance -&gt; Session -&gt; Execution -&gt;
-              Supervisor -&gt; Arbitration
-            </p>
-          </div>
-          </ParallaxBlock>
-          </Reveal>
-        </RevealGroup>
+              regulated
+            </em>{" "}
+            enterprise.
+          </h2>
+        </div>
+        <ZoomParallax
+          images={[
+            { src: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1280&h=720&fit=crop&auto=format&q=80", alt: "Data analytics" },
+            { src: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&h=600&fit=crop&auto=format&q=80", alt: "Business operations" },
+            { src: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&h=800&fit=crop&auto=format&q=80", alt: "Technology" },
+            { src: "https://images.unsplash.com/photo-1563986768609-322da13575f3?w=1280&h=720&fit=crop&auto=format&q=80", alt: "Security" },
+            { src: "https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=600&h=800&fit=crop&auto=format&q=80", alt: "Software" },
+            { src: "https://images.unsplash.com/photo-1504868584819-f8e8b4b6d7e3?w=1280&h=720&fit=crop&auto=format&q=80", alt: "Data" },
+            { src: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1280&h=720&fit=crop&auto=format&q=80", alt: "Network" },
+          ]}
+        />
       </section>
+
+      {/* M10: FlowArt — Architecture narrative */}
+      <FlowArt aria-label="Operious architecture narrative">
+        <FlowSection
+          aria-label="Boundary — governed admission"
+          style={{ backgroundColor: "#050508", color: "#D8E4F4" }}
+        >
+          <p
+            className="text-[9px] font-bold uppercase tracking-[0.2em] text-[rgba(201,168,76,0.5)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            01 — Boundary
+          </p>
+          <hr className="border-none border-t border-white/10 my-[2vw]" />
+          <div>
+            <h2
+              className="text-[clamp(3.5rem,10vw,12rem)] font-extrabold leading-[0.88] uppercase tracking-tight"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              Admit<br />Only<br />The<br />Governed.
+            </h2>
+          </div>
+          <hr className="border-none border-t border-white/10 my-[2vw]" />
+          <p
+            className="mt-auto max-w-[50ch] text-[clamp(1rem,2vw,1.5rem)] font-normal leading-relaxed text-[#7A90B4]"
+            style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+          >
+            No request enters the system without passing the admission gate. Language detected, fingerprint computed, rate limits enforced — before any AI model sees the input.
+          </p>
+        </FlowSection>
+
+        <FlowSection
+          aria-label="Governance — policy executes"
+          style={{ backgroundColor: "#0A0F1C", color: "#D8E4F4" }}
+        >
+          <p
+            className="text-[9px] font-bold uppercase tracking-[0.2em] text-[rgba(0,199,255,0.5)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            02 — Governance
+          </p>
+          <hr className="border-none border-t border-white/[0.08] my-[2vw]" />
+          <div>
+            <h2
+              className="text-[clamp(3.5rem,10vw,12rem)] font-extrabold leading-[0.88] uppercase tracking-tight"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              Policy<br />Executes.<br />Not<br />Suggests.
+            </h2>
+          </div>
+          <hr className="border-none border-t border-white/[0.08] my-[2vw]" />
+          <p
+            className="mt-auto max-w-[50ch] text-[clamp(1rem,2vw,1.5rem)] font-normal leading-relaxed text-[#7A90B4]"
+            style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+          >
+            Policy chains evaluate every proposed action. Empty chains return DENY. There is no path to ALLOW without a passing policy — regardless of what the model proposes.
+          </p>
+        </FlowSection>
+
+        <FlowSection
+          aria-label="Execution — governed actions"
+          style={{ backgroundColor: "#F8F5EE", color: "#0A0F1C" }}
+        >
+          <p
+            className="text-[9px] font-bold uppercase tracking-[0.2em] text-[rgba(168,136,44,0.7)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            03 — Execution
+          </p>
+          <hr className="border-none border-t border-black/15 my-[2vw]" />
+          <div>
+            <h2
+              className="text-[clamp(3.5rem,10vw,12rem)] font-extrabold leading-[0.88] uppercase tracking-tight text-ink-primary"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              Every<br />Action.<br />Permitted<br />First.
+            </h2>
+          </div>
+          <hr className="border-none border-t border-black/15 my-[2vw]" />
+          <p
+            className="mt-auto max-w-[50ch] text-[clamp(1rem,2vw,1.5rem)] font-normal leading-relaxed text-ink-body"
+            style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+          >
+            Warranty claims, refund requests, replacements — each action is governed, SOP-cited, and optionally manager-approved before touching a customer.
+          </p>
+        </FlowSection>
+
+        <FlowSection
+          aria-label="Audit — permanent record"
+          style={{ backgroundColor: "#050508", color: "#D8E4F4" }}
+        >
+          <p
+            className="text-[9px] font-bold uppercase tracking-[0.2em] text-[rgba(201,168,76,0.5)]"
+            style={{ fontFamily: "var(--font-mono)" }}
+          >
+            04 — Audit
+          </p>
+          <hr className="border-none border-t border-white/10 my-[2vw]" />
+          <div>
+            <h2
+              className="text-[clamp(3.5rem,10vw,12rem)] font-extrabold leading-[0.88] uppercase tracking-tight"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
+              Every<br />Decision.<br />Permanent<br />Record.
+            </h2>
+          </div>
+          <hr className="border-none border-t border-white/10 my-[2vw]" />
+          <p
+            className="mt-auto max-w-[50ch] text-[clamp(1rem,2vw,1.5rem)] font-normal leading-relaxed text-[#7A90B4]"
+            style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+          >
+            UUID5 identity. HMAC-SHA256 signatures. Append-only timelines. Replay any operational decision at any point in time with cryptographic certainty.
+          </p>
+        </FlowSection>
+      </FlowArt>
 
       {/* Containment Vessel */}
       <section className="border-t border-[#1A2744] bg-[#05080F] px-6 py-24">
