@@ -11,6 +11,7 @@ import { ArrowUpRight, ChevronDown, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { OperioussLogo } from "./logo";
 import { commandCenterUrl, headerGroups, type LinkGroup } from "@/lib/site-links";
+import { cn } from "@/lib/utils";
 
 function NavDropdown({
   group,
@@ -55,7 +56,7 @@ function NavDropdown({
                   className="group -m-3 block rounded-md p-3 transition-colors duration-200 hover:bg-white/[0.04]"
                   role="menuitem"
                 >
-                  <div className="text-[14px] font-semibold text-[#F2F0EA] transition-colors duration-200 group-hover:text-[#C9A84C]">
+                  <div className="relative text-[14px] font-semibold text-[#F2F0EA] transition-colors duration-200 group-hover:text-[#C9A84C] after:absolute after:bottom-0 after:left-0 after:h-px after:w-0 after:bg-[var(--gold)] after:transition-all after:duration-300 group-hover:after:w-full">
                     {item.label}
                   </div>
                   <div className="mt-0.5 text-[12px] leading-relaxed text-[#9FB0CA]">
@@ -204,10 +205,10 @@ export function Navigation() {
   }, []);
 
   useEffect(() => {
-    const handler = () => setScrolled(window.scrollY > 12);
-    handler();
-    window.addEventListener("scroll", handler, { passive: true });
-    return () => window.removeEventListener("scroll", handler);
+    const onScroll = () => setScrolled(window.scrollY > 60);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
@@ -226,11 +227,12 @@ export function Navigation() {
         initial={{ y: -24, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className={`fixed inset-x-0 top-0 z-[60] border-b backdrop-blur-md transition-colors duration-300 ${
+        className={cn(
+          "fixed inset-x-0 top-0 z-[60] border-b transition-colors duration-300",
           scrolled
-            ? "border-white/10 bg-black/65 shadow-[0_8px_28px_rgba(0,0,0,0.4)]"
-            : "border-white/[0.06] bg-black/45"
-        }`}
+            ? "bg-[rgba(5,5,8,0.92)] backdrop-blur-xl border-white/[0.05]"
+            : "border-white/[0.06] bg-black/45 backdrop-blur-md"
+        )}
         role="navigation"
         aria-label="Main navigation"
       >
@@ -243,7 +245,10 @@ export function Navigation() {
             >
               <OperioussLogo size={28} showWordmark tone="dark" />
             </Link>
-            <div className="hidden items-center gap-7 md:flex">
+            <div
+              className="hidden items-center gap-7 md:flex"
+              style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+            >
               {headerGroups.map((group) => (
                 <NavDropdown
                   key={group.label}
