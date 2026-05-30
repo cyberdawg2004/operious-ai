@@ -28,7 +28,14 @@ import {
 } from "@/components/data-state";
 
 type FilterStatus = "all" | ApprovalRecord["status"];
+type ProposalSourceFilter = "all" | "quality" | "failure_pattern";
 type SortOption = "confidence" | "age" | "evidence";
+
+const sourceFilterOptions: { id: ProposalSourceFilter; label: string }[] = [
+  { id: "all", label: "All Proposals" },
+  { id: "quality", label: "Quality Improvements" },
+  { id: "failure_pattern", label: "From Failure Patterns" },
+];
 
 const filterOptions: { id: FilterStatus; label: string }[] = [
   { id: "all", label: "All" },
@@ -51,6 +58,8 @@ type CognitionHubProps = {
 
 export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps) {
   const [activeFilter, setActiveFilter] = useState<FilterStatus>("all");
+  const [activeSourceFilter, setActiveSourceFilter] =
+    useState<ProposalSourceFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("confidence");
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
@@ -64,10 +73,21 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
   const { data, error, isLoading, reload } = useApiResource(loadApprovals);
 
   const approvals = useMemo(() => data?.items ?? [], [data?.items]);
-  const filteredRecords = approvals.filter((record) => {
-    if (activeFilter === "all") return true;
-    return record.status === activeFilter;
-  });
+  const filteredRecords = useMemo(
+    () =>
+      approvals.filter((record) => {
+        const isFailurePattern = record.metadata?.failure_pattern === true;
+        if (activeSourceFilter === "failure_pattern" && !isFailurePattern) {
+          return false;
+        }
+        if (activeSourceFilter === "quality" && isFailurePattern) {
+          return false;
+        }
+        if (activeFilter === "all") return true;
+        return record.status === activeFilter;
+      }),
+    [activeFilter, activeSourceFilter, approvals]
+  );
 
   const sortedRecords = useMemo(() => {
     return [...filteredRecords].sort((a, b) => {
@@ -224,6 +244,23 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
             <StatCard label="AVERAGE CONFIDENCE" value={stats.avgConfidence} />
           </div>
 
+          <div className="mb-6 flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-1">
+            {sourceFilterOptions.map((option) => (
+              <button
+                key={option.id}
+                onClick={() => setActiveSourceFilter(option.id)}
+                className={cn(
+                  "min-h-11 rounded px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-160 sm:min-h-0",
+                  activeSourceFilter === option.id
+                    ? "bg-[var(--gold-primary)] text-white"
+                    : "text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
           {sortedRecords.length === 0 ? (
             <EmptyState
               title="No approval records"
@@ -276,18 +313,26 @@ function ApprovalCard({
 }) {
   const [expandedEvidence, setExpandedEvidence] = useState<string | null>(null);
   const statusConfig = getStatusConfig(record.status);
+  const isFailurePattern = record.metadata?.failure_pattern === true;
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-4 sm:p-6">
       <div className="flex items-center justify-between">
-        <span
-          className={cn(
-            "px-2.5 py-1 border rounded-full font-mono text-[10px] uppercase tracking-[0.08em]",
-            statusConfig.className
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              "px-2.5 py-1 border rounded-full font-mono text-[10px] uppercase tracking-[0.08em]",
+              statusConfig.className
+            )}
+          >
+            {statusConfig.label}
+          </span>
+          {isFailurePattern && (
+            <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--ink-secondary)]">
+              🔍 From Failure Pattern
+            </span>
           )}
-        >
-          {statusConfig.label}
-        </span>
+        </div>
         <span className="font-mono text-[13px] font-medium tabular-nums text-[var(--ink-secondary)]">
           {Math.round(record.confidence * 100)}% confidence
         </span>

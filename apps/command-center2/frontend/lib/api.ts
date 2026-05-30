@@ -171,6 +171,7 @@ export type ApprovalRecord = {
   proposed_by: string;
   reviewed_by: string | null;
   created_at: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type ActionApprovalSummary = {

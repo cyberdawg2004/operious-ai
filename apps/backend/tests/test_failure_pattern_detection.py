@@ -189,11 +189,13 @@ async def test_propose_called_on_new_pattern(
     )
     await set_pg_rls_tenant(pg_session, tenant_id)
     fake_runtime = _FakeSOPRuntime()
+    fake_synthesis = _FakeSOPSynthesisAgent("Synthesized charging SOP update")
 
     result = await detect_sop_failure_patterns_runtime(
         tenant_ids=(tenant_id,),
         session=pg_session,
         sop_runtime=fake_runtime,
+        sop_synthesis_agent=fake_synthesis,
         event_persistence=InMemoryOperationalEventPersistence(),
         now=lambda: _NOW,
     )
@@ -212,6 +214,7 @@ async def test_propose_called_on_new_pattern(
             "expected_tenant_id": tenant_id,
             "category": "charging_issue",
             "recommendation_count": DLQ_THRESHOLD,
+            "synthesized_proposed_change": "Synthesized charging SOP update",
         }
     ]
     assert row.status == "proposed"
@@ -376,6 +379,7 @@ class _FakeSOPRuntime:
         expected_tenant_id: str,
         category: str,
         recommendation_count: int,
+        synthesized_proposed_change: str | None = None,
     ) -> _Approval:
         self.calls.append(
             {
@@ -383,6 +387,23 @@ class _FakeSOPRuntime:
                 "expected_tenant_id": expected_tenant_id,
                 "category": category,
                 "recommendation_count": recommendation_count,
+                "synthesized_proposed_change": synthesized_proposed_change,
             }
         )
         return _Approval(approval_id=self.approval_id)
+
+
+class _FakeSOPSynthesisAgent:
+    def __init__(self, proposed_change: str) -> None:
+        self.proposed_change = proposed_change
+
+    async def synthesize_improvement(
+        self,
+        *,
+        category: str,
+        failure_count: int,
+        failure_description: str,
+        tenant_id: str,
+    ) -> str:
+        del category, failure_count, failure_description, tenant_id
+        return self.proposed_change

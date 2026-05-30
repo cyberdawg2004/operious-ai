@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.sop_intelligence.enums import ApprovalStatus
@@ -21,6 +23,7 @@ class ApprovalRecordResponse(BaseModel):
     proposed_by: str
     reviewed_by: str | None = None
     created_at: str
+    metadata: dict[str, Any]
 
     @classmethod
     def from_record(
@@ -38,6 +41,7 @@ class ApprovalRecordResponse(BaseModel):
             proposed_by=record.proposed_by,
             reviewed_by=record.reviewed_by,
             created_at=record.created_at,
+            metadata=dict(record.metadata),
         )
 
 

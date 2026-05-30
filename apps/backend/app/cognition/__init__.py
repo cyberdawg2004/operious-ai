@@ -39,6 +39,7 @@ from app.cognition.models import (
     KnowledgeRollbackResult,
 )
 from app.cognition.runtime import CognitionRuntime
+from app.cognition.sop_improvement_models import SOPImprovementLLMOutput
 
 __all__ = [
     "ApprovalApplicationResult",
@@ -72,4 +73,5 @@ __all__ = [
     "DiagnosticReasoningResult",
     "DiagnosticReasoningSnapshot",
     "KnowledgeRollbackResult",
+    "SOPImprovementLLMOutput",
 ]

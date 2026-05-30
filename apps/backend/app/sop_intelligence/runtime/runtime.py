@@ -193,6 +193,7 @@ class SOPIntelligenceRuntime:
         expected_tenant_id: str,
         category: str,
         recommendation_count: int,
+        synthesized_proposed_change: str | None = None,
     ) -> Coroutine[Any, Any, ApprovalRecord]:
         """Create or return a pending SOP proposal from repeated QA failures."""
 
@@ -201,6 +202,7 @@ class SOPIntelligenceRuntime:
             expected_tenant_id=expected_tenant_id,
             category=category,
             recommendation_count=recommendation_count,
+            synthesized_proposed_change=synthesized_proposed_change,
         )
 
     async def _propose_from_failure_pattern(
@@ -210,6 +212,7 @@ class SOPIntelligenceRuntime:
         expected_tenant_id: str,
         category: str,
         recommendation_count: int,
+        synthesized_proposed_change: str | None = None,
     ) -> ApprovalRecord:
         """Create or return a pending SOP proposal from repeated QA failures."""
 
@@ -245,15 +248,20 @@ class SOPIntelligenceRuntime:
         if existing is not None:
             return existing
 
+        proposed_change = (
+            synthesized_proposed_change
+            if synthesized_proposed_change is not None
+            else _failure_pattern_proposed_change(
+                document=document,
+                category=category,
+                recommendation_count=recommendation_count,
+            )
+        )
         record = ApprovalRecord(
             approval_id=approval_id,
             tenant_id=expected_tenant_id,
             document_id=str(document.document_id),
-            proposed_change=_failure_pattern_proposed_change(
-                document=document,
-                category=category,
-                recommendation_count=recommendation_count,
-            ),
+            proposed_change=proposed_change,
             evidence_sessions=evidence_sessions,
             confidence=_failure_pattern_confidence(recommendation_count),
             status=ApprovalStatus.PENDING_REVIEW.value,
@@ -267,6 +275,9 @@ class SOPIntelligenceRuntime:
                 "document_version_before": document.version,
                 "document_status": document.status.value,
                 "proposal_only": True,
+                "synthesized_proposed_change": (
+                    synthesized_proposed_change is not None
+                ),
             },
         )
         try:

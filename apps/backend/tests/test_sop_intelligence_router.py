@@ -141,4 +141,4 @@ async def test_sop_approval_endpoints_are_tenant_scoped(
     assert point.status_code == 200
     body = point.json()
     assert body["status"] == "pending_review"
-    assert "metadata" not in body
+    assert body["metadata"] == {"redacted": "not returned"}

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from threading import Thread
@@ -12,11 +14,20 @@ from typing import Any, Protocol, TypeVar
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.sop_synthesis_agent import (
+    DeterministicSOPImprovementLLMClient,
+    SOPSynthesisAgent,
+)
+from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMClient
 from app.core.config import get_settings
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.events.persistence import OperationalEventPersistenceProtocol
 from app.governance.persistence import PostgresGovernanceRepository
+from app.knowledge.chunking import DeterministicKnowledgeChunker
+from app.knowledge.embeddings import DeterministicHashEmbeddingProvider
+from app.knowledge.persistence import PostgresKnowledgeRepository
+from app.knowledge.runtime import KnowledgeRuntime
 from app.qa.persistence import PostgresQAPersistence
 from app.queues import QUEUE_SOP_INTELLIGENCE
 from app.runtime.failure_pattern_runtime import (
@@ -43,7 +54,19 @@ class SOPFailurePatternProposalProtocol(Protocol):
         expected_tenant_id: str,
         category: str,
         recommendation_count: int,
+        synthesized_proposed_change: str | None = None,
     ) -> Coroutine[Any, Any, Any]: ...
+
+
+class SOPSynthesisProtocol(Protocol):
+    async def synthesize_improvement(
+        self,
+        *,
+        category: str,
+        failure_count: int,
+        failure_description: str,
+        tenant_id: str,
+    ) -> str: ...
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -68,6 +91,7 @@ async def detect_sop_failure_patterns_runtime(
     tenant_ids: tuple[str, ...] | None = None,
     session: AsyncSession | None = None,
     sop_runtime: SOPFailurePatternProposalProtocol | None = None,
+    sop_synthesis_agent: SOPSynthesisProtocol | None = None,
     event_persistence: OperationalEventPersistenceProtocol | None = None,
     now: Callable[[], datetime] | None = None,
 ) -> dict[str, object]:
@@ -80,6 +104,7 @@ async def detect_sop_failure_patterns_runtime(
             session=session,
             tenant_ids=tenant_ids,
             sop_runtime=sop_runtime,
+            sop_synthesis_agent=sop_synthesis_agent,
             event_persistence=event_persistence,
             now=now,
             window_hours=window_hours,
@@ -93,6 +118,7 @@ async def detect_sop_failure_patterns_runtime(
             session=owned_session,
             tenant_ids=tenant_ids,
             sop_runtime=sop_runtime,
+            sop_synthesis_agent=sop_synthesis_agent,
             event_persistence=event_persistence,
             now=now,
             window_hours=window_hours,
@@ -106,6 +132,7 @@ async def _detect_sop_failure_patterns_with_session(
     session: AsyncSession,
     tenant_ids: tuple[str, ...] | None,
     sop_runtime: SOPFailurePatternProposalProtocol | None,
+    sop_synthesis_agent: SOPSynthesisProtocol | None,
     event_persistence: OperationalEventPersistenceProtocol | None,
     now: Callable[[], datetime] | None,
     window_hours: int,
@@ -126,9 +153,11 @@ async def _detect_sop_failure_patterns_with_session(
         now=now,
     )
     proposer = sop_runtime or _sop_runtime(session)
+    synthesizer = sop_synthesis_agent or _sop_synthesis_agent(session)
     detected: list[dict[str, object]] = []
     inserted: list[str] = []
     proposed: list[str] = []
+    synthesis_failed: list[dict[str, object]] = []
     proposal_failed: list[dict[str, object]] = []
     failed: list[dict[str, object]] = []
 
@@ -160,12 +189,41 @@ async def _detect_sop_failure_patterns_with_session(
                     if not recorded.inserted:
                         continue
                     inserted.append(str(recorded.pattern_id))
+                    synthesized_change: str | None = None
+                    try:
+                        synthesized_change = await synthesizer.synthesize_improvement(
+                            category=pattern.category,
+                            failure_count=pattern.failure_count,
+                            failure_description=(
+                                f"Pattern source: {pattern.pattern_source}. "
+                                f"{pattern.failure_count} failures in "
+                                f"{window_hours}h window."
+                            ),
+                            tenant_id=pattern.tenant_id,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - static proposal fallback.
+                        synthesis_failed.append(
+                            {
+                                "tenant_id": tenant_id,
+                                "category": pattern.category,
+                                "reason": exc.__class__.__name__,
+                            }
+                        )
+                        logger.warning(
+                            "sop_failure_pattern_synthesis_failed",
+                            extra={
+                                "tenant_id": tenant_id,
+                                "category": pattern.category,
+                                "error_class": exc.__class__.__name__,
+                            },
+                        )
                     try:
                         record = await proposer.propose_from_failure_pattern(
                             tenant_id=pattern.tenant_id,
                             expected_tenant_id=pattern.tenant_id,
                             category=pattern.category,
                             recommendation_count=pattern.failure_count,
+                            synthesized_proposed_change=synthesized_change,
                         )
                         approval_id = str(getattr(record, "approval_id"))
                         await detector.mark_pattern_proposed(
@@ -213,6 +271,7 @@ async def _detect_sop_failure_patterns_with_session(
         "pattern_ids": inserted,
         "approval_ids": proposed,
         "detected": detected,
+        "synthesis_failed": synthesis_failed,
         "proposal_failed": proposal_failed,
         "failed": failed,
     }
@@ -265,6 +324,48 @@ def _sop_runtime(session: AsyncSession) -> SOPIntelligenceRuntime:
             session
         ),
     )
+
+
+def _sop_synthesis_agent(session: AsyncSession) -> SOPSynthesisAgent:
+    return SOPSynthesisAgent(
+        llm_client=_sop_synthesis_llm_client(),
+        knowledge_runtime=_sop_knowledge_runtime(session),
+    )
+
+
+def _sop_synthesis_llm_client() -> DiagnosticLLMClient:
+    settings = get_settings()
+    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+        return DeterministicSOPImprovementLLMClient()
+    return AnthropicMessagesClient(
+        api_key=settings.ANTHROPIC_API_KEY,
+        model=settings.ANTHROPIC_DEFAULT_MODEL,
+        base_url=settings.ANTHROPIC_BASE_URL,
+        anthropic_version=settings.ANTHROPIC_VERSION,
+        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
+    )
+
+
+def _sop_knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
+    settings = get_settings()
+    return KnowledgeRuntime(
+        repository=PostgresKnowledgeRepository(session),
+        tenant_configuration_repository=PostgresTenantConfigurationRepository(
+            session
+        ),
+        embedding_provider=DeterministicHashEmbeddingProvider(),
+        chunker=DeterministicKnowledgeChunker(
+            target_size=settings.CHUNK_TARGET_SIZE,
+            overlap=settings.CHUNK_OVERLAP,
+            min_size=settings.CHUNK_MIN_SIZE,
+        ),
+        vector_index_name=settings.VECTOR_DEFAULT_INDEX,
+        default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
+    )
+
+
+def _running_under_pytest() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
 
 async def _tenant_ids_for_failure_pattern_scan(
