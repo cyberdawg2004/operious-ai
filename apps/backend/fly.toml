@@ -19,8 +19,22 @@ primary_region = "sin"
 
 [env]
   # AUDIT_EXPORT_HMAC_SECRET is set through `fly secrets set`, never [env].
+  # TENANT_CREDENTIAL_MASTER_KEY is set through `fly secrets set` as well.
   PORT = "8000"
-  ENVIRONMENT = "staging"
+  ENVIRONMENT = "production"
+  # Trusted-ingress allowlist (S-01). On Fly, the edge proxy forwards
+  # public traffic to the app over the private 6PN network, so the app
+  # observes the proxy as an ``fdaa::/16`` peer. Only authority-bearing
+  # requests forwarded by this proxy are accepted; a direct caller (or a
+  # spoofed ``X-Tenant-ID``) is rejected. Anonymous health checks carry
+  # no authority headers and pass regardless.
+  #
+  # OPERATOR ACTION: verify this range against your deployment. If
+  # authenticated requests start returning ``400 untrusted_ingress``,
+  # read the logged ``peer`` field (app logs ``untrusted_ingress_rejected``
+  # with the real source IP) and widen TRUSTED_PROXIES to match. Getting
+  # this wrong fails CLOSED (rejects auth), never open.
+  TRUSTED_PROXIES = "fdaa::/16"
   AUTH_ENABLED = "true"
   AUTH_PROVIDER = "auth0"
   AUTH0_DOMAIN = "operious-dev.uk.auth0.com"

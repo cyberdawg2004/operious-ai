@@ -9,6 +9,7 @@ codebase never reads `os.environ` directly.
 from __future__ import annotations
 
 from functools import lru_cache
+from ipaddress import IPv4Network, IPv6Network, ip_network
 from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -84,6 +85,18 @@ class Settings(BaseSettings):
 
     AUTH_ENABLED: bool = False
     AUTH_PROVIDER: str | None = None
+
+    # ─── Ingress trust posture (S-01) ────────────────────────────────
+    # ``TRUSTED_PROXIES`` is a comma-separated list of CIDR blocks (or
+    # bare IPs) for the upstream proxies allowed to stamp authority
+    # headers. Empty in production means the STRICT fail-closed empty
+    # allowlist (every direct peer is untrusted). See
+    # ``app.middleware.trusted_ingress``.
+    TRUSTED_PROXIES: str = ""
+    # When ``None`` (default), legacy upstream-attested ``X-*-ID``
+    # identity headers are honoured everywhere EXCEPT production, where
+    # they are fail-closed. Set explicitly to force either posture.
+    LEGACY_HEADER_AUTHORITY_ENABLED: bool | None = None
 
     AUTH0_DOMAIN: str | None = None
     AUTH0_ISSUER: str | None = None
@@ -352,6 +365,50 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.ENVIRONMENT in ("local", "development", "test")
+
+    @property
+    def legacy_header_authority_enabled(self) -> bool:
+        """Whether upstream-attested ``X-*-ID`` headers are honoured.
+
+        Fail-closed in production unless explicitly overridden — a
+        direct caller must never be able to spoof tenant identity by
+        stamping the canonical identity headers itself (S-01).
+        """
+        if self.LEGACY_HEADER_AUTHORITY_ENABLED is not None:
+            return self.LEGACY_HEADER_AUTHORITY_ENABLED
+        return not self.is_production
+
+    @property
+    def trusted_proxy_networks(
+        self,
+    ) -> tuple[IPv4Network | IPv6Network, ...]:
+        """Parse ``TRUSTED_PROXIES`` into IP networks (pure parser)."""
+        networks: list[IPv4Network | IPv6Network] = []
+        for entry in self.TRUSTED_PROXIES.split(","):
+            candidate = entry.strip()
+            if not candidate:
+                continue
+            networks.append(ip_network(candidate, strict=False))
+        return tuple(networks)
+
+    @property
+    def resolved_trusted_proxies(
+        self,
+    ) -> tuple[IPv4Network | IPv6Network, ...] | None:
+        """Trusted-ingress allowlist to pass to ``create_app``.
+
+        Production always yields a concrete (possibly empty) tuple so
+        the trusted-ingress middleware is registered and the strict
+        boot guard is satisfied. Non-production deployments that pinned
+        nothing yield ``None`` to preserve the legacy no-enforcement
+        behaviour relied on by test harnesses.
+        """
+        networks = self.trusted_proxy_networks
+        if networks:
+            return networks
+        if self.is_production:
+            return ()
+        return None
 
     @property
     def use_json_logs(self) -> bool:

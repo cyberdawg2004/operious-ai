@@ -163,9 +163,13 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
         app: ASGIApp,
         *,
         auth_provider: AuthProvider | None = None,
+        legacy_header_authority_enabled: bool = True,
     ) -> None:
         super().__init__(app)
         self._auth_provider = auth_provider
+        self._legacy_header_authority_enabled = (
+            legacy_header_authority_enabled
+        )
 
     async def dispatch(
         self,
@@ -207,6 +211,26 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                 },
             )
         has_legacy = any(v is not None for v in legacy_raw.values())
+
+        # 2b. Fail-closed legacy header authority (S-01).
+        # When disabled (production posture), the upstream-attested
+        # ``X-*-ID`` identity headers are NOT an accepted authority
+        # source. A direct caller cannot spoof tenant identity by
+        # stamping the headers itself — only verified bearer credentials
+        # (or anonymous) are honoured.
+        if has_legacy and not self._legacy_header_authority_enabled:
+            logger.warning("authority_header_authority_disabled")
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "header_authority_disabled",
+                    "reason": (
+                        "legacy X-*-ID identity headers are not an "
+                        "accepted authority source in this deployment; "
+                        "present a verified bearer credential"
+                    ),
+                },
+            )
 
         # 3. Source singularity.
         if credential is not None and has_legacy:

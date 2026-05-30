@@ -44,14 +44,18 @@ export function getBackendAuthorityMode(): BackendAuthorityMode {
     process.env.NEXT_PUBLIC_OPERIOUS_BACKEND_AUTHORITY_MODE ||
     "";
   const normalized = raw.trim().toLowerCase();
+  // Fail-closed default: verified bearer (Auth0) is the only authority
+  // mode honoured by a production backend (S-01). Spoofable
+  // ``tenant-header`` mode must be opted into EXPLICITLY and is intended
+  // only for local development against a non-production backend.
   if (
-    normalized === "verified-bearer" ||
-    normalized === "bearer" ||
-    normalized === "auth0"
+    normalized === "tenant-header" ||
+    normalized === "header" ||
+    normalized === "legacy"
   ) {
-    return "verified-bearer";
+    return "tenant-header";
   }
-  return "tenant-header";
+  return "verified-bearer";
 }
 
 export async function getAuth0AccessToken(): Promise<string> {

@@ -628,6 +628,9 @@ def create_app(
     app.add_middleware(
         AuthorityContextMiddleware,
         auth_provider=auth_provider,
+        legacy_header_authority_enabled=(
+            settings.legacy_header_authority_enabled
+        ),
     )
     logger.info("middleware_authority_register_complete")
     if trusted_proxies is not None:
@@ -719,14 +722,26 @@ def select_auth_provider(settings: Settings) -> AuthProvider | None:
         assert settings.AUTH0_JWKS_URL is not None
         assert settings.AUTH0_AUDIENCE is not None
         assert settings.AUTH0_ISSUER is not None
+        namespace = settings.AUTH0_NAMESPACE.rstrip("/")
         return JWKSAuthProvider(
             jwks_uri=settings.AUTH0_JWKS_URL,
             audience=settings.AUTH0_AUDIENCE,
             issuer=settings.AUTH0_ISSUER,
             algorithms=("RS256",),
             name="auth0",
+            # Auth0 custom claims are namespaced (S-08); only the
+            # standard subject (``sub``) and RBAC ``permissions`` claims
+            # remain canonical. Mapping the bare names would leave every
+            # verified user without a tenant axis and silently pressure
+            # the frontend back into header authority mode.
             claim_mapping=ClaimMapping(
-                roles_claim=f"{settings.AUTH0_NAMESPACE}/roles",
+                tenant_id=f"{namespace}/tenant_id",
+                principal_id="sub",
+                organization_id=f"{namespace}/org_id",
+                environment_id=f"{namespace}/env",
+                capabilities=f"{namespace}/capabilities",
+                permissions_claim="permissions",
+                roles_claim=f"{namespace}/roles",
             ),
         )
     raise RuntimeError(
@@ -738,4 +753,9 @@ def select_auth_provider(settings: Settings) -> AuthProvider | None:
 
 app: FastAPI = create_app(
     auth_provider=select_auth_provider(get_settings()),
+    # Register the trusted-ingress chain from configuration so the
+    # deployed app — not just test harnesses — enforces that authority
+    # headers only arrive from pinned upstream proxies (S-01). In
+    # production this is always a concrete (possibly empty) tuple.
+    trusted_proxies=get_settings().resolved_trusted_proxies,
 )
