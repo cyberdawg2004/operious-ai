@@ -23,6 +23,7 @@ import SkewCards from "@/components/ui/gradient-card-showcase";
 import type { SkewCardProps } from "@/components/ui/gradient-card-showcase";
 import { ZoomParallax } from "@/components/ui/zoom-parallax";
 import FlowArt, { FlowSection } from "@/components/ui/story-scroll";
+import { HoverPeek } from "@/components/ui/link-preview";
 
 const containmentLayers = [
   {
@@ -317,7 +318,10 @@ export default function Home() {
                       className="group flex h-16 items-center gap-3 rounded border border-border-subtle bg-white px-3 transition-all duration-300 hover:-translate-y-0.5 hover:border-gold hover:shadow-[var(--shadow-card-hover)]"
                     >
                       <Icon className="h-4 w-4 shrink-0 text-gold" />
-                      <span className="text-[12px] font-semibold text-ink-primary">
+                      <span
+                        className="text-[12px] font-semibold text-ink-primary"
+                        style={{ fontFamily: "var(--font-inter, var(--type-geometric))" }}
+                      >
                         {industry.title}
                       </span>
                     </Link>
@@ -558,7 +562,10 @@ export default function Home() {
             <p className="mb-4 font-mono text-xs uppercase tracking-[0.25em] text-[#7A90B4]">
               Architecture
             </p>
-            <h2 className="text-3xl font-light tracking-tight text-[#D8E4F4]">
+            <h2
+              className="text-3xl font-light tracking-tight text-[#D8E4F4]"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
               The Containment Vessel
             </h2>
             <p className="mt-4 max-w-2xl leading-relaxed text-[#7A90B4]">
@@ -586,7 +593,7 @@ export default function Home() {
               <SectionLabel>Trust</SectionLabel>
               <h2
                 className="mt-5 max-w-[780px] text-[38px] font-bold leading-tight text-ink-primary sm:text-[54px]"
-                style={{ fontFamily: "var(--font-cormorant-sc)" }}
+                style={{ fontFamily: "var(--font-serif)" }}
               >
                 Trust posture stated plainly.
               </h2>
@@ -609,7 +616,7 @@ export default function Home() {
                 </p>
                 <h3
                   className="mt-4 text-[24px] font-semibold text-ink-primary"
-                  style={{ fontFamily: "var(--font-cormorant-sc)" }}
+                  style={{ fontFamily: "var(--font-serif)" }}
                 >
                   {card.title}
                 </h3>
@@ -629,7 +636,7 @@ export default function Home() {
               <SectionLabel>Insights</SectionLabel>
               <h2
                 className="mt-5 max-w-[780px] text-[38px] font-bold leading-tight text-ink-primary sm:text-[54px]"
-                style={{ fontFamily: "var(--font-cormorant-sc)" }}
+                style={{ fontFamily: "var(--font-serif)" }}
               >
                 Architecture writing for enterprise AI buyers.
               </h2>
@@ -647,12 +654,14 @@ export default function Home() {
                 href={article.href}
                 className="group block h-full rounded-md border border-border-subtle bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:border-gold hover:shadow-[var(--shadow-card-hover)]"
               >
-                <h3
-                  className="text-[24px] font-semibold leading-tight text-ink-primary"
-                  style={{ fontFamily: "var(--font-cormorant-sc)" }}
-                >
-                  {article.title}
-                </h3>
+                <HoverPeek url={`https://www.operious.com${article.href}`}>
+                  <h3
+                    className="text-[24px] font-semibold leading-tight text-ink-primary"
+                    style={{ fontFamily: "var(--font-serif)" }}
+                  >
+                    {article.title}
+                  </h3>
+                </HoverPeek>
                 <p className="mt-3 text-[15px] leading-relaxed text-ink-body">{article.body}</p>
                 <span className="mt-6 inline-flex items-center text-[13px] font-medium text-gold">
                   Read article
@@ -670,17 +679,19 @@ export default function Home() {
           <Reveal>
           <h2
             className="text-[36px] font-bold leading-tight sm:text-[50px]"
-            style={{ fontFamily: "var(--font-cormorant-sc)" }}
+            style={{ fontFamily: "var(--font-serif)" }}
           >
             See how Operious eliminates the trust gap in enterprise AI operations.
           </h2>
-          <Link
-            href="/company/contact"
-            className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.2)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.28)]"
-          >
-            Request enterprise access
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Link>
+          <MagneticWrapper>
+            <Link
+              href="/company/contact"
+              className="mt-8 inline-flex h-12 items-center justify-center rounded-md bg-[#C9A84C] px-6 text-[14px] font-semibold text-[#05080F] shadow-[0_12px_34px_rgba(201,168,76,0.2)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#D4B85A] hover:shadow-[0_18px_44px_rgba(201,168,76,0.28)]"
+            >
+              Request enterprise access
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
+          </MagneticWrapper>
           </Reveal>
         </RevealGroup>
       </section>
