@@ -87,7 +87,7 @@
   --color-status-error: var(--status-error);
   --font-sans: var(--type-geometric);
   --font-mono: var(--type-technical);
-  --font-serif: var(--type-geometric);
+  --font-serif: var(--font-playfair), 'Playfair Display', Georgia, serif;
   
   /* Shadow tokens */
   --shadow-dropdown: 0 8px 32px rgba(10, 15, 28, 0.12), 0 2px 8px rgba(10, 15, 28, 0.08);
