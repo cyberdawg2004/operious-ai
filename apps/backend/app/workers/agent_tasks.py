@@ -115,6 +115,9 @@ from app.runtime.provider_circuit_breaker import (
     ProviderCircuitBreaker,
     ProviderCircuitSnapshot,
 )
+from app.workers.execution_completion_events import (
+    WorkerExecutionCompletionEventSink,
+)
 from app.session.contracts.requests import AppendEventRequest
 from app.session.contracts.results import AppendEventResult
 from app.session.conversation import (
@@ -768,7 +771,10 @@ async def _persist_diagnostic_success(
             try:
                 await _set_transaction_tenant(session, work_item.tenant_id)
                 execution_runtime = ExecutionRuntime(
-                    persistence=PostgresExecutionPersistence(session)
+                    persistence=PostgresExecutionPersistence(session),
+                    completion_event_sink=WorkerExecutionCompletionEventSink(
+                        session=session
+                    ),
                 )
                 session_repo = PostgresSessionPersistence(session)
                 timeline = TimelineRuntime(persistence=session_repo)

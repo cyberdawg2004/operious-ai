@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any, Mapping
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
@@ -44,7 +45,7 @@ class PostgresOperationalEventPersistence(
         except IntegrityError as exc:
             existing = await self.get_event(event.event_id)
             if existing is not None:
-                if existing == event:
+                if existing == event or existing == _event_with_schema_version(event):
                     return existing
                 raise EventPersistenceError(
                     f"event {event.event_id!r} already exists with different content"
@@ -216,7 +217,31 @@ def _event_to_row(event: OperationalEvent) -> OperationalEventRow:
             else event.governance_decision.value
         ),
         governance_decision_id=event.governance_decision_id,
-        metadata_json=dict(event.metadata),
+        metadata_json=_metadata_with_schema_version(event.metadata),
+    )
+
+
+def _metadata_with_schema_version(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    versioned = dict(metadata)
+    versioned["_schema_version"] = "1"
+    return versioned
+
+
+def _event_with_schema_version(event: OperationalEvent) -> OperationalEvent:
+    return OperationalEvent(
+        event_id=event.event_id,
+        operational_act=event.operational_act,
+        substrate=event.substrate,
+        causality=event.causality,
+        chronology=event.chronology,
+        tenant_id=event.tenant_id,
+        principal_id=event.principal_id,
+        organization_id=event.organization_id,
+        environment_id=event.environment_id,
+        tenant_authority_source=event.tenant_authority_source,
+        governance_decision=event.governance_decision,
+        governance_decision_id=event.governance_decision_id,
+        metadata=_metadata_with_schema_version(event.metadata),
     )
 
 

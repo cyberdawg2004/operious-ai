@@ -231,9 +231,11 @@ async def test_postgres_event_runtime_round_trip(
         OperationalEventQuery(tenant_id=event.tenant_id)
     )
 
-    assert got == event
+    assert got is not None
+    assert got.event_id == event.event_id
+    assert got.metadata == {"_schema_version": "1", "a": 1}
     assert page.total == 1
-    assert page.events[0] == event
+    assert page.events[0] == got
 
 
 @pytest.mark.asyncio

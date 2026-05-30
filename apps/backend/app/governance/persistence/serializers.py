@@ -66,6 +66,7 @@ def decision_to_record(decision: GovernanceDecision) -> GovernanceDecisionRecord
     tenant_id = md.pop("tenant_id", None)
     subject_kind = md.pop("subject_kind", "generic")
     governance_version = md.pop("governance_version", "unversioned")
+    md["_schema_version"] = "1"
     return GovernanceDecisionRecord(
         decision_id=str(decision.decision_id),
         decision=decision.decision.value,

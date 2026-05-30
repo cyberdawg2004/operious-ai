@@ -181,6 +181,7 @@ class GovernanceRuntime:
             evaluation_results=engine_result.evaluation_results,
             metadata={
                 **dict(context.metadata),
+                "_schema_version": "1",
                 "action": context.action,
                 "resource": context.resource,
                 "tenant_id": context.tenant_id,
@@ -374,6 +375,7 @@ class GovernanceRuntime:
             evaluation_results=(),
             metadata={
                 **dict(context.metadata),
+                "_schema_version": "1",
                 "action": context.action,
                 "resource": context.resource,
                 "tenant_id": context.tenant_id,

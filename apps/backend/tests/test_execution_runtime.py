@@ -20,10 +20,24 @@ from app.execution import (
 )
 from app.execution.enums import ExecutionKind, ExecutionOutboxState
 from app.execution.exceptions import ExecutionAdmissionError
+from app.events import (
+    InMemoryOperationalEventPersistence,
+    OperationalEventQuery,
+    OperationalEventRuntime,
+    OperationalSubstrate,
+)
+from app.governance.capability.acts import OperationalAct
+from app.runtime.execution_event_projection import ExecutionCompletionEventSink
 from tests.conftest import execution_admission_token
 
 
 _NOW = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
+
+
+class _FailingCompletionEventSink:
+    async def append_execution_completed(self, **kwargs: object) -> None:
+        del kwargs
+        raise RuntimeError("event fabric unavailable")
 
 
 @pytest.mark.asyncio
@@ -299,6 +313,88 @@ async def test_completed_execution_cannot_be_reclaimed() -> None:
     assert completed.result == {"summary": "done"}
     assert duplicate.claimed is False
     assert duplicate.reason == "execution_not_claimable:completed"
+
+
+@pytest.mark.asyncio
+async def test_execution_completed_event_appended() -> None:
+    store = InMemoryExecutionPersistence()
+    event_store = InMemoryOperationalEventPersistence()
+    runtime = ExecutionRuntime(
+        persistence=store,
+        completion_event_sink=ExecutionCompletionEventSink(
+            event_runtime=OperationalEventRuntime(persistence=event_store)
+        ),
+    )
+    request = await runtime.request_diagnostic_execution(
+        dispatch_id="dispatch-complete-event",
+        session_id="session-complete-event",
+        tenant_id="tenant-a",
+        requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
+    )
+    claimed = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-a",
+        claimed_at=_NOW,
+    )
+    assert claimed.attempt is not None
+
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-a",
+        result={
+            "diagnostic_category": "charging_issue",
+            "diagnostic_summary": "done",
+        },
+        completed_at=_NOW,
+    )
+    page = await event_store.list_events(
+        OperationalEventQuery(
+            operational_act=OperationalAct.EXECUTION_COMPLETE,
+            substrate=OperationalSubstrate.EXECUTION,
+        ),
+        expected_tenant_id="tenant-a",
+    )
+
+    assert completed.state is ExecutionState.COMPLETED
+    assert page.total == 1
+    event = page.events[0]
+    assert event.metadata["_schema_version"] == "1"
+    assert event.metadata["execution_id"] == str(request.execution.execution_id)
+    assert event.metadata["result_category"] == "charging_issue"
+
+
+@pytest.mark.asyncio
+async def test_execution_event_fail_open() -> None:
+    store = InMemoryExecutionPersistence()
+    runtime = ExecutionRuntime(
+        persistence=store,
+        completion_event_sink=_FailingCompletionEventSink(),
+    )
+    request = await runtime.request_diagnostic_execution(
+        dispatch_id="dispatch-complete-event-fail-open",
+        session_id="session-complete-event-fail-open",
+        tenant_id="tenant-a",
+        requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
+    )
+    claimed = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-a",
+        claimed_at=_NOW,
+    )
+    assert claimed.attempt is not None
+
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-a",
+        result={"diagnostic_category": "charging_issue"},
+        completed_at=_NOW,
+    )
+
+    assert completed.state is ExecutionState.COMPLETED
 
 
 @pytest.mark.asyncio

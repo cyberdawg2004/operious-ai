@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Mapping, cast
+from typing import Any, Mapping, Protocol, cast
 
 from app.execution.enums import (
     ExecutionAttemptState,
@@ -48,6 +48,19 @@ from app.execution.persistence import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ExecutionCompletionEventSink(Protocol):
+    """Best-effort event sink for completed execution transitions."""
+
+    async def append_execution_completed(
+        self,
+        *,
+        execution: ExecutionRecord,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        result: Mapping[str, Any],
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,8 +164,10 @@ class ExecutionRuntime:
         self,
         *,
         persistence: ExecutionPersistenceProtocol,
+        completion_event_sink: ExecutionCompletionEventSink | None = None,
     ) -> None:
         self._persistence = persistence
+        self._completion_event_sink = completion_event_sink
 
     @property
     def persistence(self) -> ExecutionPersistenceProtocol:
@@ -492,7 +507,41 @@ class ExecutionRuntime:
         )
         if isinstance(outcome, ExecutionClaimLost):
             _log_execution_claim_lost(outcome, operation="complete")
+        else:
+            await self._append_execution_completed_event(
+                execution=outcome,
+                attempt_id=aid,
+                worker_id=worker_id,
+                result=result_envelope.to_dict(),
+            )
         return outcome
+
+    async def _append_execution_completed_event(
+        self,
+        *,
+        execution: ExecutionRecord,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        result: Mapping[str, Any],
+    ) -> None:
+        if self._completion_event_sink is None:
+            return
+        try:
+            await self._completion_event_sink.append_execution_completed(
+                execution=execution,
+                attempt_id=attempt_id,
+                worker_id=worker_id,
+                result=result,
+            )
+        except Exception as exc:  # noqa: BLE001 - event emission is fail-open.
+            logger.warning(
+                "execution_completed_event_failed",
+                extra={
+                    "execution_id": str(execution.execution_id),
+                    "tenant_id": execution.tenant_id,
+                    "error": str(exc),
+                },
+            )
 
     async def fail_execution(
         self,

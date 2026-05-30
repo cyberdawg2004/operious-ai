@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events import (
     EventCausality,
@@ -43,6 +45,7 @@ from app.events import (
 )
 from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 
 _RUNTIME = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -327,6 +330,57 @@ def test_event_id_distinguishes_two_chronology_points() -> None:
 def test_event_metadata_defaults_to_empty_mapping() -> None:
     event = _make_event()
     assert dict(event.metadata) == {}
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_schema_version_in_operational_event_metadata(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = "tenant-event-schema-version"
+    runtime_instance_id = uuid.uuid5(
+        uuid.NAMESPACE_DNS,
+        "operational-event-schema-version",
+    )
+    event_id = derive_event_id(
+        operational_act=OperationalAct.SESSION_OPEN.value,
+        substrate=OperationalSubstrate.SESSION.value,
+        runtime_instance_id=runtime_instance_id,
+        sequence=0,
+        tenant_id=tenant_id,
+        parent_event_id=None,
+    )
+    event = _make_event(
+        event_id=event_id,
+        causality=EventCausality(root_event_id=event_id),
+        chronology=EventChronology(
+            runtime_instance_id=runtime_instance_id,
+            sequence=0,
+            occurred_at=_NOW,
+        ),
+        tenant_id=tenant_id,
+        metadata={"source": "test"},
+    )
+    await set_pg_rls_tenant(pg_session, tenant_id)
+
+    await OperationalEventRuntime(
+        persistence=PostgresOperationalEventPersistence(pg_session)
+    ).append_event(event, expected_tenant_id=tenant_id)
+    row = (
+        await pg_session.execute(
+            text(
+                """
+                SELECT metadata
+                FROM operational_events
+                WHERE event_id = :event_id
+                """
+            ),
+            {"event_id": uuid.UUID(str(event.event_id))},
+        )
+    ).scalar_one()
+
+    assert row["_schema_version"] == "1"
+    assert row["source"] == "test"
 
 
 def test_event_query_rejects_invalid_replay_windows() -> None:

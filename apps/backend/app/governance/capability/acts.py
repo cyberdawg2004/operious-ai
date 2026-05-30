@@ -52,6 +52,7 @@ class OperationalAct(StrEnum):
 
     # ─── boundary chronology projection ─────────────────────────────
     BOUNDARY_INGEST = "boundary:ingest"
+    SEMANTIC_QUARANTINE_CREATED = "boundary:semantic_quarantine_created"
 
     # ─── boundary (translation) ─────────────────────────────────────
     BOUNDARY_TRANSLATION_INGRESS = "boundary_translation:ingress"
@@ -68,6 +69,7 @@ class OperationalAct(StrEnum):
 
     # ─── governance chronology projection ───────────────────────────
     GOVERNANCE_DECIDE = "governance:decide"
+    GOVERNANCE_CRISIS_DEPLOY = "governance:crisis_deploy"
 
     # ─── execution chronology projection ────────────────────────────
     EXECUTION_REQUEST = "execution:request"

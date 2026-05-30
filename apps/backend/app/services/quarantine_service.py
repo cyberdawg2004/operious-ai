@@ -12,6 +12,14 @@ from typing import Any, Protocol, cast
 from sqlalchemy import Select, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.events import (
+    EventCausality,
+    EventChronology,
+    OperationalEvent,
+    OperationalSubstrate,
+    derive_event_id,
+)
+from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
 from app.governance.identity import derive_decision_id
 from app.governance.persistence import (
@@ -83,6 +91,15 @@ class TicketReingestCallback(Protocol):
         expected_tenant_id: str,
         semantic_quarantine_enabled: bool,
     ) -> Awaitable[object]: ...
+
+
+class OperationalEventAppenderProtocol(Protocol):
+    async def append_event(
+        self,
+        event: OperationalEvent,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +247,7 @@ class QuarantineService:
         governance_repository: BaseGovernanceRepository | None = None,
         publisher: SemanticQuarantinePublisher | None = None,
         ticket_reingest: TicketReingestCallback | None = None,
+        event_runtime: OperationalEventAppenderProtocol | None = None,
     ) -> None:
         self._session = session
         self._repository = repository or SemanticQuarantineRepository(session)
@@ -238,6 +256,7 @@ class QuarantineService:
         )
         self._publisher = publisher or _UnavailableSemanticQuarantinePublisher()
         self._ticket_reingest = ticket_reingest
+        self._event_runtime = event_runtime
 
     async def quarantine_ticket(
         self,
@@ -262,9 +281,11 @@ class QuarantineService:
             cluster_size=cluster_size,
             similarity_threshold=similarity_threshold,
             metadata={
+                "_schema_version": "1",
                 "semantic_quarantine_queue": QUEUE_SEMANTIC_QUARANTINE,
             },
         )
+        await self._append_quarantine_operational_event(record)
         try:
             self._publisher.publish(
                 quarantine_id=record.quarantine_id,
@@ -286,6 +307,28 @@ class QuarantineService:
                 },
             )
         return record.quarantine_id
+
+    async def _append_quarantine_operational_event(
+        self,
+        record: SemanticQuarantineRecord,
+    ) -> None:
+        if self._event_runtime is None:
+            return
+        try:
+            async with self._session.begin_nested():
+                await self._event_runtime.append_event(
+                    _semantic_quarantine_operational_event(record),
+                    expected_tenant_id=record.tenant_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - event emission is fail-open.
+            logger.warning(
+                "semantic_quarantine_event_failed",
+                extra={
+                    "quarantine_id": record.quarantine_id,
+                    "tenant_id": record.tenant_id,
+                    "error": str(exc),
+                },
+            )
 
     async def release(
         self,
@@ -393,6 +436,7 @@ class QuarantineService:
         decided_at: datetime,
     ) -> None:
         metadata = {
+            "_schema_version": "1",
             "quarantine_id": record.quarantine_id,
             "channel": record.channel,
             "external_id": record.external_id,
@@ -469,6 +513,40 @@ def _record_from_row(row: SemanticQuarantineRecordRow) -> SemanticQuarantineReco
         resolution_note=row.resolution_note,
         created_at=row.created_at,
         metadata=dict(row.metadata_json or {}),
+    )
+
+
+def _semantic_quarantine_operational_event(
+    record: SemanticQuarantineRecord,
+) -> OperationalEvent:
+    runtime_instance_id = uuid.UUID(record.quarantine_id)
+    sequence = 0
+    event_id = derive_event_id(
+        operational_act=OperationalAct.SEMANTIC_QUARANTINE_CREATED.value,
+        substrate=OperationalSubstrate.BOUNDARY.value,
+        runtime_instance_id=runtime_instance_id,
+        sequence=sequence,
+        tenant_id=record.tenant_id,
+        parent_event_id=None,
+    )
+    return OperationalEvent(
+        event_id=event_id,
+        operational_act=OperationalAct.SEMANTIC_QUARANTINE_CREATED,
+        substrate=OperationalSubstrate.BOUNDARY,
+        causality=EventCausality(root_event_id=event_id),
+        chronology=EventChronology(
+            runtime_instance_id=runtime_instance_id,
+            sequence=sequence,
+            occurred_at=record.created_at,
+        ),
+        tenant_id=record.tenant_id,
+        metadata={
+            "_schema_version": "1",
+            "quarantine_id": record.quarantine_id,
+            "tenant_id": record.tenant_id,
+            "channel": record.channel,
+            "cluster_size": record.cluster_size,
+        },
     )
 
 

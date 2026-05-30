@@ -160,6 +160,7 @@ class DefectClusterDetectionRuntime:
             failure_step_hint=None,
             status="detected",
             metadata_json={
+                "_schema_version": "1",
                 "execution_ids": list(candidate.execution_ids),
             },
         )
@@ -241,6 +242,7 @@ def _defect_cluster_detected_event(
         parent_event_id=None,
     )
     metadata: dict[str, Any] = {
+        "_schema_version": "1",
         "cluster_id": str(cluster_id),
         "tenant_id": candidate.tenant_id,
         "category": candidate.category,

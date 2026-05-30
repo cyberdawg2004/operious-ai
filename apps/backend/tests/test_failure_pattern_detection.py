@@ -58,6 +58,10 @@ async def test_dlq_pattern_detected_at_threshold(
     assert patterns[0].category == "charging_issue"
     assert patterns[0].failure_count == DLQ_THRESHOLD
     assert patterns[0].pattern_source == "dlq"
+    assert set(patterns[0].metadata["trigger_dlq_ids"]) == {
+        str(uuid.uuid5(_NAMESPACE, f"dlq:{tenant_id}:charging_issue:{index}"))
+        for index in range(DLQ_THRESHOLD)
+    }
 
 
 async def test_dlq_pattern_not_detected_below_threshold(
@@ -136,6 +140,52 @@ async def test_admission_pattern_detected(pg_session: AsyncSession) -> None:
     assert patterns[0].category == "admission_voice"
     assert patterns[0].failure_count == DLQ_THRESHOLD
     assert patterns[0].pattern_source == "admission"
+    assert set(patterns[0].metadata["trigger_admission_ids"]) == {
+        str(uuid.uuid5(_NAMESPACE, f"admission:{tenant_id}:voice:{index}"))
+        for index in range(DLQ_THRESHOLD)
+    }
+
+
+async def test_failure_pattern_stores_trigger_ids(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = "tenant-failure-trigger-ids"
+    await _seed_dlq_records(
+        pg_session,
+        tenant_id=tenant_id,
+        category="charging_issue",
+        count=DLQ_THRESHOLD,
+    )
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    runtime = FailurePatternDetectionRuntime(
+        session=pg_session,
+        event_persistence=InMemoryOperationalEventPersistence(),
+        now=lambda: _NOW,
+    )
+
+    patterns = await runtime.detect_dlq_patterns(
+        tenant_id=tenant_id,
+        expected_tenant_id=tenant_id,
+    )
+    result = await runtime.record_detected_pattern(
+        pattern=patterns[0],
+        expected_tenant_id=tenant_id,
+        window_hours=DLQ_WINDOW_HOURS,
+        threshold=DLQ_THRESHOLD,
+    )
+    row = (
+        await pg_session.execute(
+            select(SOPFailurePatternRow).where(
+                SOPFailurePatternRow.pattern_id == result.pattern_id
+            )
+        )
+    ).scalar_one()
+
+    assert row.metadata_json["_schema_version"] == "1"
+    assert set(row.metadata_json["trigger_dlq_ids"]) == {
+        str(uuid.uuid5(_NAMESPACE, f"dlq:{tenant_id}:charging_issue:{index}"))
+        for index in range(DLQ_THRESHOLD)
+    }
 
 
 async def test_pattern_persisted_idempotent(

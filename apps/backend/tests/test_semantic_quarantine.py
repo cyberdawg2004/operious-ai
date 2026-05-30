@@ -9,6 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.boundary.persistence import InMemoryBoundaryPersistence
 from app.core.config import get_settings
+from app.events import (
+    InMemoryOperationalEventPersistence,
+    OperationalEventQuery,
+    OperationalEventRuntime,
+    OperationalSubstrate,
+)
+from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
 from app.governance.persistence import DecisionQuery, PostgresGovernanceRepository
 from app.semantic import (
@@ -162,6 +169,36 @@ async def test_tripped_circuit_routes_to_quarantine(
     assert result.quarantine_id is not None
     assert [record.quarantine_id for record in records] == [result.quarantine_id]
     assert publisher.calls
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_quarantine_emits_event(
+    pg_session: AsyncSession,
+) -> None:
+    event_store = InMemoryOperationalEventPersistence()
+    quarantine = QuarantineService(
+        pg_session,
+        publisher=_FakePublisher(),
+        event_runtime=OperationalEventRuntime(persistence=event_store),
+    )
+
+    record = await _create_pending_quarantine(quarantine)
+    page = await event_store.list_events(
+        OperationalEventQuery(
+            operational_act=OperationalAct.SEMANTIC_QUARANTINE_CREATED,
+            substrate=OperationalSubstrate.BOUNDARY,
+        ),
+        expected_tenant_id=_TENANT_ID,
+    )
+
+    assert page.total == 1
+    event = page.events[0]
+    assert event.metadata["_schema_version"] == "1"
+    assert event.metadata["quarantine_id"] == record.quarantine_id
+    assert event.metadata["tenant_id"] == _TENANT_ID
+    assert event.metadata["channel"] == "email"
+    assert event.metadata["cluster_size"] == 5
 
 
 @requires_postgres

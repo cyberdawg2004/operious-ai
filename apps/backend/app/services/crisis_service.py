@@ -8,13 +8,21 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import sentry_sdk
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.events import (
+    EventCausality,
+    EventChronology,
+    OperationalEvent,
+    OperationalSubstrate,
+    derive_event_id,
+)
+from app.governance.capability.acts import OperationalAct
 from app.governance.crisis.templates import (
     CrisisDeploymentRecord,
     CrisisDeploymentScope,
@@ -38,6 +46,15 @@ class CrisisServiceError(RuntimeError):
     """Raised when a crisis deployment request cannot be completed."""
 
 
+class OperationalEventAppenderProtocol(Protocol):
+    async def append_event(
+        self,
+        event: OperationalEvent,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> object: ...
+
+
 class CrisisService:
     def __init__(
         self,
@@ -45,12 +62,14 @@ class CrisisService:
         session: AsyncSession,
         redis_client: Any,
         event_repository: CrisisEventRepository | None = None,
+        event_runtime: OperationalEventAppenderProtocol | None = None,
     ) -> None:
         self._session = session
         self._redis = redis_client
         self._event_repository = event_repository or PostgresCrisisEventRepository(
             session
         )
+        self._event_runtime = event_runtime
 
     async def deploy(
         self,
@@ -85,6 +104,7 @@ class CrisisService:
             scope=normalized_scope,
         )
         metadata = {
+            "_schema_version": "1",
             "redis_key": redis_key,
             "decision": decision,
             "dry_run": dry_run,
@@ -158,6 +178,13 @@ class CrisisService:
                 occurred_at=now,
             )
         )
+        await self._append_deployment_operational_event(
+            tenant_id=tenant_id,
+            deployment_id=deployment_id,
+            template=template,
+            ttl_minutes=ttl_minutes,
+            occurred_at=now,
+        )
         _capture_crisis_message(
             message=f"CRISIS RULE DEPLOYED: {template.value} on tenant {tenant_id}",
             level="warning",
@@ -171,6 +198,40 @@ class CrisisService:
             },
         )
         return _record_from_row(row)
+
+    async def _append_deployment_operational_event(
+        self,
+        *,
+        tenant_id: str,
+        deployment_id: uuid.UUID,
+        template: CrisisTemplate,
+        ttl_minutes: int,
+        occurred_at: datetime,
+    ) -> None:
+        if self._event_runtime is None:
+            return
+        try:
+            async with self._session.begin_nested():
+                await self._event_runtime.append_event(
+                    _deployment_operational_event(
+                        tenant_id=tenant_id,
+                        deployment_id=deployment_id,
+                        template=template,
+                        ttl_minutes=ttl_minutes,
+                        occurred_at=occurred_at,
+                    ),
+                    expected_tenant_id=tenant_id,
+                )
+            await self._session.commit()
+        except Exception as exc:  # noqa: BLE001 - event emission is fail-open.
+            _logger.warning(
+                "crisis_deployment_event_failed",
+                extra={
+                    "deployment_id": str(deployment_id),
+                    "tenant_id": tenant_id,
+                    "error": str(exc),
+                },
+            )
 
     async def deactivate(
         self,
@@ -480,6 +541,48 @@ def _event_record(
         actor=actor,
         occurred_at=occurred_at,
         metadata={},
+    )
+
+
+def _deployment_operational_event(
+    *,
+    tenant_id: str,
+    deployment_id: uuid.UUID,
+    template: CrisisTemplate,
+    ttl_minutes: int,
+    occurred_at: datetime,
+) -> OperationalEvent:
+    runtime_instance_id = uuid.uuid5(
+        _DEPLOYMENT_NAMESPACE,
+        f"operational_event:{deployment_id}:deployed:{occurred_at.isoformat()}",
+    )
+    sequence = 0
+    event_id = derive_event_id(
+        operational_act=OperationalAct.GOVERNANCE_CRISIS_DEPLOY.value,
+        substrate=OperationalSubstrate.GOVERNANCE.value,
+        runtime_instance_id=runtime_instance_id,
+        sequence=sequence,
+        tenant_id=tenant_id,
+        parent_event_id=None,
+    )
+    return OperationalEvent(
+        event_id=event_id,
+        operational_act=OperationalAct.GOVERNANCE_CRISIS_DEPLOY,
+        substrate=OperationalSubstrate.GOVERNANCE,
+        causality=EventCausality(root_event_id=event_id),
+        chronology=EventChronology(
+            runtime_instance_id=runtime_instance_id,
+            sequence=sequence,
+            occurred_at=occurred_at,
+        ),
+        tenant_id=tenant_id,
+        metadata={
+            "_schema_version": "1",
+            "deployment_id": str(deployment_id),
+            "template": template.value,
+            "tenant_id": tenant_id,
+            "ttl_minutes": ttl_minutes,
+        },
     )
 
 

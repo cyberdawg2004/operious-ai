@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import String, and_, cast as sa_cast, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,7 @@ DLQ_THRESHOLD: int = 3
 _DIAGNOSTIC_TASK_NAME = "execute_diagnostic_agent"
 _UNKNOWN_DIAGNOSTIC_CATEGORY = "unknown_diagnostic"
 _FAILURE_PATTERN_NAMESPACE = uuid.UUID("a8b67337-169c-5f76-9260-a0d3190d8c7d")
+_TRIGGER_ID_LIMIT = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,7 @@ class FailurePattern:
     pattern_source: str
     window_start: datetime
     window_end: datetime
+    metadata: Mapping[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +100,16 @@ class FailurePatternDetectionRuntime:
             _UNKNOWN_DIAGNOSTIC_CATEGORY,
         )
         count_expr = func.count(DeadLetterTaskRow.dead_letter_task_id)
+        trigger_ids_expr = func.array_agg(
+            sa_cast(DeadLetterTaskRow.dead_letter_task_id, String)
+        )
         stmt = (
             select(
                 category_expr.label("category"),
                 count_expr.label("failure_count"),
+                trigger_ids_expr.label("trigger_dlq_ids"),
+                func.min(DeadLetterTaskRow.created_at).label("window_start"),
+                func.max(DeadLetterTaskRow.created_at).label("window_end"),
             )
             .select_from(DeadLetterTaskRow)
             .outerjoin(
@@ -128,8 +136,11 @@ class FailurePatternDetectionRuntime:
                 category=str(row[0] or _UNKNOWN_DIAGNOSTIC_CATEGORY),
                 failure_count=int(row[1]),
                 pattern_source="dlq",
-                window_start=window_start,
-                window_end=window_end,
+                window_start=_coerce_aware(cast(datetime, row[3])),
+                window_end=_coerce_aware(cast(datetime, row[4])),
+                metadata={
+                    "trigger_dlq_ids": _bounded_trigger_ids(row[2]),
+                },
             )
             for row in rows
         ]
@@ -152,10 +163,16 @@ class FailurePatternDetectionRuntime:
             now=self._now(),
         )
         count_expr = func.count(AdmissionRecordRow.decision_id)
+        trigger_ids_expr = func.array_agg(
+            sa_cast(AdmissionRecordRow.decision_id, String)
+        )
         stmt = (
             select(
                 AdmissionRecordRow.channel,
                 count_expr.label("failure_count"),
+                trigger_ids_expr.label("trigger_admission_ids"),
+                func.min(AdmissionRecordRow.evaluated_at).label("window_start"),
+                func.max(AdmissionRecordRow.evaluated_at).label("window_end"),
             )
             .where(
                 AdmissionRecordRow.tenant_id == expected_tenant_id,
@@ -174,8 +191,11 @@ class FailurePatternDetectionRuntime:
                 category=f"admission_{_category_part(cast(str | None, row[0]))}",
                 failure_count=int(row[1]),
                 pattern_source="admission",
-                window_start=window_start,
-                window_end=window_end,
+                window_start=_coerce_aware(cast(datetime, row[3])),
+                window_end=_coerce_aware(cast(datetime, row[4])),
+                metadata={
+                    "trigger_admission_ids": _bounded_trigger_ids(row[2]),
+                },
             )
             for row in rows
         ]
@@ -204,12 +224,14 @@ class FailurePatternDetectionRuntime:
             window_start=pattern.window_start,
         )
         pattern_metadata = {
+            "_schema_version": "1",
             "tenant_id": pattern.tenant_id,
             "category": pattern.category,
             "pattern_source": pattern.pattern_source,
             "failure_count": pattern.failure_count,
             "window_start": pattern.window_start.isoformat(),
             "window_end": pattern.window_end.isoformat(),
+            **dict(pattern.metadata),
             **dict(metadata or {}),
         }
         stmt = (
@@ -307,6 +329,7 @@ def _sop_failure_pattern_detected_event(
         parent_event_id=None,
     )
     metadata: dict[str, Any] = {
+        "_schema_version": "1",
         "pattern_id": str(pattern_id),
         "tenant_id": pattern.tenant_id,
         "category": pattern.category,
@@ -316,6 +339,7 @@ def _sop_failure_pattern_detected_event(
         "window_start": pattern.window_start.isoformat(),
         "window_end": pattern.window_end.isoformat(),
         "threshold_used": threshold,
+        **dict(pattern.metadata),
     }
     return OperationalEvent(
         event_id=event_id,
@@ -359,6 +383,16 @@ def _parse_uuid(value: str | uuid.UUID) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(value)
+
+
+def _bounded_trigger_ids(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list | tuple):
+        values = tuple(cast(Sequence[object], value))
+    else:
+        values = (value,)
+    return [str(item) for item in values if item is not None][:_TRIGGER_ID_LIMIT]
 
 
 def _utcnow() -> datetime:

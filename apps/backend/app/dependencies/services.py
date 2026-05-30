@@ -90,6 +90,7 @@ from app.execution import (
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.execution.publisher import ExecutionPublisher, QueueBackpressureCheck
 from app.events import PostgresOperationalEventPersistence
+from app.events.appender import OperationalEventAppender
 from app.events.read_service import OperationalEventReader
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
@@ -320,6 +321,9 @@ def get_ticket_ingress_service(
             session,
             governance_repository=PostgresGovernanceRepository(session),
             publisher=CelerySemanticQuarantinePublisher(),
+            event_runtime=OperationalEventAppender(
+                persistence=PostgresOperationalEventPersistence(session)
+            ),
         ),
         webhook_queue_by_channel={
             TenantChannelType.EMAIL: DIAGNOSTIC_QUEUE_PRIORITY,
@@ -360,6 +364,9 @@ def get_quarantine_service(
         governance_repository=PostgresGovernanceRepository(session),
         publisher=CelerySemanticQuarantinePublisher(),
         ticket_reingest=_ticket_reingest,
+        event_runtime=OperationalEventAppender(
+            persistence=PostgresOperationalEventPersistence(session)
+        ),
     )
 
 
@@ -706,6 +713,9 @@ def get_crisis_service(
         session=session,
         redis_client=get_redis_client(),
         event_repository=PostgresCrisisEventRepository(session),
+        event_runtime=OperationalEventAppender(
+            persistence=PostgresOperationalEventPersistence(session)
+        ),
     )
 
 

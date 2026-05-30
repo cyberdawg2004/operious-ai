@@ -37,6 +37,7 @@ regardless of backend.
 
 from __future__ import annotations
 
+from typing import Any, Mapping
 from uuid import UUID
 
 from sqlalchemy import Select, select
@@ -100,7 +101,7 @@ class PostgresGovernanceRepository(BaseRepository):
             violations=[v.to_dict() for v in record.violations],
             restrictions=[r.to_dict() for r in record.restrictions],
             evaluated_rules=[e.to_dict() for e in record.evaluated_rules],
-            metadata_json=dict(record.metadata),
+            metadata_json=_metadata_with_schema_version(record.metadata),
         )
         try:
             # SAVEPOINT-isolated insert: IntegrityError rolls back the
@@ -399,6 +400,12 @@ def _decision_row_to_record(
         ),
         metadata=dict(row.metadata_json),
     )
+
+
+def _metadata_with_schema_version(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    versioned = dict(metadata)
+    versioned["_schema_version"] = "1"
+    return versioned
 
 
 def _trace_row_to_record(

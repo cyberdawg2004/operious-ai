@@ -17,6 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.api.v1.routers.crisis import router as crisis_router
 from app.dependencies.authority import require_tenant_scope
 from app.dependencies.services import get_crisis_service
+from app.events import (
+    InMemoryOperationalEventPersistence,
+    OperationalEventQuery,
+    OperationalEventRuntime,
+    OperationalSubstrate,
+)
+from app.governance.capability.acts import OperationalAct
 from app.governance.crisis import CrisisDeploymentScope, CrisisTemplate
 from app.governance.db.models import CrisisDeploymentRow, CrisisEventRow
 from app.services.crisis_events import (
@@ -71,6 +78,43 @@ async def test_deploy_writes_deployed_event(
         assert events[0].template == "block_sku"
         assert events[0].actor == "principal-a"
         assert str(events[0].deployment_id) == record.deployment_id
+
+
+@pytest.mark.asyncio
+async def test_crisis_deploy_emits_event(
+    crisis_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    event_store = InMemoryOperationalEventPersistence()
+    async with crisis_session_factory() as session:
+        record = await _service(
+            session,
+            event_runtime=OperationalEventRuntime(persistence=event_store),
+        ).deploy(
+            tenant_id="tenant-a",
+            expected_tenant_id="tenant-a",
+            template=CrisisTemplate.BLOCK_SKU,
+            scope=CrisisDeploymentScope(
+                template=CrisisTemplate.BLOCK_SKU,
+                sku="A3219",
+            ),
+            ttl_minutes=30,
+            deployed_by="principal-a",
+        )
+
+    page = await event_store.list_events(
+        OperationalEventQuery(
+            operational_act=OperationalAct.GOVERNANCE_CRISIS_DEPLOY,
+            substrate=OperationalSubstrate.GOVERNANCE,
+        ),
+        expected_tenant_id="tenant-a",
+    )
+
+    assert page.total == 1
+    event = page.events[0]
+    assert event.metadata["_schema_version"] == "1"
+    assert event.metadata["deployment_id"] == record.deployment_id
+    assert event.metadata["template"] == "block_sku"
+    assert event.metadata["ttl_minutes"] == 30
 
 
 @pytest.mark.asyncio
@@ -259,11 +303,16 @@ async def test_sentry_failure_does_not_block_deploy(
     assert record.status == "active"
 
 
-def _service(session: AsyncSession, redis: _FakeRedis | None = None) -> CrisisService:
+def _service(
+    session: AsyncSession,
+    redis: _FakeRedis | None = None,
+    event_runtime: OperationalEventRuntime | None = None,
+) -> CrisisService:
     return CrisisService(
         session=session,
         redis_client=redis or _FakeRedis(),
         event_repository=PostgresCrisisEventRepository(session),
+        event_runtime=event_runtime,
     )
 
 

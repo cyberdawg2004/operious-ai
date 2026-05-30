@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.events import (
     EventCausality,
     EventChronology,
@@ -20,9 +22,11 @@ from app.events import (
     OperationalEvent,
     OperationalEventRuntime,
     OperationalSubstrate,
+    PostgresOperationalEventPersistence,
     derive_event_id,
 )
 from app.execution import (
+    ExecutionAttemptId,
     ExecutionAttemptQuery,
     ExecutionAttemptRecord,
     ExecutionAttemptState,
@@ -37,6 +41,7 @@ from app.governance.capability.acts import OperationalAct
 from app.governance.enums import Decision
 
 
+_EXECUTION_COMPLETED_SEQUENCE = 1
 _OUTBOX_CREATED_SEQUENCE = 10
 _OUTBOX_CLAIMED_SEQUENCE = 11
 _OUTBOX_TERMINAL_SEQUENCE = 12
@@ -130,6 +135,58 @@ class ExecutionOperationalEventProjector:
                 )
             )
         return tuple(projections)
+
+
+class ExecutionCompletionEventSink:
+    """Append one completion event after the execution state changes."""
+
+    def __init__(
+        self,
+        *,
+        event_runtime: OperationalEventRuntime,
+        session: AsyncSession | None = None,
+    ) -> None:
+        self._event_runtime = event_runtime
+        self._session = session
+
+    async def append_execution_completed(
+        self,
+        *,
+        execution: ExecutionRecord,
+        attempt_id: ExecutionAttemptId | None,
+        worker_id: str,
+        result: Mapping[str, Any],
+    ) -> None:
+        event = _execution_completed_event(
+            execution=execution,
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            result=result,
+        )
+        if self._session is None:
+            await self._event_runtime.append_event(
+                event,
+                expected_tenant_id=execution.tenant_id,
+            )
+            return
+        async with self._session.begin_nested():
+            await self._event_runtime.append_event(
+                event,
+                expected_tenant_id=execution.tenant_id,
+            )
+
+
+def build_execution_completion_event_sink(
+    session: AsyncSession,
+) -> ExecutionCompletionEventSink:
+    """Build the Postgres-backed completion event sink for a DB session."""
+
+    return ExecutionCompletionEventSink(
+        event_runtime=OperationalEventRuntime(
+            persistence=PostgresOperationalEventPersistence(session)
+        ),
+        session=session,
+    )
 
 
 def project_execution_records(
@@ -521,6 +578,7 @@ def _fact_to_event(
         ),
         governance_decision_id=governance_decision_id,
         metadata={
+            "_schema_version": "1",
             **dict(fact.metadata),
             "source_kind": fact.source_kind,
             "source_id": fact.source_id,
@@ -665,6 +723,69 @@ def _derive_execution_event_id(
     )
 
 
+def _execution_completed_event(
+    *,
+    execution: ExecutionRecord,
+    attempt_id: ExecutionAttemptId | None,
+    worker_id: str,
+    result: Mapping[str, Any],
+) -> OperationalEvent:
+    if execution.completed_at is None:
+        raise ExecutionEventProjectionError(
+            "completed execution record is missing completed_at"
+        )
+    event_id = _derive_execution_event_id(
+        execution=execution,
+        operational_act=OperationalAct.EXECUTION_COMPLETE,
+        sequence=_EXECUTION_COMPLETED_SEQUENCE,
+        parent_event_id=None,
+    )
+    result_category = (
+        execution.diagnostic_category
+        or _metadata_optional(result, "diagnostic_category", "category")
+    )
+    return OperationalEvent(
+        event_id=event_id,
+        operational_act=OperationalAct.EXECUTION_COMPLETE,
+        substrate=OperationalSubstrate.EXECUTION,
+        causality=EventCausality(root_event_id=event_id),
+        chronology=EventChronology(
+            runtime_instance_id=uuid.UUID(str(execution.execution_id)),
+            sequence=_EXECUTION_COMPLETED_SEQUENCE,
+            occurred_at=execution.completed_at,
+        ),
+        tenant_id=execution.tenant_id,
+        principal_id=_authority_optional(execution, "principal_id"),
+        organization_id=_authority_optional(execution, "organization_id"),
+        environment_id=_authority_optional(execution, "environment_id"),
+        tenant_authority_source=(
+            _authority_optional(execution, "tenant_authority_source")
+            or _authority_optional(execution, "authority_source")
+        ),
+        governance_decision=(
+            Decision.ALLOW
+            if execution.governance_decision_id is not None
+            else None
+        ),
+        governance_decision_id=(
+            None
+            if execution.governance_decision_id is None
+            else str(execution.governance_decision_id)
+        ),
+        metadata={
+            "_schema_version": "1",
+            "transition": "completed",
+            "execution_id": str(execution.execution_id),
+            "attempt_id": None if attempt_id is None else str(attempt_id),
+            "worker_id": worker_id,
+            "tenant_id": execution.tenant_id,
+            "result_category": result_category,
+            "completed_at": execution.completed_at.isoformat(),
+            "projection_source": "execution_completion_event_sink",
+        },
+    )
+
+
 def _attempt_start_sequence(attempt_number: int) -> int:
     _validate_attempt_number(attempt_number)
     return _ATTEMPT_SEQUENCE_BASE + (
@@ -728,8 +849,10 @@ def _authority_optional(
 
 
 __all__ = [
+    "ExecutionCompletionEventSink",
     "ExecutionEventProjectionError",
     "ExecutionOperationalEventProjection",
     "ExecutionOperationalEventProjector",
+    "build_execution_completion_event_sink",
     "project_execution_records",
 ]
