@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,7 +19,10 @@ from app.knowledge import (
     DeterministicKnowledgeChunker,
     KnowledgeBudgetDecisionReason,
     KnowledgeDocumentNotIndexableError,
+    KnowledgeEmbeddingProvider,
     KnowledgePersistenceError,
+    KnowledgeProviderError,
+    KnowledgeRetrievalError,
     KnowledgeRuntime,
     derive_chunk_id,
     derive_vector_id,
@@ -83,6 +86,48 @@ class _StrictSearchKnowledgeRepository(InMemoryKnowledgeRepository):
         )
 
 
+class _FailingVectorKnowledgeRepository(InMemoryKnowledgeRepository):
+    async def list_vector_entries(
+        self,
+        query: KnowledgeVectorQuery,
+        *,
+        expected_tenant_id: str,
+        query_embedding: list[float] | None = None,
+    ) -> KnowledgeVectorPage:
+        del query, expected_tenant_id, query_embedding
+        raise RuntimeError("vector store unavailable")
+
+
+class _EmptyEmbeddingProvider:
+    provider_name = "empty_provider"
+    model_name = "empty-provider-v1"
+    dimensions = 16
+
+    async def embed_texts(
+        self,
+        *,
+        tenant_id: str,
+        texts: Sequence[str],
+    ) -> tuple[tuple[float, ...], ...]:
+        del tenant_id, texts
+        return ()
+
+
+class _FailingEmbeddingProvider:
+    provider_name = "failing_provider"
+    model_name = "failing-provider-v1"
+    dimensions = 16
+
+    async def embed_texts(
+        self,
+        *,
+        tenant_id: str,
+        texts: Sequence[str],
+    ) -> tuple[tuple[float, ...], ...]:
+        del tenant_id, texts
+        raise RuntimeError("embedding provider unavailable")
+
+
 def _document(
     *,
     tenant_id: str = _TENANT_ID,
@@ -139,6 +184,25 @@ async def _runtime(
         default_context_token_budget=64,
     )
     return runtime, tenant_repository, knowledge_repository
+
+
+def _runtime_with_embedding_provider(
+    provider: KnowledgeEmbeddingProvider,
+    *,
+    knowledge_repo: InMemoryKnowledgeRepository | None = None,
+) -> KnowledgeRuntime:
+    return KnowledgeRuntime(
+        repository=knowledge_repo or InMemoryKnowledgeRepository(),
+        tenant_configuration_repository=InMemoryTenantConfigurationRepository(),
+        embedding_provider=provider,
+        chunker=DeterministicKnowledgeChunker(
+            target_size=64,
+            overlap=8,
+            min_size=24,
+        ),
+        vector_index_name="phase_5a_test",
+        default_context_token_budget=64,
+    )
 
 
 @pytest.mark.asyncio
@@ -328,6 +392,58 @@ async def test_retrieval_uses_vector_query_without_text_prefilter() -> None:
     assert len(knowledge_repo.queries) == 1
     assert knowledge_repo.queries[0].search_text is None
     assert knowledge_repo.queries[0].limit == 4
+
+
+@pytest.mark.asyncio
+async def test_knowledge_empty_embedding_raises() -> None:
+    runtime = _runtime_with_embedding_provider(_EmptyEmbeddingProvider())
+
+    with pytest.raises(
+        KnowledgeRetrievalError,
+        match="empty result",
+    ):
+        await runtime.retrieve(
+            tenant_id=_TENANT_ID,
+            query="refund warranty credit",
+            top_k=4,
+        )
+
+
+@pytest.mark.asyncio
+async def test_knowledge_provider_exception_normalized() -> None:
+    runtime = _runtime_with_embedding_provider(_FailingEmbeddingProvider())
+
+    with pytest.raises(KnowledgeProviderError) as exc_info:
+        await runtime.retrieve(
+            tenant_id=_TENANT_ID,
+            query="refund warranty credit",
+            top_k=4,
+        )
+
+    assert isinstance(exc_info.value, KnowledgeRetrievalError)
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "embedding provider unavailable" in str(exc_info.value.__cause__)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_vector_search_exception_normalized() -> None:
+    runtime = _runtime_with_embedding_provider(
+        DeterministicHashEmbeddingProvider(dimensions=16),
+        knowledge_repo=_FailingVectorKnowledgeRepository(),
+    )
+
+    with pytest.raises(
+        KnowledgeRetrievalError,
+        match="vector retrieval failed",
+    ) as exc_info:
+        await runtime.retrieve(
+            tenant_id=_TENANT_ID,
+            query="refund warranty credit",
+            top_k=4,
+        )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "vector store unavailable" in str(exc_info.value.__cause__)
 
 
 @pytest.mark.asyncio

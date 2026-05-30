@@ -14,6 +14,8 @@ from app.knowledge.embeddings import (
 from app.knowledge.exceptions import (
     KnowledgeDocumentNotFoundError,
     KnowledgeDocumentNotIndexableError,
+    KnowledgeProviderError,
+    KnowledgeRetrievalError,
 )
 from app.knowledge.identity import derive_chunk_id, derive_vector_id
 from app.knowledge.models import (
@@ -203,23 +205,36 @@ class KnowledgeRuntime:
         )
         if token_budget < 0:
             raise ValueError("max_tokens must be >= 0")
-        query_vector = (
-            await self._embedding_provider.embed_texts(
+        try:
+            embeddings = await self._embedding_provider.embed_texts(
                 tenant_id=tenant_id,
                 texts=(query,),
             )
-        )[0]
-        page = await self._repository.list_vector_entries(
-            KnowledgeVectorQuery(
-                vector_index_name=self._vector_index_name,
-                provider=self._embedding_provider.provider_name,
-                model=self._embedding_provider.model_name,
-                current_only=True,
-                limit=top_k,
-            ),
-            expected_tenant_id=tenant_id,
-            query_embedding=list(query_vector),
-        )
+        except Exception as exc:  # noqa: BLE001 - normalize provider boundary.
+            raise KnowledgeProviderError(
+                "Embedding provider failed while embedding retrieval query"
+            ) from exc
+        if not embeddings:
+            raise KnowledgeRetrievalError(
+                "Embedding provider returned empty result for query"
+            )
+        query_vector = embeddings[0]
+        try:
+            page = await self._repository.list_vector_entries(
+                KnowledgeVectorQuery(
+                    vector_index_name=self._vector_index_name,
+                    provider=self._embedding_provider.provider_name,
+                    model=self._embedding_provider.model_name,
+                    current_only=True,
+                    limit=top_k,
+                ),
+                expected_tenant_id=tenant_id,
+                query_embedding=list(query_vector),
+            )
+        except Exception as exc:  # noqa: BLE001 - normalize retrieval boundary.
+            raise KnowledgeRetrievalError(
+                "Knowledge vector retrieval failed"
+            ) from exc
         candidates = [(_entry_score(entry), entry) for entry in page.items]
         decisions, included = _apply_budget(
             candidates,

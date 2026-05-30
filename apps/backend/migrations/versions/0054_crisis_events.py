@@ -62,6 +62,7 @@ def upgrade() -> None:
             ["deployment_id"],
             ["public.crisis_deployments.deployment_id"],
             name=op.f("fk_crisis_events_deployment_id_crisis_deployments"),
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("event_id", name=op.f("pk_crisis_events")),
         schema="public",
@@ -93,7 +94,7 @@ def upgrade() -> None:
     op.execute(
         """
         COMMENT ON TABLE public.crisis_events IS
-        'Append-only crisis audit trail. UPDATE and DELETE are blocked by trigger.'
+        'Append-only crisis audit trail. Direct UPDATE and DELETE are blocked; owning deployment deletion cascades events.'
         """
     )
     op.execute(
@@ -103,6 +104,9 @@ def upgrade() -> None:
         LANGUAGE plpgsql
         AS $$
         BEGIN
+            IF TG_OP = 'DELETE' AND pg_trigger_depth() > 1 THEN
+                RETURN OLD;
+            END IF;
             RAISE EXCEPTION 'crisis_events is append-only';
         END;
         $$;

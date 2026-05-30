@@ -11,6 +11,14 @@ class KnowledgePersistenceError(KnowledgeError):
     """Raised when tenant knowledge persistence refuses an operation."""
 
 
+class KnowledgeRetrievalError(KnowledgeError):
+    """Raised when tenant knowledge retrieval cannot complete safely."""
+
+
+class KnowledgeProviderError(KnowledgeRetrievalError):
+    """Raised when a knowledge provider fails during retrieval."""
+
+
 class KnowledgeDocumentNotFoundError(KnowledgeError):
     """Raised when the requested tenant knowledge document is missing."""
 
@@ -24,4 +32,6 @@ __all__ = [
     "KnowledgeDocumentNotIndexableError",
     "KnowledgeError",
     "KnowledgePersistenceError",
+    "KnowledgeProviderError",
+    "KnowledgeRetrievalError",
 ]

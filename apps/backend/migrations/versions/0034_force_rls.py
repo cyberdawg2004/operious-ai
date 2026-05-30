@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "0034_force_rls"
 down_revision: Union[str, None] = "0033_rls_routing_resolver"
@@ -19,7 +20,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 _FORCED_RLS_TABLES = (
     "approval_records",
-    "admission_records",
     "arbitration_evaluations",
     "boundary_egress",
     "boundary_ingress",
@@ -58,29 +58,56 @@ _FORCED_RLS_TABLES = (
     "tenants",
     "webhook_nonce_records",
 )
+# `admission_records` is created later in 0036 and forced in 0037. It must
+# not be asserted here because this migration protects only tables that exist
+# at revision 0034.
 
 
 def upgrade() -> None:
+    # This migration has already run in production. The fail-loud
+    # assertion below protects fresh environments from silently skipping
+    # FORCE RLS when an expected tenant-scoped table is missing.
+    _assert_forced_rls_tables_exist()
     for table_name in _FORCED_RLS_TABLES:
-        _alter_force_rls_if_exists(table_name, force=True)
+        _alter_force_rls(table_name, force=True)
 
 
 def downgrade() -> None:
     for table_name in reversed(_FORCED_RLS_TABLES):
-        _alter_force_rls_if_exists(table_name, force=False)
+        _alter_force_rls(table_name, force=False)
 
 
-def _alter_force_rls_if_exists(table_name: str, *, force: bool) -> None:
+def _assert_forced_rls_tables_exist() -> None:
+    conn = op.get_bind()
+    missing: list[str] = []
+    for table_name in _FORCED_RLS_TABLES:
+        result = conn.execute(
+            text("SELECT to_regclass(:qualified_table)"),
+            {"qualified_table": f"public.{table_name}"},
+        ).scalar()
+        if result is None:
+            missing.append(table_name)
+    if missing:
+        missing_tables = ", ".join(repr(table_name) for table_name in missing)
+        raise RuntimeError(
+            "Migration 0034: expected table(s) "
+            f"{missing_tables} do not exist. Cannot apply FORCE RLS."
+        )
+
+
+def _alter_force_rls(table_name: str, *, force: bool) -> None:
+    conn = op.get_bind()
     escaped_table = table_name.replace('"', '""')
     command = "FORCE" if force else "NO FORCE"
-    op.execute(
-        f"""
-        DO $$
-        BEGIN
-            IF to_regclass('public."{escaped_table}"') IS NOT NULL THEN
-                EXECUTE 'ALTER TABLE public."{escaped_table}" {command} ROW LEVEL SECURITY';
-            END IF;
-        END
-        $$;
-        """
+    conn.execute(
+        text(
+            f'ALTER TABLE public."{escaped_table}" '
+            "ENABLE ROW LEVEL SECURITY"
+        )
+    )
+    conn.execute(
+        text(
+            f'ALTER TABLE public."{escaped_table}" '
+            f"{command} ROW LEVEL SECURITY"
+        )
     )

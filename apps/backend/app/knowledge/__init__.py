@@ -10,6 +10,8 @@ from app.knowledge.exceptions import (
     KnowledgeDocumentNotIndexableError,
     KnowledgeError,
     KnowledgePersistenceError,
+    KnowledgeProviderError,
+    KnowledgeRetrievalError,
 )
 from app.knowledge.identity import (
     KnowledgeChunkId,
@@ -44,6 +46,8 @@ __all__ = [
     "KnowledgeError",
     "KnowledgeIngestionResult",
     "KnowledgePersistenceError",
+    "KnowledgeProviderError",
+    "KnowledgeRetrievalError",
     "KnowledgeRetrievalItem",
     "KnowledgeRetrievalResult",
     "KnowledgeRuntime",

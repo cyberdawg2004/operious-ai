@@ -163,6 +163,7 @@ class CrisisEventRow(Base):
         ForeignKey(
             "crisis_deployments.deployment_id",
             name="fk_crisis_events_deployment_id_crisis_deployments",
+            ondelete="CASCADE",
         ),
         nullable=False,
         index=True,

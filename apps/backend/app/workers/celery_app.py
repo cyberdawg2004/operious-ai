@@ -107,10 +107,19 @@ celery_conf.update(
         "cleanup_expired_webhook_nonces": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
+        "operious.workers.emit_queue_depth_snapshot": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
+        "emit_queue_depth_snapshot": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
         "operious.workers.evaluate_alert_conditions": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
         "expire_crisis_deployments": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
+        "recover_dead_letter_replays": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
         "process_post_call_transcript": {"queue": QUEUE_INGRESS_VOICE},
@@ -224,10 +233,16 @@ _initialize_worker_alert_evaluator()
     name="operious.workers.emit_queue_depth_snapshot",
     queue=QUEUE_WEBHOOK_MAINTENANCE,
     ignore_result=True,
+    # No retry: metric snapshot, next beat run covers any miss.
+    max_retries=0,
+    default_retry_delay=0,
 )
 def emit_queue_depth_snapshot() -> None:
     """PRIVILEGED_PATH: reads all queue depths and emits a log snapshot."""
 
+    # DLQ: intentionally omitted for periodic beat tasks. Failure impact is
+    # one missed execution; the next scheduled run covers the gap. No replay
+    # needed.
     try:
         collector = get_metrics_collector()
         if collector is None:
@@ -248,10 +263,16 @@ def emit_queue_depth_snapshot() -> None:
     name="operious.workers.evaluate_alert_conditions",
     queue=QUEUE_WEBHOOK_MAINTENANCE,
     ignore_result=True,
+    # No retry: periodic beat task, will re-run on next schedule.
+    max_retries=0,
+    default_retry_delay=0,
 )
 def evaluate_alert_conditions() -> None:
     """Evaluate all alert conditions without crashing maintenance workers."""
 
+    # DLQ: intentionally omitted for periodic beat tasks. Failure impact is
+    # one missed execution; the next scheduled run covers the gap. No replay
+    # needed.
     evaluator = get_alert_evaluator()
     if evaluator is None:
         logger.warning("alert_evaluator_not_initialized")
@@ -284,10 +305,15 @@ def evaluate_alert_conditions() -> None:
     name="expire_crisis_deployments",
     queue=QUEUE_WEBHOOK_MAINTENANCE,
     ignore_result=True,
+    max_retries=1,
+    default_retry_delay=60,
 )
 def expire_crisis_deployments(limit: int = 100) -> None:
     """PRIVILEGED_PATH: mark expired crisis deployments across tenants."""
 
+    # DLQ: intentionally omitted for periodic beat tasks. Failure impact is
+    # one missed execution; the next scheduled run covers the gap. No replay
+    # needed.
     async def _run() -> None:
         async with get_owner_session_factory()() as session:
             expired = await CrisisService(

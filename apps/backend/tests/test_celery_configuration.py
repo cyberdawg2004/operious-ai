@@ -13,7 +13,7 @@ import pytest
 
 from app.core.config import get_settings
 from app.core.redis_policy import verify_redis_memory_policy
-from app.queues import QUEUE_INGRESS_VOICE
+from app.queues import QUEUE_INGRESS_VOICE, QUEUE_WEBHOOK_MAINTENANCE
 from app.workers.agent_tasks import (
     DiagnosticNonRetryableError,
     _DiagnosticExecutionWorkItem,
@@ -24,11 +24,17 @@ from app.workers.agent_tasks import (
     execute_diagnostic_agent,
 )
 from app.workers.celery_app import celery_app, process_post_call_transcript
+from app.workers.celery_app import (
+    emit_queue_depth_snapshot,
+    evaluate_alert_conditions,
+    expire_crisis_deployments,
+)
 from app.workers.escalation_recovery_tasks import reconcile_stale_escalation_outbox
 from app.workers.escalation_tasks import create_governance_escalation
 from app.workers.execution_recovery_tasks import (
     reconcile_failed_execution_outbox,
     reconcile_stale_execution_outbox,
+    recover_dead_letter_replays,
     recover_stale_executions,
 )
 from app.workers.failure_pattern_tasks import detect_sop_failure_patterns
@@ -60,6 +66,10 @@ _FIRE_AND_FORGET_TASKS = {
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
     "reconcile_stale_escalation_outbox": reconcile_stale_escalation_outbox,
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
+    "emit_queue_depth_snapshot": emit_queue_depth_snapshot,
+    "evaluate_alert_conditions": evaluate_alert_conditions,
+    "expire_crisis_deployments": expire_crisis_deployments,
+    "recover_dead_letter_replays": recover_dead_letter_replays,
     "process_post_call_transcript": process_post_call_transcript,
 }
 _TASK_RETRY_SETTINGS = {
@@ -75,6 +85,10 @@ _TASK_RETRY_SETTINGS = {
     "reconcile_stale_execution_outbox": (5, 30),
     "reconcile_stale_escalation_outbox": (5, 30),
     "cleanup_expired_webhook_nonces": (1, 30),
+    "emit_queue_depth_snapshot": (0, 0),
+    "evaluate_alert_conditions": (0, 0),
+    "expire_crisis_deployments": (1, 60),
+    "recover_dead_letter_replays": (5, 30),
     "process_post_call_transcript": (1, 30),
 }
 
@@ -121,10 +135,43 @@ def test_celery_tasks_have_explicit_retry_budgets() -> None:
         assert getattr(task, "default_retry_delay") == expected_delay, task_name
 
 
+def test_celery_registered_tasks_have_retry_settings() -> None:
+    missing: list[str] = []
+    for task_name, task in celery_app.tasks.items():
+        if task_name.startswith("celery."):
+            continue
+        max_retries = getattr(task, "max_retries", None)
+        default_retry_delay = getattr(task, "default_retry_delay", None)
+        if not isinstance(max_retries, int) or not isinstance(
+            default_retry_delay,
+            int,
+        ):
+            missing.append(task_name)
+
+    assert not missing, "\n".join(sorted(missing))
+
+
 def test_post_call_voice_task_routes_to_voice_queue() -> None:
     routes = celery_app.conf.task_routes
 
     assert routes["process_post_call_transcript"]["queue"] == QUEUE_INGRESS_VOICE
+
+
+def test_maintenance_task_routes_to_webhook_maintenance_queue() -> None:
+    routes = celery_app.conf.task_routes
+
+    assert (
+        routes["operious.workers.emit_queue_depth_snapshot"]["queue"]
+        == QUEUE_WEBHOOK_MAINTENANCE
+    )
+    assert (
+        routes["emit_queue_depth_snapshot"]["queue"]
+        == QUEUE_WEBHOOK_MAINTENANCE
+    )
+    assert (
+        routes["recover_dead_letter_replays"]["queue"]
+        == QUEUE_WEBHOOK_MAINTENANCE
+    )
 
 
 def test_diagnostic_retry_countdown_uses_exponential_backoff() -> None:
