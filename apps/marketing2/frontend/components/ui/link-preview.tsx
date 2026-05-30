@@ -1,7 +1,7 @@
 "use client";
 import * as RdxHoverCard from "@radix-ui/react-hover-card";
 import { encode } from "qss";
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { AnimatePresence, motion, useMotionValue, useSpring, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
@@ -71,12 +71,20 @@ export const HoverPeek = ({
   enableMouseFollow = true,
 }: HoverPeekProps) => {
   const reducedMotion = useReducedMotion();
-  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
   const finalImageSrc = usePreviewSource(url, peekWidth, peekHeight, isStatic, imageSrc);
   const { isPeeking, handleOpenChange, handlePointerMove, followX } = useHoverState(enableMouseFollow);
+  const imageLoadFailed = failedImageSrc === finalImageSrc;
 
-  useEffect(() => { setImageLoadFailed(false); }, [finalImageSrc]);
-  useEffect(() => { if (!isPeeking) setImageLoadFailed(false); }, [isPeeking]);
+  const handlePreviewOpenChange = useCallback(
+    (open: boolean) => {
+      handleOpenChange(open);
+      if (!open) {
+        setFailedImageSrc(null);
+      }
+    },
+    [handleOpenChange]
+  );
 
   const triggerChild = React.isValidElement(children)
     ? React.cloneElement(children as React.ReactElement<{ className?: string; onPointerMove?: (e: React.PointerEvent<HTMLElement>) => void }>, {
@@ -86,7 +94,7 @@ export const HoverPeek = ({
     : <span className={className} onPointerMove={handlePointerMove}>{children}</span>;
 
   return (
-    <RdxHoverCard.Root openDelay={75} closeDelay={150} onOpenChange={handleOpenChange}>
+    <RdxHoverCard.Root openDelay={75} closeDelay={150} onOpenChange={handlePreviewOpenChange}>
       <RdxHoverCard.Trigger asChild>{triggerChild}</RdxHoverCard.Trigger>
       <RdxHoverCard.Portal>
         <RdxHoverCard.Content
@@ -119,7 +127,7 @@ export const HoverPeek = ({
                       height={peekHeight}
                       className="block rounded-[5px] pointer-events-none bg-[var(--surface-raised)]"
                       alt={`Preview for ${url}`}
-                      onError={() => setImageLoadFailed(true)}
+                      onError={() => setFailedImageSrc(finalImageSrc)}
                       loading="lazy"
                     />
                   )}
@@ -152,7 +160,7 @@ export const HoverPeek = ({
                         height={peekHeight}
                         className="block rounded-[5px] pointer-events-none bg-[var(--surface-raised)]"
                         alt={`Preview for ${url}`}
-                        onError={() => setImageLoadFailed(true)}
+                        onError={() => setFailedImageSrc(finalImageSrc)}
                         loading="lazy"
                       />
                     )}

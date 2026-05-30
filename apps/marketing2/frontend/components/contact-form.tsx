@@ -55,7 +55,7 @@ export function ContactForm({
         status: "success",
         message:
           result.message ??
-          "Your request was received. Operious will follow up with architecture review next steps.",
+          "Your architecture review request was received. Operious will follow up with next steps.",
         requestId: result.requestId ?? "pending",
       });
       event.currentTarget.reset();
@@ -162,7 +162,7 @@ export function ContactForm({
         disabled={submitState.status === "submitting"}
         className="inline-flex h-12 items-center justify-center rounded-md bg-ink-primary px-5 text-[14px] font-semibold text-white transition-colors hover:bg-ink-body disabled:cursor-wait disabled:opacity-70"
       >
-        {submitState.status === "submitting" ? "Submitting request" : "Request enterprise access"}
+        {submitState.status === "submitting" ? "Submitting request" : "Book an Architecture Review"}
         <Send className="ml-2 h-4 w-4" />
       </button>
     </form>

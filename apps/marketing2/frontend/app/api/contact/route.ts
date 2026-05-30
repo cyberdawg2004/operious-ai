@@ -44,13 +44,10 @@ function normalizePayload(payload: ContactPayload, requestId: string) {
   };
 }
 
-async function forwardToConfiguredEndpoint(payload: ReturnType<typeof normalizePayload>) {
-  const endpoint = process.env.CONTACT_ENDPOINT_URL;
-
-  if (!endpoint) {
-    return { delivered: false };
-  }
-
+async function forwardToConfiguredEndpoint(
+  payload: ReturnType<typeof normalizePayload>,
+  endpoint: string
+) {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
   };
@@ -108,9 +105,22 @@ export async function POST(request: Request) {
   }
 
   const normalizedPayload = normalizePayload(payload, requestId);
+  const endpoint = process.env.CONTACT_ENDPOINT_URL?.trim();
+
+  if (!endpoint) {
+    console.error("Contact endpoint is not configured", { requestId });
+    return NextResponse.json(
+      {
+        message:
+          "Contact intake is not configured. Please email hello@operious.com and include your company, role, operational domain, ticket volume, and use case.",
+        requestId,
+      },
+      { status: 503 }
+    );
+  }
 
   try {
-    await forwardToConfiguredEndpoint(normalizedPayload);
+    await forwardToConfiguredEndpoint(normalizedPayload, endpoint);
   } catch (error) {
     console.error("Contact endpoint forwarding failed", {
       requestId,
@@ -129,7 +139,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       message:
-        "Your request was received. Operious will follow up with architecture review next steps.",
+        "Your architecture review request was received. Operious will follow up with next steps.",
       requestId,
     },
     { status: 202 }

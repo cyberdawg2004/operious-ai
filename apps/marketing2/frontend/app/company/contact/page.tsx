@@ -45,7 +45,7 @@ export default async function ContactPage({ searchParams }: ContactPageProps) {
               className="mt-5 text-[42px] font-bold leading-[1.05] text-ink-primary sm:text-[56px] lg:text-[72px]"
               style={{ fontFamily: "var(--font-cormorant-sc)" }}
             >
-              Request enterprise access.
+              Book an Architecture Review.
             </h1>
             <p className="mt-6 text-[18px] leading-relaxed text-ink-secondary">
               Share the operational domain, ticket volume, and governance requirements

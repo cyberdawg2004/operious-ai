@@ -22,10 +22,9 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.operious.com"),
-  title: "Operious AI — Governed Execution Infrastructure",
+  title: "Operious AI — Operational Governance Infrastructure",
   description:
-    "The layer between what AI proposes and what your " +
-    "business executes. Governed. Audited. Immutable.",
+    "Enterprise operational workflows with enforced policy, complete governance, and a forensic record of every decision made.",
   icons: {
     icon: [{ url: "/icon", type: "image/png" }],
     shortcut: [{ url: "/icon", type: "image/png" }],
@@ -34,17 +33,16 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Operious AI",
     description:
-      "Governed AI execution infrastructure. " +
-      "The containment layer between AI models and your business.",
+      "Operational governance infrastructure for enterprise support, warranty, claims, escalations, and approvals.",
     url: "https://www.operious.com",
     siteName: "Operious AI",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Operious AI — Governed Execution Infrastructure",
+    title: "Operious AI — Operational Governance Infrastructure",
     description:
-      "The containment layer between AI models and your business.",
+      "Enterprise workflows that scale. Decisions that hold up in any audit.",
   },
 };
 

@@ -123,7 +123,7 @@ export const pages: Record<PageKey, PageContent> = {
     ],
     ctas: [
       { label: "Explore constitutional governance", href: "/platform/governance" },
-      { label: "Request enterprise access", href: "/company/contact" },
+      { label: "Book an Architecture Review", href: "/company/contact?topic=architecture-review" },
     ],
   },
 
@@ -263,7 +263,7 @@ execution.invoke(tool, token, payload)`,
     ],
     ctas: [
       { label: "Read the replay article", href: "/insights/reconstructible-truth" },
-      { label: "Request enterprise access", href: "/company/contact" },
+      { label: "Book an Architecture Review", href: "/company/contact?topic=architecture-review" },
     ],
   },
 
@@ -940,7 +940,7 @@ execution.invoke(tool, token, payload)`,
     ],
     ctas: [
       { label: "Read compliance posture", href: "/trust/compliance" },
-      { label: "Request enterprise access", href: "/company/contact?topic=security" },
+      { label: "Request Security Review", href: "/company/contact?topic=security" },
     ],
   },
 
@@ -1702,7 +1702,7 @@ else:
         ],
       },
     ],
-    ctas: [{ label: "Request enterprise access", href: "/company/contact" }],
+    ctas: [{ label: "Book an Architecture Review", href: "/company/contact?topic=architecture-review" }],
   },
 
   privacy: {
