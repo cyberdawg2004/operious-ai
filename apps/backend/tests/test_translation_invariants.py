@@ -39,6 +39,10 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # remains narrowly allowed for `OperationalAct` and
     # `GovernanceRuntime`; the rest of governance stays opaque.
     "app.core.capability_gate",
+    # Translation providers may use the lifecycle-managed shared
+    # outbound HTTP client; direct vendor SDK / httpx imports remain
+    # forbidden below.
+    "app.core.http",
     "app.governance.capability",
 )
 

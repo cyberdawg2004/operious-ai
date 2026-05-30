@@ -79,6 +79,7 @@ from app.boundary.translation.persistence import (
     TranslationPersistenceProtocol,
 )
 from app.boundary.translation.adapters import (
+    AnthropicTranslationProvider,
     BaseTranslationProvider,
     DeterministicStubTranslationProvider,
     IdentityTranslationProvider,
@@ -101,6 +102,7 @@ from app.boundary.translation.traces import (
 )
 
 __all__ = [
+    "AnthropicTranslationProvider",
     "BaseTranslationProvider",
     "BoundaryNormalizer",
     "CANONICAL_LANGUAGE",

@@ -234,6 +234,19 @@ class Settings(BaseSettings):
     ANTHROPIC_MAX_OUTPUT_TOKENS: int = 512
     ANTHROPIC_TEMPERATURE: float = 0.0
 
+    # ─── Translation provider ────────────────────────────────────────
+    TRANSLATION_PROVIDER: str = Field(
+        default="identity",
+        description=(
+            "Translation provider: 'identity' (verbatim) or "
+            "'anthropic' (real translation via Claude)."
+        ),
+    )
+    TRANSLATION_MODEL: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description="Anthropic model for translation calls.",
+    )
+
     # ─── Embedding gateway ───────────────────────────────────────────
     EMBEDDING_DEFAULT_PROVIDER: str = "openai"
     EMBEDDING_TIMEOUT_SECONDS: float = 30.0

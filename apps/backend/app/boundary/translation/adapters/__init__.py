@@ -13,6 +13,9 @@ from app.boundary.translation.adapters.base import (
     TranslationProviderRequest,
     TranslationProviderResponse,
 )
+from app.boundary.translation.adapters.anthropic import (
+    AnthropicTranslationProvider,
+)
 from app.boundary.translation.adapters.identity import (
     IdentityTranslationProvider,
 )
@@ -21,6 +24,7 @@ from app.boundary.translation.adapters.stub import (
 )
 
 __all__ = [
+    "AnthropicTranslationProvider",
     "BaseTranslationProvider",
     "DeterministicStubTranslationProvider",
     "IdentityTranslationProvider",
