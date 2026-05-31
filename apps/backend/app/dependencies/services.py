@@ -695,6 +695,9 @@ def get_action_approval_service(
                     redis_client=get_redis_client(),
                 ),
                 redis_client=get_redis_client(),
+                pre_approved_decision_ttl_seconds=(
+                    get_settings().AGENT_PRE_APPROVED_DECISION_TTL_SECONDS
+                ),
             ),
             approval_repository=PostgresActionApprovalRepository(session),
             timeline_runtime=timeline_runtime,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import ClassVar, FrozenSet, Sequence
 
 import pytest
@@ -23,6 +23,10 @@ from app.agents.tools import (
     ToolCapability,
     ToolInvoker,
     ToolRegistry,
+)
+from app.agents.tools.invoker import (
+    AGENT_ACTION_BINDING_KEY,
+    compute_agent_action_binding,
 )
 from app.agents.value_objects import CausalityMetadata
 from app.governance.context import GovernanceContext
@@ -214,20 +218,37 @@ async def _invoke_pre_approved(
     )
 
 
+#: Binding for the canonical pre-approved request used by
+#: ``_invoke_pre_approved`` (tool ``mutating_echo``, payload
+#: ``{"value": 1}``, target ``external:test``, tenant ``tenant-action``).
+_STANDARD_BINDING = compute_agent_action_binding(
+    tenant_id="tenant-action",
+    tool_name="mutating_echo",
+    target_resource="external:test",
+    payload={"value": 1},
+)
+
+
 def _persisted_decision(
     *,
     decision_id: str,
     decision: Decision = Decision.ALLOW,
+    binding: str | None = _STANDARD_BINDING,
+    decided_at: str | None = None,
 ) -> GovernanceDecisionRecord:
+    metadata: dict[str, object] = {}
+    if binding is not None:
+        metadata[AGENT_ACTION_BINDING_KEY] = binding
     return GovernanceDecisionRecord(
         decision_id=decision_id,
         decision=decision.value,
         stage=EnforcementStage.PRE_EXECUTION.value,
         policy_chain_id="manager.action_approval.v1",
         reason="manager_approved",
-        decided_at=datetime.now(timezone.utc).isoformat(),
+        decided_at=decided_at or datetime.now(timezone.utc).isoformat(),
         tenant_id="tenant-action",
         subject_kind="manager_approval",
+        metadata=metadata,
     )
 
 
@@ -300,6 +321,148 @@ async def test_pre_approved_decision_id_allows_action_tool() -> None:
     assert envelope.is_ok
     assert calls == [{"value": 1}]
     assert str(envelope.trace.governance_decision_id) == decision_id
+
+
+@pytest.mark.asyncio
+async def test_real_allow_decision_can_be_replayed_for_identical_request() -> None:
+    """End-to-end: a decision minted by a real ALLOW evaluation carries a
+    binding that matches an identical follow-up request, so the
+    legitimate manager-approval re-invocation flow still works."""
+    calls: list[dict[str, object]] = []
+    governance, _ = _governance(Decision.ALLOW)
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+    )
+
+    # 1. Real evaluation persists a decision (with a stamped binding).
+    first = await _invoke(invoker=invoker, tool_name="mutating_echo")
+    decision_id = str(first.trace.governance_decision_id)
+
+    # 2. Replay the IDENTICAL request as a pre-approved grant.
+    second = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
+
+    assert second.is_ok
+    assert calls == [{"value": 1}, {"value": 1}]
+
+
+@pytest.mark.asyncio
+async def test_pre_approved_decision_cannot_be_replayed_for_other_payload() -> None:
+    """S-05: an ALLOW grant for one payload cannot authorise another."""
+    calls: list[dict[str, object]] = []
+    governance, persistence = _governance(Decision.DENY)
+    decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "bound-grant-payload"))
+    # Grant bound to payload {"value": 1}.
+    await persistence.record_decision(_persisted_decision(decision_id=decision_id))
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+    )
+
+    # Replay it for a DIFFERENT payload.
+    envelope = await invoker.invoke(
+        ToolInvocationRequest(
+            tool_name="mutating_echo",
+            payload={"value": 999},
+            metadata={"target_resource": "external:test"},
+        ),
+        _context(tool_name="mutating_echo"),
+        invocation_ordinal=1,
+        pre_approved_decision_id=decision_id,
+    )
+
+    assert envelope.is_denied
+    assert (
+        envelope.trace.metadata["reason"]
+        == "pre_approved_decision_binding_mismatch"
+    )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_pre_approved_decision_without_binding_is_rejected() -> None:
+    """A persisted ALLOW lacking a binding fingerprint cannot be used."""
+    calls: list[dict[str, object]] = []
+    governance, persistence = _governance(Decision.DENY)
+    decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "unbound-grant"))
+    await persistence.record_decision(
+        _persisted_decision(decision_id=decision_id, binding=None)
+    )
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+    )
+
+    envelope = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
+
+    assert envelope.is_denied
+    assert (
+        envelope.trace.metadata["reason"]
+        == "pre_approved_decision_binding_mismatch"
+    )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_pre_approved_decision_expires() -> None:
+    """A grant older than the TTL is rejected as expired."""
+    calls: list[dict[str, object]] = []
+    governance, persistence = _governance(Decision.DENY)
+    decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "expired-grant"))
+    stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    await persistence.record_decision(
+        _persisted_decision(decision_id=decision_id, decided_at=stale)
+    )
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+        pre_approved_decision_ttl_seconds=3600,
+    )
+
+    envelope = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
+
+    assert envelope.is_denied
+    assert envelope.trace.metadata["reason"] == "pre_approved_decision_expired"
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_pre_approved_decision_consumed_once_with_redis() -> None:
+    """With Redis, a grant is one-time: the second use is rejected."""
+    calls: list[dict[str, object]] = []
+    governance, persistence = _governance(Decision.DENY)
+    decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "one-time-grant"))
+    await persistence.record_decision(_persisted_decision(decision_id=decision_id))
+
+    class _OneTimeRedis:
+        def __init__(self) -> None:
+            self.keys: set[str] = set()
+
+        async def set(
+            self, key: str, value: str, *, nx: bool = False, ex: int | None = None
+        ) -> bool | None:
+            del value, ex
+            if nx and key in self.keys:
+                return None
+            self.keys.add(key)
+            return True
+
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=governance,
+        redis_client=_OneTimeRedis(),
+    )
+
+    first = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
+    second = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
+
+    assert first.is_ok
+    assert second.is_denied
+    assert (
+        second.trace.metadata["reason"]
+        == "pre_approved_decision_already_consumed"
+    )
+    assert calls == [{"value": 1}]
 
 
 @pytest.mark.asyncio

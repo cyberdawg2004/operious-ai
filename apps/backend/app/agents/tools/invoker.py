@@ -31,10 +31,13 @@ require one and execute only on a persisted ALLOW decision.
 from __future__ import annotations
 
 import asyncio
+import hmac
+import json
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from typing import Any, Final
 
 from app.agents.context import AgentExecutionContext
 from app.agents.envelopes import ToolInvocationEnvelope
@@ -59,6 +62,15 @@ from app.governance.enums import Decision, EnforcementStage
 from app.governance.subjects.agent_actions import AgentActionGovernanceSubject
 from app.identity import TenantId
 
+#: Metadata key under which the deterministic action binding fingerprint
+#: is stamped on every agent-tool governance decision (S-05). The
+#: fingerprint covers tenant + tool + action + target resource + payload
+#: hash, so a persisted ALLOW decision can only be reused as a
+#: ``pre_approved_decision_id`` for the EXACT request it authorised.
+AGENT_ACTION_BINDING_KEY: Final[str] = "agent_action_binding"
+_AGENT_ACTION: Final[str] = "agent.tool_invocation"
+_DEFAULT_PRE_APPROVED_TTL_SECONDS: Final[int] = 3600
+
 
 class ToolInvoker:
     """Single integration seam: tool registry + governance runtime."""
@@ -69,6 +81,7 @@ class ToolInvoker:
         tool_registry: ToolRegistry,
         governance_runtime: GovernanceRuntime | None = None,
         redis_client: Any | None = None,
+        pre_approved_decision_ttl_seconds: int = _DEFAULT_PRE_APPROVED_TTL_SECONDS,
     ) -> None:
         action_tool_names = tuple(
             tool.name
@@ -83,6 +96,7 @@ class ToolInvoker:
         self._tools = tool_registry
         self._governance = governance_runtime
         self._redis_client = redis_client
+        self._pre_approved_ttl_seconds = max(1, pre_approved_decision_ttl_seconds)
 
     async def invoke(
         self,
@@ -214,6 +228,60 @@ class ToolInvoker:
                         "governance_decision": persisted.decision,
                         "governance_reason": persisted.reason,
                     },
+                    governance_envelope=None,
+                    governance_decision_id=governance_decision_id,
+                )
+            # S-05: the persisted ALLOW must be BOUND to this exact
+            # request. A decision approved for a different tool / target /
+            # payload cannot be replayed here.
+            expected_binding = compute_agent_action_binding(
+                tenant_id=context.tenant_id,
+                tool_name=request.tool_name,
+                target_resource=_target_resource_for(request),
+                payload=request.payload,
+            )
+            persisted_binding = persisted.metadata.get(AGENT_ACTION_BINDING_KEY)
+            if not isinstance(persisted_binding, str) or not hmac.compare_digest(
+                persisted_binding, expected_binding
+            ):
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=None,
+                    reason="pre_approved_decision_binding_mismatch",
+                    governance_envelope=None,
+                    governance_decision_id=governance_decision_id,
+                )
+            # Expiry: a stale grant cannot be reused indefinitely.
+            if self._pre_approved_decision_expired(persisted.decided_at):
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=None,
+                    reason="pre_approved_decision_expired",
+                    governance_envelope=None,
+                    governance_decision_id=governance_decision_id,
+                )
+            # One-time consumption (best-effort; enforced when a Redis
+            # client is configured). A grant may be redeemed at most once.
+            if not await self._claim_pre_approved_decision(
+                decision_id=governance_decision_id,
+                tenant_id=context.tenant_id,
+            ):
+                return self._denied_envelope(
+                    invocation_id=invocation_id,
+                    request=request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=None,
+                    reason="pre_approved_decision_already_consumed",
                     governance_envelope=None,
                     governance_decision_id=governance_decision_id,
                 )
@@ -357,6 +425,41 @@ class ToolInvoker:
 
     # ─── Internals ────────────────────────────────────────────────────
 
+    def _pre_approved_decision_expired(self, decided_at: str) -> bool:
+        """Return ``True`` when a persisted grant is older than the TTL.
+
+        A malformed / unparseable ``decided_at`` is treated as expired
+        (fail-closed) — a grant we cannot date is not safe to honour.
+        """
+        try:
+            decided = datetime.fromisoformat(decided_at)
+        except (TypeError, ValueError):
+            return True
+        if decided.tzinfo is None:
+            decided = decided.replace(tzinfo=timezone.utc)
+        deadline = decided + timedelta(seconds=self._pre_approved_ttl_seconds)
+        return datetime.now(timezone.utc) >= deadline
+
+    async def _claim_pre_approved_decision(
+        self,
+        *,
+        decision_id: uuid.UUID,
+        tenant_id: str | None,
+    ) -> bool:
+        """Atomically claim a one-time grant. ``True`` if not yet used.
+
+        Enforced only when a Redis client is configured; without one,
+        binding + expiry remain the active controls and consumption is
+        not tracked (the call returns ``True``).
+        """
+        if self._redis_client is None:
+            return True
+        key = f"agent:pre_approved_consumed:{tenant_id or ''}:{decision_id}"
+        claimed = await self._redis_client.set(
+            key, "1", nx=True, ex=self._pre_approved_ttl_seconds
+        )
+        return bool(claimed)
+
     def _denied_envelope(
         self,
         *,
@@ -464,8 +567,53 @@ def _build_governance_context(
         metadata={
             "execution_id": str(context.execution.execution_id),
             "runtime_instance_id": str(context.identity.runtime_instance_id),
+            # S-05: stamp the deterministic action binding so a persisted
+            # ALLOW can only be replayed as a pre_approved_decision_id for
+            # this exact tenant + tool + target + payload.
+            AGENT_ACTION_BINDING_KEY: compute_agent_action_binding(
+                tenant_id=context.tenant_id,
+                tool_name=request.tool_name,
+                target_resource=target_resource,
+                payload=request.payload,
+            ),
         },
     )
+
+
+def _target_resource_for(request: ToolInvocationRequest) -> str:
+    """Resolve the binding target resource identically at decision time
+    and at pre-approval verification time."""
+    return str(request.metadata.get("target_resource") or request.tool_name)
+
+
+def compute_agent_action_binding(
+    *,
+    tenant_id: str | None,
+    tool_name: str,
+    target_resource: str,
+    payload: Mapping[str, Any],
+) -> str:
+    """Deterministic fingerprint binding a governance ALLOW to one act.
+
+    Covers tenant + tool + the stable ``agent.tool_invocation`` action +
+    target resource + a canonical hash of the payload. Equal inputs →
+    equal fingerprint, so a pre-approved decision can be matched to the
+    exact request it authorised (S-05).
+    """
+    payload_canonical = json.dumps(
+        dict(payload), sort_keys=True, separators=(",", ":"), default=str
+    )
+    payload_hash = sha256(payload_canonical.encode("utf-8")).hexdigest()
+    signing_input = "|".join(
+        [
+            tenant_id or "",
+            tool_name,
+            _AGENT_ACTION,
+            target_resource,
+            payload_hash,
+        ]
+    )
+    return sha256(signing_input.encode("utf-8")).hexdigest()
 
 
 def _tool_capability(tool: BaseTool) -> ToolCapability:
@@ -480,4 +628,8 @@ def _metadata_str(metadata: Mapping[str, Any], key: str) -> str | None:
     return None
 
 
-__all__ = ["ToolInvoker"]
+__all__ = [
+    "AGENT_ACTION_BINDING_KEY",
+    "ToolInvoker",
+    "compute_agent_action_binding",
+]

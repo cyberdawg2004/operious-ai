@@ -324,6 +324,11 @@ class Settings(BaseSettings):
     # deployments override these at boot via environment variables.
     # List values use comma-separated strings; the governance DI layer
     # splits them at composition time.
+    # Lifetime of a pre-approved agent action grant (S-05). A persisted
+    # ALLOW decision may be redeemed as a ``pre_approved_decision_id``
+    # only within this window (and only once, when Redis is configured).
+    AGENT_PRE_APPROVED_DECISION_TTL_SECONDS: int = 3600
+
     GOVERNANCE_ENABLED: bool = True
     GOVERNANCE_TENANT_ALLOWLIST: str = ""  # comma-separated tenant ids
     GOVERNANCE_CONTENT_DENYLIST: str = ""  # comma-separated substrings
