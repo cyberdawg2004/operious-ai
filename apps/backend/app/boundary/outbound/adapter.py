@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from app.core.config import get_settings
-from app.core.http import get_shared_http_client
-from app.core.ssrf import validate_public_https_url
+from app.core.http import create_isolated_http_client
+from app.core.ssrf import (
+    PinnedIPAsyncHTTPTransport,
+    ValidatedPublicHTTPSURL,
+    validate_public_https_url,
+)
 
 _MAX_RESPONSE_BODY_CHARS = 2048
 
@@ -34,6 +40,15 @@ class OutboundWebhookResponse:
     success: bool
 
 
+class SSRFValidator(Protocol):
+    def __call__(
+        self,
+        url: str,
+        *,
+        allowed_hosts: Iterable[str] = (),
+    ) -> ValidatedPublicHTTPSURL: ...
+
+
 class OutboundWebhookAdapter:
     """POST JSON to a tenant-configured webhook URL.
 
@@ -42,9 +57,17 @@ class OutboundWebhookAdapter:
     BEFORE connecting, and redirects are never followed (S-06).
     """
 
-    def __init__(self, *, allowed_hosts: tuple[str, ...] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        allowed_hosts: tuple[str, ...] | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+        ssrf_validator: SSRFValidator | None = None,
+    ) -> None:
         # ``None`` -> read the operator-configured allowlist at call time.
         self._allowed_hosts = allowed_hosts
+        self._ssl_context = ssl_context
+        self._ssrf_validator = ssrf_validator or validate_public_https_url
 
     def _resolved_allowed_hosts(self) -> tuple[str, ...]:
         if self._allowed_hosts is not None:
@@ -58,22 +81,30 @@ class OutboundWebhookAdapter:
         # SSRF guard runs off-loop (DNS resolution is blocking) and
         # raises SSRFValidationError, which the dispatch layer records as
         # a failed delivery.
-        await asyncio.to_thread(
-            validate_public_https_url,
+        validated = await asyncio.to_thread(
+            self._ssrf_validator,
             request.url,
             allowed_hosts=self._resolved_allowed_hosts(),
         )
-        client = get_shared_http_client()
-        response = await client.post(
-            request.url,
-            json=request.payload,
-            headers={
-                "Authorization": request.auth_header,
-                "Content-Type": "application/json",
-            },
-            timeout=request.timeout_seconds,
-            follow_redirects=False,
+        transport = PinnedIPAsyncHTTPTransport(
+            pinned_ip=validated.pinned_ip,
+            ssl_context=self._ssl_context,
         )
+        async with create_isolated_http_client(
+            transport=transport,
+            timeout_seconds=request.timeout_seconds,
+            follow_redirects=False,
+        ) as client:
+            response = await client.post(
+                validated.url,
+                json=request.payload,
+                headers={
+                    "Authorization": request.auth_header,
+                    "Content-Type": "application/json",
+                },
+                timeout=request.timeout_seconds,
+                follow_redirects=False,
+            )
         body = response.text[:_MAX_RESPONSE_BODY_CHARS]
         return OutboundWebhookResponse(
             status_code=response.status_code,

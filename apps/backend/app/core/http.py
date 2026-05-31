@@ -36,6 +36,21 @@ def get_shared_http_client() -> httpx.AsyncClient:
     return init_shared_http_client()
 
 
+def create_isolated_http_client(
+    *,
+    transport: httpx.AsyncBaseTransport,
+    timeout_seconds: float,
+    follow_redirects: bool = False,
+) -> httpx.AsyncClient:
+    """Create a short-lived outbound client for custom transports."""
+
+    return httpx.AsyncClient(
+        transport=transport,
+        timeout=timeout_seconds,
+        follow_redirects=follow_redirects,
+    )
+
+
 async def close_shared_http_client() -> None:
     """Close and clear the shared outbound HTTP client."""
 
@@ -48,6 +63,7 @@ async def close_shared_http_client() -> None:
 
 __all__ = [
     "close_shared_http_client",
+    "create_isolated_http_client",
     "get_shared_http_client",
     "init_shared_http_client",
 ]
