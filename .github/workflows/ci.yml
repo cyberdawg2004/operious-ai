@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint + tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: operious
+          POSTGRES_PASSWORD: operious
+          POSTGRES_DB: operious_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U operious"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ENVIRONMENT: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: operious
+      POSTGRES_PASSWORD: operious
+      POSTGRES_DB: operious_test
+      DATABASE_URL: postgresql+asyncpg://operious:operious@localhost:5432/operious_test
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://operious:operious@localhost:5432/operious_test
+      TEST_DATABASE_URL: postgresql+asyncpg://operious:operious@localhost:5432/operious_test
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r apps/backend/requirements.txt
+          pip install ruff
+      - name: Lint (ruff)
+        working-directory: apps/backend
+        run: ruff check app tests scripts
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Tests (incl. Postgres-backed RLS + integration)
+        run: python -m pytest -q
+
+  frontend-invariants:
+    name: Frontend architectural invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        working-directory: tests-frontend
+        run: npm install
+      - name: Run invariant tests
+        working-directory: tests-frontend
+        run: npm test
