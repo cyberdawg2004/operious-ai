@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -48,6 +47,11 @@ from app.boundary.translation import (
     IngressTranslateRequest,
     TranslationPayload,
     TranslationRuntime,
+)
+from app.core.twilio_signature import (
+    TWILIO_CANONICAL_URL_HEADER,
+    TWILIO_SIGNATURE_HEADER,
+    verify_twilio_signature,
 )
 from app.db.tenant_context import set_current_tenant
 from app.governance.capability import OperationalAct
@@ -1380,24 +1384,16 @@ def _twilio_signature_matches(
     body: Any,
     headers: Mapping[str, str],
 ) -> bool:
-    signature = _header(headers, "x-twilio-signature")
-    webhook_url = _header(headers, "x-operious-webhook-url")
-    if not signature or webhook_url is None or not isinstance(body, Mapping):
+    signature = _header(headers, TWILIO_SIGNATURE_HEADER)
+    if not signature or not isinstance(body, Mapping):
         return False
-    pieces = [webhook_url]
     typed_body = cast(Mapping[str, Any], body)
-    for key in sorted(str(k) for k in typed_body.keys()):
-        value = typed_body.get(key)
-        pieces.append(key)
-        pieces.append("" if value is None else str(value))
-    expected = base64.b64encode(
-        hmac.new(
-            secret.encode("utf-8"),
-            "".join(pieces).encode("utf-8"),
-            hashlib.sha1,
-        ).digest()
-    ).decode("ascii")
-    return hmac.compare_digest(signature.strip(), expected)
+    return verify_twilio_signature(
+        auth_token=secret,
+        url=_header(headers, TWILIO_CANONICAL_URL_HEADER),
+        params=typed_body,
+        signature=signature,
+    )
 
 
 def _lark_signature_matches(

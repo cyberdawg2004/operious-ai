@@ -8,7 +8,6 @@ session, execution, or coordination imports belong here.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
@@ -28,6 +27,11 @@ from app.boundary.exceptions import BoundaryNormalizationError
 from app.boundary.models.normalization import BoundaryNormalizationResult
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
+from app.core.twilio_signature import (
+    TWILIO_CANONICAL_URL_HEADER,
+    TWILIO_SIGNATURE_HEADER,
+    verify_twilio_signature,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -768,27 +772,17 @@ def _verify_twilio_signature(
     secret: str,
     payload: IngressPayload,
 ) -> bool:
-    signature = _header(payload.headers, "x-twilio-signature")
+    signature = _header(payload.headers, TWILIO_SIGNATURE_HEADER)
     body_object: object = payload.body
     if not signature or not isinstance(body_object, Mapping):
         return False
     body = cast(Mapping[str, Any], body_object)
-    webhook_url = _header(payload.headers, "x-operious-webhook-url")
-    if not webhook_url:
-        return False
-    pieces = [webhook_url]
-    for key in sorted(str(k) for k in body.keys()):
-        value = body.get(key)
-        pieces.append(key)
-        pieces.append("" if value is None else str(value))
-    expected = base64.b64encode(
-        hmac.new(
-            secret.encode("utf-8"),
-            "".join(pieces).encode("utf-8"),
-            hashlib.sha1,
-        ).digest()
-    ).decode("ascii")
-    return hmac.compare_digest(signature.strip(), expected)
+    return verify_twilio_signature(
+        auth_token=secret,
+        url=_header(payload.headers, TWILIO_CANONICAL_URL_HEADER),
+        params=body,
+        signature=signature,
+    )
 
 
 def _verify_lark_signature(

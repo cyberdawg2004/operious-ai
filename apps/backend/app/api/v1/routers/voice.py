@@ -18,6 +18,15 @@ from app.boundary.voice.session_token import (
     verify_voice_session_token,
 )
 from app.core.config import get_settings
+from app.core.twilio_signature import (
+    TWILIO_CANONICAL_URL_HEADER,
+    TWILIO_SIGNATURE_HEADER,
+    verify_twilio_signature,
+)
+from app.services.voice_provider_auth import (
+    VoiceProviderAuthTokenLoader,
+    get_voice_provider_auth_token_loader,
+)
 
 router = APIRouter(tags=["voice"])
 
@@ -58,6 +67,17 @@ async def stream_voice_session(
         )
     except VoiceSessionTokenError:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from None
+
+    auth_token_loader = _voice_provider_auth_token_loader(websocket)
+    try:
+        provider_auth_token = await auth_token_loader(tenant_id)
+    except Exception:  # noqa: BLE001 - provider auth lookup fails closed.
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from None
+    if not provider_auth_token or not _verify_voice_provider_signature(
+        websocket=websocket,
+        auth_token=provider_auth_token,
+    ):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
 
     if not await capacity.is_available():
         raise WebSocketException(code=status.WS_1013_TRY_AGAIN_LATER)
@@ -177,4 +197,30 @@ async def _handle_voice_call(
         )
 
 
-__all__ = ["router", "get_voice_capacity_counter"]
+def _voice_provider_auth_token_loader(
+    websocket: WebSocket,
+) -> VoiceProviderAuthTokenLoader:
+    configured = getattr(websocket.app.state, "voice_provider_auth_token_loader", None)
+    if configured is not None:
+        return cast(VoiceProviderAuthTokenLoader, configured)
+    return get_voice_provider_auth_token_loader()
+
+
+def _verify_voice_provider_signature(
+    *,
+    websocket: WebSocket,
+    auth_token: str,
+) -> bool:
+    return verify_twilio_signature(
+        auth_token=auth_token,
+        url=websocket.headers.get(TWILIO_CANONICAL_URL_HEADER),
+        params=None,
+        signature=websocket.headers.get(TWILIO_SIGNATURE_HEADER),
+    )
+
+
+__all__ = [
+    "get_voice_capacity_counter",
+    "get_voice_provider_auth_token_loader",
+    "router",
+]
