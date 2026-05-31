@@ -8,6 +8,19 @@
 
 **Tech Stack:** Python 3.12, FastAPI/Starlette ASGI, `redis.asyncio`, pydantic-settings, pytest.
 
+**Execution amendment (2026-06-01, during inline execution):** The rate-limit
+primitive was changed from a Lua token-bucket to an atomic `INCR`+`EXPIRE`
+**fixed-window** counter. Reason: the dependency manifest is constitutionalized
+(`tests/test_forbidden_dependencies.py` forbids extras beyond `celery[redis]`, so
+`fakeredis[lua]` is disallowed) and the suite's convention is a hand-rolled
+per-test `_FakeRedis` (`incr`/`expire`/`fail`), not the `fakeredis` library.
+Fixed-window fully satisfies the spec intent (per-tenant, fail-closed, provable in
+CI) with no new dependency. Consequences: limiter API is `consume(key, limit,
+window_seconds)` (not `capacity`/`refill`); the `*_BURST` settings are dropped in
+favour of `RATE_LIMIT_WINDOW_SECONDS`. Task code blocks below that reference
+`capacity`/`refill`/Lua are superseded by this amendment; the tests/behaviour are
+otherwise unchanged.
+
 **Conventions (read before starting):**
 - Run pytest from the **repo root** (`/home/imad-baraja/Projects/operious-ai`), never from `apps/backend` — running from the subdir causes ~29 spurious failures. Use `python -m pytest apps/backend/tests/...`.
 - Spec: [docs/superpowers/specs/2026-06-01-edge-hardening-design.md](../specs/2026-06-01-edge-hardening-design.md).

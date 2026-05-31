@@ -212,6 +212,41 @@ class Settings(BaseSettings):
     # CPU a single media stream can consume (WebSocket DoS).
     VOICE_MAX_FRAME_BYTES: int = 65_536
     VOICE_MAX_FRAMES_PER_CALL: int = 100_000
+    # ── Voice WebSocket wall-clock / idle / rate caps (spec 1b #40) ──
+    # Bound how long a single media stream can hold a connection and how
+    # fast it may push frames, on top of the per-frame byte / per-call
+    # count caps above.
+    VOICE_MAX_CALL_SECONDS: int = 3600
+    VOICE_IDLE_TIMEOUT_SECONDS: int = 30
+    VOICE_MAX_FRAMES_PER_SECOND: int = 100
+
+    # ── Inbound rate limiting (spec 1b #39) ──────────────────────────
+    # Fixed-window (INCR+EXPIRE) request budgets. The per-IP layer runs
+    # pre-auth; the per-tenant / per-principal layers run post-auth.
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_IP_PER_MINUTE: int = 120
+    RATE_LIMIT_TENANT_PER_MINUTE: int = 600
+    RATE_LIMIT_PRINCIPAL_PER_MINUTE: int = 300  # 0 disables the layer
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    # Path suffixes never rate limited (health / liveness / readiness
+    # probes); suffix match so it is independent of the mount prefix.
+    RATE_LIMIT_EXEMPT_SUFFIXES: str = "/health,/live,/ready"
+
+    # ── Webhook canonical URL (spec 1b #23) ──────────────────────────
+    # The public origin (scheme + host, no trailing slash) the substrate
+    # is reachable at, used to derive the canonical URL provider
+    # signatures are verified against — never a client-supplied header.
+    PUBLIC_BASE_URL: str = ""
+    # Honour the client-supplied ``x-operious-webhook-url`` header only
+    # when explicitly enabled (non-prod testing). Production boot rejects
+    # this being true (see ``production_readiness``).
+    WEBHOOK_TRUST_URL_HEADER: bool = False
+
+    # ── Auth error coarsening (spec 1b #25) ──────────────────────────
+    # When true (default in production via property below), external auth
+    # failures return a generic body; the precise reason is logged only.
+    COARSE_AUTH_ERRORS: bool = False
+
     EXECUTION_QUEUE_NAME: str = QUEUE_DIAGNOSTIC_NORMAL
     EXECUTION_QUEUE_MAX_DEPTH: int = 10_000
     ESCALATION_QUEUE_NAME: str = QUEUE_ESCALATION
@@ -410,6 +445,32 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.ENVIRONMENT in ("local", "development", "test")
+
+    @property
+    def rate_limit_exempt_suffixes(self) -> tuple[str, ...]:
+        """Parsed path suffixes never subject to inbound rate limiting."""
+        return tuple(
+            part.strip()
+            for part in self.RATE_LIMIT_EXEMPT_SUFFIXES.split(",")
+            if part.strip()
+        )
+
+    @property
+    def public_base_url_normalized(self) -> str:
+        """The public origin with surrounding whitespace and trailing slash removed."""
+        return self.PUBLIC_BASE_URL.strip().rstrip("/")
+
+    @property
+    def coarse_auth_errors_effective(self) -> bool:
+        """Whether external auth errors are coarsened.
+
+        Coarsen in production by default so failure detail cannot aid
+        reconnaissance; an explicit ``COARSE_AUTH_ERRORS=true`` forces it
+        on anywhere (e.g. to exercise the production posture in tests).
+        """
+        if self.COARSE_AUTH_ERRORS:
+            return True
+        return self.is_production
 
     @property
     def legacy_header_authority_enabled(self) -> bool:
