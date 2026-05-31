@@ -77,6 +77,9 @@ from app.middleware.authority_context import (
 )
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.request_body_limit import RequestBodyLimitMiddleware
+from app.middleware.edge_rate_limit import EdgeRateLimitMiddleware
+from app.middleware.tenant_rate_limit import TenantRateLimitMiddleware
+from app.core.rate_limit import FixedWindowLimiter
 from app.middleware.trusted_ingress import (
     IPNetwork,
     TrustedIngressMiddleware,
@@ -632,6 +635,20 @@ def create_app(
     # HTTP-level identity extraction site; see
     # ``app/middleware/authority_context.py`` for the doctrine.
     # Inner → outer (Starlette prepends; last added is outermost).
+    # The fixed-window inbound rate limiter (spec 1b #39) is shared by the
+    # per-tenant (innermost, registered first) and per-IP (registered after
+    # trusted-ingress, so it sits OUTSIDE authority) layers.
+    _rate_limiter = FixedWindowLimiter(cast(Any, redis_client))
+    logger.info("middleware_tenant_rate_limit_register_begin")
+    app.add_middleware(
+        TenantRateLimitMiddleware,
+        limiter=_rate_limiter,
+        tenant_per_minute=settings.RATE_LIMIT_TENANT_PER_MINUTE,
+        principal_per_minute=settings.RATE_LIMIT_PRINCIPAL_PER_MINUTE,
+        window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        enabled=settings.RATE_LIMIT_ENABLED,
+    )
+    logger.info("middleware_tenant_rate_limit_register_complete")
     logger.info("middleware_authority_register_begin")
     app.add_middleware(
         AuthorityContextMiddleware,
@@ -650,6 +667,16 @@ def create_app(
         logger.info("middleware_trusted_ingress_register_complete")
     else:
         logger.info("middleware_trusted_ingress_register_skipped")
+    logger.info("middleware_edge_rate_limit_register_begin")
+    app.add_middleware(
+        EdgeRateLimitMiddleware,
+        limiter=_rate_limiter,
+        limit=settings.RATE_LIMIT_IP_PER_MINUTE,
+        window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        exempt_suffixes=settings.rate_limit_exempt_suffixes,
+        enabled=settings.RATE_LIMIT_ENABLED,
+    )
+    logger.info("middleware_edge_rate_limit_register_complete")
     logger.info("middleware_request_context_register_begin")
     app.add_middleware(RequestContextMiddleware)
     logger.info("middleware_request_context_register_complete")
