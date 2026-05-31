@@ -224,6 +224,7 @@ async def _invoke_pre_approved(
 _STANDARD_BINDING = compute_agent_action_binding(
     tenant_id="tenant-action",
     tool_name="mutating_echo",
+    actor="agent:test-agent",
     payload={"value": 1},
 )
 
@@ -302,7 +303,7 @@ async def test_action_tool_allow_with_persisted_decision_runs() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pre_approved_decision_id_allows_action_tool() -> None:
+async def test_pre_approved_decision_requires_durable_grant_repository() -> None:
     calls: list[dict[str, object]] = []
     governance, persistence = _governance(Decision.DENY)
     decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "manager-approved-tool"))
@@ -317,16 +318,20 @@ async def test_pre_approved_decision_id_allows_action_tool() -> None:
         decision_id=decision_id,
     )
 
-    assert envelope.is_ok
-    assert calls == [{"value": 1}]
+    assert envelope.is_denied
+    assert (
+        envelope.trace.metadata["reason"]
+        == "pre_approved_decision_grant_repository_required"
+    )
+    assert calls == []
     assert str(envelope.trace.governance_decision_id) == decision_id
 
 
 @pytest.mark.asyncio
-async def test_real_allow_decision_can_be_replayed_for_identical_request() -> None:
+async def test_real_allow_decision_without_issued_grant_is_rejected() -> None:
     """End-to-end: a decision minted by a real ALLOW evaluation carries a
-    binding that matches an identical follow-up request, so the
-    legitimate manager-approval re-invocation flow still works."""
+    matching binding, but is not replayable unless a durable grant was
+    issued for later use."""
     calls: list[dict[str, object]] = []
     governance, _ = _governance(Decision.ALLOW)
     invoker = ToolInvoker(
@@ -341,8 +346,12 @@ async def test_real_allow_decision_can_be_replayed_for_identical_request() -> No
     # 2. Replay the IDENTICAL request as a pre-approved grant.
     second = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
 
-    assert second.is_ok
-    assert calls == [{"value": 1}, {"value": 1}]
+    assert second.is_denied
+    assert (
+        second.trace.metadata["reason"]
+        == "pre_approved_decision_grant_repository_required"
+    )
+    assert calls == [{"value": 1}]
 
 
 @pytest.mark.asyncio
@@ -426,8 +435,8 @@ async def test_pre_approved_decision_expires() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pre_approved_decision_consumed_once_with_redis() -> None:
-    """With Redis, a grant is one-time: the second use is rejected."""
+async def test_redis_consumption_marker_is_not_authoritative_without_db_grant() -> None:
+    """Redis alone cannot authorize or consume a pre-approved grant."""
     calls: list[dict[str, object]] = []
     governance, persistence = _governance(Decision.DENY)
     decision_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "one-time-grant"))
@@ -452,16 +461,14 @@ async def test_pre_approved_decision_consumed_once_with_redis() -> None:
         redis_client=_OneTimeRedis(),
     )
 
-    first = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
-    second = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
+    envelope = await _invoke_pre_approved(invoker=invoker, decision_id=decision_id)
 
-    assert first.is_ok
-    assert second.is_denied
+    assert envelope.is_denied
     assert (
-        second.trace.metadata["reason"]
-        == "pre_approved_decision_already_consumed"
+        envelope.trace.metadata["reason"]
+        == "pre_approved_decision_grant_repository_required"
     )
-    assert calls == [{"value": 1}]
+    assert calls == []
 
 
 @pytest.mark.asyncio

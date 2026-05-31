@@ -28,6 +28,7 @@ from app.agents.tools.approvals import (
     PostgresActionApprovalRepository,
     build_pending_action_approval,
 )
+from app.agents.tools.grants import AGENT_ACTION_ACTOR_KEY
 from app.agents.tools.orchestration import ActionOrchestrationRuntime
 from app.agents.value_objects import CausalityMetadata
 from app.governance.context import GovernanceContext
@@ -361,6 +362,7 @@ async def test_action_tool_require_approval_creates_record() -> None:
     )
     assert approval is not None
     assert result.outcomes[0].approval_record_id == approval.approval_id
+    assert approval.metadata[AGENT_ACTION_ACTOR_KEY] == "agent:test-action-agent"
     assert timeline.events[0]["event_type"] == "action_pending_approval"
 
 

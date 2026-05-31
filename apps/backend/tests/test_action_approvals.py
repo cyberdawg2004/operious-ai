@@ -20,6 +20,7 @@ from app.agents.tools.approvals import (
     PostgresActionApprovalRepository,
     build_pending_action_approval,
 )
+from app.agents.tools.grants import AGENT_ACTION_ACTOR_KEY
 from app.agents.tools.invoker import (
     AGENT_ACTION_BINDING_KEY,
     compute_agent_action_binding,
@@ -57,6 +58,7 @@ pytestmark = [requires_postgres]
 
 _TENANT_ID = "tenant-acme"
 _OTHER_TENANT_ID = "tenant-other"
+_ACTION_ACTOR = "agent:diagnostic-action-orchestrator"
 _NOW = datetime(2026, 5, 22, 13, tzinfo=timezone.utc)
 
 
@@ -266,6 +268,7 @@ async def _create_approval(
                 "proposal_id": ids["proposal_id"],
                 "action_type": "warranty_claim",
                 "target_resource": "order:order-100:sku:A1771",
+                AGENT_ACTION_ACTOR_KEY: _ACTION_ACTOR,
             },
         ),
         expected_tenant_id=tenant_id,
@@ -377,9 +380,28 @@ async def test_approve_creates_governance_decision(
         compute_agent_action_binding(
             tenant_id=approval.tenant_id,
             tool_name=approval.tool_name,
+            actor=_ACTION_ACTOR,
             payload=dict(approval.payload_json),
         )
     )
+    assert manager_decision.metadata[AGENT_ACTION_ACTOR_KEY] == _ACTION_ACTOR
+
+    grant = (
+        await pg_session.execute(
+            text(
+                """
+                SELECT actor, binding_hash, consumed_by
+                FROM public.agent_action_grants
+                WHERE decision_id = CAST(:decision_id AS uuid)
+                  AND tenant_id = :tenant_id
+                """
+            ),
+            {"decision_id": decision_id, "tenant_id": _TENANT_ID},
+        )
+    ).mappings().one()
+    assert grant["actor"] == _ACTION_ACTOR
+    assert grant["binding_hash"] == manager_decision.metadata[AGENT_ACTION_BINDING_KEY]
+    assert grant["consumed_by"] == _ACTION_ACTOR
 
     executed = [
         event for event in await _events(pg_session, approval)

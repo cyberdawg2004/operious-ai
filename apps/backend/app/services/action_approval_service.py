@@ -26,6 +26,11 @@ from app.agents.tools.approvals import (
     ActionApprovalRecord,
     ActionApprovalRepository,
 )
+from app.agents.tools.grants import (
+    AGENT_ACTION_ACTOR_KEY,
+    AgentActionGrantRepository,
+    compute_agent_action_payload_hash,
+)
 from app.agents.tools.invoker import (
     AGENT_ACTION_BINDING_KEY,
     compute_agent_action_binding,
@@ -107,6 +112,7 @@ class ActionApprovalService:
         self,
         *,
         approval_repository: ActionApprovalRepository,
+        grant_repository: AgentActionGrantRepository,
         governance_repository: BaseGovernanceRepository,
         resolution_repository: ResolutionProposalPersistenceProtocol,
         session_repository: SessionPersistenceProtocol,
@@ -115,6 +121,7 @@ class ActionApprovalService:
         session: AsyncSession,
     ) -> None:
         self._approvals = approval_repository
+        self._grants = grant_repository
         self._governance = governance_repository
         self._resolutions = resolution_repository
         self._sessions = session_repository
@@ -439,11 +446,28 @@ class ActionApprovalService:
                 ),
             )
         )
+        actor = _execution_actor_for_approval(approval)
+        payload = dict(approval.payload_json)
+        payload_hash = compute_agent_action_payload_hash(payload)
+        binding_hash = compute_agent_action_binding(
+            tenant_id=approval.tenant_id,
+            tool_name=approval.tool_name,
+            actor=actor,
+            payload=payload,
+        )
         existing = await self._governance.get_decision(
             decision_id,
             expected_tenant_id=approval.tenant_id,
         )
         if existing is not None:
+            await self._issue_manager_action_grant(
+                approval=approval,
+                decision_id=uuid.UUID(decision_id),
+                actor=actor,
+                payload_hash=payload_hash,
+                binding_hash=binding_hash,
+                issued_at=_parse_datetime(existing.decided_at),
+            )
             return decision_id
 
         now = datetime.now(timezone.utc)
@@ -456,7 +480,7 @@ class ActionApprovalService:
             tenant_id=approval.tenant_id,
             metadata={
                 "idempotency_key": approval.idempotency_key,
-                "payload": dict(approval.payload_json),
+                "payload": payload,
             },
         )
         metadata: JsonObject = {
@@ -467,12 +491,9 @@ class ActionApprovalService:
             # S-05: bind this manager-approval ALLOW to the exact action it
             # authorises so re_invoke_approved_action's reconstructed
             # request matches and the pre-approved decision is honoured
-            # (and cannot be replayed for a different tool/payload).
-            AGENT_ACTION_BINDING_KEY: compute_agent_action_binding(
-                tenant_id=approval.tenant_id,
-                tool_name=approval.tool_name,
-                payload=dict(approval.payload_json),
-            ),
+            # (and cannot be replayed by a different actor/tool/payload).
+            AGENT_ACTION_ACTOR_KEY: actor,
+            AGENT_ACTION_BINDING_KEY: binding_hash,
             "idempotency_key": approval.idempotency_key,
             "source_governance_decision_id": source_decision.decision_id,
             "original_governance_decision_id": source_decision.decision_id,
@@ -553,7 +574,42 @@ class ActionApprovalService:
         await self._governance.record_decision(decision_record)
         await self._governance.record_trace(trace_record)
         await self._governance.record_enforcement_action(action_record)
+        await self._issue_manager_action_grant(
+            approval=approval,
+            decision_id=uuid.UUID(decision_id),
+            actor=actor,
+            payload_hash=payload_hash,
+            binding_hash=binding_hash,
+            issued_at=now,
+        )
         return decision_id
+
+    async def _issue_manager_action_grant(
+        self,
+        *,
+        approval: ActionApprovalRecord,
+        decision_id: uuid.UUID,
+        actor: str,
+        payload_hash: str,
+        binding_hash: str,
+        issued_at: datetime,
+    ) -> None:
+        await self._grants.issue_grant(
+            tenant_id=approval.tenant_id,
+            decision_id=decision_id,
+            tool_name=approval.tool_name,
+            action="agent.tool_invocation",
+            actor=actor,
+            payload_hash=payload_hash,
+            binding_hash=binding_hash,
+            issued_at=issued_at,
+            expires_at=None,
+            metadata={
+                "source": "manager_approval",
+                "action_approval_id": approval.approval_id,
+                "tool_name": approval.tool_name,
+            },
+        )
 
     async def _classification_for_approval(
         self,
@@ -655,11 +711,13 @@ def _execution_context_for_approval(
         "refund.request",
         "warehouse.repair.report",
     )
+    actor = _execution_actor_for_approval(approval)
+    agent_id = _agent_id_for_execution_actor(actor)
     return AgentExecutionContext(
         identity=AgentIdentity(
-            agent_id="manager-action-approval",
+            agent_id=agent_id,
             runtime_instance_id=derive_agent_runtime_instance_id(
-                agent_ids=("manager-action-approval",)
+                agent_ids=(agent_id,)
             ),
         ),
         execution=ExecutionIdentity(
@@ -697,8 +755,23 @@ def _execution_context_for_approval(
             "session_id": approval.session_id,
             "approval_id": approval.approval_id,
             "approved_by": approved_by,
+            AGENT_ACTION_ACTOR_KEY: actor,
         },
     )
+
+
+def _execution_actor_for_approval(approval: ActionApprovalRecord) -> str:
+    actor = _text(approval.metadata.get(AGENT_ACTION_ACTOR_KEY))
+    if actor is not None:
+        return actor
+    return "agent:manager-action-approval"
+
+
+def _agent_id_for_execution_actor(actor: str) -> str:
+    prefix = "agent:"
+    if actor.startswith(prefix) and len(actor) > len(prefix):
+        return actor[len(prefix) :]
+    return "manager-action-approval"
 
 
 def _execution_uuid(approval: ActionApprovalRecord) -> uuid.UUID:

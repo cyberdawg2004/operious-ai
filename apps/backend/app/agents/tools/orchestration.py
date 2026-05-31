@@ -16,6 +16,10 @@ from app.agents.tools.approvals import (
     ActionApprovalRepository,
     build_pending_action_approval,
 )
+from app.agents.tools.grants import (
+    AGENT_ACTION_ACTOR_KEY,
+    compute_agent_execution_actor,
+)
 from app.agents.tools.invoker import ToolInvoker
 from app.governance.enums import Decision
 from app.resolution.persistence.records import ResolutionProposalRecord
@@ -319,6 +323,7 @@ class ActionOrchestrationRuntime:
         if envelope.is_denied:
             decision = _text(envelope.trace.metadata.get("governance_decision"))
             if decision == Decision.REQUIRE_APPROVAL.value:
+                actor = compute_agent_execution_actor(execution_context)
                 approval = await self._approval_repository.create_pending_approval(
                     build_pending_action_approval(
                         tenant_id=expected_tenant_id,
@@ -332,6 +337,7 @@ class ActionOrchestrationRuntime:
                             "proposal_id": str(proposal.proposal_id),
                             "action_type": action_type,
                             "target_resource": target_resource,
+                            AGENT_ACTION_ACTOR_KEY: actor,
                         },
                     ),
                     expected_tenant_id=expected_tenant_id,

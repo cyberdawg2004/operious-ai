@@ -26,12 +26,19 @@ from app.governance.envelopes import GovernanceEnvelope
 
 @dataclass(frozen=True, slots=True)
 class ToolInvocationEnvelope:
-    """Never-raising container for one tool invocation outcome."""
+    """Never-raising container for one tool invocation outcome.
+
+    ``provider_idempotency_key`` is the deterministic key a durable
+    pre-approved action grant carries to downstream provider integrations.
+    Retries of the same logical grant expose the same value, so future
+    provider adapters can forward it without re-deriving action identity.
+    """
 
     trace: ToolInvocationTrace
     result: ToolInvocationResult | None = None
     error: BaseException | None = None
     governance_envelope: GovernanceEnvelope | None = None
+    provider_idempotency_key: str | None = None
 
     @property
     def is_ok(self) -> bool:
