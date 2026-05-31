@@ -135,7 +135,14 @@ def test_production_requires_explicit_trusted_proxies(monkeypatch) -> None:
 def test_production_with_explicit_empty_proxies_boots() -> None:
     """Empty tuple is the strict fail-closed setting and MUST boot."""
     get_settings.cache_clear()
-    with patch.dict(os.environ, {"ENVIRONMENT": "production"}):
+    with patch.dict(
+        os.environ,
+        {
+            "ENVIRONMENT": "production",
+            # This test pins trusted-proxy posture, not provider readiness.
+            "PRODUCTION_READINESS_ENFORCED": "false",
+        },
+    ):
         app = create_app(trusted_proxies=())
     get_settings.cache_clear()
     assert app is not None

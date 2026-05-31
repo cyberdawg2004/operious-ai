@@ -25,7 +25,14 @@ _TRUSTED_CLIENT = ("127.0.0.1", 12345)
 def test_production_rejects_legacy_tenant_header_from_trusted_peer() -> None:
     get_settings.cache_clear()
     try:
-        with patch.dict(os.environ, {"ENVIRONMENT": "production"}):
+        with patch.dict(
+            os.environ,
+            {
+                "ENVIRONMENT": "production",
+                # Pin header-authority posture, not provider readiness.
+                "PRODUCTION_READINESS_ENFORCED": "false",
+            },
+        ):
             app = create_app(trusted_proxies=_LOCALHOST)
             client = TestClient(
                 app,

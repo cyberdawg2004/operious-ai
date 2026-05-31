@@ -55,6 +55,7 @@ from app.boundary.voice.call import (
 )
 from app.core.config import Settings, get_settings
 from app.core.http import close_shared_http_client, init_shared_http_client
+from app.core.production_readiness import validate_production_config
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, get_redis_client
 from app.core.redis_policy import RedisConfigClient, verify_redis_memory_policy
@@ -463,6 +464,13 @@ def create_app(
             "fail-closed setting). Refusing to boot with "
             "`trusted_proxies=None`."
         )
+
+    # Fail-closed production readiness gate (S-09 stubs / secrets).
+    # Refuses to boot on stubbed providers or missing security secrets
+    # unless each is explicitly acknowledged. Disabled outside production
+    # and overridable via PRODUCTION_READINESS_ENFORCED.
+    if settings.production_readiness_enforced:
+        validate_production_config(settings)
 
     logger.info("fastapi_instance_create_begin")
     app = FastAPI(

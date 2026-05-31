@@ -98,6 +98,20 @@ class Settings(BaseSettings):
     # they are fail-closed. Set explicitly to force either posture.
     LEGACY_HEADER_AUTHORITY_ENABLED: bool | None = None
 
+    # ─── Production readiness (S-09 stubs, #31/#30/#74/#17/#54) ──────
+    # When ``None`` (default), production refuses to boot with stubbed
+    # providers / missing security secrets; non-production never
+    # enforces. Set explicitly to force either posture (e.g. ``false``
+    # for a test harness that boots a production-env app).
+    PRODUCTION_READINESS_ENFORCED: bool | None = None
+    # Explicit acknowledgements that a stub provider is acceptable in
+    # production (each defaults to fail-closed).
+    ALLOW_STUB_LLM: bool = False
+    ALLOW_STUB_TRANSLATION: bool = False
+    ALLOW_STUB_VECTOR: bool = False
+    ALLOW_STUB_EMBEDDINGS: bool = False
+    ALLOW_STUB_VOICE: bool = False
+
     # Separation of duties for tenant configuration application (S-03).
     # When ``None`` (default), a tenant admin may self-approve (apply)
     # their own knowledge / policy / execution-governance change
@@ -412,6 +426,13 @@ class Settings(BaseSettings):
         if self.LEGACY_HEADER_AUTHORITY_ENABLED is not None:
             return self.LEGACY_HEADER_AUTHORITY_ENABLED
         return not self.is_production
+
+    @property
+    def production_readiness_enforced(self) -> bool:
+        """Whether the fail-closed production config gate runs at boot."""
+        if self.PRODUCTION_READINESS_ENFORCED is not None:
+            return self.PRODUCTION_READINESS_ENFORCED
+        return self.is_production
 
     @property
     def tenant_config_self_approval_allowed(self) -> bool:
