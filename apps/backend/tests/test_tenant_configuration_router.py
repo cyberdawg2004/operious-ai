@@ -33,6 +33,7 @@ async def tenant_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[httpx.AsyncClient]:
     monkeypatch.setenv("TENANT_CREDENTIAL_MASTER_KEY", _MASTER_KEY)
+    monkeypatch.setenv("TENANT_CONFIG_ALLOW_SELF_APPROVAL", "true")
     get_settings.cache_clear()
     app = create_app()
 

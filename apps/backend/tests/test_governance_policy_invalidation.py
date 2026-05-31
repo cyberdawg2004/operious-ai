@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, ClassVar, FrozenSet, Sequence
 
 import pytest
 
+from app.core.config import get_settings
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
 from app.governance.enforcement.handlers import (
@@ -33,6 +35,15 @@ from app.tenant.persistence import (
     TenantGovernancePolicyQuery,
 )
 from app.tenant.runtime import TenantConfigurationRuntime
+
+
+@pytest.fixture(autouse=True)
+def _allow_legacy_direct_apply_for_tests() -> None:
+    os.environ["TENANT_CONFIG_ALLOW_SELF_APPROVAL"] = "true"
+    get_settings.cache_clear()
+    yield
+    os.environ.pop("TENANT_CONFIG_ALLOW_SELF_APPROVAL", None)
+    get_settings.cache_clear()
 
 
 class _FixedPolicy(BaseGovernancePolicy):
@@ -103,9 +114,7 @@ def _chain(decision: Decision) -> PolicyChain:
     return PolicyChain(
         chain_id=f"test.{decision.value}",
         stage=EnforcementStage.PRE_REQUEST,
-        policies=(
-            _FixedPolicy(name=f"test.{decision.value}", decision=decision),
-        ),
+        policies=(_FixedPolicy(name=f"test.{decision.value}", decision=decision),),
     )
 
 
@@ -222,7 +231,9 @@ async def test_per_task_runtime_sees_updated_policy_at_construction() -> None:
 
     first_policy = await _create_policy(service, decision=Decision.ALLOW)
     first_runtime = await _runtime_from_policy_repository(repo)
-    assert (await first_runtime.evaluate(_context())).unwrap().decision is Decision.ALLOW
+    assert (
+        await first_runtime.evaluate(_context())
+    ).unwrap().decision is Decision.ALLOW
 
     await service.update_governance_policy(
         tenant_id="tenant-acme",

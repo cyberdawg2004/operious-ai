@@ -77,11 +77,13 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, str]] = {
     "operator:access": "operator",
     "read:tenant_data": "tenant_read",
     "write:tenant_data": "tenant_write",
+    "write:tenant_config": "tenant.config.write",
 }
 
 ROLE_CAPABILITY_MAP: Final[dict[str, str]] = {
     "Operator": "operator",
     "TenantAdmin": "tenant_admin",
+    "TenantConfigWriter": "tenant.config.write",
     "TenantViewer": "tenant_read",
     # Separation of duties (S-03): the approve duty is a DISTINCT role so
     # it can be granted to a different principal than ``TenantAdmin``.
@@ -119,9 +121,7 @@ class JWTProvider:
         require_claims: tuple[str, ...] = (),
     ) -> None:
         if not algorithms:
-            raise ValueError(
-                "JWTProvider requires a non-empty algorithms allowlist"
-            )
+            raise ValueError("JWTProvider requires a non-empty algorithms allowlist")
         self.name = name
         self._key = key
         self._algorithms = tuple(algorithms)
@@ -149,32 +149,20 @@ class JWTProvider:
                 leeway=self._decode.leeway,
             )
         except InvalidAlgorithmError as err:
-            raise AuthenticationError(
-                f"unsupported algorithm: {err}"
-            ) from err
+            raise AuthenticationError(f"unsupported algorithm: {err}") from err
         except InvalidIssuerError as err:
-            raise AuthenticationError(
-                f"issuer not allowed: {err}"
-            ) from err
+            raise AuthenticationError(f"issuer not allowed: {err}") from err
         except InvalidAudienceError as err:
-            raise AuthenticationError(
-                f"audience mismatch: {err}"
-            ) from err
+            raise AuthenticationError(f"audience mismatch: {err}") from err
         except InvalidTokenError as err:
-            raise AuthenticationError(
-                f"invalid token: {err}"
-            ) from err
+            raise AuthenticationError(f"invalid token: {err}") from err
 
         if not isinstance(claims, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise AuthenticationError(
-                "JWT payload is not a JSON object"
-            )
+            raise AuthenticationError("JWT payload is not a JSON object")
 
         for required in self._require_claims:
             if required not in claims:
-                raise AuthenticationError(
-                    f"required claim missing: {required!r}"
-                )
+                raise AuthenticationError(f"required claim missing: {required!r}")
 
         identity_axes: dict[str, Any] = {}
         for axis, claim_name in (
@@ -218,9 +206,7 @@ class JWTProvider:
             claims=dict(claims),
         )
 
-    def _extract_capabilities(
-        self, claims: dict[str, Any]
-    ) -> frozenset[str]:
+    def _extract_capabilities(self, claims: dict[str, Any]) -> frozenset[str]:
         return extract_capabilities_from_claims(
             claims=claims,
             claim_mapping=self._claim_mapping,

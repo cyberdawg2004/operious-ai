@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.sop_intelligence import ApprovalRecord, ApprovalStatus
 from app.tenant.chronology import canonical_sha256
@@ -28,6 +29,7 @@ from app.tenant.identity import (
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
 )
+from app.tenant.exceptions import TenantConfigurationDirectApplyDisabledError
 from app.tenant.persistence import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
@@ -77,7 +79,10 @@ class TenantConfigurationService:
         credentials: Mapping[str, Any],
         webhook_secret: str,
         status: TenantChannelStatus,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
         record = await self._runtime.configure_channel(
             tenant_id=tenant_id,
             channel_type=channel_type,
@@ -86,7 +91,8 @@ class TenantConfigurationService:
             webhook_secret=webhook_secret,
             status=status,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def update_channel(
@@ -98,7 +104,10 @@ class TenantConfigurationService:
         credentials: Mapping[str, Any] | None,
         webhook_secret: str | None,
         status: TenantChannelStatus | None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
         record = await self._runtime.update_channel(
             tenant_id=tenant_id,
             config_id=config_id,
@@ -107,7 +116,8 @@ class TenantConfigurationService:
             webhook_secret=webhook_secret,
             status=status,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def _publish_governance_policy_invalidation(
@@ -131,17 +141,28 @@ class TenantConfigurationService:
                 extra={"tenant_id": tenant_id, "error": str(exc)},
             )
 
+    async def publish_governance_policy_invalidation(
+        self,
+        *,
+        tenant_id: str,
+    ) -> None:
+        await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
+
     async def verify_channel(
         self,
         *,
         tenant_id: str,
         config_id: TenantChannelConfigurationId,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
         record = await self._runtime.verify_channel(
             tenant_id=tenant_id,
             config_id=config_id,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def list_channels(
@@ -172,19 +193,24 @@ class TenantConfigurationService:
         document_type: TenantKnowledgeDocumentType,
         status: TenantKnowledgeDocumentStatus,
         uploaded_by: str,
+        approval: ApprovalRecord | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantKnowledgeDocumentRecord:
-        approval = _approved_configuration_change(
-            tenant_id=tenant_id,
-            target_id=f"knowledge:{document_type.value}:{title}",
-            change_kind="knowledge_document_create",
-            proposed_by=uploaded_by,
-            material={
-                "title": title,
-                "content": content,
-                "document_type": document_type.value,
-                "status": status.value,
-            },
-        )
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if approval is None:
+            approval = _approved_configuration_change(
+                tenant_id=tenant_id,
+                target_id=f"knowledge:{document_type.value}:{title}",
+                change_kind="knowledge_document_create",
+                proposed_by=uploaded_by,
+                material={
+                    "title": title,
+                    "content": content,
+                    "document_type": document_type.value,
+                    "status": status.value,
+                },
+            )
         record = await self._runtime.create_knowledge_document(
             tenant_id=tenant_id,
             title=title,
@@ -194,7 +220,8 @@ class TenantConfigurationService:
             uploaded_by=uploaded_by,
             approval=approval,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def update_knowledge_document(
@@ -205,18 +232,23 @@ class TenantConfigurationService:
         content: str | None,
         status: TenantKnowledgeDocumentStatus | None,
         uploaded_by: str,
+        approval: ApprovalRecord | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantKnowledgeDocumentRecord:
-        approval = _approved_configuration_change(
-            tenant_id=tenant_id,
-            target_id=str(document_id),
-            change_kind="knowledge_document_update",
-            proposed_by=uploaded_by,
-            material={
-                "document_id": str(document_id),
-                "content": content,
-                "status": None if status is None else status.value,
-            },
-        )
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if approval is None:
+            approval = _approved_configuration_change(
+                tenant_id=tenant_id,
+                target_id=str(document_id),
+                change_kind="knowledge_document_update",
+                proposed_by=uploaded_by,
+                material={
+                    "document_id": str(document_id),
+                    "content": content,
+                    "status": None if status is None else status.value,
+                },
+            )
         record = await self._runtime.update_knowledge_document(
             tenant_id=tenant_id,
             document_id=document_id,
@@ -225,7 +257,8 @@ class TenantConfigurationService:
             uploaded_by=uploaded_by,
             approval=approval,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def list_knowledge_documents(
@@ -256,19 +289,24 @@ class TenantConfigurationService:
         status: TenantGovernancePolicyStatus,
         approved_by: str,
         effective_from: datetime,
+        approval: ApprovalRecord | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantGovernancePolicyRecord:
-        approval = _approved_configuration_change(
-            tenant_id=tenant_id,
-            target_id=f"governance_policy:{policy_type}",
-            change_kind="governance_policy_create",
-            proposed_by=approved_by,
-            material={
-                "policy_type": policy_type,
-                "parameters": dict(parameters),
-                "status": status.value,
-                "effective_from": effective_from.isoformat(),
-            },
-        )
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if approval is None:
+            approval = _approved_configuration_change(
+                tenant_id=tenant_id,
+                target_id=f"governance_policy:{policy_type}",
+                change_kind="governance_policy_create",
+                proposed_by=approved_by,
+                material={
+                    "policy_type": policy_type,
+                    "parameters": dict(parameters),
+                    "status": status.value,
+                    "effective_from": effective_from.isoformat(),
+                },
+            )
         record = await self._runtime.create_governance_policy(
             tenant_id=tenant_id,
             policy_type=policy_type,
@@ -278,8 +316,9 @@ class TenantConfigurationService:
             effective_from=effective_from,
             approval=approval,
         )
-        await self._session.commit()
-        await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
+        if commit:
+            await self._session.commit()
+            await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
         return record
 
     async def update_governance_policy(
@@ -291,21 +330,26 @@ class TenantConfigurationService:
         status: TenantGovernancePolicyStatus | None,
         approved_by: str,
         effective_from: datetime | None,
+        approval: ApprovalRecord | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantGovernancePolicyRecord:
-        approval = _approved_configuration_change(
-            tenant_id=tenant_id,
-            target_id=str(policy_id),
-            change_kind="governance_policy_update",
-            proposed_by=approved_by,
-            material={
-                "policy_id": str(policy_id),
-                "parameters": None if parameters is None else dict(parameters),
-                "status": None if status is None else status.value,
-                "effective_from": (
-                    None if effective_from is None else effective_from.isoformat()
-                ),
-            },
-        )
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if approval is None:
+            approval = _approved_configuration_change(
+                tenant_id=tenant_id,
+                target_id=str(policy_id),
+                change_kind="governance_policy_update",
+                proposed_by=approved_by,
+                material={
+                    "policy_id": str(policy_id),
+                    "parameters": None if parameters is None else dict(parameters),
+                    "status": None if status is None else status.value,
+                    "effective_from": (
+                        None if effective_from is None else effective_from.isoformat()
+                    ),
+                },
+            )
         record = await self._runtime.update_governance_policy(
             tenant_id=tenant_id,
             policy_id=policy_id,
@@ -315,8 +359,9 @@ class TenantConfigurationService:
             effective_from=effective_from,
             approval=approval,
         )
-        await self._session.commit()
-        await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
+        if commit:
+            await self._session.commit()
+            await self._publish_governance_policy_invalidation(tenant_id=tenant_id)
         return record
 
     async def configure_execution_governance(
@@ -334,25 +379,32 @@ class TenantConfigurationService:
         status: TenantExecutionGovernanceStatus,
         configured_by: str,
         metadata: Mapping[str, Any],
+        approval: ApprovalRecord | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantExecutionGovernanceConfigurationRecord:
-        approval = _approved_configuration_change(
-            tenant_id=tenant_id,
-            target_id="execution_governance",
-            change_kind="execution_governance_configure",
-            proposed_by=configured_by,
-            material={
-                "execution_quota": execution_quota,
-                "throughput_limit": throughput_limit,
-                "throughput_window_minutes": throughput_window_minutes,
-                "governance_budget_limit": governance_budget_limit,
-                "governance_budget_window_minutes": governance_budget_window_minutes,
-                "circuit_failure_threshold": circuit_failure_threshold,
-                "circuit_window_minutes": circuit_window_minutes,
-                "circuit_cooldown_minutes": circuit_cooldown_minutes,
-                "status": status.value,
-                "metadata": dict(metadata),
-            },
-        )
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if approval is None:
+            approval = _approved_configuration_change(
+                tenant_id=tenant_id,
+                target_id="execution_governance",
+                change_kind="execution_governance_configure",
+                proposed_by=configured_by,
+                material={
+                    "execution_quota": execution_quota,
+                    "throughput_limit": throughput_limit,
+                    "throughput_window_minutes": throughput_window_minutes,
+                    "governance_budget_limit": governance_budget_limit,
+                    "governance_budget_window_minutes": (
+                        governance_budget_window_minutes
+                    ),
+                    "circuit_failure_threshold": circuit_failure_threshold,
+                    "circuit_window_minutes": circuit_window_minutes,
+                    "circuit_cooldown_minutes": circuit_cooldown_minutes,
+                    "status": status.value,
+                    "metadata": dict(metadata),
+                },
+            )
         record = await self._runtime.configure_execution_governance(
             tenant_id=tenant_id,
             execution_quota=execution_quota,
@@ -368,7 +420,8 @@ class TenantConfigurationService:
             approval=approval,
             metadata=metadata,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def list_execution_governance_configurations(
@@ -432,7 +485,10 @@ class TenantConfigurationService:
         topology: Mapping[str, Any],
         status: TenantTopologyStatus,
         configured_by: str,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantTopologyConfigurationRecord:
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
         record = await self._runtime.configure_topology_from_mapping(
             tenant_id=tenant_id,
             topology_name=topology_name,
@@ -440,7 +496,8 @@ class TenantConfigurationService:
             status=status,
             configured_by=configured_by,
         )
-        await self._session.commit()
+        if commit:
+            await self._session.commit()
         return record
 
     async def list_topology_configurations(
@@ -470,6 +527,7 @@ def _approved_configuration_change(
     change_kind: str,
     proposed_by: str,
     material: Mapping[str, Any],
+    reviewed_by: str | None = None,
 ) -> ApprovalRecord:
     material_hash = canonical_sha256(
         {
@@ -495,12 +553,22 @@ def _approved_configuration_change(
         confidence=1.0,
         status=ApprovalStatus.APPROVED.value,
         proposed_by=proposed_by,
-        reviewed_by=proposed_by,
+        reviewed_by=reviewed_by or proposed_by,
         created_at=now,
         metadata={
             "approval_source": "tenant_configuration_service",
             "material_sha256": material_hash,
         },
+    )
+
+
+def _require_direct_apply_enabled(*, bypass: bool = False) -> None:
+    if bypass:
+        return
+    if get_settings().tenant_config_self_approval_allowed:
+        return
+    raise TenantConfigurationDirectApplyDisabledError(
+        "direct tenant configuration mutation is disabled; use change requests"
     )
 
 

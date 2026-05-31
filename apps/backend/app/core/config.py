@@ -31,6 +31,7 @@ from app.queues import (
 
 Environment = Literal["local", "development", "staging", "production", "test"]
 
+
 # Repository-root anchored environment resolution.
 #
 # Prevents:
@@ -52,16 +53,14 @@ def _resolve_root_dir() -> Path:
 
     config_path = Path(__file__).resolve()
     for parent in config_path.parents:
-        if (
-            (parent / "package.json").is_file()
-            and (parent / "apps" / "backend").is_dir()
-        ):
+        if (parent / "package.json").is_file() and (
+            parent / "apps" / "backend"
+        ).is_dir():
             return parent
     for parent in config_path.parents:
-        if (
-            (parent / "alembic.ini").is_file()
-            and (parent / "app" / "main.py").is_file()
-        ):
+        if (parent / "alembic.ini").is_file() and (
+            parent / "app" / "main.py"
+        ).is_file():
             return parent
     for parent in config_path.parents:
         if (parent / ".env").is_file():
@@ -112,13 +111,10 @@ class Settings(BaseSettings):
     ALLOW_STUB_EMBEDDINGS: bool = False
     ALLOW_STUB_VOICE: bool = False
 
-    # Separation of duties for tenant configuration application (S-03).
-    # When ``None`` (default), a tenant admin may self-approve (apply)
-    # their own knowledge / policy / execution-governance change
-    # everywhere EXCEPT production. In production, applying additionally
-    # requires the distinct ``tenant.config.approve`` capability so write
-    # and approve duties can be separated. Set explicitly to force either
-    # posture.
+    # Legacy direct tenant configuration application (S-03).
+    # The durable tenant-config ledger is the production path. This flag
+    # exists only as an explicit non-production escape hatch for older
+    # direct mutation endpoints during tests and local development.
     TENANT_CONFIG_ALLOW_SELF_APPROVAL: bool | None = None
 
     AUTH0_DOMAIN: str | None = None
@@ -436,15 +432,14 @@ class Settings(BaseSettings):
 
     @property
     def tenant_config_self_approval_allowed(self) -> bool:
-        """Whether a tenant admin may apply their own config change (S-03).
+        """Whether legacy direct tenant config mutation is enabled.
 
-        Fail-closed in production unless explicitly overridden — applying
-        a knowledge / policy / execution-governance change there requires
-        the distinct ``tenant.config.approve`` capability.
+        Fail-closed in production regardless of the flag. Non-production
+        callers must opt in explicitly with
+        ``TENANT_CONFIG_ALLOW_SELF_APPROVAL=true``; otherwise all config
+        mutations should flow through the durable ledger.
         """
-        if self.TENANT_CONFIG_ALLOW_SELF_APPROVAL is not None:
-            return self.TENANT_CONFIG_ALLOW_SELF_APPROVAL
-        return not self.is_production
+        return not self.is_production and self.TENANT_CONFIG_ALLOW_SELF_APPROVAL is True
 
     @property
     def outbound_webhook_allowed_hosts(self) -> tuple[str, ...]:

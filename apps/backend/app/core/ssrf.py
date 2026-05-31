@@ -36,10 +36,8 @@ class SSRFValidationError(Exception):
 
 
 def _default_resolve(host: str, port: int) -> list[str]:
-    infos = socket.getaddrinfo(
-        host, port, proto=socket.IPPROTO_TCP
-    )
-    return [info[4][0] for info in infos]
+    infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    return [str(info[4][0]) for info in infos]
 
 
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -93,9 +91,7 @@ def validate_public_https_url(
     try:
         addresses = list(resolver(host, port))
     except OSError as exc:
-        raise SSRFValidationError(
-            f"DNS resolution failed for {host!r}"
-        ) from exc
+        raise SSRFValidationError(f"DNS resolution failed for {host!r}") from exc
 
     if not addresses:
         raise SSRFValidationError(f"{host!r} resolved to no addresses")
@@ -108,9 +104,7 @@ def validate_public_https_url(
                 f"{host!r} resolved to an unparseable address {raw!r}"
             ) from exc
         if _is_blocked_ip(ip):
-            raise SSRFValidationError(
-                f"{host!r} resolves to blocked address {raw}"
-            )
+            raise SSRFValidationError(f"{host!r} resolves to blocked address {raw}")
 
 
 __all__ = ["Resolver", "SSRFValidationError", "validate_public_https_url"]

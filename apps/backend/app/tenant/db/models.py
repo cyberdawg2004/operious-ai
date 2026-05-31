@@ -428,8 +428,76 @@ class TenantTopologyConfigurationRow(Base):
     )
 
 
+class TenantConfigChangeRequestRow(Base):
+    """Durable dual-control ledger row for tenant config changes."""
+
+    __tablename__ = "tenant_config_change_requests"
+
+    change_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    change_type: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    proposed_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        server_default=text("'PROPOSED'"),
+        index=True,
+    )
+    proposed_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    proposed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    approved_by: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejected_by: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True
+    )
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcome_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "change_type IN ("
+            "'knowledge', 'policy', 'execution_governance', "
+            "'topology', 'channel'"
+            ")",
+            name="change_type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('PROPOSED', 'APPROVED', 'REJECTED', 'APPLIED')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "approved_by IS NULL OR approved_by != proposed_by",
+            name="approver_distinct",
+        ),
+        Index(
+            "ix_tenant_config_change_requests_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+
 __all__ = [
     "TenantChannelConfigurationRow",
+    "TenantConfigChangeRequestRow",
     "TenantExecutionCircuitBreakerRow",
     "TenantExecutionGovernanceConfigurationRow",
     "TenantGovernancePolicyRow",

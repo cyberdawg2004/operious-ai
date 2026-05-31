@@ -15,6 +15,10 @@ class TenantConfigurationPersistenceError(TenantConfigurationError):
     """Raised when a tenant configuration write cannot be persisted."""
 
 
+class TenantConfigurationDirectApplyDisabledError(TenantConfigurationError):
+    """Raised when legacy direct configuration mutation is disabled."""
+
+
 class ApprovalRequiredError(TenantConfigurationError):
     """Raised when a chronological mutation lacks approved lineage."""
 
@@ -34,6 +38,7 @@ class TenantCredentialEncryptionError(TenantConfigurationError):
 __all__ = [
     "ApprovalRequiredError",
     "ChronologyImmutabilityError",
+    "TenantConfigurationDirectApplyDisabledError",
     "TenantConfigurationError",
     "TenantConfigurationNotFoundError",
     "TenantConfigurationPersistenceError",

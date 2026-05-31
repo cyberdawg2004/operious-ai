@@ -7,6 +7,7 @@ test_ticket_ingress_chain   → PASSES now
 test_dispatch_governance    → PASSES now
 test_full_chain             → PASSES now
 """
+
 from __future__ import annotations
 
 import os
@@ -21,7 +22,6 @@ from tests.conftest import (
     database_url_skip_reason,
     requires_postgres,
 )
-
 
 pytestmark = pytest.mark.smoke
 
@@ -53,6 +53,7 @@ def _create_app():
         "TENANT_CREDENTIAL_MASTER_KEY",
         "system-smoke-master-key-material-32-bytes",
     )
+    os.environ["TENANT_CONFIG_ALLOW_SELF_APPROVAL"] = "true"
     if database_url_skip_reason() is None:
         os.environ["DATABASE_URL"] = os.environ[TEST_DATABASE_URL_ENV]
     from app.core.config import get_settings
@@ -120,10 +121,7 @@ async def test_health_endpoint_live():
     """
     app = _create_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/v1/health")
         assert response.status_code == 200
         data = response.json()
@@ -139,10 +137,7 @@ async def test_ticket_ingress_chain():
     """
     app = _create_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         external_id = _smoke_external_id("smoke-ingress")
         response = await client.post(
             "/api/v1/boundary/translation/ingress",
@@ -150,9 +145,9 @@ async def test_ticket_ingress_chain():
                 "external_id": external_id,
                 "channel": "email",
                 "raw_content": "My Anker cable stopped working",
-                "language_code": "en"
+                "language_code": "en",
             },
-            headers=SMOKE_HEADERS
+            headers=SMOKE_HEADERS,
         )
         assert response.status_code == 202
         data = response.json()
@@ -168,10 +163,7 @@ async def test_dispatch_governance_chain():
     """
     app = _create_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         await _ensure_execution_governance(client)
         external_id = _smoke_external_id("smoke-dispatch")
         ingress = await client.post(
@@ -180,9 +172,9 @@ async def test_dispatch_governance_chain():
                 "external_id": external_id,
                 "channel": "email",
                 "raw_content": "My Anker cable stopped working",
-                "language_code": "en"
+                "language_code": "en",
             },
-            headers=SMOKE_HEADERS
+            headers=SMOKE_HEADERS,
         )
         assert ingress.status_code == 202
         ingress_id = ingress.json()["ingress_id"]
@@ -190,7 +182,7 @@ async def test_dispatch_governance_chain():
         response = await client.post(
             "/api/v1/coordination/dispatch",
             json={"ingress_id": ingress_id},
-            headers=SMOKE_HEADERS
+            headers=SMOKE_HEADERS,
         )
         assert response.status_code == 200
         data = response.json()
@@ -208,10 +200,7 @@ async def test_full_ticket_to_timeline_chain():
     """
     app = _create_app()
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         await _ensure_execution_governance(client)
         external_id = _smoke_external_id("smoke-e2e")
 
@@ -222,9 +211,9 @@ async def test_full_ticket_to_timeline_chain():
                 "external_id": external_id,
                 "channel": "email",
                 "raw_content": "My Anker PowerCore stopped charging",
-                "language_code": "en"
+                "language_code": "en",
             },
-            headers=SMOKE_HEADERS
+            headers=SMOKE_HEADERS,
         )
         assert ingress.status_code == 202
         ingress_id = ingress.json()["ingress_id"]
@@ -233,15 +222,14 @@ async def test_full_ticket_to_timeline_chain():
         dispatch = await client.post(
             "/api/v1/coordination/dispatch",
             json={"ingress_id": ingress_id},
-            headers=SMOKE_HEADERS
+            headers=SMOKE_HEADERS,
         )
         assert dispatch.status_code == 200
         session_id = dispatch.json()["session_id"]
 
         # Step 3 — verify session timeline populated
         timeline = await client.get(
-            f"/api/v1/session/{session_id}/timeline",
-            headers=SMOKE_HEADERS
+            f"/api/v1/session/{session_id}/timeline", headers=SMOKE_HEADERS
         )
         assert timeline.status_code == 200
         events = timeline.json()["events"]
@@ -249,8 +237,7 @@ async def test_full_ticket_to_timeline_chain():
 
         # Step 4 — verify governance decision recorded
         governance = await client.get(
-            "/api/v1/governance/decisions",
-            headers=SMOKE_HEADERS
+            "/api/v1/governance/decisions", headers=SMOKE_HEADERS
         )
         assert governance.status_code == 200
         assert len(governance.json()["decisions"]) > 0

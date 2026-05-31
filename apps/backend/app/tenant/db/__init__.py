@@ -2,6 +2,7 @@
 
 from app.tenant.db.models import (
     TenantChannelConfigurationRow,
+    TenantConfigChangeRequestRow,
     TenantGovernancePolicyRow,
     TenantKnowledgeDocumentRow,
     TenantRow,
@@ -9,6 +10,7 @@ from app.tenant.db.models import (
 
 __all__ = [
     "TenantChannelConfigurationRow",
+    "TenantConfigChangeRequestRow",
     "TenantGovernancePolicyRow",
     "TenantKnowledgeDocumentRow",
     "TenantRow",

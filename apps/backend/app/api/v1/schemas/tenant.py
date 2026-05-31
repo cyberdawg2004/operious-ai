@@ -17,6 +17,14 @@ from app.tenant.enums import (
     TenantKnowledgeDocumentType,
     TenantTopologyStatus,
 )
+from app.tenant.change_requests import (
+    TenantConfigChangeRequestPage as LedgerPage,
+)
+from app.tenant.change_requests import (
+    TenantConfigChangeRequestRecord,
+    TenantConfigChangeRequestStatus,
+    TenantConfigChangeType,
+)
 from app.tenant.persistence import (
     TenantChannelConfigurationRecord,
     TenantExecutionCircuitBreakerRecord,
@@ -219,9 +227,7 @@ class TenantExecutionGovernanceCreateRequest(BaseModel):
     circuit_failure_threshold: int = Field(ge=1)
     circuit_window_minutes: int = Field(ge=1)
     circuit_cooldown_minutes: int = Field(ge=1)
-    status: TenantExecutionGovernanceStatus = (
-        TenantExecutionGovernanceStatus.DRAFT
-    )
+    status: TenantExecutionGovernanceStatus = TenantExecutionGovernanceStatus.DRAFT
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -256,9 +262,7 @@ class TenantExecutionGovernanceResponse(BaseModel):
             throughput_limit=record.throughput_limit,
             throughput_window_minutes=record.throughput_window_minutes,
             governance_budget_limit=record.governance_budget_limit,
-            governance_budget_window_minutes=(
-                record.governance_budget_window_minutes
-            ),
+            governance_budget_window_minutes=(record.governance_budget_window_minutes),
             circuit_failure_threshold=record.circuit_failure_threshold,
             circuit_window_minutes=record.circuit_window_minutes,
             circuit_cooldown_minutes=record.circuit_cooldown_minutes,
@@ -303,14 +307,10 @@ class TenantExecutionCircuitBreakerResponse(BaseModel):
             state=record.state,
             failure_count=record.failure_count,
             opened_at=(
-                record.opened_at.isoformat()
-                if record.opened_at is not None
-                else None
+                record.opened_at.isoformat() if record.opened_at is not None else None
             ),
             open_until=(
-                record.open_until.isoformat()
-                if record.open_until is not None
-                else None
+                record.open_until.isoformat() if record.open_until is not None else None
             ),
             last_transition_at=record.last_transition_at.isoformat(),
             reason=record.reason,
@@ -372,7 +372,95 @@ class TenantTopologyConfigurationPage(BaseModel):
     offset: int
 
 
+class TenantConfigChangeRequestCreateRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    change_type: TenantConfigChangeType
+    payload: dict[str, Any]
+
+
+class TenantConfigChangeRequestRejectRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    reason: str = Field(min_length=1)
+
+
+class TenantConfigChangeRequestResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    change_request_id: str
+    tenant_id: str
+    change_type: TenantConfigChangeType
+    proposed_payload: dict[str, Any]
+    status: TenantConfigChangeRequestStatus
+    proposed_by: str
+    proposed_at: str
+    approved_by: str | None = None
+    approved_at: str | None = None
+    rejected_by: str | None = None
+    rejected_at: str | None = None
+    applied_at: str | None = None
+    rejection_reason: str | None = None
+    outcome_payload: dict[str, Any] | None = None
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantConfigChangeRequestRecord,
+    ) -> "TenantConfigChangeRequestResponse":
+        return cls(
+            change_request_id=str(record.change_request_id),
+            tenant_id=record.tenant_id,
+            change_type=record.change_type,
+            proposed_payload=dict(record.proposed_payload),
+            status=record.status,
+            proposed_by=record.proposed_by,
+            proposed_at=record.proposed_at.isoformat(),
+            approved_by=record.approved_by,
+            approved_at=(
+                None if record.approved_at is None else record.approved_at.isoformat()
+            ),
+            rejected_by=record.rejected_by,
+            rejected_at=(
+                None if record.rejected_at is None else record.rejected_at.isoformat()
+            ),
+            applied_at=(
+                None if record.applied_at is None else record.applied_at.isoformat()
+            ),
+            rejection_reason=record.rejection_reason,
+            outcome_payload=(
+                None if record.outcome_payload is None else dict(record.outcome_payload)
+            ),
+        )
+
+
+class TenantConfigChangeRequestPage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[TenantConfigChangeRequestResponse] = []
+    total: int
+    offset: int
+
+    @classmethod
+    def from_page(
+        cls,
+        page: LedgerPage,
+    ) -> "TenantConfigChangeRequestPage":
+        return cls(
+            items=[
+                TenantConfigChangeRequestResponse.from_record(record)
+                for record in page.items
+            ],
+            total=page.total,
+            offset=page.offset,
+        )
+
+
 __all__ = [
+    "TenantConfigChangeRequestCreateRequest",
+    "TenantConfigChangeRequestPage",
+    "TenantConfigChangeRequestRejectRequest",
+    "TenantConfigChangeRequestResponse",
     "TenantChannelConfigurationPage",
     "TenantChannelConfigurationResponse",
     "TenantChannelCreateRequest",

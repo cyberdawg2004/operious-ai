@@ -5,6 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.tenant import (
+    TenantConfigChangeRequestCreateRequest,
+    TenantConfigChangeRequestPage,
+    TenantConfigChangeRequestRejectRequest,
+    TenantConfigChangeRequestResponse,
     TenantChannelConfigurationPage,
     TenantChannelConfigurationResponse,
     TenantChannelCreateRequest,
@@ -27,14 +31,28 @@ from app.api.v1.schemas.tenant import (
     TenantTopologyConfigurationResponse,
 )
 from app.dependencies.authority import (
+    TENANT_CONFIG_APPROVE_CAPABILITY,
+    require_capability,
     require_config_apply_authorization,
-    require_tenant_admin,
     require_tenant_scope,
 )
-from app.dependencies.services import get_tenant_configuration_service
+from app.dependencies.services import (
+    get_tenant_config_change_request_service,
+    get_tenant_configuration_service,
+)
 from app.identity import AuthorityContext
+from app.services.tenant_config_change_request_service import (
+    TenantConfigChangeRequestService,
+)
 from app.services.tenant_configuration_service import (
     TenantConfigurationService,
+)
+from app.tenant.change_requests import (
+    TenantConfigChangeRequestError,
+    TenantConfigChangeRequestLifecycleError,
+    TenantConfigChangeRequestNotFoundError,
+    TenantConfigChangeRequestSeparationError,
+    TenantConfigChangeRequestStatus,
 )
 from app.tenant.enums import (
     TenantChannelStatus,
@@ -58,10 +76,133 @@ from app.tenant.identity import (
 )
 
 router = APIRouter(tags=["tenant"])
+require_tenant_config_write = require_capability("tenant.config.write")
+require_tenant_config_approve = require_capability(TENANT_CONFIG_APPROVE_CAPABILITY)
 
 _MIN_LIMIT = 1
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 25
+
+
+@router.post(
+    "/config/change-requests",
+    response_model=TenantConfigChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def propose_config_change_request(
+    request: TenantConfigChangeRequestCreateRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_tenant_config_write),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestResponse:
+    try:
+        record = await service.propose(
+            tenant_id=expected_tenant_id,
+            change_type=request.change_type,
+            payload=request.payload,
+            proposed_by=_principal_or_400(authority),
+        )
+    except TenantConfigChangeRequestError as exc:
+        raise _change_request_http_error(exc) from exc
+    return TenantConfigChangeRequestResponse.from_record(record)
+
+
+@router.get(
+    "/config/change-requests",
+    response_model=TenantConfigChangeRequestPage,
+)
+async def list_config_change_requests(
+    status_filter: TenantConfigChangeRequestStatus | None = Query(
+        None,
+        alias="status",
+    ),
+    limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _writer: AuthorityContext = Depends(require_tenant_config_write),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestPage:
+    page = await service.list(
+        expected_tenant_id=expected_tenant_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return TenantConfigChangeRequestPage.from_page(page)
+
+
+@router.post(
+    "/config/change-requests/{change_request_id}/approve",
+    response_model=TenantConfigChangeRequestResponse,
+)
+async def approve_config_change_request(
+    change_request_id: str,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_tenant_config_approve),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestResponse:
+    try:
+        record = await service.approve(
+            change_request_id=change_request_id,
+            approved_by=_principal_or_400(authority),
+            expected_tenant_id=expected_tenant_id,
+        )
+    except (ValueError, TenantConfigChangeRequestError) as exc:
+        raise _change_request_http_error(exc) from exc
+    return TenantConfigChangeRequestResponse.from_record(record)
+
+
+@router.post(
+    "/config/change-requests/{change_request_id}/reject",
+    response_model=TenantConfigChangeRequestResponse,
+)
+async def reject_config_change_request(
+    change_request_id: str,
+    request: TenantConfigChangeRequestRejectRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_tenant_config_approve),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestResponse:
+    try:
+        record = await service.reject(
+            change_request_id=change_request_id,
+            rejected_by=_principal_or_400(authority),
+            reason=request.reason,
+            expected_tenant_id=expected_tenant_id,
+        )
+    except (ValueError, TenantConfigChangeRequestError) as exc:
+        raise _change_request_http_error(exc) from exc
+    return TenantConfigChangeRequestResponse.from_record(record)
+
+
+@router.post(
+    "/config/change-requests/{change_request_id}/apply",
+    response_model=TenantConfigChangeRequestResponse,
+)
+async def apply_config_change_request(
+    change_request_id: str,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _approver: AuthorityContext = Depends(require_tenant_config_approve),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestResponse:
+    try:
+        record = await service.apply(
+            change_request_id=change_request_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+    except (ValueError, TenantConfigChangeRequestError) as exc:
+        raise _change_request_http_error(exc) from exc
+    return TenantConfigChangeRequestResponse.from_record(record)
 
 
 @router.post(
@@ -71,7 +212,7 @@ _DEFAULT_LIMIT = 25
 async def configure_channel(
     request: TenantChannelCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _admin: AuthorityContext = Depends(require_tenant_admin),
+    _direct_apply: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -99,7 +240,7 @@ async def update_channel(
     config_id: str,
     request: TenantChannelUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _admin: AuthorityContext = Depends(require_tenant_admin),
+    _direct_apply: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -131,7 +272,7 @@ async def update_channel(
 async def verify_channel(
     config_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _admin: AuthorityContext = Depends(require_tenant_admin),
+    _direct_apply: AuthorityContext = Depends(require_config_apply_authorization),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -480,6 +621,33 @@ def _principal_or_400(authority: AuthorityContext) -> str:
             detail={"code": "principal_axis_missing"},
         )
     return str(authority.principal_id)
+
+
+def _change_request_http_error(exc: BaseException) -> HTTPException:
+    if isinstance(exc, TenantConfigChangeRequestNotFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_config_change_request_not_found"},
+        )
+    if isinstance(exc, TenantConfigChangeRequestSeparationError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "tenant_config_approver_must_differ"},
+        )
+    if isinstance(exc, TenantConfigChangeRequestLifecycleError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "tenant_config_change_request_lifecycle_error"},
+        )
+    if isinstance(exc, ValueError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "tenant_config_change_request_invalid"},
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"code": "tenant_config_change_request_failed"},
+    )
 
 
 __all__ = ["router"]

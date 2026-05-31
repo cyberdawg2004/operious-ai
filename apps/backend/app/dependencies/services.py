@@ -198,6 +198,12 @@ from app.supervisor.persistence import (
 from app.services.tenant_configuration_service import (
     TenantConfigurationService,
 )
+from app.services.tenant_config_change_request_service import (
+    TenantConfigChangeRequestService,
+)
+from app.tenant.change_requests import (
+    PostgresTenantConfigChangeRequestRepository,
+)
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import PostgresTenantConfigurationRepository
@@ -446,9 +452,7 @@ def get_execution_publisher() -> ExecutionPublisher:
 
 async def get_conversation_service(
     session: AsyncSession = Depends(get_db_session),
-    execution_publisher: ExecutionPublisher = Depends(
-        get_execution_publisher
-    ),
+    execution_publisher: ExecutionPublisher = Depends(get_execution_publisher),
 ) -> AsyncIterator[ConversationService]:
     """Return the live conversation service for this request."""
 
@@ -496,9 +500,7 @@ async def get_conversation_service(
 
 async def get_dispatch_service(
     session: AsyncSession = Depends(get_db_session),
-    execution_publisher: ExecutionPublisher = Depends(
-        get_execution_publisher
-    ),
+    execution_publisher: ExecutionPublisher = Depends(get_execution_publisher),
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
     execution_runtime = ExecutionRuntime(
@@ -569,9 +571,7 @@ async def get_dispatch_service(
 
 
 def get_batch_ingest_service(
-    boundary_repository: BoundaryPersistenceProtocol = Depends(
-        get_boundary_repository
-    ),
+    boundary_repository: BoundaryPersistenceProtocol = Depends(get_boundary_repository),
     dispatch_service: DispatchService = Depends(get_dispatch_service),
 ) -> BatchIngestService:
     """Return the batch-ingest service for this request."""
@@ -641,6 +641,23 @@ def get_tenant_configuration_service(
         runtime=runtime,
         session=session,
         redis_client=getattr(request.app.state, "redis_client", get_redis_client()),
+    )
+
+
+def get_tenant_config_change_request_service(
+    session: AsyncSession = Depends(get_db_session),
+    tenant_configuration_service: TenantConfigurationService = Depends(
+        get_tenant_configuration_service
+    ),
+) -> TenantConfigChangeRequestService:
+    """Return the durable tenant config dual-control ledger service."""
+    return TenantConfigChangeRequestService(
+        repository=PostgresTenantConfigChangeRequestRepository(session),
+        tenant_configuration_service=tenant_configuration_service,
+        event_appender=OperationalEventAppender(
+            persistence=PostgresOperationalEventPersistence(session)
+        ),
+        session=session,
     )
 
 
@@ -729,9 +746,7 @@ def get_knowledge_service(
     settings = get_settings()
     runtime = KnowledgeRuntime(
         repository=PostgresKnowledgeRepository(session),
-        tenant_configuration_repository=PostgresTenantConfigurationRepository(
-            session
-        ),
+        tenant_configuration_repository=PostgresTenantConfigurationRepository(session),
         embedding_provider=DeterministicHashEmbeddingProvider(),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
@@ -1124,5 +1139,6 @@ __all__ = [
     "get_session_repository",
     "get_sop_intelligence_service",
     "get_supervisor_repository",
+    "get_tenant_config_change_request_service",
     "get_tenant_configuration_service",
 ]

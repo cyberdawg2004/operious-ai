@@ -241,12 +241,12 @@ async def test_ingestion_uses_deterministic_uuid5_and_is_idempotent() -> None:
     assert first.chunk_count == second.chunk_count
     assert first.vector_count == second.vector_count
     assert first_page.total == second_page.total == first.chunk_count
-    assert {
-        entry.chunk.chunk_id for entry in first_page.items
-    } == {entry.chunk.chunk_id for entry in second_page.items}
-    assert {
-        entry.vector.vector_id for entry in first_page.items
-    } == {entry.vector.vector_id for entry in second_page.items}
+    assert {entry.chunk.chunk_id for entry in first_page.items} == {
+        entry.chunk.chunk_id for entry in second_page.items
+    }
+    assert {entry.vector.vector_id for entry in first_page.items} == {
+        entry.vector.vector_id for entry in second_page.items
+    }
     assert all(entry.chunk.chunk_id.version == 5 for entry in second_page.items)
     assert all(entry.vector.vector_id.version == 5 for entry in second_page.items)
     assert stored_document is not None
@@ -290,9 +290,7 @@ async def test_retrieval_is_tenant_scoped_and_citations_are_ordered() -> None:
     )
 
     assert result.items
-    assert {item.document_id for item in result.items} == {
-        acme_document.document_id
-    }
+    assert {item.document_id for item in result.items} == {acme_document.document_id}
     assert [citation.index for citation in result.citations] == list(
         range(1, len(result.citations) + 1)
     )
@@ -348,14 +346,13 @@ async def test_retrieval_budgeting_is_deterministic() -> None:
 
     assert len(result.items) == 1
     assert any(
-        decision.reason
-        is KnowledgeBudgetDecisionReason.EXCEEDED_PER_DOCUMENT_CAP
+        decision.reason is KnowledgeBudgetDecisionReason.EXCEEDED_PER_DOCUMENT_CAP
         for decision in result.budget_decisions
     )
     assert zero_budget.items == ()
-    assert {
-        decision.reason for decision in zero_budget.budget_decisions
-    } == {KnowledgeBudgetDecisionReason.EXCEEDED_TOKEN_BUDGET}
+    assert {decision.reason for decision in zero_budget.budget_decisions} == {
+        KnowledgeBudgetDecisionReason.EXCEEDED_TOKEN_BUDGET
+    }
 
 
 @pytest.mark.asyncio
@@ -527,12 +524,12 @@ async def test_vector_repository_rejects_cross_tenant_writes() -> None:
 
 
 def test_phase_5a_router_service_runtime_boundaries() -> None:
-    router_source = Path(
-        "apps/backend/app/api/v1/routers/knowledge.py"
-    ).read_text(encoding="utf-8")
-    service_source = Path(
-        "apps/backend/app/services/knowledge_service.py"
-    ).read_text(encoding="utf-8")
+    router_source = Path("apps/backend/app/api/v1/routers/knowledge.py").read_text(
+        encoding="utf-8"
+    )
+    service_source = Path("apps/backend/app/services/knowledge_service.py").read_text(
+        encoding="utf-8"
+    )
     runtime_source = Path("apps/backend/app/knowledge/runtime.py").read_text(
         encoding="utf-8"
     )
@@ -600,6 +597,7 @@ async def knowledge_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[httpx.AsyncClient]:
     monkeypatch.setenv("TENANT_CREDENTIAL_MASTER_KEY", _MASTER_KEY)
+    monkeypatch.setenv("TENANT_CONFIG_ALLOW_SELF_APPROVAL", "true")
     get_settings.cache_clear()
     app = create_app()
 
@@ -666,8 +664,6 @@ async def test_knowledge_router_ingests_and_searches_from_tenant_documents(
 
     assert searched.status_code == 200
     assert searched.json()["items"]
-    assert {item["document_id"] for item in searched.json()["items"]} == {
-        document_id
-    }
+    assert {item["document_id"] for item in searched.json()["items"]} == {document_id}
     assert other_tenant.status_code == 200
     assert other_tenant.json()["items"] == []

@@ -70,6 +70,10 @@ class OperationalAct(StrEnum):
     # ─── governance chronology projection ───────────────────────────
     GOVERNANCE_DECIDE = "governance:decide"
     GOVERNANCE_CRISIS_DEPLOY = "governance:crisis_deploy"
+    TENANT_CONFIG_CHANGE_PROPOSE = "governance:tenant_config_change_propose"
+    TENANT_CONFIG_CHANGE_APPROVE = "governance:tenant_config_change_approve"
+    TENANT_CONFIG_CHANGE_REJECT = "governance:tenant_config_change_reject"
+    TENANT_CONFIG_CHANGE_APPLY = "governance:tenant_config_change_apply"
 
     # ─── execution chronology projection ────────────────────────────
     EXECUTION_REQUEST = "execution:request"

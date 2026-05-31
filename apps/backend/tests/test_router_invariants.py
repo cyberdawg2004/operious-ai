@@ -79,36 +79,40 @@ _SCHEMAS_DIR: Final[Path] = _BACKEND_APP / "api" / "v1" / "schemas"
 
 #: Every substrate runtime package under ``app.*``. Used to detect
 #: cross-substrate imports inside router files.
-_SUBSTRATE_PACKAGES: Final[frozenset[str]] = frozenset({
-    "arbitration",
-    "boundary",
-    "cognition",
-    "coordination",
-    "escalation",
-    "governance",
-    "hardening",
-    "knowledge",
-    "organizational_intelligence",
-    "session",
-    "sop_intelligence",
-    "supervisor",
-    "tenant",
-})
+_SUBSTRATE_PACKAGES: Final[frozenset[str]] = frozenset(
+    {
+        "arbitration",
+        "boundary",
+        "cognition",
+        "coordination",
+        "escalation",
+        "governance",
+        "hardening",
+        "knowledge",
+        "organizational_intelligence",
+        "session",
+        "sop_intelligence",
+        "supervisor",
+        "tenant",
+    }
+)
 
 #: ``app.*`` packages that routers may import freely. These are
 #: cross-cutting infrastructure, not sibling-substrate runtimes —
 #: importing them doesn't leak substrate semantics.
-_ROUTER_ALLOWED_APP_PACKAGES: Final[frozenset[str]] = frozenset({
-    "api",            # for response schemas
-    "auth",           # authentication primitives (Credential, etc.)
-    "core",           # config, redis, logging
-    "dependencies",   # DI surface
-    "identity",       # AuthorityContext typed primitives
-    "middleware",     # request-state contracts
-    "observability",  # logging / tracing helpers
-    "services",       # health service (the only legacy service)
-    "survivability",  # idempotency / problem-details helpers
-})
+_ROUTER_ALLOWED_APP_PACKAGES: Final[frozenset[str]] = frozenset(
+    {
+        "api",  # for response schemas
+        "auth",  # authentication primitives (Credential, etc.)
+        "core",  # config, redis, logging
+        "dependencies",  # DI surface
+        "identity",  # AuthorityContext typed primitives
+        "middleware",  # request-state contracts
+        "observability",  # logging / tracing helpers
+        "services",  # health service (the only legacy service)
+        "survivability",  # idempotency / problem-details helpers
+    }
+)
 
 
 # ─── Routers exempt from tenant scoping ──────────────────────────────────
@@ -116,49 +120,56 @@ _ROUTER_ALLOWED_APP_PACKAGES: Final[frozenset[str]] = frozenset({
 #: Each router file path (relative to ``app/api/v1/routers/``) listed
 #: here is exempt from the require_tenant_scope dependency invariant.
 #: Adding a router here requires explicit doctrine review.
-_PUBLIC_ROUTER_FILES: Final[frozenset[str]] = frozenset({
-    "health.py",  # /health /live /ready — operational probes
-    "auth.py",    # /me — self-identity (uses require_authority, not tenant)
-})
+_PUBLIC_ROUTER_FILES: Final[frozenset[str]] = frozenset(
+    {
+        "health.py",  # /health /live /ready — operational probes
+        "auth.py",  # /me — self-identity (uses require_authority, not tenant)
+    }
+)
 
 
 # ─── DI surface pinning ──────────────────────────────────────────────────
 
-_EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset({
-    "get_audit_export_service",
-    "get_arbitration_repository",
-    "get_boundary_repository",
-    "get_cognition_service",
-    "get_conversation_service",
-    "get_coordination_repository",
-    "get_escalation_service",
-    "get_governance_repository",
-    "get_health_service",
-    "get_knowledge_service",
-    "get_operational_event_service",
-    "get_operational_observability_service",
-    "get_quarantine_service",
-    "get_queue_operations_service",
-    "get_quota_operations_service",
-    "get_quota_runtime",
-    "get_semantic_circuit_service",
-    "get_session_read_service",
-    "get_session_repository",
-    "get_sop_intelligence_service",
-    "get_supervisor_repository",
-    "get_tenant_configuration_service",
-})
+_EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset(
+    {
+        "get_audit_export_service",
+        "get_arbitration_repository",
+        "get_boundary_repository",
+        "get_cognition_service",
+        "get_conversation_service",
+        "get_coordination_repository",
+        "get_escalation_service",
+        "get_governance_repository",
+        "get_health_service",
+        "get_knowledge_service",
+        "get_operational_event_service",
+        "get_operational_observability_service",
+        "get_quarantine_service",
+        "get_queue_operations_service",
+        "get_quota_operations_service",
+        "get_quota_runtime",
+        "get_semantic_circuit_service",
+        "get_session_read_service",
+        "get_session_repository",
+        "get_sop_intelligence_service",
+        "get_supervisor_repository",
+        "get_tenant_config_change_request_service",
+        "get_tenant_configuration_service",
+    }
+)
 
 
 # ─── Middleware pinning ──────────────────────────────────────────────────
 
-_EXPECTED_MIDDLEWARE_CLASSES: Final[frozenset[str]] = frozenset({
-    "AuthorityContextMiddleware",
-    "TrustedIngressMiddleware",
-    "RequestContextMiddleware",
-    "RequestBodyLimitMiddleware",
-    "CORSMiddleware",
-})
+_EXPECTED_MIDDLEWARE_CLASSES: Final[frozenset[str]] = frozenset(
+    {
+        "AuthorityContextMiddleware",
+        "TrustedIngressMiddleware",
+        "RequestContextMiddleware",
+        "RequestBodyLimitMiddleware",
+        "CORSMiddleware",
+    }
+)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
@@ -166,9 +177,7 @@ _EXPECTED_MIDDLEWARE_CLASSES: Final[frozenset[str]] = frozenset({
 
 def _router_files() -> list[Path]:
     """Every concrete router module file (excludes ``__init__.py``)."""
-    return sorted(
-        p for p in _ROUTERS_DIR.glob("*.py") if p.name != "__init__.py"
-    )
+    return sorted(p for p in _ROUTERS_DIR.glob("*.py") if p.name != "__init__.py")
 
 
 def _parse(path: Path) -> ast.Module:
@@ -234,9 +243,7 @@ def test_router_imports_no_sibling_substrate(
         # Any other app.* package is unexpected (db, repositories,
         # etc.). Allow ``app.db.base`` / ``app.db.repository`` (the
         # constitutional foundation) but flag everything else.
-        if module.startswith("app.db.base") or module.startswith(
-            "app.db.repository"
-        ):
+        if module.startswith("app.db.base") or module.startswith("app.db.repository"):
             continue
         offenders.append(module)
     assert not offenders, (
@@ -291,9 +298,17 @@ def test_router_does_not_import_other_routers(
 # ─── Invariant 3: response-model discipline ──────────────────────────────
 
 
-_DECORATOR_VERBS: Final[frozenset[str]] = frozenset({
-    "get", "post", "put", "patch", "delete", "head", "options",
-})
+_DECORATOR_VERBS: Final[frozenset[str]] = frozenset(
+    {
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "head",
+        "options",
+    }
+)
 
 
 def _route_decorators(
@@ -301,13 +316,9 @@ def _route_decorators(
 ) -> list[tuple[ast.AsyncFunctionDef | ast.FunctionDef, ast.Call]]:
     """Yield ``(handler_fn, decorator_call)`` pairs for every
     ``@router.<verb>(...)``-style decorator in the module."""
-    pairs: list[
-        tuple[ast.AsyncFunctionDef | ast.FunctionDef, ast.Call]
-    ] = []
+    pairs: list[tuple[ast.AsyncFunctionDef | ast.FunctionDef, ast.Call]] = []
     for node in ast.walk(tree):
-        if not isinstance(
-            node, (ast.FunctionDef, ast.AsyncFunctionDef)
-        ):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for dec in node.decorator_list:
             if not isinstance(dec, ast.Call):
@@ -369,9 +380,7 @@ def test_router_response_model_imported_from_v1_schemas(
                     "be a single name imported from "
                     "app.api.v1.schemas.*"
                 )
-    assert not offenders, (
-        f"{router_file.name} response-model violations: {offenders}"
-    )
+    assert not offenders, f"{router_file.name} response-model violations: {offenders}"
 
 
 # ─── Invariant 4: authority bypass paths ─────────────────────────────────
@@ -401,10 +410,12 @@ def _handler_depends_on(
     return False
 
 
-_TENANT_SCOPE_DEPENDENCIES: Final[frozenset[str]] = frozenset({
-    "require_tenant_scope",
-    "request_tenant_scope_opt",
-})
+_TENANT_SCOPE_DEPENDENCIES: Final[frozenset[str]] = frozenset(
+    {
+        "require_tenant_scope",
+        "request_tenant_scope_opt",
+    }
+)
 
 
 @pytest.mark.parametrize(
@@ -431,9 +442,7 @@ def test_tenant_scoped_router_handlers_depend_on_tenant_scope(
     tree = _parse(router_file)
     offenders: list[str] = []
     for handler, _ in _route_decorators(tree):
-        if not _handler_depends_on(
-            handler, _TENANT_SCOPE_DEPENDENCIES
-        ):
+        if not _handler_depends_on(handler, _TENANT_SCOPE_DEPENDENCIES):
             offenders.append(handler.name)
     assert not offenders, (
         f"{router_file.name} handlers missing tenant-scope "
@@ -495,9 +504,7 @@ def test_main_create_app_middleware_stack_is_pinned() -> None:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if not (
-            isinstance(func, ast.Attribute) and func.attr == "add_middleware"
-        ):
+        if not (isinstance(func, ast.Attribute) and func.attr == "add_middleware"):
             continue
         if not node.args:
             continue
