@@ -574,19 +574,23 @@ async def test_postgres_resolution_persistence_enforces_tenant_rls(
         )
     ) is not None
 
-    await set_pg_rls_tenant(pg_session, "tenant-other")
-    assert (
-        await persistence.get_resolution_proposal(
-            str(record.proposal_id),
-            expected_tenant_id="tenant-other",
-        )
-    ) is None
-    assert (
-        await persistence.get_resolution_proposal(
-            str(record.proposal_id),
-            expected_tenant_id=TENANT_ID,
-        )
-    ) is None
+    try:
+        await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+        await set_pg_rls_tenant(pg_session, "tenant-other")
+        assert (
+            await persistence.get_resolution_proposal(
+                str(record.proposal_id),
+                expected_tenant_id="tenant-other",
+            )
+        ) is None
+        assert (
+            await persistence.get_resolution_proposal(
+                str(record.proposal_id),
+                expected_tenant_id=TENANT_ID,
+            )
+        ) is None
+    finally:
+        await pg_session.execute(text("RESET ROLE"))
 
 
 @pytest.mark.asyncio
@@ -743,23 +747,27 @@ async def test_postgres_resolution_outbound_draft_enforces_tenant_rls(
         )
     ) is not None
 
-    await set_pg_rls_tenant(pg_session, "tenant-other")
-    assert (
-        await persistence.get_resolution_outbound_draft(
-            str(draft.draft_id),
+    try:
+        await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+        await set_pg_rls_tenant(pg_session, "tenant-other")
+        assert (
+            await persistence.get_resolution_outbound_draft(
+                str(draft.draft_id),
+                expected_tenant_id="tenant-other",
+            )
+        ) is None
+        assert (
+            await persistence.get_resolution_outbound_draft(
+                str(draft.draft_id),
+                expected_tenant_id=TENANT_ID,
+            )
+        ) is None
+        page = await persistence.list_resolution_outbound_drafts(
+            ResolutionOutboundDraftQuery(),
             expected_tenant_id="tenant-other",
         )
-    ) is None
-    assert (
-        await persistence.get_resolution_outbound_draft(
-            str(draft.draft_id),
-            expected_tenant_id=TENANT_ID,
-        )
-    ) is None
-    page = await persistence.list_resolution_outbound_drafts(
-        ResolutionOutboundDraftQuery(),
-        expected_tenant_id="tenant-other",
-    )
+    finally:
+        await pg_session.execute(text("RESET ROLE"))
     assert page.total == 0
 
 

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.admission import AdmissionRecordRow
@@ -291,14 +291,18 @@ async def test_failure_pattern_tenant_isolation(
         window_hours=DLQ_WINDOW_HOURS,
         threshold=DLQ_THRESHOLD,
     )
-    await set_pg_rls_tenant(pg_session, tenant_b)
-    visible = int(
-        (
-            await pg_session.execute(
-                select(func.count()).select_from(SOPFailurePatternRow)
-            )
-        ).scalar_one()
-    )
+    try:
+        await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+        await set_pg_rls_tenant(pg_session, tenant_b)
+        visible = int(
+            (
+                await pg_session.execute(
+                    select(func.count()).select_from(SOPFailurePatternRow)
+                )
+            ).scalar_one()
+        )
+    finally:
+        await pg_session.execute(text("RESET ROLE"))
 
     assert visible == 0
 

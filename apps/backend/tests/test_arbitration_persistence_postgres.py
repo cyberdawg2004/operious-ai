@@ -32,7 +32,7 @@ from app.arbitration.persistence import (
     ArbitrationRecord,
     PostgresArbitrationPersistence,
 )
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 pytestmark = [requires_postgres]
 
@@ -232,11 +232,27 @@ async def test_postgres_list_records_orders_by_runtime_seq(
 ) -> None:
     repo = PostgresArbitrationPersistence(pg_session)
     runtime = uuid.uuid4()
-    await repo.save(_record(runtime_instance_id=runtime, sequence=2))
-    await repo.save(_record(runtime_instance_id=runtime, sequence=0))
-    await repo.save(_record(runtime_instance_id=runtime, sequence=1))
+    tenant_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_DNS,
+            "test_postgres_list_records_orders_by_runtime_seq",
+        )
+    )
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    await repo.save(
+        _record(runtime_instance_id=runtime, sequence=2, tenant_id=tenant_id)
+    )
+    await repo.save(
+        _record(runtime_instance_id=runtime, sequence=0, tenant_id=tenant_id)
+    )
+    await repo.save(
+        _record(runtime_instance_id=runtime, sequence=1, tenant_id=tenant_id)
+    )
 
-    page = await repo.list_records(ArbitrationQuery())
+    page = await repo.list_records(
+        ArbitrationQuery(tenant_id=tenant_id),
+        expected_tenant_id=tenant_id,
+    )
     seqs = [r.sequence for r in page.records if r.runtime_instance_id == runtime]
     assert seqs == [0, 1, 2]
 

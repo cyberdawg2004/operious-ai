@@ -9,6 +9,7 @@ from typing import ClassVar, FrozenSet
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from starlette.testclient import WebSocketDisconnect
 
 from app.boundary.voice import (
@@ -399,8 +400,12 @@ async def test_postgres_voice_persistence_tenant_isolation(pg_session) -> None:
     visible = await persistence.get_ingress(envelope.result.identity.event_id)
     assert visible is not None
 
-    await set_pg_rls_tenant(pg_session, "tenant-b")
-    hidden = await persistence.get_ingress(envelope.result.identity.event_id)
+    try:
+        await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+        await set_pg_rls_tenant(pg_session, "tenant-b")
+        hidden = await persistence.get_ingress(envelope.result.identity.event_id)
+    finally:
+        await pg_session.execute(text("RESET ROLE"))
     assert hidden is None
 
 

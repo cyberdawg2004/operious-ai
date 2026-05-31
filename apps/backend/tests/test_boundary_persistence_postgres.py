@@ -42,7 +42,7 @@ from app.boundary.persistence import (
     BoundaryIngressRecord,
     PostgresBoundaryPersistence,
 )
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 pytestmark = [requires_postgres]
 
@@ -403,11 +403,27 @@ async def test_postgres_list_ingress_orders_by_runtime_seq(
 ) -> None:
     repo = PostgresBoundaryPersistence(pg_session)
     runtime = uuid.uuid4()
-    await repo.save_ingress(_ingress(runtime=runtime, sequence=2))
-    await repo.save_ingress(_ingress(runtime=runtime, sequence=0))
-    await repo.save_ingress(_ingress(runtime=runtime, sequence=1))
+    tenant_id = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_DNS,
+            "test_postgres_list_ingress_orders_by_runtime_seq",
+        )
+    )
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    await repo.save_ingress(
+        _ingress(runtime=runtime, sequence=2, tenant_id=tenant_id)
+    )
+    await repo.save_ingress(
+        _ingress(runtime=runtime, sequence=0, tenant_id=tenant_id)
+    )
+    await repo.save_ingress(
+        _ingress(runtime=runtime, sequence=1, tenant_id=tenant_id)
+    )
 
-    page = await repo.list_ingress(BoundaryIngressQuery())
+    page = await repo.list_ingress(
+        BoundaryIngressQuery(tenant_id=tenant_id),
+        expected_tenant_id=tenant_id,
+    )
     seqs = [
         r.sequence for r in page.ingress if r.runtime_instance_id == runtime
     ]

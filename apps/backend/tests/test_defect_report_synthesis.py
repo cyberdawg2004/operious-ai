@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.defect_report_agent import (
@@ -226,15 +226,18 @@ async def test_defect_report_tenant_isolation(pg_session: AsyncSession) -> None:
     )
     await pg_session.flush()
     await _ensure_tenant(pg_session, tenant_b)
-    await set_pg_rls_tenant(pg_session, tenant_b)
-
-    visible_count = int(
-        (
-            await pg_session.execute(
-                select(func.count()).select_from(DefectReportRow)
-            )
-        ).scalar_one()
-    )
+    try:
+        await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+        await set_pg_rls_tenant(pg_session, tenant_b)
+        visible_count = int(
+            (
+                await pg_session.execute(
+                    select(func.count()).select_from(DefectReportRow)
+                )
+            ).scalar_one()
+        )
+    finally:
+        await pg_session.execute(text("RESET ROLE"))
 
     assert visible_count == 0
 
