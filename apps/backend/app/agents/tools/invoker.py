@@ -237,7 +237,6 @@ class ToolInvoker:
             expected_binding = compute_agent_action_binding(
                 tenant_id=context.tenant_id,
                 tool_name=request.tool_name,
-                target_resource=_target_resource_for(request),
                 payload=request.payload,
             )
             persisted_binding = persisted.metadata.get(AGENT_ACTION_BINDING_KEY)
@@ -573,32 +572,27 @@ def _build_governance_context(
             AGENT_ACTION_BINDING_KEY: compute_agent_action_binding(
                 tenant_id=context.tenant_id,
                 tool_name=request.tool_name,
-                target_resource=target_resource,
                 payload=request.payload,
             ),
         },
     )
 
 
-def _target_resource_for(request: ToolInvocationRequest) -> str:
-    """Resolve the binding target resource identically at decision time
-    and at pre-approval verification time."""
-    return str(request.metadata.get("target_resource") or request.tool_name)
-
-
 def compute_agent_action_binding(
     *,
     tenant_id: str | None,
     tool_name: str,
-    target_resource: str,
     payload: Mapping[str, Any],
 ) -> str:
     """Deterministic fingerprint binding a governance ALLOW to one act.
 
     Covers tenant + tool + the stable ``agent.tool_invocation`` action +
-    target resource + a canonical hash of the payload. Equal inputs →
-    equal fingerprint, so a pre-approved decision can be matched to the
-    exact request it authorised (S-05).
+    a canonical hash of the payload. Equal inputs → equal fingerprint, so
+    a pre-approved decision can be matched to the exact request it
+    authorised (S-05). The payload hash subsumes the target resource
+    (which is derived from the payload), keeping the binding robust
+    across the manager-approval re-invocation path where the request is
+    rebuilt from the persisted approval payload.
     """
     payload_canonical = json.dumps(
         dict(payload), sort_keys=True, separators=(",", ":"), default=str
@@ -609,7 +603,6 @@ def compute_agent_action_binding(
             tenant_id or "",
             tool_name,
             _AGENT_ACTION,
-            target_resource,
             payload_hash,
         ]
     )

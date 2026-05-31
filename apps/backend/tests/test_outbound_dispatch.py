@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.boundary.outbound.adapter as adapter_module
@@ -173,8 +173,8 @@ async def test_credentials_never_logged(
 
 
 async def test_dispatch_tenant_isolation(pg_session: AsyncSession) -> None:
-    tenant_a = "tenant-dispatch-a"
-    tenant_b = "tenant-dispatch-b"
+    tenant_a = f"tenant-dispatch-a-{uuid.uuid4()}"
+    tenant_b = f"tenant-dispatch-b-{uuid.uuid4()}"
     report = await _seed_report(pg_session, tenant_id=tenant_a)
     pg_session.add(
         OutboundDispatchRow(
@@ -195,6 +195,10 @@ async def test_dispatch_tenant_isolation(pg_session: AsyncSession) -> None:
     )
     await pg_session.flush()
     await _ensure_tenant(pg_session, tenant_b)
+    try:
+        await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"restricted RLS role unavailable: {exc}")
     await set_pg_rls_tenant(pg_session, tenant_b)
 
     visible_count = int(

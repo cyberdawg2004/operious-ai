@@ -25,6 +25,11 @@ async def non_superuser_db_conn() -> AsyncIterator[asyncpg.Connection]:
     )
     conn = await asyncpg.connect(dsn)
     try:
+        if await _current_role_bypasses_rls(conn):
+            try:
+                await conn.execute("SET ROLE operious_app_test")
+            except asyncpg.PostgresError as exc:
+                pytest.skip(f"restricted RLS role unavailable: {exc}")
         yield conn
     finally:
         await conn.close()
@@ -152,4 +157,16 @@ async def test_rls_blocks_query_without_session_variable(
     assert count == 0, (
         f"Expected 0 rows without tenant context but got {count}. "
         "FORCE RLS may not be active."
+    )
+
+
+async def _current_role_bypasses_rls(conn: asyncpg.Connection) -> bool:
+    return bool(
+        await conn.fetchval(
+            """
+            SELECT rolsuper OR rolbypassrls
+            FROM pg_roles
+            WHERE rolname = current_user
+            """
+        )
     )

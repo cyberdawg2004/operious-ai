@@ -224,7 +224,6 @@ async def _invoke_pre_approved(
 _STANDARD_BINDING = compute_agent_action_binding(
     tenant_id="tenant-action",
     tool_name="mutating_echo",
-    target_resource="external:test",
     payload={"value": 1},
 )
 

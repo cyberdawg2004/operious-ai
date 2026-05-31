@@ -12,10 +12,17 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.core.redis as redis_module
+import app.dependencies.services as service_dependencies
+import app.main as main_module
 from app.agents.tools.approvals import (
     ActionApprovalRecord,
     PostgresActionApprovalRepository,
     build_pending_action_approval,
+)
+from app.agents.tools.invoker import (
+    AGENT_ACTION_BINDING_KEY,
+    compute_agent_action_binding,
 )
 from app.dependencies.database import get_db_session
 from app.governance.enums import Decision, EnforcementStage
@@ -61,7 +68,12 @@ def pg_tenant_id() -> str:
 @pytest_asyncio.fixture
 async def approval_client(
     pg_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[httpx.AsyncClient]:
+    redis = _NoopRedis()
+    monkeypatch.setattr(redis_module, "_redis_client", redis)
+    monkeypatch.setattr(main_module, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(service_dependencies, "get_redis_client", lambda: redis)
     app = create_app()
 
     async def _override() -> AsyncIterator[AsyncSession]:
@@ -361,6 +373,13 @@ async def test_approve_creates_governance_decision(
     assert manager_decision is not None
     assert manager_decision.decision == Decision.ALLOW.value
     assert manager_decision.subject_kind == "manager_approval"
+    assert manager_decision.metadata[AGENT_ACTION_BINDING_KEY] == (
+        compute_agent_action_binding(
+            tenant_id=approval.tenant_id,
+            tool_name=approval.tool_name,
+            payload=dict(approval.payload_json),
+        )
+    )
 
     executed = [
         event for event in await _events(pg_session, approval)
@@ -473,3 +492,49 @@ async def test_approval_cross_tenant_blocked(
     assert other.status_code == 200
     assert other.json()["items"] == []
     assert detail_cross.status_code == 404
+
+
+class _NoopRedis:
+    async def aclose(self) -> None:
+        return None
+
+    async def config_get(self, _name: str) -> dict[str, str]:
+        return {"maxmemory-policy": "allkeys-lru"}
+
+    async def eval(self, *_args: object) -> int:
+        return 1
+
+    async def get(self, _key: str) -> None:
+        return None
+
+    async def info(self, _section: str) -> dict[str, int]:
+        return {"used_memory": 0, "maxmemory": 0}
+
+    async def llen(self, _key: str) -> int:
+        return 0
+
+    async def ping(self) -> bool:
+        return True
+
+    def pubsub(self) -> "_NoopRedis":
+        return self
+
+    async def set(
+        self,
+        _key: str,
+        _value: str,
+        *,
+        nx: bool = False,
+        ex: int | None = None,
+    ) -> bool:
+        del nx, ex
+        return True
+
+    async def zadd(self, *_args: object, **_kwargs: object) -> int:
+        return 1
+
+    async def zrange(self, *_args: object, **_kwargs: object) -> list[object]:
+        return []
+
+    async def zremrangebyscore(self, *_args: object, **_kwargs: object) -> int:
+        return 0

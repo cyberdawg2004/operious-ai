@@ -26,6 +26,10 @@ from app.agents.tools.approvals import (
     ActionApprovalRecord,
     ActionApprovalRepository,
 )
+from app.agents.tools.invoker import (
+    AGENT_ACTION_BINDING_KEY,
+    compute_agent_action_binding,
+)
 from app.agents.tools.orchestration import (
     ActionOrchestrationRuntime,
     ActionOutcome,
@@ -460,6 +464,15 @@ class ActionApprovalService:
             "override": True,
             "action_approval_id": approval.approval_id,
             "tool_name": approval.tool_name,
+            # S-05: bind this manager-approval ALLOW to the exact action it
+            # authorises so re_invoke_approved_action's reconstructed
+            # request matches and the pre-approved decision is honoured
+            # (and cannot be replayed for a different tool/payload).
+            AGENT_ACTION_BINDING_KEY: compute_agent_action_binding(
+                tenant_id=approval.tenant_id,
+                tool_name=approval.tool_name,
+                payload=dict(approval.payload_json),
+            ),
             "idempotency_key": approval.idempotency_key,
             "source_governance_decision_id": source_decision.decision_id,
             "original_governance_decision_id": source_decision.decision_id,
