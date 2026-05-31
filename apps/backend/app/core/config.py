@@ -189,6 +189,19 @@ class Settings(BaseSettings):
         default=100,
         description="Maximum concurrent active voice calls.",
     )
+    # ─── Voice media gateway security (S-04) ─────────────────────────
+    # Voice is DISABLED by default. The media WebSocket only accepts a
+    # connection when voice is explicitly enabled AND the handshake
+    # presents a valid short-lived signed session token whose payload
+    # binds the tenant + session. The tenant is taken from the verified
+    # token, never from a client-supplied query parameter.
+    VOICE_ENABLED: bool = False
+    VOICE_SESSION_TOKEN_SECRET: str = ""
+    VOICE_SESSION_TOKEN_TTL_SECONDS: int = 300
+    # Per-frame byte ceiling and per-call frame cap — bound the memory /
+    # CPU a single media stream can consume (WebSocket DoS).
+    VOICE_MAX_FRAME_BYTES: int = 65_536
+    VOICE_MAX_FRAMES_PER_CALL: int = 100_000
     EXECUTION_QUEUE_NAME: str = QUEUE_DIAGNOSTIC_NORMAL
     EXECUTION_QUEUE_MAX_DEPTH: int = 10_000
     ESCALATION_QUEUE_NAME: str = QUEUE_ESCALATION

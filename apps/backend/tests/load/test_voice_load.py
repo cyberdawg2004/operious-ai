@@ -32,9 +32,12 @@ from app.boundary.voice.call import (
     VoiceCallSessionRuntime,
     VoiceCapacityCounter,
 )
+from app.core.config import get_settings
 from app.governance.enums import Decision
 from tests.load.test_voice_capacity import (
+    _VOICE_SECRET,
     _app_with_capacity as _capacity_app_with_capacity,
+    _voice_token,
 )
 from tests.test_voice_call_runtime import _governance, _persist_decision
 
@@ -43,6 +46,15 @@ pytestmark = pytest.mark.load
 SIMULATED_STT_LATENCY_MS = 150
 SIMULATED_TTS_LATENCY_MS = 80
 CONCURRENT_CALLS = 10
+
+
+@pytest.fixture(autouse=True)
+def _enable_voice(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VOICE_ENABLED", "true")
+    monkeypatch.setenv("VOICE_SESSION_TOKEN_SECRET", _VOICE_SECRET)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @dataclass(frozen=True)
@@ -105,7 +117,8 @@ class _StaticLanguageDetector:
 
 
 class _AdmissionOnlyWebSocket:
-    query_params = {"tenant": "tenant-load"}
+    def __init__(self, session_id: str) -> None:
+        self.query_params = {"token": _voice_token(session_id)}
 
 
 @pytest.mark.asyncio
@@ -181,7 +194,9 @@ def test_voice_admission_under_overload() -> None:
         with pytest.raises(WebSocketException) as exc_info:
             asyncio.run(
                 stream_voice_session(
-                    websocket=_AdmissionOnlyWebSocket(),  # type: ignore[arg-type]
+                    websocket=_AdmissionOnlyWebSocket(
+                        session_id=f"rejected-{index}",
+                    ),  # type: ignore[arg-type]
                     session_id=f"rejected-{index}",
                     capacity=counter,
                 )

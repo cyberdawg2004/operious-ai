@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import cast
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketException, status
@@ -12,6 +13,11 @@ from app.boundary.voice.call import (
     VoiceCallSessionRuntime,
     VoiceCapacityCounter,
 )
+from app.boundary.voice.session_token import (
+    VoiceSessionTokenError,
+    verify_voice_session_token,
+)
+from app.core.config import get_settings
 
 router = APIRouter(tags=["voice"])
 
@@ -31,9 +37,27 @@ async def stream_voice_session(
     session_id: str,
     capacity: VoiceCapacityCounter = Depends(get_voice_capacity_counter),
 ) -> None:
-    tenant_id = websocket.query_params.get("tenant")
-    if not tenant_id:
+    settings = get_settings()
+
+    # 1. Voice must be explicitly enabled (S-04, fail-closed default).
+    if not settings.VOICE_ENABLED:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+
+    # 2. Tenant identity comes from a verified signed session token, NOT
+    #    from a spoofable ``?tenant=`` query parameter. The token binds
+    #    tenant + session + expiry; verification happens before accept().
+    token = websocket.query_params.get("token")
+    if not token:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    try:
+        tenant_id = verify_voice_session_token(
+            secret=settings.VOICE_SESSION_TOKEN_SECRET,
+            token=token,
+            session_id=session_id,
+            now=int(time.time()),
+        )
+    except VoiceSessionTokenError:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from None
 
     if not await capacity.is_available():
         raise WebSocketException(code=status.WS_1013_TRY_AGAIN_LATER)
@@ -63,6 +87,8 @@ async def stream_voice_session(
             call_id=call_id,
             session_id=session_id,
             tenant_id=tenant_id,
+            max_frame_bytes=settings.VOICE_MAX_FRAME_BYTES,
+            max_frames=settings.VOICE_MAX_FRAMES_PER_CALL,
         )
     finally:
         try:
@@ -84,10 +110,31 @@ async def _handle_voice_call(
     call_id: str,
     session_id: str,
     tenant_id: str,
+    max_frame_bytes: int,
+    max_frames: int,
 ) -> None:
+    frames_seen = 0
     try:
         while True:
             raw = await websocket.receive_text()
+            # Bound per-frame size and per-call frame count (S-04 DoS).
+            if len(raw.encode("utf-8")) > max_frame_bytes:
+                await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                await runtime.terminate_call(
+                    call_id=call_id,
+                    reason="voice_frame_too_large",
+                    expected_tenant_id=tenant_id,
+                )
+                return
+            frames_seen += 1
+            if frames_seen > max_frames:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                await runtime.terminate_call(
+                    call_id=call_id,
+                    reason="voice_frame_limit_exceeded",
+                    expected_tenant_id=tenant_id,
+                )
+                return
             event = adapter.parse_message(raw)
             if event.event in {"connected", "start"}:
                 continue

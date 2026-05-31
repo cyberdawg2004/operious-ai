@@ -11,11 +11,33 @@ from fastapi import WebSocketException
 
 from app.api.v1.routers.voice import stream_voice_session
 from app.boundary.voice.call import VOICE_CAPACITY_KEY, VoiceCapacityCounter
+from app.boundary.voice.session_token import mint_voice_session_token
+from app.core.config import get_settings
 from app.governance.enums import Decision
 from app.main import create_app
 from tests.test_voice_call_runtime import _governance, _runtime
 
 pytestmark = pytest.mark.load
+
+_VOICE_SECRET = "voice-load-test-secret-material-32-bytes-x"
+
+
+def _voice_token(session_id: str) -> str:
+    return mint_voice_session_token(
+        secret=_VOICE_SECRET,
+        tenant_id="tenant-load",
+        session_id=session_id,
+        expires_at=2_000_000_000,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _enable_voice(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VOICE_ENABLED", "true")
+    monkeypatch.setenv("VOICE_SESSION_TOKEN_SECRET", _VOICE_SECRET)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 class _FakeCapacityRedis:
@@ -54,13 +76,17 @@ class _FakeCapacityRedis:
 
 
 class _AdmissionOnlyWebSocket:
+    def __init__(self, session_id: str) -> None:
+        self.query_params = {"token": _voice_token(session_id)}
+
+
+class _TenantOnlyWebSocket:
     query_params = {"tenant": "tenant-load"}
 
 
 class _StopEventWebSocket:
-    query_params = {"tenant": "tenant-load"}
-
-    def __init__(self, runtime: object) -> None:
+    def __init__(self, runtime: object, session_id: str) -> None:
+        self.query_params = {"token": _voice_token(session_id)}
         self.app = SimpleNamespace(
             state=SimpleNamespace(voice_call_runtime=runtime)
         )
@@ -75,6 +101,32 @@ class _StopEventWebSocket:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _OversizedFrameWebSocket:
+    """Sends a single media frame larger than VOICE_MAX_FRAME_BYTES."""
+
+    def __init__(self, runtime: object, session_id: str = "oversized") -> None:
+        self.query_params = {"token": _voice_token(session_id)}
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(voice_call_runtime=runtime)
+        )
+        self.accepted = False
+        self.close_code: int | None = None
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def receive_text(self) -> str:
+        return json.dumps(
+            {"event": "media", "media": {"payload": "A" * 70_000}}
+        )
+
+    async def close(self, code: int = 1000) -> None:
+        self.close_code = code
+
+    async def send_json(self, data: object) -> None:
+        del data
 
 
 def test_voice_capacity_admission_blocks_at_limit() -> None:
@@ -94,7 +146,9 @@ def test_voice_capacity_admission_blocks_at_limit() -> None:
         with pytest.raises(WebSocketException) as exc_info:
             asyncio.run(
                 stream_voice_session(
-                    websocket=_AdmissionOnlyWebSocket(),  # type: ignore[arg-type]
+                    websocket=_AdmissionOnlyWebSocket(
+                        session_id=f"rejected-{index}",
+                    ),  # type: ignore[arg-type]
                     session_id=f"rejected-{index}",
                     capacity=counter,
                 )
@@ -112,12 +166,13 @@ def test_voice_capacity_admission_blocks_at_limit() -> None:
 
 def test_counter_released_on_call_termination() -> None:
     app, counter = _app_with_capacity(limit=1)
-    websocket = _StopEventWebSocket(app.state.voice_call_runtime)
+    session_id = "terminates"
+    websocket = _StopEventWebSocket(app.state.voice_call_runtime, session_id)
 
     asyncio.run(
         stream_voice_session(
             websocket=websocket,  # type: ignore[arg-type]
-            session_id="terminates",
+            session_id=session_id,
             capacity=counter,
         )
     )
@@ -134,13 +189,48 @@ def test_admission_fails_closed_when_redis_unavailable() -> None:
     with pytest.raises(WebSocketException) as exc_info:
         asyncio.run(
             stream_voice_session(
-                websocket=_AdmissionOnlyWebSocket(),  # type: ignore[arg-type]
+                websocket=_AdmissionOnlyWebSocket(
+                    session_id="redis-down",
+                ),  # type: ignore[arg-type]
                 session_id="redis-down",
                 capacity=counter,
             )
         )
 
     assert exc_info.value.code == 1013
+    assert _current_count(counter) == 0
+
+
+def test_oversized_frame_closes_call_and_releases_capacity() -> None:
+    app, counter = _app_with_capacity(limit=1)
+    websocket = _OversizedFrameWebSocket(app.state.voice_call_runtime)
+
+    asyncio.run(
+        stream_voice_session(
+            websocket=websocket,  # type: ignore[arg-type]
+            session_id="oversized",
+            capacity=counter,
+        )
+    )
+
+    assert websocket.accepted is True
+    assert websocket.close_code == 1009  # WS_1009_MESSAGE_TOO_BIG
+    assert _current_count(counter) == 0
+
+
+def test_query_tenant_without_signed_token_is_rejected() -> None:
+    _, counter = _app_with_capacity(limit=1)
+
+    with pytest.raises(WebSocketException) as exc_info:
+        asyncio.run(
+            stream_voice_session(
+                websocket=_TenantOnlyWebSocket(),  # type: ignore[arg-type]
+                session_id="tenant-query-only",
+                capacity=counter,
+            )
+        )
+
+    assert exc_info.value.code == 1008
     assert _current_count(counter) == 0
 
 
