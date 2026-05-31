@@ -34,6 +34,7 @@ _TENANT_ID = "tenant-voice-signature"
 _SESSION_ID = "session-provider-sig"
 _SESSION_SECRET = "voice-provider-session-secret-32b"
 _TWILIO_AUTH_TOKEN = "twilio-provider-auth-token-32b"
+_PUBLIC_BASE_URL = "https://voice.example.test"
 
 
 @pytest.fixture(autouse=True)
@@ -202,8 +203,13 @@ class _HandshakeWebSocket:
         provider_auth_token: str = _TWILIO_AUTH_TOKEN,
         auth_token_loader: object | None = None,
     ) -> None:
-        query = dict(parse_qsl(urlsplit(path).query, keep_blank_values=True))
+        split = urlsplit(path)
+        query = dict(parse_qsl(split.query, keep_blank_values=True))
         self.query_params = query
+        self.scope = {
+            "path": split.path,
+            "query_string": split.query.encode("latin-1"),
+        }
         self.headers = headers
         self.accepted = False
         self.close_codes: list[int] = []
@@ -243,6 +249,8 @@ def _configure_voice(
         monkeypatch.delenv("VOICE_ENABLED", raising=False)
     monkeypatch.setenv("VOICE_SESSION_TOKEN_SECRET", _SESSION_SECRET)
     monkeypatch.setenv("TENANT_CREDENTIAL_MASTER_KEY", "v" * 32)
+    # Provider signature is verified against the server-derived URL (#23).
+    monkeypatch.setenv("PUBLIC_BASE_URL", _PUBLIC_BASE_URL)
     get_settings.cache_clear()
 
 
@@ -262,12 +270,14 @@ def _signed_handshake(
     if extra_query:
         query = f"{query}&{extra_query}"
     path = f"/api/v1/voice/{session_id}/stream?{query}"
-    canonical_url = f"wss://voice.example.test{path}"
+    # The provider signs the canonical URL the server derives from
+    # PUBLIC_BASE_URL + path (+ query), not a client-supplied header (#23).
+    canonical_url = f"{_PUBLIC_BASE_URL}/api/v1/voice/{session_id}/stream?{query}"
     signature = _twilio_signature(auth_token=auth_token, url=canonical_url)
     return (
         path,
         {
-            TWILIO_CANONICAL_URL_HEADER: canonical_url,
+            TWILIO_CANONICAL_URL_HEADER: "https://forged.example.test/ignored",
             TWILIO_SIGNATURE_HEADER: signature,
         },
     )

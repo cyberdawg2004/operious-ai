@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 from types import SimpleNamespace
 
@@ -13,6 +16,10 @@ from app.api.v1.routers.voice import stream_voice_session
 from app.boundary.voice.call import VOICE_CAPACITY_KEY, VoiceCapacityCounter
 from app.boundary.voice.session_token import mint_voice_session_token
 from app.core.config import get_settings
+from app.core.twilio_signature import (
+    TWILIO_CANONICAL_URL_HEADER,
+    TWILIO_SIGNATURE_HEADER,
+)
 from app.governance.enums import Decision
 from app.main import create_app
 from tests.test_voice_call_runtime import _governance, _runtime
@@ -20,6 +27,8 @@ from tests.test_voice_call_runtime import _governance, _runtime
 pytestmark = pytest.mark.load
 
 _VOICE_SECRET = "voice-load-test-secret-material-32-bytes-x"
+_PUBLIC_BASE_URL = "https://voice.load.test"
+_PROVIDER_AUTH_TOKEN = "voice-load-provider-auth-token-32bytes"
 
 
 def _voice_token(session_id: str) -> str:
@@ -31,10 +40,39 @@ def _voice_token(session_id: str) -> str:
     )
 
 
+async def _load_provider_auth_token(tenant_id: str) -> str:
+    del tenant_id
+    return _PROVIDER_AUTH_TOKEN
+
+
+def _handshake(session_id: str) -> tuple[dict[str, str], dict[str, str], dict[str, object]]:
+    """Return (query_params, headers, scope) for a fully valid voice handshake.
+
+    Models the production gate: signed session token + provider signature over
+    the SERVER-derived URL (#23), so a fake reaches the capacity / handler logic
+    under test instead of being rejected at the signature gate.
+    """
+    token = _voice_token(session_id)
+    query = f"token={token}"
+    path = f"/api/v1/voice/{session_id}/stream"
+    canonical = f"{_PUBLIC_BASE_URL}{path}?{query}"
+    signature = base64.b64encode(
+        hmac.new(_PROVIDER_AUTH_TOKEN.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha1).digest()
+    ).decode("ascii")
+    query_params = {"token": token}
+    headers = {
+        TWILIO_SIGNATURE_HEADER: signature,
+        TWILIO_CANONICAL_URL_HEADER: "https://forged.test/ignored",
+    }
+    scope = {"path": path, "query_string": query.encode("latin-1")}
+    return query_params, headers, scope
+
+
 @pytest.fixture(autouse=True)
 def _enable_voice(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VOICE_ENABLED", "true")
     monkeypatch.setenv("VOICE_SESSION_TOKEN_SECRET", _VOICE_SECRET)
+    monkeypatch.setenv("PUBLIC_BASE_URL", _PUBLIC_BASE_URL)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -76,8 +114,16 @@ class _FakeCapacityRedis:
 
 
 class _AdmissionOnlyWebSocket:
-    def __init__(self, session_id: str) -> None:
-        self.query_params = {"token": _voice_token(session_id)}
+    """Valid handshake, used to probe capacity admission (rejected pre-accept)."""
+
+    def __init__(self, session_id: str, runtime: object | None = None) -> None:
+        self.query_params, self.headers, self.scope = _handshake(session_id)
+        self.app = SimpleNamespace(
+            state=SimpleNamespace(
+                voice_call_runtime=runtime,
+                voice_provider_auth_token_loader=_load_provider_auth_token,
+            )
+        )
 
 
 class _TenantOnlyWebSocket:
@@ -86,9 +132,12 @@ class _TenantOnlyWebSocket:
 
 class _StopEventWebSocket:
     def __init__(self, runtime: object, session_id: str) -> None:
-        self.query_params = {"token": _voice_token(session_id)}
+        self.query_params, self.headers, self.scope = _handshake(session_id)
         self.app = SimpleNamespace(
-            state=SimpleNamespace(voice_call_runtime=runtime)
+            state=SimpleNamespace(
+                voice_call_runtime=runtime,
+                voice_provider_auth_token_loader=_load_provider_auth_token,
+            )
         )
         self.accepted = False
         self.closed = False
@@ -99,17 +148,24 @@ class _StopEventWebSocket:
     async def receive_text(self) -> str:
         return json.dumps({"event": "stop"})
 
-    async def close(self) -> None:
+    async def close(self, code: int = 1000) -> None:
+        del code
         self.closed = True
+
+    async def send_json(self, data: object) -> None:
+        del data
 
 
 class _OversizedFrameWebSocket:
     """Sends a single media frame larger than VOICE_MAX_FRAME_BYTES."""
 
     def __init__(self, runtime: object, session_id: str = "oversized") -> None:
-        self.query_params = {"token": _voice_token(session_id)}
+        self.query_params, self.headers, self.scope = _handshake(session_id)
         self.app = SimpleNamespace(
-            state=SimpleNamespace(voice_call_runtime=runtime)
+            state=SimpleNamespace(
+                voice_call_runtime=runtime,
+                voice_provider_auth_token_loader=_load_provider_auth_token,
+            )
         )
         self.accepted = False
         self.close_code: int | None = None

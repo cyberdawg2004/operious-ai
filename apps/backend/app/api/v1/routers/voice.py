@@ -23,6 +23,10 @@ from app.core.twilio_signature import (
     TWILIO_SIGNATURE_HEADER,
     verify_twilio_signature,
 )
+from app.core.webhook_url import (
+    CanonicalWebhookUrlError,
+    derive_canonical_webhook_url,
+)
 from app.services.voice_provider_auth import (
     VoiceProviderAuthTokenLoader,
     get_voice_provider_auth_token_loader,
@@ -76,6 +80,8 @@ async def stream_voice_session(
     if not provider_auth_token or not _verify_voice_provider_signature(
         websocket=websocket,
         auth_token=provider_auth_token,
+        public_base_url=settings.public_base_url_normalized,
+        trust_url_header=settings.WEBHOOK_TRUST_URL_HEADER,
     ):
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
 
@@ -210,13 +216,48 @@ def _verify_voice_provider_signature(
     *,
     websocket: WebSocket,
     auth_token: str,
+    public_base_url: str,
+    trust_url_header: bool,
 ) -> bool:
+    url = _voice_canonical_url(
+        websocket=websocket,
+        public_base_url=public_base_url,
+        trust_url_header=trust_url_header,
+    )
+    if url is None:
+        return False
     return verify_twilio_signature(
         auth_token=auth_token,
-        url=websocket.headers.get(TWILIO_CANONICAL_URL_HEADER),
+        url=url,
         params=None,
         signature=websocket.headers.get(TWILIO_SIGNATURE_HEADER),
     )
+
+
+def _voice_canonical_url(
+    *,
+    websocket: WebSocket,
+    public_base_url: str,
+    trust_url_header: bool,
+) -> str | None:
+    """The URL the voice provider signature is verified against (#23).
+
+    Derived server-side from ``PUBLIC_BASE_URL`` + the WebSocket path, never a
+    client-supplied header unless ``WEBHOOK_TRUST_URL_HEADER`` is set (non-prod).
+    """
+    if trust_url_header:
+        return websocket.headers.get(TWILIO_CANONICAL_URL_HEADER)
+    path = websocket.scope.get("path", "")
+    raw_query = websocket.scope.get("query_string", b"")
+    query = raw_query.decode("latin-1") if isinstance(raw_query, bytes) else str(raw_query)
+    try:
+        return derive_canonical_webhook_url(
+            public_base_url=public_base_url,
+            request_path=path,
+            query_string=query,
+        )
+    except CanonicalWebhookUrlError:
+        return None
 
 
 __all__ = [

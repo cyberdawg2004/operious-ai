@@ -35,9 +35,10 @@ from app.boundary.voice.call import (
 from app.core.config import get_settings
 from app.governance.enums import Decision
 from tests.load.test_voice_capacity import (
+    _PUBLIC_BASE_URL,
     _VOICE_SECRET,
+    _AdmissionOnlyWebSocket,
     _app_with_capacity as _capacity_app_with_capacity,
-    _voice_token,
 )
 from tests.test_voice_call_runtime import _governance, _persist_decision
 
@@ -52,6 +53,7 @@ CONCURRENT_CALLS = 10
 def _enable_voice(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VOICE_ENABLED", "true")
     monkeypatch.setenv("VOICE_SESSION_TOKEN_SECRET", _VOICE_SECRET)
+    monkeypatch.setenv("PUBLIC_BASE_URL", _PUBLIC_BASE_URL)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -114,11 +116,6 @@ class _StaticLanguageDetector:
     def detect(self, text: str) -> str:
         del text
         return "en"
-
-
-class _AdmissionOnlyWebSocket:
-    def __init__(self, session_id: str) -> None:
-        self.query_params = {"token": _voice_token(session_id)}
 
 
 @pytest.mark.asyncio
