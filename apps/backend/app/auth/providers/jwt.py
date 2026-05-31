@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, ClassVar, Final, cast
+from typing import Any, ClassVar, Final, TypeAlias, cast
 
 import jwt
 from jwt import (
@@ -73,17 +73,38 @@ class ClaimMapping:
 
 DEFAULT_CLAIM_MAPPING: Final[ClaimMapping] = ClaimMapping()
 
-PERMISSION_CAPABILITY_MAP: Final[dict[str, str]] = {
+CapabilityMappingValue: TypeAlias = str | tuple[str, ...]
+
+TENANT_DOMAIN_CAPABILITIES: Final[tuple[str, ...]] = (
+    "tenant.channel.admin",
+    "tenant.knowledge.write",
+    "tenant.policy.write",
+    "tenant.topology.write",
+    "tenant.execution_governance.write",
+)
+
+TENANT_CONFIG_ADMIN_CAPABILITIES: Final[tuple[str, ...]] = (
+    *TENANT_DOMAIN_CAPABILITIES,
+    "tenant.config.write",
+)
+
+PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "operator:access": "operator",
     "read:tenant_data": "tenant_read",
     "write:tenant_data": "tenant_write",
-    "write:tenant_config": "tenant.config.write",
+    "write:tenant_config": TENANT_CONFIG_ADMIN_CAPABILITIES,
 }
 
-ROLE_CAPABILITY_MAP: Final[dict[str, str]] = {
+ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "Operator": "operator",
-    "TenantAdmin": "tenant_admin",
+    "TenantAdmin": TENANT_CONFIG_ADMIN_CAPABILITIES,
+    "TenantConfigAdmin": TENANT_CONFIG_ADMIN_CAPABILITIES,
     "TenantConfigWriter": "tenant.config.write",
+    "TenantChannelAdmin": "tenant.channel.admin",
+    "TenantKnowledgeWriter": "tenant.knowledge.write",
+    "TenantPolicyWriter": "tenant.policy.write",
+    "TenantTopologyWriter": "tenant.topology.write",
+    "TenantExecGovWriter": "tenant.execution_governance.write",
     "TenantViewer": "tenant_read",
     # Separation of duties (S-03): the approve duty is a DISTINCT role so
     # it can be granted to a different principal than ``TenantAdmin``.
@@ -232,7 +253,7 @@ def extract_capabilities_from_claims(
     ):
         mapped = PERMISSION_CAPABILITY_MAP.get(permission)
         if mapped is not None:
-            _append_unique(capabilities, mapped)
+            _append_capability_mapping(capabilities, mapped)
     for role in _claim_values(
         claims=claims,
         claim_name=claim_mapping.roles_claim,
@@ -240,7 +261,7 @@ def extract_capabilities_from_claims(
     ):
         mapped = ROLE_CAPABILITY_MAP.get(role)
         if mapped is not None:
-            _append_unique(capabilities, mapped)
+            _append_capability_mapping(capabilities, mapped)
     return frozenset(capabilities)
 
 
@@ -279,6 +300,17 @@ def _claim_values(
 def _append_unique(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
+
+
+def _append_capability_mapping(
+    values: list[str],
+    mapped: CapabilityMappingValue,
+) -> None:
+    if isinstance(mapped, str):
+        _append_unique(values, mapped)
+        return
+    for value in mapped:
+        _append_unique(values, value)
 
 
 __all__ = [

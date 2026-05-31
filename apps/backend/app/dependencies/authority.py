@@ -104,13 +104,38 @@ OPERATOR_CAPABILITY: Final[str] = "operator"
 #: message rather than a sign-in redirect.
 ERROR_CODE_CAPABILITY_REQUIRED: Final[str] = "capability_required"
 
-#: Capability required to MUTATE tenant configuration — channels,
-#: knowledge, governance policy, execution governance, and topology.
-#: Granted by the ``TenantAdmin`` Auth0 role (see
-#: ``app.auth.providers.jwt.ROLE_CAPABILITY_MAP``). Tenant scope alone
-#: is NOT sufficient; without this capability a tenant-scoped caller
-#: can only READ configuration.
+#: Deprecated broad tenant-configuration capability retained only for
+#: compatibility tests and legacy helpers. New mutation routes MUST require
+#: one of the domain capabilities below.
 TENANT_ADMIN_CAPABILITY: Final[str] = "tenant_admin"
+
+#: Domain capability required to mutate channel configuration.
+TENANT_CHANNEL_ADMIN_CAPABILITY: Final[str] = "tenant.channel.admin"
+
+#: Domain capability required to mutate tenant knowledge configuration.
+TENANT_KNOWLEDGE_WRITE_CAPABILITY: Final[str] = "tenant.knowledge.write"
+
+#: Domain capability required to mutate governance policy configuration.
+TENANT_POLICY_WRITE_CAPABILITY: Final[str] = "tenant.policy.write"
+
+#: Domain capability required to mutate topology configuration.
+TENANT_TOPOLOGY_WRITE_CAPABILITY: Final[str] = "tenant.topology.write"
+
+#: Domain capability required to mutate execution-governance configuration.
+TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY: Final[str] = (
+    "tenant.execution_governance.write"
+)
+
+#: Backward-compatible capability for non-domain config-ledger reads.
+TENANT_CONFIG_WRITE_CAPABILITY: Final[str] = "tenant.config.write"
+
+TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES: Final[tuple[str, ...]] = (
+    TENANT_CHANNEL_ADMIN_CAPABILITY,
+    TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+    TENANT_POLICY_WRITE_CAPABILITY,
+    TENANT_TOPOLOGY_WRITE_CAPABILITY,
+    TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
+)
 
 #: Stable error code for "config change may be PROPOSED but not APPLIED
 #: by this caller" (S-03). Separation of duties: applying a knowledge /
@@ -119,9 +144,9 @@ TENANT_ADMIN_CAPABILITY: Final[str] = "tenant_admin"
 ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED: Final[str] = "independent_approval_required"
 
 #: Capability required to APPROVE / APPLY a tenant governance, knowledge,
-#: or execution-governance change (S-03). Deliberately DISTINCT from
-#: ``tenant_admin`` so an organisation can separate the write duty from
-#: the approve duty. Granted by the ``TenantApprover`` Auth0 role.
+#: or execution-governance change (S-03). Deliberately DISTINCT from the
+#: domain write capabilities so an organisation can separate the write duty
+#: from the approve duty. Granted by the ``TenantApprover`` Auth0 role.
 TENANT_CONFIG_APPROVE_CAPABILITY: Final[str] = "tenant.config.approve"
 
 
@@ -281,7 +306,7 @@ def require_tenant_admin(request: Request) -> AuthorityContext:
 def require_config_apply_authorization(
     authority: AuthorityContext = Depends(require_tenant_admin),
 ) -> AuthorityContext:
-    """Authorize the legacy direct tenant-config mutation path (S-03).
+    """Authorize the legacy broad direct tenant-config mutation path (S-03).
 
     The durable ledger is the production path. Direct mutation remains
     available only when explicitly enabled in non-production, so old
@@ -298,6 +323,34 @@ def require_config_apply_authorization(
             "capability": TENANT_CONFIG_APPROVE_CAPABILITY,
         },
     )
+
+
+def require_config_apply_authorization_for(
+    capability: str,
+) -> Callable[..., AuthorityContext]:
+    """Authorize legacy direct apply for one tenant-config domain.
+
+    Direct mutation remains disabled in production by the self-approval gate,
+    but the non-production path still needs least-privilege capability checks
+    so channel administrators cannot exercise policy or knowledge routes.
+    """
+
+    domain_dependency = require_capability(capability)
+
+    def _dependency(
+        authority: AuthorityContext = Depends(domain_dependency),
+    ) -> AuthorityContext:
+        if get_settings().tenant_config_self_approval_allowed:
+            return authority
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED,
+                "capability": TENANT_CONFIG_APPROVE_CAPABILITY,
+            },
+        )
+
+    return _dependency
 
 
 def request_tenant_scope_opt(request: Request) -> str | None:
@@ -333,12 +386,20 @@ __all__ = [
     "ERROR_CODE_TENANT_AXIS_MISSING",
     "OPERATOR_CAPABILITY",
     "TENANT_ADMIN_CAPABILITY",
+    "TENANT_CHANNEL_ADMIN_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
+    "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
+    "TENANT_CONFIG_WRITE_CAPABILITY",
+    "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
+    "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
+    "TENANT_POLICY_WRITE_CAPABILITY",
+    "TENANT_TOPOLOGY_WRITE_CAPABILITY",
     "request_authority_opt",
     "request_tenant_scope_opt",
     "require_authority",
     "require_capability",
     "require_config_apply_authorization",
+    "require_config_apply_authorization_for",
     "require_operator_authority",
     "require_tenant_admin",
     "require_tenant_scope",

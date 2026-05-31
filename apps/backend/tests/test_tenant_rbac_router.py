@@ -1,9 +1,10 @@
-"""Integration: tenant mutation routes enforce tenant_admin (S-02).
+"""Integration: tenant mutation routes enforce domain capabilities (S-02/B4).
 
-A tenant-scoped caller WITHOUT the ``tenant_admin`` capability must be
+A tenant-scoped caller WITHOUT the route's domain capability must be
 rejected with 403 before any persistence work happens. This is the
-end-to-end statement of S-02: tenant scope alone no longer authorises
-configuration mutation.
+end-to-end statement of S-02/B4: tenant scope alone no longer authorises
+configuration mutation, and the old broad capability is no longer the
+route-level write gate.
 """
 
 from __future__ import annotations
@@ -41,6 +42,21 @@ _MUTATIONS: list[tuple[str, str, dict]] = [
     ),
     (
         "post",
+        "/api/v1/tenant/execution-governance",
+        {
+            "execution_quota": 10,
+            "throughput_limit": 20,
+            "throughput_window_minutes": 5,
+            "governance_budget_limit": 30,
+            "governance_budget_window_minutes": 15,
+            "circuit_failure_threshold": 3,
+            "circuit_window_minutes": 10,
+            "circuit_cooldown_minutes": 2,
+            "metadata": {},
+        },
+    ),
+    (
+        "post",
         "/api/v1/tenant/topologies",
         {"topology_name": "routing", "topology": {}},
     ),
@@ -60,7 +76,7 @@ def staging_client():
 
 
 @pytest.mark.parametrize("method,path,body", _MUTATIONS)
-def test_mutation_without_tenant_admin_is_forbidden(
+def test_mutation_without_domain_capability_is_forbidden(
     staging_client: TestClient, method: str, path: str, body: dict
 ) -> None:
     # Header auth carries a tenant axis but NO capabilities.

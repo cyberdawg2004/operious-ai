@@ -178,6 +178,36 @@ def test_auth0_tenant_viewer_role_grants_tenant_read() -> None:
     assert "tenant_read" in auth.capabilities
 
 
+def test_auth0_tenant_config_admin_role_grants_domain_capabilities() -> None:
+    auth = _authority_from_payload(
+        {"sub": "alice", "roles": ["TenantConfigAdmin"]}
+    )
+
+    assert {
+        "tenant.channel.admin",
+        "tenant.knowledge.write",
+        "tenant.policy.write",
+        "tenant.topology.write",
+        "tenant.execution_governance.write",
+    }.issubset(auth.capabilities)
+
+
+def test_auth0_granular_tenant_roles_grant_domain_capabilities() -> None:
+    auth = _authority_from_payload(
+        {
+            "sub": "alice",
+            "roles": [
+                "TenantChannelAdmin",
+                "TenantPolicyWriter",
+            ],
+        }
+    )
+
+    assert "tenant.channel.admin" in auth.capabilities
+    assert "tenant.policy.write" in auth.capabilities
+    assert "tenant.knowledge.write" not in auth.capabilities
+
+
 def test_unknown_permission_does_not_grant_capability() -> None:
     auth = _authority_from_payload(
         {"sub": "alice", "permissions": ["billing:admin"]}

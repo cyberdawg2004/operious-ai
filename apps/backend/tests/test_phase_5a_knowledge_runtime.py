@@ -13,10 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.routers import knowledge as knowledge_router
 from app.core.config import get_settings
-from app.dependencies.authority import require_tenant_admin
+from app.auth import VerifiedIdentity
+from app.auth.providers import StaticTokenProvider
+from app.dependencies.authority import TENANT_KNOWLEDGE_WRITE_CAPABILITY
 from app.dependencies.database import get_db_session
-from app.identity.authority import AuthorityContext
-from app.identity.primitives import PrincipalId
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
@@ -603,22 +603,26 @@ async def knowledge_client(
     monkeypatch.setenv("TENANT_CREDENTIAL_MASTER_KEY", _MASTER_KEY)
     monkeypatch.setenv("TENANT_CONFIG_ALLOW_SELF_APPROVAL", "true")
     get_settings.cache_clear()
-    app = create_app()
+    provider = StaticTokenProvider(
+        tokens={
+            _TENANT_ID: VerifiedIdentity(
+                tenant_id=_TENANT_ID,
+                principal_id="principal-admin",
+                capabilities=frozenset({TENANT_KNOWLEDGE_WRITE_CAPABILITY}),
+            ),
+            _OTHER_TENANT_ID: VerifiedIdentity(
+                tenant_id=_OTHER_TENANT_ID,
+                principal_id="principal-admin",
+                capabilities=frozenset({TENANT_KNOWLEDGE_WRITE_CAPABILITY}),
+            )
+        }
+    )
+    app = create_app(auth_provider=provider)
 
     async def _override() -> AsyncIterator[AsyncSession]:
         yield pg_session
 
-    # Tenant knowledge writes now require the ``tenant_admin``
-    # capability (S-02); header auth carries none, so stand in an
-    # admin authority for these behaviour tests.
-    def _admin_authority() -> AuthorityContext:
-        return AuthorityContext(
-            principal_id=PrincipalId("principal-admin"),
-            capabilities=frozenset({"tenant_admin"}),
-        )
-
     app.dependency_overrides[get_db_session] = _override
-    app.dependency_overrides[require_tenant_admin] = _admin_authority
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
@@ -629,7 +633,7 @@ async def knowledge_client(
 
 
 def _headers(tenant_id: str = _TENANT_ID) -> dict[str, str]:
-    return {"X-Tenant-ID": tenant_id, "X-Principal-ID": "principal-admin"}
+    return {"Authorization": f"Bearer {tenant_id}"}
 
 
 @pytest.mark.asyncio

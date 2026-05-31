@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.tenant import (
@@ -31,9 +33,17 @@ from app.api.v1.schemas.tenant import (
     TenantTopologyConfigurationResponse,
 )
 from app.dependencies.authority import (
+    ERROR_CODE_CAPABILITY_REQUIRED,
+    TENANT_CHANNEL_ADMIN_CAPABILITY,
     TENANT_CONFIG_APPROVE_CAPABILITY,
+    TENANT_CONFIG_WRITE_CAPABILITY,
+    TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
+    TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+    TENANT_POLICY_WRITE_CAPABILITY,
+    TENANT_TOPOLOGY_WRITE_CAPABILITY,
+    require_authority,
     require_capability,
-    require_config_apply_authorization,
+    require_config_apply_authorization_for,
     require_tenant_scope,
 )
 from app.dependencies.services import (
@@ -53,6 +63,7 @@ from app.tenant.change_requests import (
     TenantConfigChangeRequestNotFoundError,
     TenantConfigChangeRequestSeparationError,
     TenantConfigChangeRequestStatus,
+    TenantConfigChangeType,
 )
 from app.tenant.enums import (
     TenantChannelStatus,
@@ -76,8 +87,35 @@ from app.tenant.identity import (
 )
 
 router = APIRouter(tags=["tenant"])
-require_tenant_config_write = require_capability("tenant.config.write")
+require_tenant_config_write = require_capability(TENANT_CONFIG_WRITE_CAPABILITY)
 require_tenant_config_approve = require_capability(TENANT_CONFIG_APPROVE_CAPABILITY)
+require_tenant_channel_direct_apply = require_config_apply_authorization_for(
+    TENANT_CHANNEL_ADMIN_CAPABILITY
+)
+require_tenant_knowledge_direct_apply = require_config_apply_authorization_for(
+    TENANT_KNOWLEDGE_WRITE_CAPABILITY
+)
+require_tenant_policy_direct_apply = require_config_apply_authorization_for(
+    TENANT_POLICY_WRITE_CAPABILITY
+)
+require_tenant_topology_direct_apply = require_config_apply_authorization_for(
+    TENANT_TOPOLOGY_WRITE_CAPABILITY
+)
+require_tenant_execution_governance_direct_apply = (
+    require_config_apply_authorization_for(
+        TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY
+    )
+)
+
+_CHANGE_REQUEST_DOMAIN_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] = {
+    TenantConfigChangeType.CHANNEL: TENANT_CHANNEL_ADMIN_CAPABILITY,
+    TenantConfigChangeType.KNOWLEDGE: TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+    TenantConfigChangeType.POLICY: TENANT_POLICY_WRITE_CAPABILITY,
+    TenantConfigChangeType.TOPOLOGY: TENANT_TOPOLOGY_WRITE_CAPABILITY,
+    TenantConfigChangeType.EXECUTION_GOVERNANCE: (
+        TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY
+    ),
+}
 
 _MIN_LIMIT = 1
 _MAX_LIMIT = 100
@@ -92,11 +130,15 @@ _DEFAULT_LIMIT = 25
 async def propose_config_change_request(
     request: TenantConfigChangeRequestCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_config_write),
+    authority: AuthorityContext = Depends(require_authority),
     service: TenantConfigChangeRequestService = Depends(
         get_tenant_config_change_request_service
     ),
 ) -> TenantConfigChangeRequestResponse:
+    _require_change_request_domain_capability(
+        change_type=request.change_type,
+        authority=authority,
+    )
     try:
         record = await service.propose(
             tenant_id=expected_tenant_id,
@@ -212,7 +254,7 @@ async def apply_config_change_request(
 async def configure_channel(
     request: TenantChannelCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _direct_apply: AuthorityContext = Depends(require_config_apply_authorization),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -240,7 +282,7 @@ async def update_channel(
     config_id: str,
     request: TenantChannelUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _direct_apply: AuthorityContext = Depends(require_config_apply_authorization),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -272,7 +314,7 @@ async def update_channel(
 async def verify_channel(
     config_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _direct_apply: AuthorityContext = Depends(require_config_apply_authorization),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationResponse:
     try:
@@ -324,7 +366,7 @@ async def list_channels(
 async def create_knowledge_document(
     request: TenantKnowledgeCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_config_apply_authorization),
+    authority: AuthorityContext = Depends(require_tenant_knowledge_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     record = await service.create_knowledge_document(
@@ -346,7 +388,7 @@ async def update_knowledge_document(
     document_id: str,
     request: TenantKnowledgeUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_config_apply_authorization),
+    authority: AuthorityContext = Depends(require_tenant_knowledge_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentResponse:
     try:
@@ -401,7 +443,7 @@ async def list_knowledge_documents(
 async def create_governance_policy(
     request: TenantGovernancePolicyCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_config_apply_authorization),
+    authority: AuthorityContext = Depends(require_tenant_policy_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     record = await service.create_governance_policy(
@@ -423,7 +465,7 @@ async def update_governance_policy(
     policy_id: str,
     request: TenantGovernancePolicyUpdateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_config_apply_authorization),
+    authority: AuthorityContext = Depends(require_tenant_policy_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
     try:
@@ -478,7 +520,9 @@ async def list_governance_policies(
 async def configure_execution_governance(
     request: TenantExecutionGovernanceCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_config_apply_authorization),
+    authority: AuthorityContext = Depends(
+        require_tenant_execution_governance_direct_apply
+    ),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantExecutionGovernanceResponse:
     record = await service.configure_execution_governance(
@@ -562,7 +606,7 @@ async def list_execution_circuit_breakers(
 async def configure_topology(
     request: TenantTopologyConfigurationCreateRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_config_apply_authorization),
+    authority: AuthorityContext = Depends(require_tenant_topology_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantTopologyConfigurationResponse:
     try:
@@ -622,6 +666,22 @@ def _principal_or_400(authority: AuthorityContext) -> str:
             detail={"code": "principal_axis_missing"},
         )
     return str(authority.principal_id)
+
+
+def _require_change_request_domain_capability(
+    *,
+    change_type: TenantConfigChangeType,
+    authority: AuthorityContext,
+) -> None:
+    capability = _CHANGE_REQUEST_DOMAIN_CAPABILITIES[change_type]
+    if capability not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                "capability": capability,
+            },
+        )
 
 
 def _change_request_http_error(exc: BaseException) -> HTTPException:
