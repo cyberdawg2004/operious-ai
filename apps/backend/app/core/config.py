@@ -341,6 +341,14 @@ class Settings(BaseSettings):
     # endpoints can be used.
     TENANT_CREDENTIAL_MASTER_KEY: str = ""
 
+    # ─── Outbound dispatch SSRF allowlist (S-06) ─────────────────────
+    # Optional comma-separated host allowlist for tenant-configured
+    # outbound webhook / connector URLs. Empty means "any PUBLIC host"
+    # (private / loopback / link-local / reserved addresses are always
+    # blocked regardless). Set to known SaaS hosts (e.g. Jira / Linear)
+    # to require verified connector destinations.
+    OUTBOUND_WEBHOOK_ALLOWED_HOSTS: str = ""
+
     # ─── Execution recovery (Phase 1-F) ──────────────────────────────
     # Stale execution claim recovery remains owned by
     # ``ExecutionRuntime``. Worker/scheduler transports may invoke the
@@ -416,6 +424,15 @@ class Settings(BaseSettings):
         if self.TENANT_CONFIG_ALLOW_SELF_APPROVAL is not None:
             return self.TENANT_CONFIG_ALLOW_SELF_APPROVAL
         return not self.is_production
+
+    @property
+    def outbound_webhook_allowed_hosts(self) -> tuple[str, ...]:
+        """Parsed SaaS host allowlist for outbound dispatch (S-06)."""
+        return tuple(
+            host.strip().lower()
+            for host in self.OUTBOUND_WEBHOOK_ALLOWED_HOSTS.split(",")
+            if host.strip()
+        )
 
     @property
     def trusted_proxy_networks(

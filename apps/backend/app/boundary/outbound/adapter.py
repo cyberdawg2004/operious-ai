@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.config import get_settings
 from app.core.http import get_shared_http_client
+from app.core.ssrf import validate_public_https_url
 
 _MAX_RESPONSE_BODY_CHARS = 2048
 
@@ -32,12 +35,34 @@ class OutboundWebhookResponse:
 
 
 class OutboundWebhookAdapter:
-    """POST JSON to a tenant-configured webhook URL."""
+    """POST JSON to a tenant-configured webhook URL.
+
+    Tenant URLs are attacker-influenced, so every destination is SSRF
+    validated (HTTPS only, public address only, optional SaaS allowlist)
+    BEFORE connecting, and redirects are never followed (S-06).
+    """
+
+    def __init__(self, *, allowed_hosts: tuple[str, ...] | None = None) -> None:
+        # ``None`` -> read the operator-configured allowlist at call time.
+        self._allowed_hosts = allowed_hosts
+
+    def _resolved_allowed_hosts(self) -> tuple[str, ...]:
+        if self._allowed_hosts is not None:
+            return self._allowed_hosts
+        return get_settings().outbound_webhook_allowed_hosts
 
     async def post(
         self,
         request: OutboundWebhookRequest,
     ) -> OutboundWebhookResponse:
+        # SSRF guard runs off-loop (DNS resolution is blocking) and
+        # raises SSRFValidationError, which the dispatch layer records as
+        # a failed delivery.
+        await asyncio.to_thread(
+            validate_public_https_url,
+            request.url,
+            allowed_hosts=self._resolved_allowed_hosts(),
+        )
         client = get_shared_http_client()
         response = await client.post(
             request.url,
@@ -47,6 +72,7 @@ class OutboundWebhookAdapter:
                 "Content-Type": "application/json",
             },
             timeout=request.timeout_seconds,
+            follow_redirects=False,
         )
         body = response.text[:_MAX_RESPONSE_BODY_CHARS]
         return OutboundWebhookResponse(
