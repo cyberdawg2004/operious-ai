@@ -39,6 +39,7 @@ class TenantRateLimitMiddleware:
         principal_per_minute: int,
         window_seconds: int,
         enabled: bool,
+        production: bool = False,
     ) -> None:
         self.app = app
         self._limiter = limiter
@@ -46,6 +47,8 @@ class TenantRateLimitMiddleware:
         self._principal_per_minute = principal_per_minute
         self._window = window_seconds
         self._enabled = enabled
+        # See EdgeRateLimitMiddleware: fail-closed only in production (#38).
+        self._production = production
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not self._enabled:
@@ -70,7 +73,7 @@ class TenantRateLimitMiddleware:
                 key=key, limit=limit, window_seconds=self._window
             )
             if not decision.backend_available:
-                if fail_open_allowed(method):
+                if fail_open_allowed(method) or not self._production:
                     logger.warning("rate_limit_backend_unavailable_degraded", extra={"key": key})
                     continue
                 logger.warning("rate_limit_backend_unavailable_closed", extra={"key": key})

@@ -39,6 +39,7 @@ class EdgeRateLimitMiddleware:
         window_seconds: int,
         exempt_suffixes: tuple[str, ...],
         enabled: bool,
+        production: bool = False,
     ) -> None:
         self.app = app
         self._limiter = limiter
@@ -46,6 +47,10 @@ class EdgeRateLimitMiddleware:
         self._window = window_seconds
         self._exempt = tuple(exempt_suffixes)
         self._enabled = enabled
+        # Fail-closed on backend loss is a PRODUCTION security stance (#38);
+        # outside production a Redis outage degrades open so dev / CI without
+        # Redis is not 503'd on every write.
+        self._production = production
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not self._enabled:
@@ -61,7 +66,7 @@ class EdgeRateLimitMiddleware:
             key=f"rl:ip:{ip}", limit=self._limit, window_seconds=self._window
         )
         if not decision.backend_available:
-            if fail_open_allowed(method):
+            if fail_open_allowed(method) or not self._production:
                 logger.warning("rate_limit_backend_unavailable_degraded", extra={"ip": ip})
                 await self.app(scope, receive, send)
                 return

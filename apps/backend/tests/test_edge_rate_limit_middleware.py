@@ -77,8 +77,26 @@ def test_redis_down_post_fails_closed_503() -> None:
         window_seconds=60,
         exempt_suffixes=(),
         enabled=True,
+        production=True,  # fail-closed policy is production-only (#38)
     )
     assert TestClient(app).post("/x").status_code == 503
+
+
+def test_redis_down_post_degrades_open_in_non_production() -> None:
+    async def ok(request):  # noqa: ANN001
+        return PlainTextResponse("ok")
+
+    app = Starlette(routes=[Route("/x", ok, methods=["POST"])])
+    app.add_middleware(
+        EdgeRateLimitMiddleware,
+        limiter=_StubLimiter(allow_first=0, available=False),
+        limit=2,
+        window_seconds=60,
+        exempt_suffixes=(),
+        enabled=True,
+        production=False,
+    )
+    assert TestClient(app).post("/x").status_code == 200
 
 
 def test_disabled_passes_through() -> None:
