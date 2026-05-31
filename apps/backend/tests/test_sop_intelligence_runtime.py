@@ -33,6 +33,7 @@ from app.supervisor.persistence import (
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
@@ -145,6 +146,7 @@ def _document() -> TenantKnowledgeDocumentRecord:
         content="Old SOP content",
         document_type=TenantKnowledgeDocumentType.SOP,
         status=TenantKnowledgeDocumentStatus.ACTIVE,
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
         version=3,
         uploaded_by="principal-admin",
         vector_indexed_at=None,

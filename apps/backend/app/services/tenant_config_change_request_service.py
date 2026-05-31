@@ -34,6 +34,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.identity import (
@@ -297,6 +298,11 @@ class TenantConfigChangeRequestService:
                     None
                     if payload.get("status") is None
                     else TenantKnowledgeDocumentStatus(_str(payload, "status"))
+                ),
+                review_status=(
+                    None
+                    if payload.get("review_status") is None
+                    else TenantKnowledgeReviewStatus(_str(payload, "review_status"))
                 ),
                 uploaded_by=record.approved_by or record.proposed_by,
                 approval=approval,

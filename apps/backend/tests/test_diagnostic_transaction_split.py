@@ -45,6 +45,7 @@ from app.tenant.db.models import TenantRow
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
@@ -542,6 +543,7 @@ async def _seed_knowledge(session: AsyncSession, tenant_id: str) -> None:
         ),
         document_type=TenantKnowledgeDocumentType.SOP,
         status=TenantKnowledgeDocumentStatus.PENDING_INDEX,
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
         version=1,
         uploaded_by="principal-test",
         vector_indexed_at=None,

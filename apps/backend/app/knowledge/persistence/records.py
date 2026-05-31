@@ -55,6 +55,7 @@ class KnowledgeVectorEntry:
     title: str
     document_type: str
     document_status: str | None = None
+    document_review_status: str | None = None
     cosine_score: float | None = None
 
 

@@ -47,6 +47,7 @@ from app.knowledge.persistence import InMemoryKnowledgeRepository
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
@@ -120,6 +121,7 @@ def _document(
         content=content,
         document_type=TenantKnowledgeDocumentType.SOP,
         status=TenantKnowledgeDocumentStatus.PENDING_INDEX,
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
         version=1,
         uploaded_by="principal-admin",
         vector_indexed_at=None,

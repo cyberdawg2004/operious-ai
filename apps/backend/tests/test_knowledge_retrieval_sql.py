@@ -19,6 +19,7 @@ from app.knowledge.persistence import (
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
@@ -68,6 +69,7 @@ async def _seed_vectors(
     title: str,
     vectors: tuple[tuple[float, ...], ...],
     status: TenantKnowledgeDocumentStatus = TenantKnowledgeDocumentStatus.ACTIVE,
+    review_status: TenantKnowledgeReviewStatus = TenantKnowledgeReviewStatus.APPROVED,
 ) -> TenantKnowledgeDocumentRecord:
     document_id = derive_knowledge_document_id(
         tenant_id=tenant_id,
@@ -81,6 +83,7 @@ async def _seed_vectors(
         content="SQL-native retrieval verification document.",
         document_type=TenantKnowledgeDocumentType.SOP,
         status=status,
+        review_status=review_status,
         version=1,
         uploaded_by="principal-test",
         vector_indexed_at=_NOW,
@@ -299,6 +302,7 @@ async def test_document_status_returned_in_items(
 
     assert result.items
     assert result.items[0].document_status == "active"
+    assert result.items[0].document_review_status == "approved"
 
 
 @pytest.mark.asyncio

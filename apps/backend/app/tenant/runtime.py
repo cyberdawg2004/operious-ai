@@ -42,6 +42,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.exceptions import (
@@ -357,6 +358,7 @@ class TenantConfigurationRuntime:
             content=content,
             document_type=document_type,
             status=status,
+            review_status=TenantKnowledgeReviewStatus.QUARANTINED,
             version=1 if existing is None else existing.version + 1,
             uploaded_by=uploaded_by,
             vector_indexed_at=(
@@ -395,6 +397,7 @@ class TenantConfigurationRuntime:
         uploaded_by: str,
         content: str | None = None,
         status: TenantKnowledgeDocumentStatus | None = None,
+        review_status: TenantKnowledgeReviewStatus | None = None,
         approval: ApprovalRecord | None = None,
     ) -> TenantKnowledgeDocumentRecord:
         approval_record = _require_approval(approval, tenant_id=tenant_id)
@@ -411,6 +414,13 @@ class TenantConfigurationRuntime:
             existing,
             content=content if content is not None else existing.content,
             status=status if status is not None else existing.status,
+            review_status=(
+                TenantKnowledgeReviewStatus.QUARANTINED
+                if content is not None
+                else review_status
+                if review_status is not None
+                else existing.review_status
+            ),
             version=existing.version + 1,
             uploaded_by=uploaded_by,
         )
@@ -473,10 +483,14 @@ class TenantConfigurationRuntime:
     ) -> None:
         if source_approval_id is None:
             raise ApprovalRequiredError("knowledge document version requires approval")
+        version_metadata = {
+            **dict(metadata),
+            "review_status": record.review_status.value,
+        }
         content_sha256 = _knowledge_document_content_sha256(
             record=record,
             source_approval_id=source_approval_id,
-            metadata=metadata,
+            metadata=version_metadata,
         )
         await self._repository.save_knowledge_document_version(
             TenantKnowledgeDocumentVersionRecord(
@@ -497,7 +511,7 @@ class TenantConfigurationRuntime:
                 content_sha256=content_sha256,
                 previous_version_sha256=previous_version_sha256,
                 created_at=_utcnow(),
-                metadata=dict(metadata),
+                metadata=version_metadata,
             ),
             expected_tenant_id=record.tenant_id,
         )

@@ -27,6 +27,7 @@ from app.sop_intelligence import (
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import (
     derive_knowledge_document_id,
@@ -70,6 +71,7 @@ def _document(
         content=content,
         document_type=TenantKnowledgeDocumentType.SOP,
         status=TenantKnowledgeDocumentStatus.ACTIVE,
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
         version=version,
         uploaded_by="principal-admin",
         vector_indexed_at=_NOW,
@@ -143,6 +145,7 @@ async def test_approval_lifecycle_approve_then_apply_versions_document() -> None
     assert approved.approval.status == ApprovalStatus.APPROVED.value
     assert applied.approval.status == ApprovalStatus.APPLIED.value
     assert applied.document.version == document.version + 1
+    assert applied.document.review_status is TenantKnowledgeReviewStatus.APPROVED
     assert applied.document.vector_indexed_at is None
     assert "Approved SOP update" in applied.document.content
     assert applied.previous_version is not None

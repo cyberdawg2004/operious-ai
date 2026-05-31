@@ -42,6 +42,7 @@ from app.main import create_app
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
@@ -143,6 +144,7 @@ def _document(
     status: TenantKnowledgeDocumentStatus = (
         TenantKnowledgeDocumentStatus.PENDING_INDEX
     ),
+    review_status: TenantKnowledgeReviewStatus = TenantKnowledgeReviewStatus.APPROVED,
 ) -> TenantKnowledgeDocumentRecord:
     document_id = derive_knowledge_document_id(
         tenant_id=tenant_id,
@@ -156,6 +158,7 @@ def _document(
         content=content,
         document_type=TenantKnowledgeDocumentType.SOP,
         status=status,
+        review_status=review_status,
         version=1,
         uploaded_by="principal-admin",
         vector_indexed_at=None,
@@ -251,6 +254,7 @@ async def test_ingestion_uses_deterministic_uuid5_and_is_idempotent() -> None:
     assert all(entry.vector.vector_id.version == 5 for entry in second_page.items)
     assert stored_document is not None
     assert stored_document.status is TenantKnowledgeDocumentStatus.ACTIVE
+    assert stored_document.review_status is TenantKnowledgeReviewStatus.APPROVED
     assert stored_document.vector_indexed_at is not None
 
 
@@ -644,6 +648,15 @@ async def test_knowledge_router_ingests_and_searches_from_tenant_documents(
     )
     assert created.status_code == 200
     document_id = created.json()["document_id"]
+    assert created.json()["review_status"] == "quarantined"
+
+    activated = await knowledge_client.put(
+        f"/api/v1/tenant/knowledge/{document_id}",
+        headers=_headers(),
+        json={"review_status": "approved"},
+    )
+    assert activated.status_code == 200
+    assert activated.json()["review_status"] == "approved"
 
     ingested = await knowledge_client.post(
         f"/api/v1/knowledge/documents/{document_id}/ingest",

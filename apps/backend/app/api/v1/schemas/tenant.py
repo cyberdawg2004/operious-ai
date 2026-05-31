@@ -15,6 +15,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.change_requests import (
@@ -117,6 +118,7 @@ class TenantKnowledgeUpdateRequest(BaseModel):
 
     content: str | None = Field(default=None, min_length=1)
     status: TenantKnowledgeDocumentStatus | None = None
+    review_status: TenantKnowledgeReviewStatus | None = None
 
 
 class TenantKnowledgeDocumentResponse(BaseModel):
@@ -127,6 +129,7 @@ class TenantKnowledgeDocumentResponse(BaseModel):
     content: str
     document_type: TenantKnowledgeDocumentType
     status: TenantKnowledgeDocumentStatus
+    review_status: TenantKnowledgeReviewStatus
     version: int
     uploaded_by: str
     vector_indexed_at: str | None = None
@@ -143,6 +146,7 @@ class TenantKnowledgeDocumentResponse(BaseModel):
             content=record.content,
             document_type=record.document_type,
             status=record.status,
+            review_status=record.review_status,
             version=record.version,
             uploaded_by=record.uploaded_by,
             vector_indexed_at=(

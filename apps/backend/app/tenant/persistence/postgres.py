@@ -28,6 +28,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.exceptions import (
@@ -870,6 +871,7 @@ def _document_record_to_row(
         content=record.content,
         document_type=record.document_type.value,
         status=record.status.value,
+        review_status=record.review_status.value,
         version=record.version,
         uploaded_by=record.uploaded_by,
         vector_indexed_at=record.vector_indexed_at,
@@ -885,6 +887,7 @@ def _update_document_row(
     row.content = record.content
     row.document_type = record.document_type.value
     row.status = record.status.value
+    row.review_status = record.review_status.value
     row.version = record.version
     row.uploaded_by = record.uploaded_by
     row.vector_indexed_at = record.vector_indexed_at
@@ -901,6 +904,7 @@ def _document_row_to_record(
         content=row.content,
         document_type=TenantKnowledgeDocumentType(row.document_type),
         status=TenantKnowledgeDocumentStatus(row.status),
+        review_status=TenantKnowledgeReviewStatus(row.review_status),
         version=row.version,
         uploaded_by=row.uploaded_by,
         vector_indexed_at=row.vector_indexed_at,

@@ -30,6 +30,11 @@ from app.knowledge.models import (
     KnowledgeRetrievalItem,
     KnowledgeRetrievalResult,
 )
+from app.knowledge.poisoning import (
+    KnowledgeInjectionScanResult,
+    KnowledgeInjectionScanner,
+    PatternKnowledgeInjectionScanner,
+)
 from app.knowledge.runtime import KnowledgeRuntime
 
 __all__ = [
@@ -45,6 +50,8 @@ __all__ = [
     "KnowledgeEmbeddingProvider",
     "KnowledgeError",
     "KnowledgeIngestionResult",
+    "KnowledgeInjectionScanResult",
+    "KnowledgeInjectionScanner",
     "KnowledgePersistenceError",
     "KnowledgeProviderError",
     "KnowledgeRetrievalError",
@@ -52,6 +59,7 @@ __all__ = [
     "KnowledgeRetrievalResult",
     "KnowledgeRuntime",
     "KnowledgeVectorId",
+    "PatternKnowledgeInjectionScanner",
     "as_chunk_id",
     "as_document_id",
     "as_vector_id",

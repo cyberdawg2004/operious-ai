@@ -21,6 +21,7 @@ from app.sop_intelligence import (
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
@@ -74,6 +75,7 @@ async def _seed(pg_session: AsyncSession) -> ApprovalRecord:
         content="content",
         document_type=TenantKnowledgeDocumentType.SOP,
         status=TenantKnowledgeDocumentStatus.ACTIVE,
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
         version=1,
         uploaded_by="principal-admin",
         vector_indexed_at=None,

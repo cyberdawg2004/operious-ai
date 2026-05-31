@@ -26,6 +26,11 @@ from app.knowledge.models import (
     KnowledgeRetrievalItem,
     KnowledgeRetrievalResult,
 )
+from app.knowledge.poisoning import (
+    KnowledgeInjectionScanResult,
+    KnowledgeInjectionScanner,
+    PatternKnowledgeInjectionScanner,
+)
 from app.knowledge.persistence import (
     KnowledgeChunkRecord,
     KnowledgeRepository,
@@ -35,6 +40,7 @@ from app.knowledge.persistence import (
 )
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import TenantKnowledgeDocumentId
 from app.tenant.persistence import TenantConfigurationRepository
@@ -49,6 +55,7 @@ class KnowledgeRuntime:
         tenant_configuration_repository: TenantConfigurationRepository,
         embedding_provider: KnowledgeEmbeddingProvider | None = None,
         chunker: DeterministicKnowledgeChunker | None = None,
+        injection_scanner: KnowledgeInjectionScanner | None = None,
         vector_index_name: str = "tenant_knowledge_default",
         default_context_token_budget: int = 4000,
     ) -> None:
@@ -62,6 +69,9 @@ class KnowledgeRuntime:
             embedding_provider or DeterministicHashEmbeddingProvider()
         )
         self._chunker = chunker or DeterministicKnowledgeChunker()
+        self._injection_scanner = (
+            injection_scanner or PatternKnowledgeInjectionScanner()
+        )
         self._vector_index_name = vector_index_name
         self._default_context_token_budget = default_context_token_budget
 
@@ -81,6 +91,11 @@ class KnowledgeRuntime:
             raise KnowledgeDocumentNotIndexableError(
                 "archived knowledge document cannot be indexed"
             )
+        review_status, review_metadata = _review_document_for_indexing(
+            scanner=self._injection_scanner,
+            content=document.content,
+            current_review_status=document.review_status,
+        )
         chunks = self._chunker.chunk(document.content)
         if not chunks:
             raise KnowledgeDocumentNotIndexableError(
@@ -92,6 +107,13 @@ class KnowledgeRuntime:
             texts=texts,
         )
         now = _utcnow()
+        document_metadata = {
+            "document_title": document.title,
+            "document_type": document.document_type.value,
+            "document_status": TenantKnowledgeDocumentStatus.ACTIVE.value,
+            "document_review_status": review_status.value,
+            "knowledge_review": review_metadata,
+        }
         chunk_records = tuple(
             KnowledgeChunkRecord(
                 chunk_id=derive_chunk_id(
@@ -112,10 +134,7 @@ class KnowledgeRuntime:
                 char_end=chunk.char_end,
                 is_current=True,
                 indexed_at=now,
-                metadata={
-                    "document_title": document.title,
-                    "document_type": document.document_type.value,
-                },
+                metadata=dict(document_metadata),
             )
             for chunk in chunks
         )
@@ -140,8 +159,7 @@ class KnowledgeRuntime:
                 is_current=True,
                 indexed_at=now,
                 metadata={
-                    "document_title": document.title,
-                    "document_type": document.document_type.value,
+                    **document_metadata,
                     "chunk_ordinal": chunk_record.ordinal,
                 },
             )
@@ -160,6 +178,7 @@ class KnowledgeRuntime:
             replace(
                 document,
                 status=TenantKnowledgeDocumentStatus.ACTIVE,
+                review_status=review_status,
                 vector_indexed_at=now,
             ),
             expected_tenant_id=tenant_id,
@@ -262,6 +281,7 @@ class KnowledgeRuntime:
                 estimated_tokens=entry.chunk.token_count,
                 citation_index=citation_index,
                 document_status=entry.document_status,
+                document_review_status=entry.document_review_status,
                 metadata=metadata,
             )
             items.append(item)
@@ -356,7 +376,53 @@ def _entry_metadata(entry: KnowledgeVectorEntry) -> dict[str, Any]:
         metadata["document_type"] = entry.document_type
     if entry.document_status:
         metadata["document_status"] = entry.document_status
+    if entry.document_review_status:
+        metadata["document_review_status"] = entry.document_review_status
     return metadata
+
+
+def _review_document_for_indexing(
+    *,
+    scanner: KnowledgeInjectionScanner,
+    content: str,
+    current_review_status: TenantKnowledgeReviewStatus,
+) -> tuple[TenantKnowledgeReviewStatus, dict[str, Any]]:
+    try:
+        result = scanner.scan(content)
+    except Exception as exc:  # noqa: BLE001 - scanner failures fail closed.
+        review_status = (
+            current_review_status
+            if current_review_status is TenantKnowledgeReviewStatus.REJECTED
+            else TenantKnowledgeReviewStatus.QUARANTINED
+        )
+        return review_status, {
+            "scanner": scanner.__class__.__name__,
+            "flagged": True,
+            "fail_closed": True,
+            "error_type": exc.__class__.__name__,
+        }
+    review_status = _review_status_after_scan(
+        current_review_status=current_review_status,
+        scan_result=result,
+    )
+    return review_status, {
+        "scanner": scanner.__class__.__name__,
+        "flagged": result.flagged,
+        "categories": list(result.categories),
+        "matched_phrases": list(result.matched_phrases),
+    }
+
+
+def _review_status_after_scan(
+    *,
+    current_review_status: TenantKnowledgeReviewStatus,
+    scan_result: KnowledgeInjectionScanResult,
+) -> TenantKnowledgeReviewStatus:
+    if current_review_status is TenantKnowledgeReviewStatus.REJECTED:
+        return TenantKnowledgeReviewStatus.REJECTED
+    if scan_result.flagged:
+        return TenantKnowledgeReviewStatus.QUARANTINED
+    return current_review_status
 
 
 def _utcnow() -> datetime:

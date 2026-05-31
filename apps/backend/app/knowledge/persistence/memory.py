@@ -119,6 +119,12 @@ class InMemoryKnowledgeRepository:
                 continue
             if query.current_only and not chunk.is_current:
                 continue
+            document_status = str(vector.metadata.get("document_status", "active"))
+            document_review_status = str(
+                vector.metadata.get("document_review_status", "approved")
+            )
+            if document_status != "active" or document_review_status != "approved":
+                continue
             title, document_type = self._document_titles.get(
                 (expected_tenant_id, vector.document_id),
                 (
@@ -132,6 +138,8 @@ class InMemoryKnowledgeRepository:
                     vector=vector,
                     title=title,
                     document_type=document_type,
+                    document_status=document_status,
+                    document_review_status=document_review_status,
                     cosine_score=(
                         _normalized_dot(query_embedding, vector.vector)
                         if query_embedding is not None

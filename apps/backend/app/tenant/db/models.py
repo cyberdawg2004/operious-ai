@@ -121,6 +121,12 @@ class TenantKnowledgeDocumentRow(Base):
         String(_ENUM_WIDTH), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False, index=True)
+    review_status: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        server_default=text("'quarantined'"),
+        index=True,
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
     vector_indexed_at: Mapped[datetime | None] = mapped_column(
@@ -133,6 +139,10 @@ class TenantKnowledgeDocumentRow(Base):
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
         CheckConstraint("version >= 1", name="version_positive"),
+        CheckConstraint(
+            "review_status IN ('quarantined', 'approved', 'rejected')",
+            name="knowledge_document_review_status_valid",
+        ),
         UniqueConstraint(
             "tenant_id",
             "document_type",
@@ -143,6 +153,11 @@ class TenantKnowledgeDocumentRow(Base):
             "ix_tenant_knowledge_documents_tenant_status",
             "tenant_id",
             "status",
+        ),
+        Index(
+            "ix_tenant_knowledge_documents_tenant_review_status",
+            "tenant_id",
+            "review_status",
         ),
     )
 

@@ -43,6 +43,12 @@ class TenantKnowledgeDocumentStatus(StrEnum):
     INDEXING = "indexing"
 
 
+class TenantKnowledgeReviewStatus(StrEnum):
+    QUARANTINED = "quarantined"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class TenantGovernancePolicyStatus(StrEnum):
     ACTIVE = "active"
     DRAFT = "draft"
@@ -75,5 +81,6 @@ __all__ = [
     "TenantGovernancePolicyStatus",
     "TenantKnowledgeDocumentStatus",
     "TenantKnowledgeDocumentType",
+    "TenantKnowledgeReviewStatus",
     "TenantTopologyStatus",
 ]

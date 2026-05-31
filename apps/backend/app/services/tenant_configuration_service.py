@@ -22,6 +22,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.identity import (
@@ -232,6 +233,7 @@ class TenantConfigurationService:
         content: str | None,
         status: TenantKnowledgeDocumentStatus | None,
         uploaded_by: str,
+        review_status: TenantKnowledgeReviewStatus | None = None,
         approval: ApprovalRecord | None = None,
         bypass_direct_apply_gate: bool = False,
         commit: bool = True,
@@ -247,6 +249,9 @@ class TenantConfigurationService:
                     "document_id": str(document_id),
                     "content": content,
                     "status": None if status is None else status.value,
+                    "review_status": (
+                        None if review_status is None else review_status.value
+                    ),
                 },
             )
         record = await self._runtime.update_knowledge_document(
@@ -254,6 +259,7 @@ class TenantConfigurationService:
             document_id=document_id,
             content=content,
             status=status,
+            review_status=review_status,
             uploaded_by=uploaded_by,
             approval=approval,
         )

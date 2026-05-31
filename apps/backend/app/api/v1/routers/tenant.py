@@ -356,6 +356,7 @@ async def update_knowledge_document(
             content=request.content,
             status=request.status,
             uploaded_by=_principal_or_400(authority),
+            review_status=request.review_status,
         )
     except (ValueError, TenantConfigurationNotFoundError) as exc:
         raise HTTPException(

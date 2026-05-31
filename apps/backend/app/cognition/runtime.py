@@ -30,6 +30,7 @@ from app.sop_intelligence.persistence import (
 )
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.chronology import canonical_sha256
 from app.tenant.identity import (
@@ -134,6 +135,7 @@ class CognitionRuntime:
             document,
             content=_apply_change(document.content, approval.proposed_change),
             status=TenantKnowledgeDocumentStatus.ACTIVE,
+            review_status=TenantKnowledgeReviewStatus.APPROVED,
             version=new_version,
             uploaded_by=applied_by,
             vector_indexed_at=None,
@@ -244,6 +246,7 @@ class CognitionRuntime:
             document,
             content=target.content,
             status=TenantKnowledgeDocumentStatus.ACTIVE,
+            review_status=TenantKnowledgeReviewStatus.APPROVED,
             version=document.version + 1,
             uploaded_by=rolled_back_by,
             vector_indexed_at=None,
@@ -415,6 +418,10 @@ def _version_record_from_document(
     metadata: dict[str, Any],
     previous_version_sha256: str | None = None,
 ) -> TenantKnowledgeDocumentVersionRecord:
+    version_metadata = {
+        **metadata,
+        "review_status": document.review_status.value,
+    }
     content_sha256 = canonical_sha256(
         {
             "tenant_id": document.tenant_id,
@@ -426,7 +433,7 @@ def _version_record_from_document(
             "status": document.status.value,
             "uploaded_by": document.uploaded_by,
             "source_approval_id": source_approval_id,
-            "metadata": metadata,
+            "metadata": version_metadata,
         }
     )
     return TenantKnowledgeDocumentVersionRecord(
@@ -447,7 +454,7 @@ def _version_record_from_document(
         content_sha256=content_sha256,
         previous_version_sha256=previous_version_sha256,
         created_at=created_at,
-        metadata=metadata,
+        metadata=version_metadata,
     )
 
 

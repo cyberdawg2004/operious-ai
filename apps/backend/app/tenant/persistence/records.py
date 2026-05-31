@@ -14,6 +14,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.identity import (
@@ -68,6 +69,9 @@ class TenantKnowledgeDocumentRecord:
     uploaded_by: str
     vector_indexed_at: datetime | None
     created_at: datetime
+    review_status: TenantKnowledgeReviewStatus = (
+        TenantKnowledgeReviewStatus.QUARANTINED
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,6 +22,7 @@ from app.knowledge.persistence.records import (
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_row_page, normalize_page_bounds
 from app.tenant.db.models import TenantKnowledgeDocumentRow, TenantRow
+from app.tenant.enums import TenantKnowledgeDocumentStatus, TenantKnowledgeReviewStatus
 from app.tenant.identity import TenantKnowledgeDocumentId
 
 
@@ -117,6 +118,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                 TenantKnowledgeDocumentRow.title,
                 TenantKnowledgeDocumentRow.document_type,
                 TenantKnowledgeDocumentRow.status,
+                TenantKnowledgeDocumentRow.review_status,
             )
             .select_from(KnowledgeVectorRow)
             .join(
@@ -133,6 +135,10 @@ class PostgresKnowledgeRepository(BaseRepository):
                 KnowledgeChunkRow.tenant_id == expected_tenant_id,
                 TenantKnowledgeDocumentRow.tenant_id == expected_tenant_id,
                 KnowledgeVectorRow.vector_index_name == query.vector_index_name,
+                TenantKnowledgeDocumentRow.status
+                == TenantKnowledgeDocumentStatus.ACTIVE.value,
+                TenantKnowledgeDocumentRow.review_status
+                == TenantKnowledgeReviewStatus.APPROVED.value,
             )
         )
         if query.current_only:
@@ -176,6 +182,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                     title=str(title),
                     document_type=str(document_type),
                     document_status=str(document_status),
+                    document_review_status=str(document_review_status),
                 )
                 for (
                     chunk_row,
@@ -183,6 +190,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                     title,
                     document_type,
                     document_status,
+                    document_review_status,
                 ) in page.items
             ),
             total=page.total,
@@ -232,6 +240,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                 tkd.title,
                 tkd.document_type,
                 tkd.status AS document_status,
+                tkd.review_status AS document_review_status,
                 (1 - (tkv.embedding <=> CAST(:query_vector AS vector)))
                     AS cosine_score,
                 COUNT(*) OVER () AS total_count
@@ -250,6 +259,8 @@ class PostgresKnowledgeRepository(BaseRepository):
               )
               AND tkv.is_current IS TRUE
               AND tkc.is_current IS TRUE
+              AND tkd.status = 'active'
+              AND tkd.review_status = 'approved'
               AND tkv.provider = :provider
               AND tkv.model = :model
               AND tkv.embedding IS NOT NULL
@@ -527,6 +538,7 @@ def _sql_row_to_entry(row: Mapping[Any, Any]) -> KnowledgeVectorEntry:
         title=str(row["title"]),
         document_type=str(row["document_type"]),
         document_status=str(row["document_status"]),
+        document_review_status=str(row["document_review_status"]),
         cosine_score=float(row["cosine_score"]),
     )
 

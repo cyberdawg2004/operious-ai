@@ -7,6 +7,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import (
     TenantChannelConfigurationId,
@@ -36,6 +37,7 @@ __all__ = [
     "TenantKnowledgeDocumentVersionId",
     "TenantKnowledgeDocumentStatus",
     "TenantKnowledgeDocumentType",
+    "TenantKnowledgeReviewStatus",
     "as_channel_configuration_id",
     "as_governance_policy_id",
     "as_knowledge_document_id",
