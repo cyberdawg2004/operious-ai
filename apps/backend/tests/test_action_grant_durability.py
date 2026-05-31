@@ -198,6 +198,50 @@ async def test_actor_mismatch_rejected(pg_session: AsyncSession) -> None:
         )
 
 
+async def test_binding_hash_actor_rejected_before_consumption(
+    pg_session: AsyncSession,
+) -> None:
+    decision_id = await _seed_grant(pg_session, seed="binding-actor-mismatch")
+    calls: list[dict[str, object]] = []
+    invoker = ToolInvoker(
+        tool_registry=_registry(_ActionTool(calls)),
+        governance_runtime=build_action_tool_governance_runtime(
+            persistence=PostgresGovernanceRepository(pg_session),
+            redis_client=None,
+        ),
+        grant_repository=PostgresAgentActionGrantRepository(pg_session),
+        redis_client=None,
+    )
+
+    envelope = await invoker.invoke(
+        ToolInvocationRequest(tool_name=_TOOL_NAME, payload=dict(_PAYLOAD)),
+        _context(actor=_OTHER_ACTOR),
+        invocation_ordinal=1,
+        pre_approved_decision_id=str(decision_id),
+    )
+
+    assert envelope.is_denied
+    assert (
+        envelope.trace.metadata["reason"]
+        == "pre_approved_decision_binding_mismatch"
+    )
+    assert calls == []
+    grant = (
+        await pg_session.execute(
+            text(
+                """
+                SELECT consumed_at
+                FROM public.agent_action_grants
+                WHERE decision_id = CAST(:decision_id AS uuid)
+                  AND tenant_id = :tenant_id
+                """
+            ),
+            {"decision_id": str(decision_id), "tenant_id": _TENANT_ID},
+        )
+    ).mappings().one()
+    assert grant["consumed_at"] is None
+
+
 async def test_manager_approval_reinvocation_still_works(
     pg_session: AsyncSession,
 ) -> None:
