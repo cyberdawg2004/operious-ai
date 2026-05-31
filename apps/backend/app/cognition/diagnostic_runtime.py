@@ -292,11 +292,22 @@ class DiagnosticCognitionRuntime:
         self,
         snapshot: DiagnosticReasoningSnapshot,
     ) -> DiagnosticLLMCompletion:
-        return await self._complete_llm(
+        completion = await self._complete_llm(
             system_prompt=snapshot.system_prompt,
             messages=snapshot.messages,
             tenant_id=snapshot.tenant_id,
         )
+        # Record actual token usage against the per-tenant/provider/model
+        # TPM window (S-09) so subsequent calls are throttled once the
+        # budget is exhausted. Fails open inside the runtime.
+        if self._quota_runtime is not None:
+            await self._quota_runtime.record_token_usage(
+                tenant_id=snapshot.tenant_id,
+                provider=self._llm_client.provider_name,
+                model=self._llm_client.model_name,
+                tokens=completion.usage.total_tokens,
+            )
+        return completion
 
     async def persist_reasoning_result(
         self,

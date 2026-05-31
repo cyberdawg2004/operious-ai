@@ -20,6 +20,10 @@ class _FakeRedisPipeline:
         self._commands.append(("incr", key, None))
         return self
 
+    def incrby(self, key: str, amount: int) -> _FakeRedisPipeline:
+        self._commands.append(("incrby", key, amount))
+        return self
+
     def expire(self, key: str, time: int) -> _FakeRedisPipeline:
         self._commands.append(("expire", key, time))
         return self
@@ -28,12 +32,17 @@ class _FakeRedisPipeline:
         if self._redis.fail:
             raise RuntimeError("redis unavailable")
         results: list[object] = []
-        for command, key, seconds in self._commands:
+        for command, key, arg in self._commands:
             if command == "incr":
                 self._redis.counts[key] = self._redis.counts.get(key, 0) + 1
                 results.append(self._redis.counts[key])
+            elif command == "incrby":
+                self._redis.counts[key] = self._redis.counts.get(key, 0) + int(
+                    arg or 0
+                )
+                results.append(self._redis.counts[key])
             elif command == "expire":
-                self._redis.expiry_seconds[key] = int(seconds or 0)
+                self._redis.expiry_seconds[key] = int(arg or 0)
                 results.append(True)
         return results
 
@@ -139,6 +148,7 @@ def _runtime(
     clock: _Clock | None = None,
     requests_per_minute: int = 60,
     requests_per_hour: int = 1_000,
+    tokens_per_minute: int = 100_000,
 ) -> TenantQuotaRuntime:
     return TenantQuotaRuntime(
         redis_url="redis://localhost:6379/0",
@@ -147,6 +157,7 @@ def _runtime(
         time_provider=clock,
         request_per_minute_limit=requests_per_minute,
         requests_per_hour_limit=requests_per_hour,
+        tokens_per_minute_limit=tokens_per_minute,
     )
 
 
@@ -193,8 +204,79 @@ async def test_quota_allows_within_limit() -> None:
     )
     assert status.requests_per_minute_count == 1
     assert status.requests_per_minute_limit == 2
-    assert status.tokens_per_minute_count is None
+    assert status.tokens_per_minute_count == 0
     assert status.redis_available is True
+
+
+@pytest.mark.asyncio
+async def test_token_quota_blocks_once_window_budget_exhausted() -> None:
+    session_factory = _FakeSessionFactory()
+    clock = _Clock(120.0)
+    runtime = _runtime(session_factory, clock=clock, tokens_per_minute=1_000)
+
+    # A prior call consumed the whole token budget for this minute.
+    await runtime.record_token_usage(
+        tenant_id="tenant-a", provider="anthropic", model="claude", tokens=1_000
+    )
+
+    status = await runtime.get_quota_status(
+        tenant_id="tenant-a", provider="anthropic", model="claude"
+    )
+    assert status.tokens_per_minute_count == 1_000
+
+    with pytest.raises(ProviderQuotaExceededError) as exc:
+        await runtime.check_and_increment(
+            tenant_id="tenant-a", provider="anthropic", model="claude"
+        )
+    assert exc.value.quota_type == "tokens_per_minute"
+
+
+@pytest.mark.asyncio
+async def test_token_usage_accumulates_within_window() -> None:
+    session_factory = _FakeSessionFactory()
+    clock = _Clock(120.0)
+    runtime = _runtime(session_factory, clock=clock, tokens_per_minute=10_000)
+
+    await runtime.record_token_usage(
+        tenant_id="t", provider="p", model="m", tokens=400
+    )
+    await runtime.record_token_usage(
+        tenant_id="t", provider="p", model="m", tokens=600
+    )
+
+    status = await runtime.get_quota_status(tenant_id="t", provider="p", model="m")
+    assert status.tokens_per_minute_count == 1_000
+
+
+@pytest.mark.asyncio
+async def test_token_quota_resets_in_next_minute_window() -> None:
+    session_factory = _FakeSessionFactory()
+    clock = _Clock(120.0)
+    runtime = _runtime(session_factory, clock=clock, tokens_per_minute=500)
+
+    await runtime.record_token_usage(
+        tenant_id="t", provider="p", model="m", tokens=500
+    )
+    with pytest.raises(ProviderQuotaExceededError):
+        await runtime.check_and_increment(tenant_id="t", provider="p", model="m")
+
+    clock.value = 200.0  # next minute bucket
+    await runtime.check_and_increment(tenant_id="t", provider="p", model="m")
+
+
+@pytest.mark.asyncio
+async def test_token_recording_fails_open_when_redis_unavailable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session_factory = _FakeSessionFactory()
+    redis = _FakeRedis(fail=True)
+    runtime = _runtime(session_factory, redis=redis, clock=_Clock(120.0))
+
+    # Must not raise even though Redis is down.
+    with caplog.at_level(logging.WARNING):
+        await runtime.record_token_usage(
+            tenant_id="t", provider="p", model="m", tokens=100
+        )
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,8 @@ _quota_runtime: TenantQuotaRuntime | None = None
 class _QuotaRedisPipeline(Protocol):
     def incr(self, key: str) -> _QuotaRedisPipeline: ...
 
+    def incrby(self, key: str, amount: int) -> _QuotaRedisPipeline: ...
+
     def expire(self, key: str, time: int) -> _QuotaRedisPipeline: ...
 
     async def execute(self) -> list[object]: ...
@@ -132,11 +134,29 @@ class TenantQuotaRuntime:
         if operator_state == "force_close":
             return
 
-        # TODO PR_T4_FOLLOWUP: tokens_per_minute quota is accepted
-        # in configuration but not enforced. The counter always
-        # returns None. Implement sliding window token tracking
-        # in a future PR when token usage is instrumented.
         now = self._time()
+
+        # Token-per-minute enforcement (S-09). Token usage is recorded
+        # post-call via ``record_token_usage``; here we block NEW calls
+        # once the current minute window's token budget is exhausted.
+        # Read-only check, fails open on Redis error.
+        token_count = await self._read_redis_count(
+            self._token_minute_key(
+                tenant_id=tenant_id,
+                provider=provider,
+                model=model,
+                now=now,
+            )
+        )
+        if token_count.available and token_count.count >= self._tokens_per_minute_limit:
+            raise ProviderQuotaExceededError(
+                tenant_id=tenant_id,
+                provider=provider,
+                model=model,
+                quota_type="tokens_per_minute",
+                retry_after_seconds=60,
+            )
+
         minute_key = self._minute_key(
             tenant_id=tenant_id,
             provider=provider,
@@ -200,6 +220,14 @@ class TenantQuotaRuntime:
                 now=now,
             )
         )
+        token_count = await self._read_redis_count(
+            self._token_minute_key(
+                tenant_id=tenant_id,
+                provider=provider,
+                model=model,
+                now=now,
+            )
+        )
         operator_state = await self._get_operator_override_state(
             tenant_id=tenant_id,
             provider=provider,
@@ -212,11 +240,48 @@ class TenantQuotaRuntime:
             requests_per_minute_limit=self._requests_per_minute_limit,
             requests_per_hour_count=hour_count.count,
             requests_per_hour_limit=self._requests_per_hour_limit,
-            tokens_per_minute_count=None,
+            tokens_per_minute_count=token_count.count,
             tokens_per_minute_limit=self._tokens_per_minute_limit,
             operator_circuit_state=operator_state,
-            redis_available=minute_count.available and hour_count.available,
+            redis_available=(
+                minute_count.available
+                and hour_count.available
+                and token_count.available
+            ),
         )
+
+    async def record_token_usage(
+        self,
+        tenant_id: str,
+        provider: str,
+        model: str,
+        tokens: int,
+    ) -> None:
+        """Record ``tokens`` against the current minute window (S-09).
+
+        Called AFTER an LLM call with the actual total token count.
+        Fails open on Redis error (logs a warning) so token accounting
+        never blocks a completion that already happened.
+        """
+
+        if tokens <= 0:
+            return
+        key = self._token_minute_key(
+            tenant_id=tenant_id,
+            provider=provider,
+            model=model,
+            now=self._time(),
+        )
+        try:
+            pipe = self._redis.pipeline()
+            pipe.incrby(key, tokens)
+            pipe.expire(key, 60)
+            await pipe.execute()
+        except Exception as exc:
+            logger.warning(
+                "quota_redis_unavailable",
+                extra={"error": str(exc), "key": key, "tokens": tokens},
+            )
 
     async def set_operator_override(
         self,
@@ -440,6 +505,17 @@ class TenantQuotaRuntime:
     ) -> str:
         window_bucket = int(now // 3_600)
         return f"quota:{tenant_id}:{provider}:{model}:hour:{window_bucket}"
+
+    @staticmethod
+    def _token_minute_key(
+        *,
+        tenant_id: str,
+        provider: str,
+        model: str,
+        now: float,
+    ) -> str:
+        window_bucket = int(now // 60)
+        return f"quota:{tenant_id}:{provider}:{model}:tokens:{window_bucket}"
 
     @staticmethod
     def _operator_override_record_id(*, tenant_id: str, provider: str) -> str:
