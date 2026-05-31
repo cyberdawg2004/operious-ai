@@ -48,10 +48,15 @@ from app.boundary.translation import (
     TranslationPayload,
     TranslationRuntime,
 )
+from app.core.config import get_settings
 from app.core.twilio_signature import (
     TWILIO_CANONICAL_URL_HEADER,
     TWILIO_SIGNATURE_HEADER,
     verify_twilio_signature,
+)
+from app.core.webhook_url import (
+    CanonicalWebhookUrlError,
+    derive_canonical_webhook_url,
 )
 from app.db.tenant_context import set_current_tenant
 from app.governance.capability import OperationalAct
@@ -405,6 +410,7 @@ class TicketIngressService:
         raw_body: bytes | None,
         content_type: str | None,
         tenant_hint: str | None = None,
+        request_path: str | None = None,
     ) -> TicketIngressServiceResult | WebhookDuplicateDeliveryResult:
         if self._tenant_configuration_runtime is None:
             raise TicketIngressServiceError(
@@ -455,6 +461,7 @@ class TicketIngressService:
             body=body,
             headers=headers,
             raw_body=raw_body,
+            request_path=request_path,
         )
         if not _webhook_signature_matches_secret(
             channel_type=tenant_channel_type,
@@ -462,6 +469,7 @@ class TicketIngressService:
             body=body,
             headers=headers,
             raw_body=raw_body,
+            request_path=request_path,
         ):
             raise TicketIngressRejected(
                 code="invalid_signature",
@@ -554,6 +562,7 @@ class TicketIngressService:
             content_type=content_type,
             headers=dict(headers),
             raw_bytes=raw_body,
+            request_path=request_path,
         )
         runtime = BoundaryIngressRuntime(
             adapters=BoundaryAdapterRegistry((adapter,)),
@@ -1248,6 +1257,7 @@ def _select_webhook_secret(
     body: Any,
     headers: Mapping[str, str],
     raw_body: bytes | None,
+    request_path: str | None = None,
 ) -> str:
     previous_secret = channel_config.previous_webhook_secret
     expires_at = channel_config.credential_rotation_expires_at
@@ -1261,6 +1271,7 @@ def _select_webhook_secret(
         body=body,
         headers=headers,
         raw_body=raw_body,
+        request_path=request_path,
     ):
         return previous_secret
     return channel_config.webhook_secret
@@ -1273,6 +1284,7 @@ def _webhook_signature_matches_secret(
     body: Any,
     headers: Mapping[str, str],
     raw_body: bytes | None,
+    request_path: str | None = None,
 ) -> bool:
     if channel_type is TenantChannelType.EMAIL:
         return _sha256_signature_matches(
@@ -1299,6 +1311,7 @@ def _webhook_signature_matches_secret(
                 secret=secret,
                 body=body,
                 headers=headers,
+                request_path=request_path,
             )
         )
     if channel_type is TenantChannelType.SHULEX:
@@ -1383,17 +1396,47 @@ def _twilio_signature_matches(
     secret: str,
     body: Any,
     headers: Mapping[str, str],
+    request_path: str | None,
 ) -> bool:
     signature = _header(headers, TWILIO_SIGNATURE_HEADER)
     if not signature or not isinstance(body, Mapping):
         return False
     typed_body = cast(Mapping[str, Any], body)
+    url = _twilio_canonical_url(headers=headers, request_path=request_path)
+    if url is None:
+        return False
     return verify_twilio_signature(
         auth_token=secret,
-        url=_header(headers, TWILIO_CANONICAL_URL_HEADER),
+        url=url,
         params=typed_body,
         signature=signature,
     )
+
+
+def _twilio_canonical_url(
+    *,
+    headers: Mapping[str, str],
+    request_path: str | None,
+) -> str | None:
+    """The URL the Twilio signature is verified against (#23).
+
+    Derived server-side from ``PUBLIC_BASE_URL`` + the trusted request path.
+    The client-supplied canonical-URL header is honoured only when
+    ``WEBHOOK_TRUST_URL_HEADER`` is explicitly enabled (non-prod).
+    """
+    settings = get_settings()
+    if settings.WEBHOOK_TRUST_URL_HEADER:
+        return _header(headers, TWILIO_CANONICAL_URL_HEADER)
+    if request_path is None:
+        return None
+    try:
+        return derive_canonical_webhook_url(
+            public_base_url=settings.public_base_url_normalized,
+            request_path=request_path,
+            query_string="",
+        )
+    except CanonicalWebhookUrlError:
+        return None
 
 
 def _lark_signature_matches(

@@ -43,6 +43,12 @@ class IngressPayload:
         raw_bytes:      Optional raw byte representation for
                          signature verification schemes that
                          require byte-exact body content.
+        request_path:   Server-trusted request path the payload was
+                         received at (e.g.
+                         ``/api/v1/ingress/channels/twilio/webhook``).
+                         Used to derive the canonical URL provider
+                         signatures are verified against, instead of a
+                         client-supplied header (#23).
     """
 
     body: Any
@@ -50,6 +56,7 @@ class IngressPayload:
     headers: dict[str, str] = field(default_factory=dict[str, str])
     signature: str | None = None
     raw_bytes: bytes | None = None
+    request_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

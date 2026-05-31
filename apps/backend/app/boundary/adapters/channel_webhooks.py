@@ -27,10 +27,15 @@ from app.boundary.exceptions import BoundaryNormalizationError
 from app.boundary.models.normalization import BoundaryNormalizationResult
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
+from app.core.config import get_settings
 from app.core.twilio_signature import (
     TWILIO_CANONICAL_URL_HEADER,
     TWILIO_SIGNATURE_HEADER,
     verify_twilio_signature,
+)
+from app.core.webhook_url import (
+    CanonicalWebhookUrlError,
+    derive_canonical_webhook_url,
 )
 
 
@@ -777,12 +782,37 @@ def _verify_twilio_signature(
     if not signature or not isinstance(body_object, Mapping):
         return False
     body = cast(Mapping[str, Any], body_object)
+    url = _twilio_canonical_url(payload)
+    if url is None:
+        return False
     return verify_twilio_signature(
         auth_token=secret,
-        url=_header(payload.headers, TWILIO_CANONICAL_URL_HEADER),
+        url=url,
         params=body,
         signature=signature,
     )
+
+
+def _twilio_canonical_url(payload: IngressPayload) -> str | None:
+    """The URL the Twilio signature is verified against.
+
+    Derived server-side from ``PUBLIC_BASE_URL`` + the trusted request path
+    (#23). The client-supplied ``x-operious-webhook-url`` header is honoured
+    only when ``WEBHOOK_TRUST_URL_HEADER`` is explicitly enabled (non-prod).
+    """
+    settings = get_settings()
+    if settings.WEBHOOK_TRUST_URL_HEADER:
+        return _header(payload.headers, TWILIO_CANONICAL_URL_HEADER)
+    if payload.request_path is None:
+        return None
+    try:
+        return derive_canonical_webhook_url(
+            public_base_url=settings.public_base_url_normalized,
+            request_path=payload.request_path,
+            query_string="",
+        )
+    except CanonicalWebhookUrlError:
+        return None
 
 
 def _verify_lark_signature(

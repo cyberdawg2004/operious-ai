@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 
@@ -46,9 +48,11 @@ class _FakeRequest:
         *,
         body: bytes,
         headers: dict[str, str],
+        path: str = "/api/v1/ingress/channels/email/webhook",
     ) -> None:
         self.headers = headers
         self._body = body
+        self.url = SimpleNamespace(path=path)
 
     async def body(self) -> bytes:
         return self._body

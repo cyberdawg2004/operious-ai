@@ -82,6 +82,7 @@ async def create_channel_webhook_ingress(
             raw_body=raw_body,
             content_type=content_type,
             tenant_hint=expected_tenant_id,
+            request_path=request.url.path,
         )
     except TicketIngressRejected as exc:
         if exc.response_body is not None:
