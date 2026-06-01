@@ -31,6 +31,8 @@ def test_production_rejects_legacy_tenant_header_from_trusted_peer() -> None:
                 "ENVIRONMENT": "production",
                 # Pin header-authority posture, not provider readiness.
                 "PRODUCTION_READINESS_ENFORCED": "false",
+                # This test targets authority rejection, not rate limiting.
+                "RATE_LIMIT_ENABLED": "false",
             },
         ):
             app = create_app(trusted_proxies=_LOCALHOST)
