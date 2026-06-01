@@ -118,7 +118,8 @@ async def test_webhook_signature_validated_before_nonce() -> None:
             content_type="application/json",
         )
 
-    assert getattr(exc_info.value, "code", None) == "invalid_signature"
+    # Uniform rejection: bad signature is indistinguishable from unknown route (#24).
+    assert getattr(exc_info.value, "code", None) == "webhook_rejected"
     assert not await boundary_store.webhook_nonce_exists(
         tenant_id=TENANT_ID,
         channel_type="email",

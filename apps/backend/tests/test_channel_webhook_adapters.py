@@ -202,7 +202,8 @@ async def test_channel_webhook_rejects_failed_signature() -> None:
             content_type="application/json",
         )
 
-    assert exc_info.value.code == "invalid_signature"
+    # Uniform rejection prevents route/tenant enumeration (#24).
+    assert exc_info.value.code == "webhook_rejected"
     assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),
@@ -241,7 +242,9 @@ async def test_channel_webhook_unknown_routing_does_not_persist() -> None:
             content_type="application/json",
         )
 
-    assert exc_info.value.code == "unknown_channel_route"
+    # Unknown route returns the same opaque rejection as a bad signature (#24).
+    assert exc_info.value.code == "webhook_rejected"
+    assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(BoundaryIngressQuery())
     assert page.total == 0
 
@@ -277,7 +280,9 @@ async def test_channel_webhook_tenant_hint_mismatch_fails_closed() -> None:
             tenant_hint=OTHER_TENANT_ID,
         )
 
-    assert exc_info.value.code == "tenant_route_mismatch"
+    # Tenant mismatch returns the same opaque rejection (#24).
+    assert exc_info.value.code == "webhook_rejected"
+    assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(BoundaryIngressQuery())
     assert page.total == 0
 

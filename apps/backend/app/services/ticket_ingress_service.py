@@ -431,11 +431,7 @@ class TicketIngressService:
             channel_type=tenant_channel_type,
             headers=headers,
         ):
-            raise TicketIngressRejected(
-                code="missing_signature",
-                reason="webhook signature header is required",
-                status_code=401,
-            )
+            raise _uniform_webhook_rejection("missing_signature")
         routing_secret = (
             await self._tenant_configuration_runtime
             .resolve_webhook_routing_secret(
@@ -445,16 +441,10 @@ class TicketIngressService:
         )
         await _end_read_only_routing_transaction(self._session)
         if routing_secret is None:
-            raise TicketIngressRejected(
-                code="unknown_channel_route",
-                reason="channel route is not configured or active",
-            )
+            raise _uniform_webhook_rejection("unknown_channel_route")
         resolved_tenant_id = routing_secret.tenant_id
         if tenant_hint is not None and tenant_hint != resolved_tenant_id:
-            raise TicketIngressRejected(
-                code="tenant_route_mismatch",
-                reason="channel route does not belong to tenant scope",
-            )
+            raise _uniform_webhook_rejection("tenant_route_mismatch")
         webhook_secret = _select_webhook_secret(
             channel_type=tenant_channel_type,
             channel_config=routing_secret,
@@ -471,11 +461,7 @@ class TicketIngressService:
             raw_body=raw_body,
             request_path=request_path,
         ):
-            raise TicketIngressRejected(
-                code="invalid_signature",
-                reason="invalid_signature",
-                status_code=401,
-            )
+            raise _uniform_webhook_rejection("invalid_signature")
         set_current_tenant(resolved_tenant_id)
         channel_config = (
             await self._tenant_configuration_runtime
@@ -486,10 +472,7 @@ class TicketIngressService:
             )
         )
         if channel_config is None:
-            raise TicketIngressRejected(
-                code="unknown_channel_route",
-                reason="channel route is not configured or active",
-            )
+            raise _uniform_webhook_rejection("unknown_channel_route")
         security_context = self._validated_webhook_security_context(
             channel_type=tenant_channel_type.value,
             body=body,
@@ -623,11 +606,7 @@ class TicketIngressService:
             result.normalization.status
             is BoundaryNormalizationStatus.UNAUTHENTICATED
         ):
-            raise TicketIngressRejected(
-                code="invalid_signature",
-                reason=result.normalization.error or "invalid_signature",
-                status_code=401,
-            )
+            raise _uniform_webhook_rejection("invalid_signature")
         if not result.normalization.is_ok or result.event_id is None:
             raise TicketIngressRejected(
                 code="channel_webhook_rejected",
@@ -796,6 +775,27 @@ class TicketIngressRejected(TicketIngressServiceError):
         self.status_code = status_code
         self.headers = dict(headers or {})
         self.response_body = dict(response_body) if response_body is not None else None
+
+
+#: One opaque code + status for every pre-authentication webhook rejection so an
+#: attacker cannot distinguish "route/tenant exists" from "bad signature" (#24).
+WEBHOOK_REJECTED_CODE = "webhook_rejected"
+_WEBHOOK_REJECTED_STATUS = 401
+
+
+def _uniform_webhook_rejection(internal_reason: str) -> "TicketIngressRejected":
+    """Build an identical rejection for every enumeration-sensitive cause.
+
+    The specific ``internal_reason`` (unknown route, tenant mismatch, missing or
+    invalid signature) is logged server-side only; the external response is byte
+    identical so route / tenant existence cannot be probed (#24).
+    """
+    logger.warning("webhook_rejected", extra={"reason": internal_reason})
+    return TicketIngressRejected(
+        code=WEBHOOK_REJECTED_CODE,
+        reason=WEBHOOK_REJECTED_CODE,
+        status_code=_WEBHOOK_REJECTED_STATUS,
+    )
 
 
 def _adapter_registry() -> BoundaryAdapterRegistry:
