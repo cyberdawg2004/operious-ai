@@ -155,9 +155,25 @@ def test_every_tenant_scoped_route_has_object_rbac_gate() -> None:
 def test_capability_gate_denies_without_and_allows_with(case: str) -> None:
     spec = _CAPABILITY_CASES[case]
     denied = _request(spec, capabilities=())
-    assert denied.status_code == 403
+    _assert_capability_required(denied, capability=spec.capability)
 
     allowed = _request(spec, capabilities=(spec.capability,))
+    assert allowed.status_code == 200
+
+
+def test_operator_bundle_cannot_approve_actions_without_action_approver() -> None:
+    from app.auth.providers.jwt import ROLE_CAPABILITY_MAP
+
+    spec = _CAPABILITY_CASES["actions"]
+    operator_caps = tuple(ROLE_CAPABILITY_MAP["Operator"])
+
+    denied = _request(spec, capabilities=operator_caps)
+    _assert_capability_required(
+        denied,
+        capability=TENANT_ACTIONS_APPROVE_CAPABILITY,
+    )
+
+    allowed = _request(spec, capabilities=(TENANT_ACTIONS_APPROVE_CAPABILITY,))
     assert allowed.status_code == 200
 
 
@@ -276,6 +292,19 @@ def _request(
             headers={"Authorization": f"Bearer {token}"},
             json=spec.json,
         )
+
+
+def _assert_capability_required(response: Any, *, capability: str) -> None:
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    if isinstance(detail, str):
+        assert "capability_required" in detail
+        assert capability in detail
+        return
+    assert detail == {
+        "code": "capability_required",
+        "capability": capability,
+    }
 
 
 def _dependency_calls(route: APIRoute) -> tuple[Callable[..., Any], ...]:
