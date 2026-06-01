@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -493,7 +494,7 @@ async def test_signature_validation_happens_before_admission() -> None:
         )
 
     assert exc_info.value.status_code == 401
-    assert exc_info.value.code == "invalid_signature"
+    assert exc_info.value.code == "webhook_rejected"
     assert admission_service.calls == []
 
 
@@ -703,9 +704,11 @@ class _FakeRequest:
         *,
         body: bytes,
         headers: dict[str, str],
+        path: str = "/api/v1/ingress/channels/email/webhook",
     ) -> None:
         self.headers = headers
         self._body = body
+        self.url = SimpleNamespace(path=path)
 
     async def body(self) -> bytes:
         return self._body

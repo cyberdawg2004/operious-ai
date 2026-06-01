@@ -171,7 +171,7 @@ async def test_channel_webhook_invalid_signature_returns_401(
             content_type="application/json",
         )
 
-    assert exc_info.value.code == "invalid_signature"
+    assert exc_info.value.code == "webhook_rejected"
     assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(BoundaryIngressQuery())
     assert page.total == 0
@@ -210,7 +210,7 @@ async def test_channel_webhook_missing_signature_returns_401(
             content_type="application/json",
         )
 
-    assert exc_info.value.code == "missing_signature"
+    assert exc_info.value.code == "webhook_rejected"
     assert exc_info.value.status_code == 401
     page = await boundary_store.list_ingress(BoundaryIngressQuery())
     assert page.total == 0
