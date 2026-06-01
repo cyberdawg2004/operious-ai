@@ -646,7 +646,7 @@ def create_app(
         tenant_per_minute=settings.RATE_LIMIT_TENANT_PER_MINUTE,
         principal_per_minute=settings.RATE_LIMIT_PRINCIPAL_PER_MINUTE,
         window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
-        enabled=settings.RATE_LIMIT_ENABLED,
+        enabled=settings.rate_limit_enabled_effective,
         production=settings.is_production,
     )
     logger.info("middleware_tenant_rate_limit_register_complete")
@@ -676,7 +676,7 @@ def create_app(
         limit=settings.RATE_LIMIT_IP_PER_MINUTE,
         window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
         exempt_suffixes=settings.rate_limit_exempt_suffixes,
-        enabled=settings.RATE_LIMIT_ENABLED,
+        enabled=settings.rate_limit_enabled_effective,
         production=settings.is_production,
     )
     logger.info("middleware_edge_rate_limit_register_complete")

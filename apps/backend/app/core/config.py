@@ -223,7 +223,9 @@ class Settings(BaseSettings):
     # ── Inbound rate limiting (spec 1b #39) ──────────────────────────
     # Fixed-window (INCR+EXPIRE) request budgets. The per-IP layer runs
     # pre-auth; the per-tenant / per-principal layers run post-auth.
-    RATE_LIMIT_ENABLED: bool = True
+    # None = derive from environment (enabled in production, off elsewhere).
+    # Explicit true/false overrides the environment default.
+    RATE_LIMIT_ENABLED: bool | None = None
     RATE_LIMIT_IP_PER_MINUTE: int = 120
     RATE_LIMIT_TENANT_PER_MINUTE: int = 600
     RATE_LIMIT_PRINCIPAL_PER_MINUTE: int = 300  # 0 disables the layer
@@ -445,6 +447,21 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.ENVIRONMENT in ("local", "development", "test")
+
+    @property
+    def rate_limit_enabled_effective(self) -> bool:
+        """Rate limiting is enforced in production by default.
+
+        Follows the same environment-derived pattern as
+        ``legacy_header_authority_enabled`` and ``coarse_auth_errors_effective``:
+        an explicit ``RATE_LIMIT_ENABLED`` setting overrides the derived value so
+        operators can force rate limiting on in staging or off in an emergency.
+        This prevents tests and local dev from hitting Redis when no override is
+        set.
+        """
+        if self.RATE_LIMIT_ENABLED is not None:
+            return self.RATE_LIMIT_ENABLED
+        return self.is_production
 
     @property
     def rate_limit_exempt_suffixes(self) -> tuple[str, ...]:

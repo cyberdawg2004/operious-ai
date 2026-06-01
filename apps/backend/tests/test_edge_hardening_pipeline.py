@@ -10,10 +10,13 @@ from app.main import create_app
 
 
 def _names() -> list[str]:
+    """Boot app with rate limiting explicitly on (regardless of environment)."""
+    from ipaddress import ip_network
+
     get_settings.cache_clear()
     try:
         with patch.dict(os.environ, {"ENVIRONMENT": "test", "RATE_LIMIT_ENABLED": "true"}):
-            app = create_app()
+            app = create_app(trusted_proxies=(ip_network("127.0.0.0/8"),))
         return [m.cls.__name__ for m in app.user_middleware]
     finally:
         get_settings.cache_clear()

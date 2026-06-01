@@ -13,11 +13,25 @@ def _settings(**overrides: object) -> Settings:
 
 def test_rate_limit_defaults() -> None:
     s = _settings()
-    assert s.RATE_LIMIT_ENABLED is True
+    assert s.RATE_LIMIT_ENABLED is None   # derive from environment
     assert s.RATE_LIMIT_IP_PER_MINUTE == 120
     assert s.RATE_LIMIT_TENANT_PER_MINUTE == 600
     assert s.RATE_LIMIT_PRINCIPAL_PER_MINUTE == 300
     assert s.RATE_LIMIT_WINDOW_SECONDS == 60
+
+
+def test_rate_limit_off_in_non_production_by_default() -> None:
+    assert _settings(ENVIRONMENT="test").rate_limit_enabled_effective is False
+    assert _settings(ENVIRONMENT="local").rate_limit_enabled_effective is False
+
+
+def test_rate_limit_on_in_production_by_default() -> None:
+    assert _settings(ENVIRONMENT="production").rate_limit_enabled_effective is True
+
+
+def test_rate_limit_explicit_override_wins() -> None:
+    assert _settings(ENVIRONMENT="test", RATE_LIMIT_ENABLED=True).rate_limit_enabled_effective is True
+    assert _settings(ENVIRONMENT="production", RATE_LIMIT_ENABLED=False).rate_limit_enabled_effective is False
 
 
 def test_rate_limit_exempt_suffixes_default() -> None:

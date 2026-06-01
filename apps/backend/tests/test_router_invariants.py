@@ -46,9 +46,10 @@ merge:
    router file is forbidden.
 
 6. **Middleware pinning** — ``app.main.create_app`` registers
-   exactly the five classes ``AuthorityContextMiddleware``,
+   exactly the seven classes ``AuthorityContextMiddleware``,
    ``TrustedIngressMiddleware`` (conditional), ``RequestContextMiddleware``,
-   ``RequestBodyLimitMiddleware``, and ``CORSMiddleware`` (conditional).
+   ``RequestBodyLimitMiddleware``, ``CORSMiddleware`` (conditional),
+   ``EdgeRateLimitMiddleware``, and ``TenantRateLimitMiddleware`` (spec 1b #39).
    The class catalogue
    is pinned here; adding a new middleware requires explicit
    doctrine review.
@@ -168,6 +169,11 @@ _EXPECTED_MIDDLEWARE_CLASSES: Final[frozenset[str]] = frozenset(
         "RequestContextMiddleware",
         "RequestBodyLimitMiddleware",
         "CORSMiddleware",
+        # Spec 1b: per-IP pre-auth and per-tenant/principal post-auth rate
+        # limiting (#39). Reviewed and pinned here so any future addition
+        # requires the same explicit sign-off.
+        "EdgeRateLimitMiddleware",
+        "TenantRateLimitMiddleware",
     }
 )
 
