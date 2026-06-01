@@ -80,3 +80,56 @@ def test_permission_map_observability() -> None:
 
 def test_permission_map_audit() -> None:
     assert PERMISSION_CAPABILITY_MAP.get("read:tenant_audit") == "tenant.audit.export"
+
+
+# ── Structural: observability router uses the capability dep on all endpoints ─
+
+from app.api.v1.routers import observability as _obs_router_module
+
+
+def _dep_names(route) -> list[str]:  # noqa: ANN001
+    """Collect all FastAPI dependency function names on a route."""
+    names = []
+    for dep in getattr(route, "dependencies", []):
+        if hasattr(dep.dependency, "__name__"):
+            names.append(dep.dependency.__name__)
+    # Also walk the endpoint function's Depends parameters.
+    import inspect
+    from fastapi import params as fa_params
+    sig = inspect.signature(route.endpoint)
+    for param in sig.parameters.values():
+        if isinstance(param.default, fa_params.Depends):
+            fn = param.default.dependency
+            if hasattr(fn, "__name__"):
+                names.append(fn.__name__)
+    return names
+
+
+def _observability_routes():  # noqa: ANN201
+    from app.api.v1.routers.observability import router as obs_router
+    return [r for r in obs_router.routes if hasattr(r, "endpoint")]
+
+
+def test_all_observability_endpoints_have_capability_dep() -> None:
+    """Every observability route must declare the capability gate."""
+    routes = _observability_routes()
+    assert len(routes) >= 9, f"Expected ≥9 routes, got {len(routes)}"
+    missing = []
+    for route in routes:
+        deps = _dep_names(route)
+        if "require_tenant_observability_read" not in deps:
+            missing.append(getattr(route, "path", str(route)))
+    assert not missing, f"Routes missing capability dep: {missing}"
+
+
+def test_observability_dep_present_on_metrics_dlq_alerts_traces() -> None:
+    """Spot-check four representative endpoints by path."""
+    gated = {"require_tenant_observability_read"}
+    routes_by_path = {
+        getattr(r, "path", ""): r for r in _observability_routes()
+    }
+    for path in ("/metrics", "/dlq", "/alerts", "/traces"):
+        route = routes_by_path.get(path)
+        assert route is not None, f"Route {path!r} not found"
+        deps = set(_dep_names(route))
+        assert gated <= deps, f"{path} missing cap dep, has: {deps}"

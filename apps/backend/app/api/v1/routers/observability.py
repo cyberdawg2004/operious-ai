@@ -19,8 +19,12 @@ from app.api.v1.schemas.observability import (
     OperationalTraceSpanResponse,
     StuckExecutionAlertPageResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_observability_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_operational_observability_service
+from app.identity import AuthorityContext
 from app.observability.enums import (
     AlertSeverity,
     AlertThresholdOperator,
@@ -45,6 +49,7 @@ async def read_operational_metrics(
     window_start: datetime = Query(...),
     window_end: datetime = Query(...),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -69,6 +74,7 @@ async def list_dead_letter_executions(
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -88,6 +94,7 @@ async def list_stuck_execution_alerts(
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -110,6 +117,7 @@ async def list_inbound_normalization_dead_letters(
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -130,6 +138,7 @@ async def list_inbound_normalization_dead_letters(
 async def define_slo(
     request: OperationalSLODefinitionRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -165,6 +174,7 @@ async def list_slo_definitions(
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -197,6 +207,7 @@ async def list_slo_definitions(
 async def get_slo_definition(
     slo_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -224,6 +235,7 @@ async def evaluate_alerts(
     window_start: datetime = Query(...),
     window_end: datetime = Query(...),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -246,6 +258,7 @@ async def evaluate_alerts(
 async def record_trace_span(
     request: OperationalTraceSpanRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -282,6 +295,7 @@ async def list_trace_spans(
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),

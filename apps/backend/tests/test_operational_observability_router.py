@@ -11,8 +11,12 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_observability_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_operational_observability_service
+from app.identity import AuthorityContext
 from app.main import create_app
 from app.observability.persistence import (
     OperationalMetricsSnapshotRecord,
@@ -30,6 +34,10 @@ async def observability_client() -> AsyncIterator[tuple[httpx.AsyncClient, "_Fak
         _service_override(service)
     )
     app.dependency_overrides[require_tenant_scope] = _tenant_scope_override
+    # Bypass the capability gate so the router test focuses on service behaviour.
+    _obs_ctx = AuthorityContext(tenant_id="tenant-acme",
+                                capabilities=("tenant.observability.read",))
+    app.dependency_overrides[require_tenant_observability_read] = lambda: _obs_ctx
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
