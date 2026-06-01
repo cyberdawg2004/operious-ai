@@ -404,6 +404,9 @@ class TenantConfigChangeRequestResponse(BaseModel):
     rejected_by: str | None = None
     rejected_at: str | None = None
     applied_at: str | None = None
+    applied_by: str | None = None       # principal who applied (#5)
+    revoked_by: str | None = None       # principal who revoked (#22)
+    revoked_at: str | None = None       # when revoked (#22)
     rejection_reason: str | None = None
     outcome_payload: dict[str, Any] | None = None
 
@@ -430,6 +433,11 @@ class TenantConfigChangeRequestResponse(BaseModel):
             ),
             applied_at=(
                 None if record.applied_at is None else record.applied_at.isoformat()
+            ),
+            applied_by=record.applied_by,
+            revoked_by=record.revoked_by,
+            revoked_at=(
+                None if record.revoked_at is None else record.revoked_at.isoformat()
             ),
             rejection_reason=record.rejection_reason,
             outcome_payload=(

@@ -225,3 +225,44 @@ async def test_revoke_without_revoked_by_raises() -> None:
             expected_tenant_id=record.tenant_id,
             revoked_by="",
         )
+
+
+# ── Schema tests ──────────────────────────────────────────────────────────────
+
+
+def test_response_schema_includes_applied_by() -> None:
+    import inspect
+    from app.api.v1.schemas.tenant import TenantConfigChangeRequestResponse
+    sig = inspect.signature(TenantConfigChangeRequestResponse)
+    assert "applied_by" in sig.parameters
+
+
+def test_response_schema_includes_revoked_fields() -> None:
+    import inspect
+    from app.api.v1.schemas.tenant import TenantConfigChangeRequestResponse
+    sig = inspect.signature(TenantConfigChangeRequestResponse)
+    assert "revoked_by" in sig.parameters
+    assert "revoked_at" in sig.parameters
+
+
+def test_response_from_record_exposes_applied_by() -> None:
+    from datetime import datetime, timezone
+    import uuid
+    from app.api.v1.schemas.tenant import TenantConfigChangeRequestResponse
+    record = TenantConfigChangeRequestRecord(
+        change_request_id=uuid.uuid4(),
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        change_type=TenantConfigChangeType.CHANNEL,
+        proposed_payload={"channel_type": "email"},
+        status=TenantConfigChangeRequestStatus.APPLIED,
+        proposed_by="p-1",
+        proposed_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        approved_by="p-2",
+        approved_at=datetime(2026, 6, 1, 10, tzinfo=timezone.utc),
+        applied_at=datetime(2026, 6, 1, 11, tzinfo=timezone.utc),
+        applied_by="p-3",
+    )
+    resp = TenantConfigChangeRequestResponse.from_record(record)
+    assert resp.applied_by == "p-3"
+    assert resp.revoked_by is None
+    assert resp.revoked_at is None

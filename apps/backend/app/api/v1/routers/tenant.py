@@ -241,6 +241,36 @@ async def apply_config_change_request(
         record = await service.apply(
             change_request_id=change_request_id,
             expected_tenant_id=expected_tenant_id,
+            applied_by=_principal_or_400(_approver),
+        )
+    except (ValueError, TenantConfigChangeRequestError) as exc:
+        raise _change_request_http_error(exc) from exc
+    return TenantConfigChangeRequestResponse.from_record(record)
+
+
+@router.post(
+    "/config/change-requests/{change_request_id}/revoke",
+    response_model=TenantConfigChangeRequestResponse,
+)
+async def revoke_config_change_request(
+    change_request_id: str,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_tenant_config_approve),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestResponse:
+    """Revoke an APPROVED change request before it is applied.
+
+    Requires the ``tenant.config.approve`` capability. Any approved request
+    that has not yet been applied can be revoked; APPLIED, REJECTED, and
+    already-REVOKED requests return 409.
+    """
+    try:
+        record = await service.revoke(
+            change_request_id=change_request_id,
+            expected_tenant_id=expected_tenant_id,
+            revoked_by=_principal_or_400(authority),
         )
     except (ValueError, TenantConfigChangeRequestError) as exc:
         raise _change_request_http_error(exc) from exc
