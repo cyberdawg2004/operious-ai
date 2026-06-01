@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import cast
 
@@ -115,6 +116,9 @@ async def stream_voice_session(
             tenant_id=tenant_id,
             max_frame_bytes=settings.VOICE_MAX_FRAME_BYTES,
             max_frames=settings.VOICE_MAX_FRAMES_PER_CALL,
+            max_call_seconds=settings.VOICE_MAX_CALL_SECONDS,
+            idle_timeout_seconds=settings.VOICE_IDLE_TIMEOUT_SECONDS,
+            max_frames_per_second=settings.VOICE_MAX_FRAMES_PER_SECOND,
         )
     finally:
         try:
@@ -138,11 +142,52 @@ async def _handle_voice_call(
     tenant_id: str,
     max_frame_bytes: int,
     max_frames: int,
+    max_call_seconds: int,
+    idle_timeout_seconds: int,
+    max_frames_per_second: int,
 ) -> None:
     frames_seen = 0
+    rate_window: list[float] = []
+    started_monotonic = time.monotonic()
     try:
         while True:
-            raw = await websocket.receive_text()
+            # Wall-clock max call duration (spec 1b #40).
+            if time.monotonic() - started_monotonic > max_call_seconds:
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                await runtime.terminate_call(
+                    call_id=call_id,
+                    reason="voice_max_duration",
+                    expected_tenant_id=tenant_id,
+                )
+                return
+            # Idle timeout: close if no inbound frame within the window (#40).
+            try:
+                raw = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=idle_timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                await runtime.terminate_call(
+                    call_id=call_id,
+                    reason="voice_idle_timeout",
+                    expected_tenant_id=tenant_id,
+                )
+                return
+            # Per-connection frame-rate cap (#40).
+            try:
+                _enforce_frame_rate(
+                    rate_window,
+                    now=time.monotonic(),
+                    max_per_second=max_frames_per_second,
+                )
+            except FrameRateExceeded:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                await runtime.terminate_call(
+                    call_id=call_id,
+                    reason="voice_frame_rate_exceeded",
+                    expected_tenant_id=tenant_id,
+                )
+                return
             # Bound per-frame size and per-call frame count (S-04 DoS).
             if len(raw.encode("utf-8")) > max_frame_bytes:
                 await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
@@ -201,6 +246,30 @@ async def _handle_voice_call(
             reason="websocket_disconnect",
             expected_tenant_id=tenant_id,
         )
+
+
+class FrameRateExceeded(Exception):
+    """A voice connection exceeded its per-second frame-rate cap (#40)."""
+
+
+def _enforce_frame_rate(
+    window: list[float],
+    *,
+    now: float,
+    max_per_second: int,
+) -> None:
+    """Sliding 1-second window frame-rate guard.
+
+    ``window`` holds the monotonic timestamps of frames seen in the last second;
+    it is mutated in place. Raises :class:`FrameRateExceeded` when accepting the
+    current frame would exceed ``max_per_second``.
+    """
+    cutoff = now - 1.0
+    while window and window[0] <= cutoff:
+        window.pop(0)
+    if len(window) >= max_per_second:
+        raise FrameRateExceeded
+    window.append(now)
 
 
 def _voice_provider_auth_token_loader(
