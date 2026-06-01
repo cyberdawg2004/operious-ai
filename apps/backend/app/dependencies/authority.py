@@ -149,6 +149,50 @@ ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED: Final[str] = "independent_approval_req
 #: from the approve duty. Granted by the ``TenantApprover`` Auth0 role.
 TENANT_CONFIG_APPROVE_CAPABILITY: Final[str] = "tenant.config.approve"
 
+#: Domain capability required to read tenant observability data (metrics,
+#: DLQ, traces, alerts, SLOs). Distinct from write capabilities because
+#: these surfaces are read-only but still sensitive (#26/#80).
+TENANT_OBSERVABILITY_READ_CAPABILITY: Final[str] = "tenant.observability.read"
+
+#: Domain capability required to export a tenant's signed audit record (#80).
+TENANT_AUDIT_EXPORT_CAPABILITY: Final[str] = "tenant.audit.export"
+
+
+def require_tenant_observability_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.observability.read capability.
+
+    Module-level function (not a closure) so ``dependency_overrides`` works
+    stably in tests. Protects all operational observability endpoints (#26/#80).
+    """
+    authority = require_authority(request)
+    if TENANT_OBSERVABILITY_READ_CAPABILITY not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                "capability": TENANT_OBSERVABILITY_READ_CAPABILITY,
+            },
+        )
+    return authority
+
+
+def require_tenant_audit_export(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.audit.export capability.
+
+    Module-level function (not a closure) so ``dependency_overrides`` works
+    stably in tests. Protects the audit-export endpoint (#80).
+    """
+    authority = require_authority(request)
+    if TENANT_AUDIT_EXPORT_CAPABILITY not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                "capability": TENANT_AUDIT_EXPORT_CAPABILITY,
+            },
+        )
+    return authority
+
 
 def request_authority_opt(request: Request) -> AuthorityContext | None:
     """Return the request's :class:`AuthorityContext` or ``None``.
@@ -386,12 +430,14 @@ __all__ = [
     "ERROR_CODE_TENANT_AXIS_MISSING",
     "OPERATOR_CAPABILITY",
     "TENANT_ADMIN_CAPABILITY",
+    "TENANT_AUDIT_EXPORT_CAPABILITY",
     "TENANT_CHANNEL_ADMIN_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
     "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
     "TENANT_CONFIG_WRITE_CAPABILITY",
     "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
     "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
+    "TENANT_OBSERVABILITY_READ_CAPABILITY",
     "TENANT_POLICY_WRITE_CAPABILITY",
     "TENANT_TOPOLOGY_WRITE_CAPABILITY",
     "request_authority_opt",
@@ -402,5 +448,7 @@ __all__ = [
     "require_config_apply_authorization_for",
     "require_operator_authority",
     "require_tenant_admin",
+    "require_tenant_audit_export",
+    "require_tenant_observability_read",
     "require_tenant_scope",
 ]

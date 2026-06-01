@@ -93,6 +93,8 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "read:tenant_data": "tenant_read",
     "write:tenant_data": "tenant_write",
     "write:tenant_config": TENANT_CONFIG_ADMIN_CAPABILITIES,
+    "read:tenant_observability": "tenant.observability.read",
+    "read:tenant_audit":         "tenant.audit.export",
 }
 
 ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
@@ -108,7 +110,10 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantViewer": "tenant_read",
     # Separation of duties (S-03): the approve duty is a DISTINCT role so
     # it can be granted to a different principal than ``TenantAdmin``.
-    "TenantApprover": "tenant.config.approve",
+    "TenantApprover":  "tenant.config.approve",
+    # Observability + audit domain roles (#26/#80).
+    "TenantObserver":  "tenant.observability.read",
+    "TenantAuditor":   "tenant.audit.export",
 }
 
 
