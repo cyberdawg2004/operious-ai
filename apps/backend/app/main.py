@@ -684,19 +684,24 @@ def create_app(
     app.add_middleware(RequestContextMiddleware)
     logger.info("middleware_request_context_register_complete")
 
+    cors_origins = _build_cors_origins(settings.CORS_ALLOW_ORIGINS)
+    cors_methods = [
+        method.strip()
+        for method in settings.CORS_ALLOW_METHODS.split(",")
+        if method.strip()
+    ]
     logger.info(
         "middleware_cors_register_begin",
         extra={
-            "origin_count": len(_build_cors_origins(settings.CORS_ALLOW_ORIGINS)),
-            "allow_credentials": True,
+            "origin_count": len(cors_origins),
+            "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
         },
     )
-    cors_origins = _build_cors_origins(settings.CORS_ALLOW_ORIGINS)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        allow_methods=cors_methods,
         allow_headers=_build_cors_headers(settings.CORS_ALLOW_HEADERS),
     )
     logger.info("middleware_cors_register_complete")
