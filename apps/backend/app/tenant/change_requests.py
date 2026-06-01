@@ -33,6 +33,7 @@ class TenantConfigChangeRequestStatus(StrEnum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     APPLIED = "APPLIED"
+    REVOKED = "REVOKED"
 
 
 class TenantConfigChangeRequestError(RuntimeError):
@@ -69,6 +70,9 @@ class TenantConfigChangeRequestRecord:
     rejected_by: str | None = None
     rejected_at: datetime | None = None
     applied_at: datetime | None = None
+    applied_by: str | None = None        # principal who applied (#5)
+    revoked_by: str | None = None        # principal who revoked (#22)
+    revoked_at: datetime | None = None   # when revoked (#22)
     rejection_reason: str | None = None
     outcome_payload: Mapping[str, Any] | None = None
 
@@ -266,6 +270,9 @@ def _record_to_row(
         rejected_by=record.rejected_by,
         rejected_at=record.rejected_at,
         applied_at=record.applied_at,
+        applied_by=record.applied_by,
+        revoked_by=record.revoked_by,
+        revoked_at=record.revoked_at,
         rejection_reason=record.rejection_reason,
         outcome_payload=(
             None if record.outcome_payload is None else dict(record.outcome_payload)
@@ -287,6 +294,9 @@ def _update_row(
     row.rejected_by = record.rejected_by
     row.rejected_at = record.rejected_at
     row.applied_at = record.applied_at
+    row.applied_by = record.applied_by
+    row.revoked_by = record.revoked_by
+    row.revoked_at = record.revoked_at
     row.rejection_reason = record.rejection_reason
     row.outcome_payload = (
         None if record.outcome_payload is None else dict(record.outcome_payload)
@@ -309,6 +319,9 @@ def _row_to_record(
         rejected_by=row.rejected_by,
         rejected_at=row.rejected_at,
         applied_at=row.applied_at,
+        applied_by=row.applied_by,
+        revoked_by=row.revoked_by,
+        revoked_at=row.revoked_at,
         rejection_reason=row.rejection_reason,
         outcome_payload=(
             None if row.outcome_payload is None else dict(row.outcome_payload)

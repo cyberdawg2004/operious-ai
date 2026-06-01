@@ -483,6 +483,15 @@ class TenantConfigChangeRequestRow(Base):
     applied_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    applied_by: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True
+    )
+    revoked_by: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcome_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
@@ -495,12 +504,20 @@ class TenantConfigChangeRequestRow(Base):
             name="change_type_valid",
         ),
         CheckConstraint(
-            "status IN ('PROPOSED', 'APPROVED', 'REJECTED', 'APPLIED')",
+            "status IN ('PROPOSED', 'APPROVED', 'REJECTED', 'APPLIED', 'REVOKED')",
             name="status_valid",
         ),
         CheckConstraint(
             "approved_by IS NULL OR approved_by != proposed_by",
             name="approver_distinct",
+        ),
+        CheckConstraint(
+            "status != 'APPLIED' OR applied_by IS NOT NULL",
+            name="chk_applied_by_when_applied",
+        ),
+        CheckConstraint(
+            "status != 'REVOKED' OR revoked_by IS NOT NULL",
+            name="chk_revoked_by_when_revoked",
         ),
         Index(
             "ix_tenant_config_change_requests_tenant_status",
