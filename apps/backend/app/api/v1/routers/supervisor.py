@@ -29,7 +29,10 @@ from app.api.v1.schemas.supervisor import (
     QAEvaluationSchema,
     RuntimeFindingSchema,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_scope,
+    require_tenant_supervisor_read,
+)
 from app.dependencies.services import (
     get_supervisor_inbox_service,
     get_supervisor_repository,
@@ -52,6 +55,7 @@ _DEFAULT_LIMIT = 25
 @router.get(
     "/inspections/{inspection_id}",
     response_model=SupervisorInspectionDetailResponse,
+    dependencies=[Depends(require_tenant_supervisor_read)],
 )
 async def get_inspection(
     inspection_id: str,
@@ -74,6 +78,7 @@ async def get_inspection(
 @router.get(
     "/inspections",
     response_model=SupervisorInspectionListResponse,
+    dependencies=[Depends(require_tenant_supervisor_read)],
 )
 async def list_inspections(
     execution_id: str | None = Query(None),
@@ -111,6 +116,7 @@ async def list_inspections(
 @router.get(
     "/inspections/{inspection_id}/findings",
     response_model=InspectionFindingsResponse,
+    dependencies=[Depends(require_tenant_supervisor_read)],
 )
 async def list_findings(
     inspection_id: str,
@@ -129,6 +135,7 @@ async def list_findings(
 @router.get(
     "/inspections/{inspection_id}/evaluations",
     response_model=InspectionEvaluationsResponse,
+    dependencies=[Depends(require_tenant_supervisor_read)],
 )
 async def list_evaluations(
     inspection_id: str,
@@ -149,6 +156,7 @@ async def list_evaluations(
 @router.get(
     "/inspections/{inspection_id}/escalations",
     response_model=InspectionEscalationsResponse,
+    dependencies=[Depends(require_tenant_supervisor_read)],
 )
 async def list_escalations(
     inspection_id: str,

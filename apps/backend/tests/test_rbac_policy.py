@@ -234,7 +234,14 @@ def test_capabilities_not_duplicated_when_both_permission_and_role_match() -> No
         }
     )
 
-    assert auth.capabilities == frozenset({"operator"})
+    assert auth.capabilities == frozenset(
+        {
+            "operator",
+            "tenant.operations.read",
+            "tenant.supervisor.read",
+            "tenant.observability.read",
+        }
+    )
 
 
 def test_existing_capabilities_preserved_after_mapping() -> None:

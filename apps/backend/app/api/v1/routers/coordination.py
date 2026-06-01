@@ -28,7 +28,10 @@ from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     CoordinationQuery,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_coordination_repository
 
 router = APIRouter(tags=["coordination"])
@@ -41,6 +44,7 @@ _DEFAULT_LIMIT = 25
 @router.get(
     "/envelopes/{coordination_id}",
     response_model=CoordinationEnvelopeResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
     summary="Get one coordination envelope",
     description=(
         "Return the apex coordination envelope identified by "
@@ -70,6 +74,7 @@ async def get_envelope(
 @router.get(
     "/envelopes",
     response_model=CoordinationEnvelopesPage,
+    dependencies=[Depends(require_tenant_operations_read)],
     summary="List coordination envelopes",
     description=(
         "Paginated list of coordination envelopes for the "

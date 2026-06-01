@@ -29,7 +29,10 @@ from app.boundary.persistence import (
     BoundaryIngressQuery,
     BoundaryPersistenceProtocol,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_boundary_repository
 
 router = APIRouter(tags=["boundary"])
@@ -52,6 +55,7 @@ def _parse_uuid_or_404(raw: str, *, kind: str) -> UUID:
 @router.get(
     "/ingress/{ingress_id}",
     response_model=BoundaryIngressResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_ingress(
     ingress_id: str,
@@ -73,6 +77,7 @@ async def get_ingress(
 @router.get(
     "/egress/{egress_id}",
     response_model=BoundaryEgressResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_egress(
     egress_id: str,
@@ -94,6 +99,7 @@ async def get_egress(
 @router.get(
     "/ingress",
     response_model=BoundaryIngressPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_ingress(
     source_type: str | None = Query(None),
@@ -134,6 +140,7 @@ async def list_ingress(
 @router.get(
     "/egress",
     response_model=BoundaryEgressPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_egress(
     source_type: str | None = Query(None),

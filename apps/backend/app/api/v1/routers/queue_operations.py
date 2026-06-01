@@ -11,6 +11,7 @@ from app.api.v1.schemas.queue_operations import (
 )
 from app.dependencies.authority import (
     require_operator_authority,
+    require_tenant_observability_read,
     require_tenant_scope,
 )
 from app.dependencies.services import get_queue_operations_service
@@ -28,6 +29,7 @@ router = APIRouter(tags=["operations"])
 @router.get(
     "/operations/queue-status",
     response_model=QueueStatusResponse,
+    dependencies=[Depends(require_tenant_observability_read)],
 )
 async def get_queue_status(
     expected_tenant_id: str = Depends(require_tenant_scope),

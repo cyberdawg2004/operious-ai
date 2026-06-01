@@ -9,7 +9,11 @@ from app.api.v1.schemas.trainer import (
     TrainingRecommendationListResponse,
     TrainingRecommendationResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_scope,
+    require_tenant_training_write,
+)
 from app.dependencies.services import get_trainer_recommendation_service
 from app.services.trainer_service import (
     TrainerRecommendationLifecycleError,
@@ -27,6 +31,7 @@ _DEFAULT_LIMIT = 50
 @router.get(
     "/recommendations",
     response_model=TrainingRecommendationListResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_training_recommendations(
     status_filter: str = Query(
@@ -62,6 +67,7 @@ async def list_training_recommendations(
 @router.patch(
     "/recommendations/{recommendation_id}",
     response_model=TrainingRecommendationResponse,
+    dependencies=[Depends(require_tenant_training_write)],
 )
 async def update_training_recommendation_status(
     recommendation_id: str,

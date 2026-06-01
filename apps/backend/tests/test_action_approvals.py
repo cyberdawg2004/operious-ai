@@ -25,6 +25,10 @@ from app.agents.tools.invoker import (
     AGENT_ACTION_BINDING_KEY,
     compute_agent_action_binding,
 )
+from app.dependencies.authority import (
+    require_tenant_actions_approve,
+    require_tenant_operations_read,
+)
 from app.dependencies.database import get_db_session
 from app.governance.enums import Decision, EnforcementStage
 from app.governance.persistence import (
@@ -32,6 +36,7 @@ from app.governance.persistence import (
     GovernanceDecisionRecord,
     PostgresGovernanceRepository,
 )
+from app.identity import AuthorityContext
 from app.main import create_app
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -82,6 +87,18 @@ async def approval_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_operations_read] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.operations.read",),
+        )
+    )
+    app.dependency_overrides[require_tenant_actions_approve] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.actions.approve",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,

@@ -12,7 +12,13 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.trainer import TrainingRecommendationListResponse
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_supervisor_read,
+    require_tenant_training_write,
+)
 from app.dependencies.database import get_db_session
+from app.identity import AuthorityContext
 from app.main import create_app
 from app.qa.persistence import PostgresQAPersistence, QAScoreRecord
 from app.sop_intelligence import (
@@ -74,6 +80,24 @@ async def trainer_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_operations_read] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.operations.read",),
+        )
+    )
+    app.dependency_overrides[require_tenant_supervisor_read] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.supervisor.read",),
+        )
+    )
+    app.dependency_overrides[require_tenant_training_write] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.training.write",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,

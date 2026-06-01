@@ -9,7 +9,12 @@ from app.api.v1.schemas.escalation import (
     EscalationResolutionRequest,
     EscalationResponse,
 )
-from app.dependencies.authority import require_authority, require_tenant_scope
+from app.dependencies.authority import (
+    require_authority,
+    require_tenant_actions_approve,
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_escalation_service
 from app.escalation.enums import EscalationStatus
 from app.escalation.exceptions import (
@@ -32,6 +37,7 @@ _DEFAULT_LIMIT = 25
 @router.get(
     "/{escalation_id}",
     response_model=EscalationResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_escalation(
     escalation_id: str,
@@ -53,6 +59,7 @@ async def get_escalation(
 @router.get(
     "",
     response_model=EscalationPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_escalations(
     status_filter: EscalationStatus | None = Query(None, alias="status"),
@@ -83,6 +90,7 @@ async def list_escalations(
 @router.post(
     "/{escalation_id}/approve",
     response_model=EscalationResponse,
+    dependencies=[Depends(require_tenant_actions_approve)],
 )
 async def approve_escalation(
     escalation_id: str,
@@ -119,6 +127,7 @@ async def approve_escalation(
 @router.post(
     "/{escalation_id}/reject",
     response_model=EscalationResponse,
+    dependencies=[Depends(require_tenant_actions_approve)],
 )
 async def reject_escalation(
     escalation_id: str,

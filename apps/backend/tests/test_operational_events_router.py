@@ -12,7 +12,10 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_observability_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_operational_event_service
 from app.events import (
     EventCausality,
@@ -26,6 +29,7 @@ from app.events import (
 from app.events.lineage import OperationalLineageGraph
 from app.events.replay import OperationalReplayStatus
 from app.governance.capability.acts import OperationalAct
+from app.identity import AuthorityContext
 from app.main import create_app
 
 _EVENT_ID = EventId("00000000-0000-0000-0000-00000000e601")
@@ -42,6 +46,12 @@ async def operational_event_client() -> tuple[httpx.AsyncClient, "_FakeService"]
         _service_override(service)
     )
     app.dependency_overrides[require_tenant_scope] = _tenant_scope_override
+    app.dependency_overrides[require_tenant_observability_read] = lambda: (
+        AuthorityContext(
+            tenant_id="tenant-acme",
+            capabilities=("tenant.observability.read",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     client = httpx.AsyncClient(transport=transport, base_url="http://test")
     try:

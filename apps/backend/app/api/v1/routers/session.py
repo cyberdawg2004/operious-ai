@@ -29,7 +29,10 @@ from app.api.v1.schemas.session import (
     SessionTimelineResponse,
     SessionsPage,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import (
     get_session_read_service,
     get_session_repository,
@@ -75,6 +78,7 @@ def _parse_uuid_or_404(raw: str, *, kind: str) -> UUID:
 @router.get(
     "/{session_id}/timeline",
     response_model=SessionTimelineResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_session_timeline(
     session_id: str,
@@ -104,6 +108,7 @@ async def get_session_timeline(
 @router.get(
     "/sessions/{session_id}",
     response_model=SessionResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_session(
     session_id: str,
@@ -124,6 +129,7 @@ async def get_session(
 @router.get(
     "/sessions",
     response_model=SessionsPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_sessions(
     principal_id: str | None = Query(None),
@@ -168,6 +174,7 @@ def _parse_phase_or_400(raw: str | None) -> SessionLifecyclePhase | None:
 @router.get(
     "/sessions/{session_id}/events",
     response_model=SessionEventsPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_events_for_session(
     session_id: str,
@@ -198,6 +205,7 @@ async def list_events_for_session(
 @router.get(
     "/events/{event_id}",
     response_model=SessionEventResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_event(
     event_id: str,
@@ -221,6 +229,7 @@ async def get_event(
 @router.get(
     "/sessions/{session_id}/correlations",
     response_model=SessionCorrelationsPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_correlations_for_session(
     session_id: str,
@@ -252,6 +261,7 @@ async def list_correlations_for_session(
 @router.get(
     "/correlations/{correlation_id}",
     response_model=SessionCorrelationResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_correlation(
     correlation_id: str,

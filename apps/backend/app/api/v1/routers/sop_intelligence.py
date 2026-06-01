@@ -8,7 +8,10 @@ from app.api.v1.schemas.sop_intelligence import (
     ApprovalRecordPage,
     ApprovalRecordResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_sop_intelligence_service
 from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.sop_intelligence.enums import ApprovalStatus
@@ -24,6 +27,7 @@ _DEFAULT_LIMIT = 25
 @router.get(
     "/{approval_id}",
     response_model=ApprovalRecordResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_approval_record(
     approval_id: str,
@@ -45,6 +49,7 @@ async def get_approval_record(
 @router.get(
     "",
     response_model=ApprovalRecordPage,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_approval_records(
     status_filter: ApprovalStatus | None = Query(None, alias="status"),

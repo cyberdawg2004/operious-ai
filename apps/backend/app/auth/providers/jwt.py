@@ -88,6 +88,13 @@ TENANT_CONFIG_ADMIN_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.config.write",
 )
 
+OPERATOR_BUNDLE_CAPABILITIES: Final[tuple[str, ...]] = (
+    "operator",
+    "tenant.operations.read",
+    "tenant.supervisor.read",
+    "tenant.observability.read",
+)
+
 PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "operator:access": "operator",
     "read:tenant_data": "tenant_read",
@@ -95,10 +102,19 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "write:tenant_config": TENANT_CONFIG_ADMIN_CAPABILITIES,
     "read:tenant_observability": "tenant.observability.read",
     "read:tenant_audit":         "tenant.audit.export",
+    "read:tenant_operations": "tenant.operations.read",
+    "read:tenant_supervisor": "tenant.supervisor.read",
+    "read:tenant_governance": "tenant.governance.read",
+    "read:tenant_cognition": "tenant.cognition.read",
+    "approve:tenant_actions": "tenant.actions.approve",
+    "write:tenant_training": "tenant.training.write",
 }
 
 ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
-    "Operator": "operator",
+    # The operator bundle is broad read-only operations access. It deliberately
+    # excludes governance/cognition reads and action/training writes; those
+    # remain explicit grants for compliance and separation of duties.
+    "Operator": OPERATOR_BUNDLE_CAPABILITIES,
     "TenantAdmin": TENANT_CONFIG_ADMIN_CAPABILITIES,
     "TenantConfigAdmin": TENANT_CONFIG_ADMIN_CAPABILITIES,
     "TenantConfigWriter": "tenant.config.write",
@@ -114,6 +130,12 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     # Observability + audit domain roles (#26/#80).
     "TenantObserver":  "tenant.observability.read",
     "TenantAuditor":   "tenant.audit.export",
+    "TenantOperationsViewer": "tenant.operations.read",
+    "TenantSupervisor": "tenant.supervisor.read",
+    "TenantGovernanceViewer": "tenant.governance.read",
+    "TenantCognitionViewer": "tenant.cognition.read",
+    "TenantActionApprover": "tenant.actions.approve",
+    "TenantTrainingWriter": "tenant.training.write",
 }
 
 

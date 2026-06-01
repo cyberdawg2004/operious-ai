@@ -15,7 +15,10 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.v1.routers.crisis import router as crisis_router
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_crisis_service
 from app.events import (
     InMemoryOperationalEventPersistence,
@@ -26,6 +29,7 @@ from app.events import (
 from app.governance.capability.acts import OperationalAct
 from app.governance.crisis import CrisisDeploymentScope, CrisisTemplate
 from app.governance.db.models import CrisisDeploymentRow, CrisisEventRow
+from app.identity import AuthorityContext
 from app.services.crisis_events import (
     CrisisEventRecord,
     PostgresCrisisEventRepository,
@@ -354,6 +358,12 @@ def _events_client(
     app.include_router(crisis_router, prefix="/api/v1/governance/crisis")
     app.dependency_overrides[get_crisis_service] = lambda: service
     app.dependency_overrides[require_tenant_scope] = lambda: tenant_id
+    app.dependency_overrides[require_tenant_operations_read] = lambda: (
+        AuthorityContext(
+            tenant_id=tenant_id,
+            capabilities=("tenant.operations.read",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 

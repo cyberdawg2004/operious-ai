@@ -18,7 +18,10 @@ from app.arbitration.persistence import (
     ArbitrationPersistenceProtocol,
     ArbitrationQuery,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_scope,
+    require_tenant_supervisor_read,
+)
 from app.dependencies.services import get_arbitration_repository
 
 router = APIRouter(tags=["arbitration"])
@@ -43,6 +46,7 @@ def _parse_uuid_or_404(raw: str, *, kind: str) -> UUID:
 @router.get(
     "/evaluations/{evaluation_id}",
     response_model=ArbitrationEvaluationResponse,
+    dependencies=[Depends(require_tenant_supervisor_read)],
     summary="Get one arbitration evaluation",
 )
 async def get_evaluation(
@@ -67,6 +71,7 @@ async def get_evaluation(
 @router.get(
     "/evaluations",
     response_model=ArbitrationEvaluationsPage,
+    dependencies=[Depends(require_tenant_supervisor_read)],
     summary="List arbitration evaluations",
 )
 async def list_evaluations(

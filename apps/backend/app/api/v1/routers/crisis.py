@@ -19,6 +19,8 @@ from app.api.v1.schemas.crisis import (
 )
 from app.dependencies.authority import (
     require_operator_authority,
+    require_tenant_observability_read,
+    require_tenant_operations_read,
     require_tenant_scope,
 )
 from app.dependencies.services import get_crisis_service
@@ -53,7 +55,11 @@ async def deploy_crisis_rule(
     return CrisisDeploymentResponse.from_record(record)
 
 
-@router.get("/events", response_model=CrisisEventListResponse)
+@router.get(
+    "/events",
+    response_model=CrisisEventListResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
+)
 async def list_crisis_events(
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: CrisisService = Depends(get_crisis_service),
@@ -71,7 +77,11 @@ async def list_crisis_events(
     )
 
 
-@router.get("/active", response_model=CrisisDeploymentListResponse)
+@router.get(
+    "/active",
+    response_model=CrisisDeploymentListResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
+)
 async def list_active_crisis_rules(
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: CrisisService = Depends(get_crisis_service),
@@ -104,7 +114,10 @@ async def deactivate_crisis_rule(
     return CrisisDeploymentResponse.from_record(record)
 
 
-@router.get("/ticker")
+@router.get(
+    "/ticker",
+    dependencies=[Depends(require_tenant_observability_read)],
+)
 async def crisis_ticker(
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: CrisisService = Depends(get_crisis_service),

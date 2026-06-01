@@ -115,6 +115,9 @@ TENANT_CHANNEL_ADMIN_CAPABILITY: Final[str] = "tenant.channel.admin"
 #: Domain capability required to mutate tenant knowledge configuration.
 TENANT_KNOWLEDGE_WRITE_CAPABILITY: Final[str] = "tenant.knowledge.write"
 
+#: Domain capability required to mutate trainer/learning-loop recommendations.
+TENANT_TRAINING_WRITE_CAPABILITY: Final[str] = "tenant.training.write"
+
 #: Domain capability required to mutate governance policy configuration.
 TENANT_POLICY_WRITE_CAPABILITY: Final[str] = "tenant.policy.write"
 
@@ -154,8 +157,94 @@ TENANT_CONFIG_APPROVE_CAPABILITY: Final[str] = "tenant.config.approve"
 #: these surfaces are read-only but still sensitive (#26/#80).
 TENANT_OBSERVABILITY_READ_CAPABILITY: Final[str] = "tenant.observability.read"
 
+#: Domain capability required to read tenant operations records.
+TENANT_OPERATIONS_READ_CAPABILITY: Final[str] = "tenant.operations.read"
+
+#: Domain capability required to read tenant supervisor/arbitration records.
+TENANT_SUPERVISOR_READ_CAPABILITY: Final[str] = "tenant.supervisor.read"
+
+#: Domain capability required to read tenant governance decisions and traces.
+TENANT_GOVERNANCE_READ_CAPABILITY: Final[str] = "tenant.governance.read"
+
+#: Domain capability required to read cognition/knowledge-evolution records.
+TENANT_COGNITION_READ_CAPABILITY: Final[str] = "tenant.cognition.read"
+
+#: Domain capability required to approve/reject tenant operational actions.
+TENANT_ACTIONS_APPROVE_CAPABILITY: Final[str] = "tenant.actions.approve"
+
 #: Domain capability required to export a tenant's signed audit record (#80).
 TENANT_AUDIT_EXPORT_CAPABILITY: Final[str] = "tenant.audit.export"
+
+
+def _require_capability_from_request(
+    request: Request,
+    *,
+    capability: str,
+) -> AuthorityContext:
+    return require_capability(capability)(request)
+
+
+def require_tenant_operations_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.operations.read capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_OPERATIONS_READ_CAPABILITY,
+    )
+
+
+def require_tenant_supervisor_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.supervisor.read capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_SUPERVISOR_READ_CAPABILITY,
+    )
+
+
+def require_tenant_governance_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.governance.read capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_GOVERNANCE_READ_CAPABILITY,
+    )
+
+
+def require_tenant_cognition_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.cognition.read capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_COGNITION_READ_CAPABILITY,
+    )
+
+
+def require_tenant_actions_approve(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.actions.approve capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_ACTIONS_APPROVE_CAPABILITY,
+    )
+
+
+def require_tenant_training_write(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.training.write capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_TRAINING_WRITE_CAPABILITY,
+    )
+
+
+def require_tenant_knowledge_write(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.knowledge.write capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+    )
 
 
 def require_tenant_observability_read(request: Request) -> AuthorityContext:
@@ -164,16 +253,10 @@ def require_tenant_observability_read(request: Request) -> AuthorityContext:
     Module-level function (not a closure) so ``dependency_overrides`` works
     stably in tests. Protects all operational observability endpoints (#26/#80).
     """
-    authority = require_authority(request)
-    if TENANT_OBSERVABILITY_READ_CAPABILITY not in authority.capabilities:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": ERROR_CODE_CAPABILITY_REQUIRED,
-                "capability": TENANT_OBSERVABILITY_READ_CAPABILITY,
-            },
-        )
-    return authority
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_OBSERVABILITY_READ_CAPABILITY,
+    )
 
 
 def require_tenant_audit_export(request: Request) -> AuthorityContext:
@@ -182,16 +265,10 @@ def require_tenant_audit_export(request: Request) -> AuthorityContext:
     Module-level function (not a closure) so ``dependency_overrides`` works
     stably in tests. Protects the audit-export endpoint (#80).
     """
-    authority = require_authority(request)
-    if TENANT_AUDIT_EXPORT_CAPABILITY not in authority.capabilities:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": ERROR_CODE_CAPABILITY_REQUIRED,
-                "capability": TENANT_AUDIT_EXPORT_CAPABILITY,
-            },
-        )
-    return authority
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_AUDIT_EXPORT_CAPABILITY,
+    )
 
 
 def request_authority_opt(request: Request) -> AuthorityContext | None:
@@ -429,16 +506,22 @@ __all__ = [
     "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
     "ERROR_CODE_TENANT_AXIS_MISSING",
     "OPERATOR_CAPABILITY",
+    "TENANT_ACTIONS_APPROVE_CAPABILITY",
     "TENANT_ADMIN_CAPABILITY",
     "TENANT_AUDIT_EXPORT_CAPABILITY",
     "TENANT_CHANNEL_ADMIN_CAPABILITY",
+    "TENANT_COGNITION_READ_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
     "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
     "TENANT_CONFIG_WRITE_CAPABILITY",
     "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
+    "TENANT_GOVERNANCE_READ_CAPABILITY",
     "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
     "TENANT_OBSERVABILITY_READ_CAPABILITY",
+    "TENANT_OPERATIONS_READ_CAPABILITY",
     "TENANT_POLICY_WRITE_CAPABILITY",
+    "TENANT_SUPERVISOR_READ_CAPABILITY",
+    "TENANT_TRAINING_WRITE_CAPABILITY",
     "TENANT_TOPOLOGY_WRITE_CAPABILITY",
     "request_authority_opt",
     "request_tenant_scope_opt",
@@ -447,8 +530,15 @@ __all__ = [
     "require_config_apply_authorization",
     "require_config_apply_authorization_for",
     "require_operator_authority",
+    "require_tenant_actions_approve",
     "require_tenant_admin",
     "require_tenant_audit_export",
+    "require_tenant_cognition_read",
+    "require_tenant_governance_read",
+    "require_tenant_knowledge_write",
     "require_tenant_observability_read",
+    "require_tenant_operations_read",
     "require_tenant_scope",
+    "require_tenant_supervisor_read",
+    "require_tenant_training_write",
 ]

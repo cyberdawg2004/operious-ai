@@ -9,7 +9,7 @@ method-derived fail policy as the edge layer.
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -19,6 +19,7 @@ from app.core.rate_limit import (
     service_unavailable_response,
     too_many_requests_response,
 )
+from app.identity import AuthorityContext
 
 logger = logging.getLogger(__name__)
 
@@ -54,17 +55,18 @@ class TenantRateLimitMiddleware:
         if scope["type"] != "http" or not self._enabled:
             await self.app(scope, receive, send)
             return
-        authority = (scope.get("state") or {}).get("authority")
-        tenant_id = getattr(authority, "tenant_id", None)
-        if not tenant_id:
+        state = cast(dict[str, Any], scope.get("state") or {})
+        authority = cast(AuthorityContext | None, state.get("authority"))
+        if authority is None or authority.tenant_id is None:
             await self.app(scope, receive, send)
             return
+        tenant_id = authority.tenant_id
 
         method = scope.get("method", "GET")
         checks: list[tuple[str, int]] = [
             (f"rl:tenant:{tenant_id}", self._tenant_per_minute)
         ]
-        principal_id = getattr(authority, "principal_id", None)
+        principal_id = authority.principal_id
         if principal_id and self._principal_per_minute > 0:
             checks.append((f"rl:principal:{principal_id}", self._principal_per_minute))
 

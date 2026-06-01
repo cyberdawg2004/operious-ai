@@ -220,17 +220,23 @@ def test_module_exports_stable_contract() -> None:
         "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
         "ERROR_CODE_TENANT_AXIS_MISSING",
         "OPERATOR_CAPABILITY",
+        "TENANT_ACTIONS_APPROVE_CAPABILITY",    # spec 1a-ext #26
         "TENANT_ADMIN_CAPABILITY",
         "TENANT_AUDIT_EXPORT_CAPABILITY",        # spec 1a #80
         "TENANT_CHANNEL_ADMIN_CAPABILITY",
+        "TENANT_COGNITION_READ_CAPABILITY",      # spec 1a-ext #26
         "TENANT_CONFIG_APPROVE_CAPABILITY",
         "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
         "TENANT_CONFIG_WRITE_CAPABILITY",
         "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
+        "TENANT_GOVERNANCE_READ_CAPABILITY",     # spec 1a-ext #26
         "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
         "TENANT_OBSERVABILITY_READ_CAPABILITY",  # spec 1a #26
+        "TENANT_OPERATIONS_READ_CAPABILITY",      # spec 1a-ext #26
         "TENANT_POLICY_WRITE_CAPABILITY",
+        "TENANT_SUPERVISOR_READ_CAPABILITY",     # spec 1a-ext #26
         "TENANT_TOPOLOGY_WRITE_CAPABILITY",
+        "TENANT_TRAINING_WRITE_CAPABILITY",       # spec 1a-ext #26
         "request_authority_opt",
         "request_tenant_scope_opt",
         "require_authority",
@@ -238,10 +244,17 @@ def test_module_exports_stable_contract() -> None:
         "require_config_apply_authorization",
         "require_config_apply_authorization_for",
         "require_operator_authority",
+        "require_tenant_actions_approve",        # spec 1a-ext #26
         "require_tenant_admin",
         "require_tenant_audit_export",           # spec 1a #80
+        "require_tenant_cognition_read",         # spec 1a-ext #26
+        "require_tenant_governance_read",        # spec 1a-ext #26
+        "require_tenant_knowledge_write",        # spec 1a-ext #26
         "require_tenant_observability_read",     # spec 1a #26
+        "require_tenant_operations_read",        # spec 1a-ext #26
         "require_tenant_scope",
+        "require_tenant_supervisor_read",        # spec 1a-ext #26
+        "require_tenant_training_write",         # spec 1a-ext #26
     ]
 
 

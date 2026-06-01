@@ -17,7 +17,12 @@ from app.cognition.exceptions import (
     CognitionLifecycleError,
     CognitionNotFoundError,
 )
-from app.dependencies.authority import require_authority, require_tenant_scope
+from app.dependencies.authority import (
+    require_authority,
+    require_tenant_cognition_read,
+    require_tenant_knowledge_write,
+    require_tenant_scope,
+)
 from app.identity import AuthorityContext
 from app.dependencies.services import get_cognition_service
 from app.services.cognition_service import CognitionService
@@ -32,6 +37,7 @@ _DEFAULT_LIMIT = 25
 @router.post(
     "/approvals/{approval_id}/approve",
     response_model=ApprovalLifecycleResponse,
+    dependencies=[Depends(require_tenant_knowledge_write)],
 )
 async def approve_approval(
     approval_id: str,
@@ -61,6 +67,7 @@ async def approve_approval(
 @router.post(
     "/approvals/{approval_id}/apply",
     response_model=ApprovalApplicationResponse,
+    dependencies=[Depends(require_tenant_knowledge_write)],
 )
 async def apply_approval(
     approval_id: str,
@@ -95,6 +102,7 @@ async def apply_approval(
 @router.get(
     "/knowledge/versions",
     response_model=KnowledgeDocumentVersionPageResponse,
+    dependencies=[Depends(require_tenant_cognition_read)],
 )
 async def list_knowledge_document_versions(
     document_id: str | None = Query(None),
@@ -119,6 +127,7 @@ async def list_knowledge_document_versions(
 @router.get(
     "/audits/{audit_id}",
     response_model=CognitionAuditRecordResponse,
+    dependencies=[Depends(require_tenant_cognition_read)],
 )
 async def get_cognition_audit_record(
     audit_id: str,
@@ -146,6 +155,7 @@ async def get_cognition_audit_record(
 @router.post(
     "/knowledge/{document_id}/rollback",
     response_model=KnowledgeRollbackResponse,
+    dependencies=[Depends(require_tenant_knowledge_write)],
 )
 async def rollback_knowledge_document(
     document_id: str,

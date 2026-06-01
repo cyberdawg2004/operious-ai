@@ -15,7 +15,12 @@ from app.cognition import (
     CognitionNotFoundError,
     CognitionRuntime,
 )
+from app.dependencies.authority import (
+    require_tenant_cognition_read,
+    require_tenant_knowledge_write,
+)
 from app.dependencies.database import get_db_session
+from app.identity import AuthorityContext
 from app.main import create_app
 from app.sop_intelligence import (
     ApprovalRecord,
@@ -311,6 +316,18 @@ async def cognition_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_cognition_read] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.cognition.read",),
+        )
+    )
+    app.dependency_overrides[require_tenant_knowledge_write] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.knowledge.write",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,

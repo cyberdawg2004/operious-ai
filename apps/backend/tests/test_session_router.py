@@ -11,7 +11,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dependencies.authority import require_tenant_operations_read
 from app.dependencies.database import get_db_session
+from app.identity import AuthorityContext
 from app.main import create_app
 from app.session.enums import (
     SessionContinuityMode,
@@ -52,6 +54,12 @@ async def session_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_operations_read] = lambda: (
+        AuthorityContext(
+            tenant_id="tenant-acme",
+            capabilities=("tenant.operations.read",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test"

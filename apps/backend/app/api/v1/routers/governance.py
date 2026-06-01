@@ -40,7 +40,10 @@ from app.api.v1.schemas.governance import (
     GovernanceDecisionsPage,
     GovernanceTraceResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_governance_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_governance_repository
 from app.governance.persistence import (
     BaseGovernanceRepository,
@@ -60,6 +63,7 @@ _DEFAULT_LIMIT = 25
 @router.get(
     "/decisions/{decision_id}",
     response_model=GovernanceDecisionResponse,
+    dependencies=[Depends(require_tenant_governance_read)],
     summary="Get one governance decision",
     description=(
         "Return the apex governance decision identified by "
@@ -89,6 +93,7 @@ async def get_decision(
 @router.get(
     "/decisions",
     response_model=GovernanceDecisionsPage,
+    dependencies=[Depends(require_tenant_governance_read)],
     summary="List governance decisions",
     description=(
         "Paginated list of governance decisions for the "
@@ -157,6 +162,7 @@ async def list_decisions(
 @router.get(
     "/traces/{decision_id}",
     response_model=GovernanceTraceResponse,
+    dependencies=[Depends(require_tenant_governance_read)],
     summary="Get the trace for one governance decision",
     description=(
         "Return the audit trace 1:1 with the apex governance "

@@ -10,10 +10,22 @@ from starlette.requests import Request
 from app.auth.providers.jwt import PERMISSION_CAPABILITY_MAP, ROLE_CAPABILITY_MAP
 from app.dependencies.authority import (
     OPERATOR_CAPABILITY,
+    TENANT_ACTIONS_APPROVE_CAPABILITY,
     TENANT_AUDIT_EXPORT_CAPABILITY,
+    TENANT_COGNITION_READ_CAPABILITY,
+    TENANT_GOVERNANCE_READ_CAPABILITY,
     TENANT_OBSERVABILITY_READ_CAPABILITY,
+    TENANT_OPERATIONS_READ_CAPABILITY,
+    TENANT_SUPERVISOR_READ_CAPABILITY,
+    TENANT_TRAINING_WRITE_CAPABILITY,
+    require_tenant_actions_approve,
     require_tenant_audit_export,
+    require_tenant_cognition_read,
+    require_tenant_governance_read,
     require_tenant_observability_read,
+    require_tenant_operations_read,
+    require_tenant_supervisor_read,
+    require_tenant_training_write,
 )
 from app.identity import AuthorityContext
 
@@ -29,6 +41,12 @@ def _request(capabilities: list[str], tenant_id: str = "t-1") -> Request:
 def test_capability_constant_values() -> None:
     assert TENANT_OBSERVABILITY_READ_CAPABILITY == "tenant.observability.read"
     assert TENANT_AUDIT_EXPORT_CAPABILITY == "tenant.audit.export"
+    assert TENANT_OPERATIONS_READ_CAPABILITY == "tenant.operations.read"
+    assert TENANT_SUPERVISOR_READ_CAPABILITY == "tenant.supervisor.read"
+    assert TENANT_GOVERNANCE_READ_CAPABILITY == "tenant.governance.read"
+    assert TENANT_COGNITION_READ_CAPABILITY == "tenant.cognition.read"
+    assert TENANT_ACTIONS_APPROVE_CAPABILITY == "tenant.actions.approve"
+    assert TENANT_TRAINING_WRITE_CAPABILITY == "tenant.training.write"
 
 
 def test_observability_dep_passes_with_capability() -> None:
@@ -57,6 +75,24 @@ def test_audit_export_dep_fails_without_capability() -> None:
     assert exc.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    ("capability", "dependency"),
+    [
+        (TENANT_OPERATIONS_READ_CAPABILITY, require_tenant_operations_read),
+        (TENANT_SUPERVISOR_READ_CAPABILITY, require_tenant_supervisor_read),
+        (TENANT_GOVERNANCE_READ_CAPABILITY, require_tenant_governance_read),
+        (TENANT_COGNITION_READ_CAPABILITY, require_tenant_cognition_read),
+        (TENANT_ACTIONS_APPROVE_CAPABILITY, require_tenant_actions_approve),
+        (TENANT_TRAINING_WRITE_CAPABILITY, require_tenant_training_write),
+    ],
+)
+def test_1aext_capability_deps(capability: str, dependency) -> None:  # noqa: ANN001
+    assert dependency(_request([capability])).tenant_id == "t-1"
+    with pytest.raises(HTTPException) as exc:
+        dependency(_request(["tenant_read"]))
+    assert exc.value.status_code == 403
+
+
 def test_operator_capability_does_not_bypass_domain_gate() -> None:
     # The domain gates are capability-based, not role-based.
     # Operators are expected to also hold the explicit domain capability in Auth0.
@@ -74,12 +110,59 @@ def test_role_map_tenant_auditor() -> None:
     assert ROLE_CAPABILITY_MAP.get("TenantAuditor") == "tenant.audit.export"
 
 
+def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
+    assert ROLE_CAPABILITY_MAP.get("Operator") == (
+        "operator",
+        "tenant.operations.read",
+        "tenant.supervisor.read",
+        "tenant.observability.read",
+    )
+    operator_caps = set(ROLE_CAPABILITY_MAP["Operator"])
+    assert "tenant.governance.read" not in operator_caps
+    assert "tenant.cognition.read" not in operator_caps
+    assert "tenant.actions.approve" not in operator_caps
+    assert "tenant.training.write" not in operator_caps
+
+
+@pytest.mark.parametrize(
+    ("role", "capability"),
+    [
+        ("TenantOperationsViewer", "tenant.operations.read"),
+        ("TenantSupervisor", "tenant.supervisor.read"),
+        ("TenantGovernanceViewer", "tenant.governance.read"),
+        ("TenantCognitionViewer", "tenant.cognition.read"),
+        ("TenantActionApprover", "tenant.actions.approve"),
+        ("TenantTrainingWriter", "tenant.training.write"),
+    ],
+)
+def test_role_map_1aext_roles(role: str, capability: str) -> None:
+    assert ROLE_CAPABILITY_MAP.get(role) == capability
+
+
 def test_permission_map_observability() -> None:
     assert PERMISSION_CAPABILITY_MAP.get("read:tenant_observability") == "tenant.observability.read"
 
 
 def test_permission_map_audit() -> None:
     assert PERMISSION_CAPABILITY_MAP.get("read:tenant_audit") == "tenant.audit.export"
+
+
+@pytest.mark.parametrize(
+    ("permission", "capability"),
+    [
+        ("read:tenant_operations", "tenant.operations.read"),
+        ("read:tenant_supervisor", "tenant.supervisor.read"),
+        ("read:tenant_governance", "tenant.governance.read"),
+        ("read:tenant_cognition", "tenant.cognition.read"),
+        ("approve:tenant_actions", "tenant.actions.approve"),
+        ("write:tenant_training", "tenant.training.write"),
+    ],
+)
+def test_permission_map_1aext_permissions(
+    permission: str,
+    capability: str,
+) -> None:
+    assert PERMISSION_CAPABILITY_MAP.get(permission) == capability
 
 
 # ── Integration: shared TestClient import ────────────────────────────────────

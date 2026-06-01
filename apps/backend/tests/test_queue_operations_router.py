@@ -19,7 +19,10 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.dependencies.authority import require_operator_authority
+from app.dependencies.authority import (
+    require_operator_authority,
+    require_tenant_observability_read,
+)
 from app.identity import AuthorityContext
 from app.main import create_app
 from app.dependencies.database import get_db_session
@@ -64,6 +67,9 @@ async def queue_client(
     app.dependency_overrides[get_db_session] = _db_override
     app.dependency_overrides[require_operator_authority] = (
         _operator_authority_override
+    )
+    app.dependency_overrides[require_tenant_observability_read] = (
+        _observability_authority_override
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -643,6 +649,14 @@ async def _operator_authority_override() -> AuthorityContext:
         tenant_id=_TENANT,
         principal_id="operator-principal",
         capabilities=frozenset({"operator"}),
+    )
+
+
+async def _observability_authority_override() -> AuthorityContext:
+    return AuthorityContext.from_raw(
+        tenant_id=_TENANT,
+        principal_id="observer-principal",
+        capabilities=frozenset({"tenant.observability.read"}),
     )
 
 

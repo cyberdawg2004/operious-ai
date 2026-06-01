@@ -10,7 +10,10 @@ from app.api.v1.schemas.operational_events import (
     OperationalEventPageResponse,
     OperationalReplayTraceResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_observability_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_operational_event_service
 from app.services.operational_event_service import OperationalEventService
 
@@ -20,7 +23,11 @@ _DEFAULT_LIMIT = 100
 _MAX_LIMIT = 100
 
 
-@router.get("", response_model=OperationalEventPageResponse)
+@router.get(
+    "",
+    response_model=OperationalEventPageResponse,
+    dependencies=[Depends(require_tenant_observability_read)],
+)
 async def list_operational_events(
     event_id: str | None = Query(default=None),
     operational_act: str | None = Query(default=None),
@@ -57,7 +64,11 @@ async def list_operational_events(
     return OperationalEventPageResponse.from_page(page)
 
 
-@router.get("/replay", response_model=OperationalReplayTraceResponse)
+@router.get(
+    "/replay",
+    response_model=OperationalReplayTraceResponse,
+    dependencies=[Depends(require_tenant_observability_read)],
+)
 async def load_operational_replay_trace(
     event_id: str | None = Query(default=None),
     root_event_id: str | None = Query(default=None),

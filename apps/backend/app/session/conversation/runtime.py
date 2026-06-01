@@ -277,7 +277,7 @@ class ConversationSessionRuntime:
         )
         if record is None:
             return None
-        return record.identity.principal_id
+        return record.principal_id
 
     async def _require_session(
         self,

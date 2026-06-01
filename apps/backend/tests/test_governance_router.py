@@ -40,12 +40,14 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dependencies.authority import require_tenant_governance_read
 from app.dependencies.database import get_db_session
 from app.governance.persistence import (
     GovernanceDecisionRecord,
     GovernanceTraceRecord,
     PostgresGovernanceRepository,
 )
+from app.identity import AuthorityContext
 from app.main import create_app
 from tests.conftest import requires_postgres
 
@@ -81,6 +83,12 @@ async def governance_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override_db_session
+    app.dependency_overrides[require_tenant_governance_read] = lambda: (
+        AuthorityContext(
+            tenant_id="tenant-acme",
+            capabilities=("tenant.governance.read",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test"

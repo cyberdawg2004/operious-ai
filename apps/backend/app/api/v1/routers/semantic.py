@@ -14,7 +14,12 @@ from app.api.v1.schemas.semantic import (
     SemanticQuarantineResponseList,
     SemanticQuarantineStatus,
 )
-from app.dependencies.authority import require_authority, require_tenant_scope
+from app.dependencies.authority import (
+    require_authority,
+    require_tenant_knowledge_write,
+    require_tenant_observability_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import (
     get_quarantine_service,
     get_semantic_circuit_service,
@@ -33,6 +38,7 @@ router = APIRouter(tags=["semantic"])
 @router.get(
     "/circuit-states",
     response_model=SemanticCircuitStateResponseList,
+    dependencies=[Depends(require_tenant_observability_read)],
 )
 async def list_semantic_circuit_states(
     expected_tenant_id: str = Depends(require_tenant_scope),
@@ -48,6 +54,7 @@ async def list_semantic_circuit_states(
 @router.get(
     "/circuit-events",
     response_model=SemanticCircuitEventResponseList,
+    dependencies=[Depends(require_tenant_observability_read)],
 )
 async def list_semantic_circuit_events(
     channel: str | None = Query(default=None),
@@ -67,6 +74,7 @@ async def list_semantic_circuit_events(
 @router.get(
     "/quarantine",
     response_model=SemanticQuarantineResponseList,
+    dependencies=[Depends(require_tenant_observability_read)],
 )
 async def list_semantic_quarantine(
     status_filter: SemanticQuarantineStatus = Query(
@@ -89,6 +97,7 @@ async def list_semantic_quarantine(
 @router.post(
     "/quarantine/{quarantine_id}/release",
     response_model=SemanticQuarantineResponse,
+    dependencies=[Depends(require_tenant_knowledge_write)],
 )
 async def release_semantic_quarantine(
     quarantine_id: str,

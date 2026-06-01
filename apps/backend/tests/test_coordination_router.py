@@ -16,7 +16,9 @@ from app.coordination.persistence import (
     CoordinationRecord,
     PostgresCoordinationPersistence,
 )
+from app.dependencies.authority import require_tenant_operations_read
 from app.dependencies.database import get_db_session
+from app.identity import AuthorityContext
 from app.main import create_app
 from tests.conftest import requires_postgres
 
@@ -38,6 +40,12 @@ async def coord_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
+    app.dependency_overrides[require_tenant_operations_read] = lambda: (
+        AuthorityContext(
+            tenant_id="tenant-acme",
+            capabilities=("tenant.operations.read",),
+        )
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test"

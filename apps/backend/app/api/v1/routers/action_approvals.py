@@ -11,7 +11,12 @@ from app.api.v1.schemas.action_approvals import (
     ApproveActionApprovalRequest,
     DenyActionApprovalRequest,
 )
-from app.dependencies.authority import require_authority, require_tenant_scope
+from app.dependencies.authority import (
+    require_authority,
+    require_tenant_actions_approve,
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_action_approval_service
 from app.identity import AuthorityContext
 from app.services.action_approval_service import (
@@ -31,6 +36,7 @@ _DEFAULT_LIMIT = 50
 @router.get(
     "",
     response_model=ActionApprovalListResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_action_approvals(
     status_filter: str = Query("pending", alias="status"),
@@ -57,6 +63,7 @@ async def list_action_approvals(
 @router.get(
     "/{approval_id}",
     response_model=ActionApprovalDetailResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def get_action_approval(
     approval_id: str,
@@ -80,6 +87,7 @@ async def get_action_approval(
 @router.post(
     "/{approval_id}/approve",
     response_model=ActionApprovalSummaryResponse,
+    dependencies=[Depends(require_tenant_actions_approve)],
 )
 async def approve_action_approval(
     approval_id: str,
@@ -117,6 +125,7 @@ async def approve_action_approval(
 @router.post(
     "/{approval_id}/deny",
     response_model=ActionApprovalSummaryResponse,
+    dependencies=[Depends(require_tenant_actions_approve)],
 )
 async def deny_action_approval(
     approval_id: str,
