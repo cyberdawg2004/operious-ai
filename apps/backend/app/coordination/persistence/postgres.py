@@ -13,6 +13,7 @@ SQL three-valued logic, matching the governance / session pattern.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, cast
 from uuid import UUID
 
@@ -26,6 +27,7 @@ from app.coordination.persistence.models import (
     RecordPage,
 )
 from app.coordination.persistence.records import CoordinationRecord
+from app.data_protection.crypto import DataProtectionService
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
 
@@ -33,10 +35,19 @@ from app.repositories.pagination import fetch_scalar_page
 class PostgresCoordinationPersistence(BaseRepository):
     """Postgres-backed coordination persistence."""
 
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
+
     # ─── Writes ──────────────────────────────────────────────────────
 
     async def record_envelope(self, record: CoordinationRecord) -> None:
-        row = _record_to_row(record)
+        row = _record_to_row(await self._protect_record(record))
         try:
             # SAVEPOINT isolation — IntegrityError rolls back the
             # nested transaction only, leaving the outer transaction
@@ -66,7 +77,7 @@ class PostgresCoordinationPersistence(BaseRepository):
                 CoordinationEnvelopeRow.tenant_id == expected_tenant_id
             )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if row is None else _row_to_record(row)
+        return None if row is None else await self._row_to_record(row)
 
     async def query_envelopes(
         self,
@@ -94,11 +105,31 @@ class PostgresCoordinationPersistence(BaseRepository):
             offset=query.offset,
         )
         return RecordPage(
-            items=tuple(_row_to_record(r) for r in page.items),
+            items=tuple([await self._row_to_record(r) for r in page.items]),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
         )
+
+    async def _protect_record(self, record: CoordinationRecord) -> CoordinationRecord:
+        if self._data_protection is None or record.tenant_id is None:
+            return record
+        payload_body = await self._data_protection.encrypt_json_values(
+            dict(record.payload_body),
+            tenant_id=record.tenant_id,
+            subject_id=_coordination_subject_id(record),
+            field="coordination_envelopes.payload_body",
+        )
+        return replace(record, payload_body=payload_body)
+
+    async def _row_to_record(self, row: CoordinationEnvelopeRow) -> CoordinationRecord:
+        record = _row_to_record(row)
+        if self._data_protection is None:
+            return record
+        payload_body = await self._data_protection.decrypt_json_values(
+            record.payload_body
+        )
+        return replace(record, payload_body=payload_body)
 
 
 # ─── Filter composer ────────────────────────────────────────────────────
@@ -216,6 +247,14 @@ def _record_to_row(record: CoordinationRecord) -> CoordinationEnvelopeRow:
         message_metadata=dict(record.message_metadata),
         envelope_metadata=dict(record.envelope_metadata),
     )
+
+
+def _coordination_subject_id(record: CoordinationRecord) -> str:
+    for key in ("subject_id", "principal_id", "customer_id", "session_id"):
+        value = record.payload_body.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return record.request_id or record.correlation_id or record.coordination_id
 
 
 def _row_to_record(row: CoordinationEnvelopeRow) -> CoordinationRecord:

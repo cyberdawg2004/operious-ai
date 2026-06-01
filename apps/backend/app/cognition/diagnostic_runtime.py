@@ -674,6 +674,7 @@ class DiagnosticCognitionRuntime:
                 **_attempt_metadata(snapshot),
             },
             captured_at=_utcnow(),
+            subject_id=snapshot.session_id,
         )
         try:
             await self._usage_persistence.save_cognition_audit(

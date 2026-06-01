@@ -197,6 +197,15 @@ async def _semantic_client(pg_session: AsyncSession) -> httpx.AsyncClient:
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _db_override
+    # Spec 1a-ext: semantic circuit-state reads are gated on
+    # tenant.observability.read. The legacy-header auth this test uses carries
+    # no capabilities, so grant the read capability explicitly.
+    from app.dependencies.authority import require_tenant_observability_read
+    from app.identity import AuthorityContext
+
+    app.dependency_overrides[require_tenant_observability_read] = lambda: AuthorityContext(
+        capabilities=("tenant.observability.read",)
+    )
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",

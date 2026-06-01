@@ -10,8 +10,9 @@ Reads remain tenant-scoped, and list ordering remains canonical
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 from sqlalchemy import delete, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -45,6 +46,7 @@ from app.boundary.persistence.records import (
     BoundaryIngressRecord,
     WebhookNonceRecord,
 )
+from app.data_protection.crypto import DataProtectionService
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
 
@@ -52,12 +54,22 @@ from app.repositories.pagination import fetch_scalar_page
 class PostgresBoundaryPersistence(BaseRepository):
     """Postgres-backed boundary persistence."""
 
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
+
     # ─── Writes ──────────────────────────────────────────────────────
 
     async def save_ingress(
         self, record: BoundaryIngressRecord
     ) -> BoundaryIngressRecord:
-        row = _ingress_record_to_row(record)
+        protected_record = await self._protect_ingress(record)
+        row = _ingress_record_to_row(protected_record)
         try:
             # SAVEPOINT isolation — see governance repo for doctrine.
             async with self.session.begin_nested():
@@ -96,7 +108,10 @@ class PostgresBoundaryPersistence(BaseRepository):
     ) -> set[BoundaryIngressId]:
         if not records:
             return set()
-        rows = [_ingress_record_to_values(record) for record in records]
+        protected_records = [
+            await self._protect_ingress(record) for record in records
+        ]
+        rows = [_ingress_record_to_values(record) for record in protected_records]
         stmt = (
             pg_insert(BoundaryIngressRow)
             .values(rows)
@@ -110,7 +125,7 @@ class PostgresBoundaryPersistence(BaseRepository):
         }
 
     async def save_egress(self, record: BoundaryEgressRecord) -> None:
-        row = _egress_record_to_row(record)
+        row = _egress_record_to_row(await self._protect_egress(record))
         try:
             async with self.session.begin_nested():
                 self.session.add(row)
@@ -144,7 +159,7 @@ class PostgresBoundaryPersistence(BaseRepository):
             .limit(1)
         )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if row is None else _ingress_row_to_record(row)
+        return None if row is None else await self._ingress_row_to_record(row)
 
     # ─── Point reads ─────────────────────────────────────────────────
 
@@ -162,7 +177,7 @@ class PostgresBoundaryPersistence(BaseRepository):
                 BoundaryIngressRow.tenant_id == expected_tenant_id
             )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if row is None else _ingress_row_to_record(row)
+        return None if row is None else await self._ingress_row_to_record(row)
 
     async def get_egress(
         self,
@@ -178,7 +193,7 @@ class PostgresBoundaryPersistence(BaseRepository):
                 BoundaryEgressRow.tenant_id == expected_tenant_id
             )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if row is None else _egress_row_to_record(row)
+        return None if row is None else await self._egress_row_to_record(row)
 
     # ─── List reads ──────────────────────────────────────────────────
 
@@ -242,7 +257,7 @@ class PostgresBoundaryPersistence(BaseRepository):
             offset=query.offset,
         )
         return BoundaryRecordPage(
-            ingress=tuple(_ingress_row_to_record(r) for r in page.items),
+            ingress=tuple([await self._ingress_row_to_record(r) for r in page.items]),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
@@ -290,11 +305,77 @@ class PostgresBoundaryPersistence(BaseRepository):
             offset=query.offset,
         )
         return BoundaryRecordPage(
-            egress=tuple(_egress_row_to_record(r) for r in page.items),
+            egress=tuple([await self._egress_row_to_record(r) for r in page.items]),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
         )
+
+    async def _protect_ingress(
+        self,
+        record: BoundaryIngressRecord,
+    ) -> BoundaryIngressRecord:
+        if self._data_protection is None or record.tenant_id is None:
+            return record
+        canonical_payload = await self._data_protection.encrypt_json_values(
+            dict(record.canonical_payload),
+            tenant_id=record.tenant_id,
+            subject_id=_boundary_subject_id(record.canonical_payload, record),
+            field="boundary_ingress.canonical_payload",
+        )
+        return replace(record, canonical_payload=canonical_payload)
+
+    async def _protect_egress(
+        self,
+        record: BoundaryEgressRecord,
+    ) -> BoundaryEgressRecord:
+        if self._data_protection is None or record.tenant_id is None:
+            return record
+        subject_id = _boundary_subject_id(record.metadata, record)
+        payload_body = record.payload_body
+        if isinstance(payload_body, dict):
+            payload_body = await self._data_protection.encrypt_json_values(
+                _as_dict(cast(object, payload_body)),
+                tenant_id=record.tenant_id,
+                subject_id=subject_id,
+                field="boundary_egress.payload_body",
+            )
+        elif isinstance(payload_body, str):
+            payload_body = await self._data_protection.encrypt_text(
+                payload_body,
+                tenant_id=record.tenant_id,
+                subject_id=subject_id,
+                field="boundary_egress.payload_body",
+            )
+        return replace(record, payload_body=payload_body)
+
+    async def _ingress_row_to_record(
+        self,
+        row: BoundaryIngressRow,
+    ) -> BoundaryIngressRecord:
+        record = _ingress_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        canonical_payload = await self._data_protection.decrypt_json_values(
+            _as_dict(record.canonical_payload)
+        )
+        return replace(record, canonical_payload=canonical_payload)
+
+    async def _egress_row_to_record(
+        self,
+        row: BoundaryEgressRow,
+    ) -> BoundaryEgressRecord:
+        record = _egress_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        payload_body = record.payload_body
+        if isinstance(payload_body, dict):
+            payload_body = await self._data_protection.decrypt_json_values(
+                _as_dict(cast(object, payload_body))
+            )
+        elif isinstance(payload_body, str):
+            payload_body = await self._data_protection.decrypt_text(payload_body)
+        return replace(record, payload_body=payload_body)
 
     # ─── Webhook replay protection ───────────────────────────────────
 
@@ -387,6 +468,17 @@ class PostgresBoundaryPersistence(BaseRepository):
 
 
 # ─── Record ↔ Row converters ────────────────────────────────────────────
+
+
+def _boundary_subject_id(
+    payload: Mapping[str, Any],
+    record: BoundaryIngressRecord | BoundaryEgressRecord,
+) -> str:
+    for key in ("subject_id", "principal_id", "customer_id", "session_id"):
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return record.correlation_id or record.request_id or str(record.tenant_id)
 
 
 def _ingress_record_to_row(

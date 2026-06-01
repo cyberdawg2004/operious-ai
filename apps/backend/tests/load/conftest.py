@@ -179,6 +179,9 @@ async def committed_burst_seed(
     owner_dsn = _owner_database_url_for_test(dsn) or dsn
     monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.setenv("ALEMBIC_DATABASE_URL", owner_dsn)
+    monkeypatch.setenv("DB_POOL_SIZE", "40")
+    monkeypatch.setenv("DB_MAX_OVERFLOW", "10")
+    monkeypatch.setenv("DB_POOL_TIMEOUT", "60")
     get_settings.cache_clear()
     reset_engine_state()
 
@@ -581,6 +584,22 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
             "DELETE FROM tenant_execution_governance_configurations "
             "WHERE tenant_id = :t"
         ),
+        {"t": tenant_id},
+    )
+    await session.execute(
+        text("DELETE FROM data_protection_erasure_requests WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
+        text("DELETE FROM data_protection_legal_holds WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
+        text("DELETE FROM tenant_data_retention_policies WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
+        text("DELETE FROM data_protection_data_keys WHERE tenant_id = :t"),
         {"t": tenant_id},
     )
     await session.execute(

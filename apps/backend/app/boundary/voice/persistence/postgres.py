@@ -46,6 +46,7 @@ from app.boundary.voice.persistence.records import (
 from app.boundary.voice.persistence.repository import (
     VoicePersistenceProtocol,
 )
+from app.data_protection.crypto import DataProtectionService
 from app.db.repository import TenantScopedRepository
 
 _SESSION_SCOPE_SQL = text(
@@ -61,11 +62,21 @@ class PostgresVoicePersistence(
 ):
     """Postgres-backed voice persistence."""
 
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
+
     async def write_ingress(
         self, record: VoiceIngressRecord
     ) -> None:
         await self._scope_for_write(record.identity.tenant_id)
         row = _ingress_record_to_row(record)
+        await self._protect_ingress_row(row)
         try:
             async with self.session.begin_nested():
                 self.session.add(row)
@@ -82,13 +93,14 @@ class PostgresVoicePersistence(
             VoiceIngressRecordRow.record_id == event_id
         )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if row is None else _row_to_ingress_record(row)
+        return None if row is None else await self._ingress_row_to_record(row)
 
     async def write_egress(
         self, record: VoiceEgressRecord
     ) -> None:
         await self._scope_for_write(record.identity.tenant_id)
         row = _egress_record_to_row(record)
+        await self._protect_egress_row(row)
         try:
             async with self.session.begin_nested():
                 self.session.add(row)
@@ -105,7 +117,7 @@ class PostgresVoicePersistence(
             VoiceEgressRecordRow.record_id == event_id
         )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
-        return None if row is None else _row_to_egress_record(row)
+        return None if row is None else await self._egress_row_to_record(row)
 
     async def list_lineage_entries(
         self, correlation_id: VoiceCorrelationId
@@ -154,6 +166,52 @@ class PostgresVoicePersistence(
         tenant_id = await self.session.scalar(_CURRENT_TENANT_SQL)
         await self.session.execute(
             _SESSION_SCOPE_SQL, {"tenant_id": str(tenant_id or "")}
+        )
+
+    async def _protect_ingress_row(self, row: VoiceIngressRecordRow) -> None:
+        if self._data_protection is None:
+            return
+        row.transcript_text = await self._data_protection.encrypt_text(
+            row.transcript_text or "",
+            tenant_id=row.tenant_id,
+            subject_id=str(row.session_id),
+            field="voice_ingress_records.transcript_text",
+        )
+
+    async def _protect_egress_row(self, row: VoiceEgressRecordRow) -> None:
+        if self._data_protection is None:
+            return
+        row.synthesis_text = await self._data_protection.encrypt_text(
+            row.synthesis_text or "",
+            tenant_id=row.tenant_id,
+            subject_id=str(row.session_id),
+            field="voice_egress_records.synthesis_text",
+        )
+
+    async def _ingress_row_to_record(
+        self,
+        row: VoiceIngressRecordRow,
+    ) -> VoiceIngressRecord:
+        if self._data_protection is None:
+            return _row_to_ingress_record(row)
+        return _row_to_ingress_record(
+            row,
+            transcript_text=await self._data_protection.decrypt_text(
+                row.transcript_text or ""
+            ),
+        )
+
+    async def _egress_row_to_record(
+        self,
+        row: VoiceEgressRecordRow,
+    ) -> VoiceEgressRecord:
+        if self._data_protection is None:
+            return _row_to_egress_record(row)
+        return _row_to_egress_record(
+            row,
+            synthesis_text=await self._data_protection.decrypt_text(
+                row.synthesis_text or ""
+            ),
         )
 
 
@@ -214,6 +272,8 @@ def _egress_record_to_row(
 
 def _row_to_ingress_record(
     row: VoiceIngressRecordRow,
+    *,
+    transcript_text: str | None = None,
 ) -> VoiceIngressRecord:
     metadata = row.metadata_json
     audio = _audio_from_metadata(metadata)
@@ -222,7 +282,11 @@ def _row_to_ingress_record(
         transcript_id=VoiceTranscriptId(
             _required_uuid(metadata, "transcript_id")
         ),
-        text=row.transcript_text or "",
+        text=(
+            transcript_text
+            if transcript_text is not None
+            else row.transcript_text or ""
+        ),
         language=str(metadata.get("language") or audio.language),
         confidence=float(metadata.get("confidence") or 1.0),
         provider_name=row.provider_model or "unknown",
@@ -244,6 +308,8 @@ def _row_to_ingress_record(
 
 def _row_to_egress_record(
     row: VoiceEgressRecordRow,
+    *,
+    synthesis_text: str | None = None,
 ) -> VoiceEgressRecord:
     metadata = row.metadata_json
     audio = _audio_from_metadata(metadata)
@@ -252,7 +318,11 @@ def _row_to_egress_record(
         synthesis_id=VoiceSynthesisId(
             _required_uuid(metadata, "synthesis_id")
         ),
-        source_text=row.synthesis_text or "",
+        source_text=(
+            synthesis_text
+            if synthesis_text is not None
+            else row.synthesis_text or ""
+        ),
         target_language=str(metadata.get("language") or audio.language),
         provider_name=row.provider_model or "unknown",
         text_fingerprint=str(metadata.get("text_fingerprint") or ""),

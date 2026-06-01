@@ -388,6 +388,15 @@ class Settings(BaseSettings):
     # endpoints can be used.
     TENANT_CREDENTIAL_MASTER_KEY: str = ""
 
+    # ─── Data protection envelope encryption (Spec 1c) ──────────────
+    # Comma-separated versioned key ring entries, e.g.
+    # ``v1:<base64-or-hex-or-raw>,v2:<material>``. When unset, the
+    # envelope runtime falls back to TENANT_CREDENTIAL_MASTER_KEY for
+    # backwards-compatible single-key deployments.
+    DATA_PROTECTION_MASTER_KEYS: str = ""
+    DATA_PROTECTION_ACTIVE_MASTER_KEY_VERSION: str = "v1"
+    DATA_PROTECTION_DEFAULT_RETENTION_DAYS: int = 90
+
     # ─── Outbound dispatch SSRF allowlist (S-06) ─────────────────────
     # Optional comma-separated host allowlist for tenant-configured
     # outbound webhook / connector URLs. Empty means "any PUBLIC host"

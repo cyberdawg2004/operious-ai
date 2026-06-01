@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Mapping, cast
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 
+from app.data_protection.crypto import DataProtectionService
 from app.knowledge.db.models import KnowledgeChunkRow, KnowledgeVectorRow
 from app.knowledge.exceptions import KnowledgePersistenceError
 from app.knowledge.identity import KnowledgeChunkId, KnowledgeVectorId
@@ -29,6 +31,15 @@ from app.tenant.identity import TenantKnowledgeDocumentId
 class PostgresKnowledgeRepository(BaseRepository):
     """Postgres-backed tenant knowledge vector repository."""
 
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
+
     async def replace_document_index(
         self,
         *,
@@ -48,6 +59,9 @@ class PostgresKnowledgeRepository(BaseRepository):
             vector_index_name=vector_index_name,
             chunks=chunks,
             vectors=vectors,
+        )
+        protected_chunks = tuple(
+            [await self._protect_chunk(chunk) for chunk in chunks]
         )
         await self._ensure_tenant(expected_tenant_id)
         try:
@@ -69,7 +83,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                     )
                     .values(is_current=False)
                 )
-                for chunk in chunks:
+                for chunk in protected_chunks:
                     existing = await self._chunk_row(
                         chunk.chunk_id,
                         expected_tenant_id=expected_tenant_id,
@@ -110,6 +124,15 @@ class PostgresKnowledgeRepository(BaseRepository):
                 query,
                 expected_tenant_id=expected_tenant_id,
                 query_embedding=query_embedding,
+            )
+        if (
+            self._data_protection is not None
+            and query.search_text is not None
+            and query.search_text.strip()
+        ):
+            raise KnowledgePersistenceError(
+                "full-text search over encrypted knowledge content is disabled; "
+                "use embedding retrieval"
             )
         stmt = (
             select(
@@ -176,26 +199,88 @@ class PostgresKnowledgeRepository(BaseRepository):
         )
         return KnowledgeVectorPage(
             items=tuple(
-                KnowledgeVectorEntry(
-                    chunk=_chunk_row_to_record(chunk_row),
-                    vector=_vector_row_to_record(vector_row),
-                    title=str(title),
-                    document_type=str(document_type),
-                    document_status=str(document_status),
-                    document_review_status=str(document_review_status),
-                )
-                for (
-                    chunk_row,
-                    vector_row,
-                    title,
-                    document_type,
-                    document_status,
-                    document_review_status,
-                ) in page.items
+                [
+                    await self._entry_from_rows(
+                        chunk_row=chunk_row,
+                        vector_row=vector_row,
+                        title=str(title),
+                        document_type=str(document_type),
+                        document_status=str(document_status),
+                        document_review_status=str(document_review_status),
+                    )
+                    for (
+                        chunk_row,
+                        vector_row,
+                        title,
+                        document_type,
+                        document_status,
+                        document_review_status,
+                    ) in page.items
+                ]
             ),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
+        )
+
+    async def _entry_from_rows(
+        self,
+        *,
+        chunk_row: KnowledgeChunkRow,
+        vector_row: KnowledgeVectorRow,
+        title: str,
+        document_type: str,
+        document_status: str,
+        document_review_status: str,
+    ) -> KnowledgeVectorEntry:
+        return KnowledgeVectorEntry(
+            chunk=await self._chunk_row_to_record(chunk_row),
+            vector=_vector_row_to_record(vector_row),
+            title=title,
+            document_type=document_type,
+            document_status=document_status,
+            document_review_status=document_review_status,
+        )
+
+    async def _protect_chunk(
+        self,
+        record: KnowledgeChunkRecord,
+    ) -> KnowledgeChunkRecord:
+        if self._data_protection is None:
+            return record
+        content = await self._data_protection.encrypt_text(
+            record.content,
+            tenant_id=record.tenant_id,
+            subject_id=None,
+            field="tenant_knowledge_chunks.content",
+            tenant_scoped=True,
+        )
+        return replace(record, content=content)
+
+    async def _chunk_row_to_record(
+        self,
+        row: KnowledgeChunkRow,
+    ) -> KnowledgeChunkRecord:
+        record = _chunk_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        return replace(
+            record,
+            content=await self._data_protection.decrypt_text(record.content),
+        )
+
+    async def _decrypt_entry(
+        self,
+        entry: KnowledgeVectorEntry,
+    ) -> KnowledgeVectorEntry:
+        if self._data_protection is None:
+            return entry
+        return replace(
+            entry,
+            chunk=replace(
+                entry.chunk,
+                content=await self._data_protection.decrypt_text(entry.chunk.content),
+            ),
         )
 
     async def _list_vector_entries_by_embedding(
@@ -289,7 +374,9 @@ class PostgresKnowledgeRepository(BaseRepository):
         rows = tuple(result.mappings().all())  # bounded-load-ok
         total = int(rows[0]["total_count"]) if rows else 0
         return KnowledgeVectorPage(
-            items=tuple(_sql_row_to_entry(row) for row in rows),
+            items=tuple(
+                [await self._decrypt_entry(_sql_row_to_entry(row)) for row in rows]
+            ),
             total=total,
             limit=page_limit,
             offset=page_offset,

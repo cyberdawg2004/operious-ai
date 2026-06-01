@@ -43,6 +43,11 @@ _ALLOWED_INTERNAL_PREFIXES = (
     # foundation exemption as the apex boundary/session substrates.
     "app.db.base",
     "app.db.repository",
+    # Spec 1c: encryption-at-rest is cross-cutting, substrate-neutral security
+    # infrastructure (a leaf module that imports only config + its own models),
+    # in the same exemption category as `app.db.base`. Voice transcripts/records
+    # are sensitive customer data and MUST be encrypted before persistence.
+    "app.data_protection",
 )
 
 _FORBIDDEN_CROSS_SUBSTRATE_PREFIXES = (

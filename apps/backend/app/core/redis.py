@@ -75,6 +75,10 @@ async def close_redis() -> None:
         await asyncio.wait_for(_redis_client.aclose(), timeout=2.0)
     except TimeoutError:
         logger.warning("redis_client_close_timeout")
+    except RuntimeError as exc:
+        if "Event loop is closed" not in str(exc):
+            raise
+        logger.warning("redis_client_close_loop_closed")
     finally:
         _redis_client = None
         logger.info("redis_client_close_complete")

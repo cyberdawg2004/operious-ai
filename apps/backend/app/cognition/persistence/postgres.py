@@ -16,6 +16,7 @@ from app.cognition.models import (
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
 )
+from app.data_protection.crypto import DataProtectionService
 from app.repositories.base import BaseRepository
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.db.models import TenantRow
@@ -24,16 +25,18 @@ from app.tenant.db.models import TenantRow
 class PostgresCognitionUsagePersistence(BaseRepository):
     """Postgres-backed tenant usage ledger."""
 
-    __slots__ = ("_audit_encryptor",)
+    __slots__ = ("_audit_encryptor", "_data_protection")
 
     def __init__(
         self,
         session: AsyncSession,
         *,
         audit_encryptor: TenantCredentialEncryptor | None = None,
+        data_protection: DataProtectionService | None = None,
     ) -> None:
         super().__init__(session)
         self._audit_encryptor = audit_encryptor
+        self._data_protection = data_protection
 
     async def save_llm_usage(
         self,
@@ -42,6 +45,7 @@ class PostgresCognitionUsagePersistence(BaseRepository):
         expected_tenant_id: str,
     ) -> None:
         _enforce_tenant(record.tenant_id, expected_tenant_id)
+        metadata_json = await self._encrypt_usage_metadata(record)
         await self.session.merge(TenantRow(tenant_id=expected_tenant_id))
         try:
             async with self.session.begin_nested():
@@ -50,9 +54,11 @@ class PostgresCognitionUsagePersistence(BaseRepository):
                     expected_tenant_id=expected_tenant_id,
                 )
                 if existing is None:
-                    self.session.add(_record_to_row(record))
+                    self.session.add(
+                        _record_to_row(record, metadata_json=metadata_json)
+                    )
                 else:
-                    _update_row(existing, record)
+                    _update_row(existing, record, metadata_json=metadata_json)
         except IntegrityError as exc:
             raise CognitionPersistenceError(
                 f"LLM usage {record.usage_id!s} could not be persisted"
@@ -68,7 +74,7 @@ class PostgresCognitionUsagePersistence(BaseRepository):
             usage_id,
             expected_tenant_id=expected_tenant_id,
         )
-        return None if row is None else _row_to_record(row)
+        return None if row is None else await self._usage_row_to_record(row)
 
     async def save_cognition_audit(
         self,
@@ -77,7 +83,11 @@ class PostgresCognitionUsagePersistence(BaseRepository):
         expected_tenant_id: str,
     ) -> None:
         _enforce_tenant(record.tenant_id, expected_tenant_id)
-        encryptor = self._require_audit_encryptor()
+        prompt_full = await self._encrypt_audit_text(record, field="prompt_full")
+        completion_full = await self._encrypt_audit_text(
+            record,
+            field="completion_full",
+        )
         await self.session.merge(TenantRow(tenant_id=expected_tenant_id))
         try:
             async with self.session.begin_nested():
@@ -86,9 +96,20 @@ class PostgresCognitionUsagePersistence(BaseRepository):
                     expected_tenant_id=expected_tenant_id,
                 )
                 if existing is None:
-                    self.session.add(_audit_record_to_row(record, encryptor))
+                    self.session.add(
+                        _audit_record_to_row(
+                            record,
+                            prompt_full=prompt_full,
+                            completion_full=completion_full,
+                        )
+                    )
                 else:
-                    _update_audit_row(existing, record, encryptor)
+                    _update_audit_row(
+                        existing,
+                        record,
+                        prompt_full=prompt_full,
+                        completion_full=completion_full,
+                    )
         except IntegrityError as exc:
             raise CognitionPersistenceError(
                 f"cognition audit {record.audit_id!s} could not be persisted"
@@ -106,7 +127,7 @@ class PostgresCognitionUsagePersistence(BaseRepository):
         )
         if row is None:
             return None
-        return _audit_row_to_record(row, self._require_audit_encryptor())
+        return await self._audit_row_to_record(row)
 
     async def _usage_row(
         self,
@@ -139,8 +160,127 @@ class PostgresCognitionUsagePersistence(BaseRepository):
             )
         return self._audit_encryptor
 
+    async def _encrypt_usage_metadata(
+        self,
+        record: CognitionLLMUsageRecord,
+    ) -> dict[str, Any]:
+        metadata = dict(record.metadata)
+        if self._data_protection is None:
+            return metadata
+        return await self._data_protection.encrypt_json_values(
+            metadata,
+            tenant_id=record.tenant_id,
+            subject_id=record.session_id,
+            field="cognition_llm_usage.metadata_json",
+        )
 
-def _record_to_row(record: CognitionLLMUsageRecord) -> CognitionLLMUsageRow:
+    async def _usage_row_to_record(
+        self,
+        row: CognitionLLMUsageRow,
+    ) -> CognitionLLMUsageRecord:
+        record = _row_to_record(row)
+        if self._data_protection is None:
+            return record
+        metadata = await self._data_protection.decrypt_json_values(record.metadata)
+        return CognitionLLMUsageRecord(
+            usage_id=record.usage_id,
+            tenant_id=record.tenant_id,
+            execution_id=record.execution_id,
+            dispatch_id=record.dispatch_id,
+            session_id=record.session_id,
+            provider=record.provider,
+            model=record.model,
+            prompt_tokens=record.prompt_tokens,
+            completion_tokens=record.completion_tokens,
+            total_tokens=record.total_tokens,
+            estimated_cost_micro_usd=record.estimated_cost_micro_usd,
+            status=record.status,
+            created_at=record.created_at,
+            metadata=metadata,
+        )
+
+    async def _encrypt_audit_text(
+        self,
+        record: CognitionAuditRecord,
+        *,
+        field: str,
+    ) -> bytes:
+        value = record.prompt_full if field == "prompt_full" else record.completion_full
+        if self._data_protection is not None:
+            return await self._data_protection.encrypt_bytes(
+                value.encode("utf-8"),
+                tenant_id=record.tenant_id,
+                subject_id=record.subject_id or record.execution_id,
+                field=f"cognition_audit_records.{field}",
+            )
+        return _encrypt_text(
+            self._require_audit_encryptor(),
+            tenant_id=record.tenant_id,
+            key=field,
+            value=value,
+        )
+
+    async def _decrypt_audit_text(
+        self,
+        *,
+        row: CognitionAuditRecordRow,
+        field: str,
+        encrypted: bytes,
+    ) -> str:
+        decrypted = encrypted
+        if self._data_protection is not None:
+            decrypted = await self._data_protection.decrypt_bytes(encrypted)
+            if decrypted != encrypted:
+                return decrypted.decode("utf-8")
+        if self._audit_encryptor is not None:
+            return _decrypt_text(
+                self._audit_encryptor,
+                tenant_id=row.tenant_id,
+                key=field,
+                encrypted=encrypted,
+            )
+        raise CognitionPersistenceError(
+            "cognition audit row is not envelope-encrypted and no legacy "
+            "audit encryptor is configured"
+        )
+
+    async def _audit_row_to_record(
+        self,
+        row: CognitionAuditRecordRow,
+    ) -> CognitionAuditRecord:
+        return CognitionAuditRecord(
+            audit_id=CognitionAuditId(row.audit_id),
+            tenant_id=row.tenant_id,
+            execution_id=row.execution_id,
+            usage_id=(
+                CognitionLLMUsageId(row.usage_id)
+                if row.usage_id is not None
+                else None
+            ),
+            prompt_full=await self._decrypt_audit_text(
+                row=row,
+                field="prompt_full",
+                encrypted=row.prompt_full,
+            ),
+            completion_full=await self._decrypt_audit_text(
+                row=row,
+                field="completion_full",
+                encrypted=row.completion_full,
+            ),
+            prompt_sha256=row.prompt_sha256,
+            completion_sha256=row.completion_sha256,
+            model_name=row.model_name,
+            token_usage=_as_dict(row.token_usage),
+            captured_at=row.captured_at,
+            subject_id=row.execution_id,
+        )
+
+
+def _record_to_row(
+    record: CognitionLLMUsageRecord,
+    *,
+    metadata_json: dict[str, Any] | None = None,
+) -> CognitionLLMUsageRow:
     return CognitionLLMUsageRow(
         usage_id=record.usage_id,
         tenant_id=record.tenant_id,
@@ -155,13 +295,15 @@ def _record_to_row(record: CognitionLLMUsageRecord) -> CognitionLLMUsageRow:
         estimated_cost_micro_usd=record.estimated_cost_micro_usd,
         status=record.status.value,
         created_at=record.created_at,
-        metadata_json=dict(record.metadata),
+        metadata_json=dict(record.metadata) if metadata_json is None else metadata_json,
     )
 
 
 def _update_row(
     row: CognitionLLMUsageRow,
     record: CognitionLLMUsageRecord,
+    *,
+    metadata_json: dict[str, Any] | None = None,
 ) -> None:
     row.execution_id = record.execution_id
     row.dispatch_id = record.dispatch_id
@@ -174,7 +316,7 @@ def _update_row(
     row.estimated_cost_micro_usd = record.estimated_cost_micro_usd
     row.status = record.status.value
     row.created_at = record.created_at
-    row.metadata_json = dict(record.metadata)
+    row.metadata_json = dict(record.metadata) if metadata_json is None else metadata_json
 
 
 def _row_to_record(row: CognitionLLMUsageRow) -> CognitionLLMUsageRecord:
@@ -198,25 +340,17 @@ def _row_to_record(row: CognitionLLMUsageRow) -> CognitionLLMUsageRecord:
 
 def _audit_record_to_row(
     record: CognitionAuditRecord,
-    encryptor: TenantCredentialEncryptor,
+    *,
+    prompt_full: bytes,
+    completion_full: bytes,
 ) -> CognitionAuditRecordRow:
     return CognitionAuditRecordRow(
         audit_id=record.audit_id,
         tenant_id=record.tenant_id,
         execution_id=record.execution_id,
         usage_id=record.usage_id,
-        prompt_full=_encrypt_text(
-            encryptor,
-            tenant_id=record.tenant_id,
-            key="prompt_full",
-            value=record.prompt_full,
-        ),
-        completion_full=_encrypt_text(
-            encryptor,
-            tenant_id=record.tenant_id,
-            key="completion_full",
-            value=record.completion_full,
-        ),
+        prompt_full=prompt_full,
+        completion_full=completion_full,
         prompt_sha256=record.prompt_sha256,
         completion_sha256=record.completion_sha256,
         model_name=record.model_name,
@@ -228,60 +362,19 @@ def _audit_record_to_row(
 def _update_audit_row(
     row: CognitionAuditRecordRow,
     record: CognitionAuditRecord,
-    encryptor: TenantCredentialEncryptor,
+    *,
+    prompt_full: bytes,
+    completion_full: bytes,
 ) -> None:
     row.execution_id = record.execution_id
     row.usage_id = record.usage_id
-    row.prompt_full = _encrypt_text(
-        encryptor,
-        tenant_id=record.tenant_id,
-        key="prompt_full",
-        value=record.prompt_full,
-    )
-    row.completion_full = _encrypt_text(
-        encryptor,
-        tenant_id=record.tenant_id,
-        key="completion_full",
-        value=record.completion_full,
-    )
+    row.prompt_full = prompt_full
+    row.completion_full = completion_full
     row.prompt_sha256 = record.prompt_sha256
     row.completion_sha256 = record.completion_sha256
     row.model_name = record.model_name
     row.token_usage = dict(record.token_usage)
     row.captured_at = record.captured_at
-
-
-def _audit_row_to_record(
-    row: CognitionAuditRecordRow,
-    encryptor: TenantCredentialEncryptor,
-) -> CognitionAuditRecord:
-    return CognitionAuditRecord(
-        audit_id=CognitionAuditId(row.audit_id),
-        tenant_id=row.tenant_id,
-        execution_id=row.execution_id,
-        usage_id=(
-            CognitionLLMUsageId(row.usage_id)
-            if row.usage_id is not None
-            else None
-        ),
-        prompt_full=_decrypt_text(
-            encryptor,
-            tenant_id=row.tenant_id,
-            key="prompt_full",
-            encrypted=row.prompt_full,
-        ),
-        completion_full=_decrypt_text(
-            encryptor,
-            tenant_id=row.tenant_id,
-            key="completion_full",
-            encrypted=row.completion_full,
-        ),
-        prompt_sha256=row.prompt_sha256,
-        completion_sha256=row.completion_sha256,
-        model_name=row.model_name,
-        token_usage=_as_dict(row.token_usage),
-        captured_at=row.captured_at,
-    )
 
 
 def _encrypt_text(

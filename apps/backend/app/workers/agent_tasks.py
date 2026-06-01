@@ -67,6 +67,7 @@ from app.cognition.exceptions import (
     ProviderTransientError,
 )
 from app.cognition.persistence import PostgresCognitionUsagePersistence
+from app.data_protection.crypto import DataProtectionService
 from app.cognition.models import DiagnosticLLMCompletion
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
@@ -668,6 +669,7 @@ async def _diagnostic_usage_exists(
     existing = await PostgresCognitionUsagePersistence(
         session,
         audit_encryptor=_cognition_audit_encryptor(),
+        data_protection=_data_protection_service(session),
     ).get_llm_usage(
         snapshot.usage_id,
         expected_tenant_id=snapshot.tenant_id,
@@ -1964,6 +1966,7 @@ def _diagnostic_cognition_runtime(
         usage_persistence=PostgresCognitionUsagePersistence(
             session,
             audit_encryptor=_cognition_audit_encryptor(),
+            data_protection=_data_protection_service(session),
         ),
         governance_repository=PostgresGovernanceRepository(session),
         redis_client=get_redis_client(),
@@ -1997,9 +2000,19 @@ def _cognition_audit_encryptor() -> TenantCredentialEncryptor:
     key = get_settings().TENANT_CREDENTIAL_MASTER_KEY
     if key:
         return TenantCredentialEncryptor(platform_master_key=key)
-    if _running_under_pytest():
+    if _active_pytest_case():
         return TenantCredentialEncryptor(platform_master_key=b"0" * 32)
     raise RuntimeError("TENANT_CREDENTIAL_MASTER_KEY must be configured")
+
+
+def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
+    settings = get_settings()
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        return None
+    return DataProtectionService.from_settings(session, settings)
 
 
 def _bounded_exception_message(exc: BaseException) -> str:
@@ -2018,6 +2031,10 @@ def _metadata_text(value: object) -> str | None:
 
 def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+
+def _active_pytest_case() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 def _timeline_idempotency_key(

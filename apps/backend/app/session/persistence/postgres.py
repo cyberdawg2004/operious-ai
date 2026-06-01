@@ -18,6 +18,7 @@ The parent lookup is a single PK SELECT — index-only.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, cast
 from uuid import UUID
 
@@ -27,6 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
+from app.data_protection.crypto import DataProtectionService
 from app.session.db.models import (
     SessionCorrelationRow,
     SessionEventRow,
@@ -67,14 +69,24 @@ class PostgresSessionPersistence(BaseRepository):
     transaction ownership lives in the service layer.
     """
 
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
+
     # ─── Sessions: revision-monotonic overwrite ──────────────────────
 
     async def save_session(
         self, record: SessionRecord
     ) -> SessionRecord:
+        protected_record = await self._protect_session_record(record)
         insert_stmt = (
             pg_insert(SessionRow)
-            .values(**_session_record_to_values(record))
+            .values(**_session_record_to_values(protected_record))
             .on_conflict_do_nothing(
                 index_elements=[SessionRow.session_id],
             )
@@ -84,7 +96,7 @@ class PostgresSessionPersistence(BaseRepository):
             await self.session.execute(insert_stmt)
         ).scalar_one_or_none()
         if inserted is not None:
-            return _session_row_to_record(inserted)
+            return await self._session_row_to_record(inserted)
 
         existing_row = await self._get_session_row(
             record.session_id,
@@ -94,7 +106,7 @@ class PostgresSessionPersistence(BaseRepository):
             raise SessionPersistenceError(
                 f"session {record.session_id} is not visible in tenant scope"
             )
-        existing = _session_row_to_record(existing_row)
+        existing = await self._session_row_to_record(existing_row)
         if record.revision < existing.revision:
             raise SessionPersistenceError(
                 "non-monotonic revision: existing="
@@ -104,7 +116,7 @@ class PostgresSessionPersistence(BaseRepository):
         if record.revision == existing.revision:
             return existing
 
-        _update_session_row(existing_row, record)
+        _update_session_row(existing_row, protected_record)
         return record
 
     # ─── Events: append-only with contiguous sequence ────────────────
@@ -117,12 +129,13 @@ class PostgresSessionPersistence(BaseRepository):
         # event). Enforce at the application layer so the error
         # message matches the in-memory backend's wording — Postgres
         # would otherwise raise a generic UNIQUE violation.
-        head_stmt = select(SessionRow.sequence_head).where(
+        parent_stmt = select(SessionRow).where(
             SessionRow.session_id == record.session_id
         )
-        head = (
-            await self.session.execute(head_stmt)
+        parent = (
+            await self.session.execute(parent_stmt)
         ).scalar_one_or_none()
+        head = None if parent is None else parent.sequence_head
         bucket_count_stmt = select(func.count()).select_from(
             SessionEventRow
         ).where(
@@ -148,7 +161,8 @@ class PostgresSessionPersistence(BaseRepository):
                     "non-monotonic event sequence: "
                     f"head={max_seq}, incoming={record.sequence}"
                 )
-        row = _event_record_to_row(record)
+        protected_record = await self._protect_event_record(record, parent=parent)
+        row = _event_record_to_row(protected_record)
         try:
             # SAVEPOINT isolation — see save_session docstring.
             async with self.session.begin_nested():
@@ -195,7 +209,7 @@ class PostgresSessionPersistence(BaseRepository):
         row = (
             await self.session.execute(stmt)
         ).scalar_one_or_none()
-        return None if row is None else _session_row_to_record(row)
+        return None if row is None else await self._session_row_to_record(row)
 
     async def _get_session_row(
         self,
@@ -235,7 +249,7 @@ class PostgresSessionPersistence(BaseRepository):
             ).scalar_one_or_none()
             if parent_tenant != expected_tenant_id:
                 return None
-        return _event_row_to_record(row)
+        return await self._event_row_to_record(row)
 
     async def get_event_by_idempotency_key(
         self,
@@ -262,7 +276,7 @@ class PostgresSessionPersistence(BaseRepository):
             ).scalar_one_or_none()
             if parent_tenant != expected_tenant_id:
                 return None
-        return _event_row_to_record(row)
+        return await self._event_row_to_record(row)
 
     async def get_correlation(
         self,
@@ -331,7 +345,9 @@ class PostgresSessionPersistence(BaseRepository):
             offset=query.offset,
         )
         return SessionRecordPage(
-            sessions=tuple(_session_row_to_record(r) for r in page.items),
+            sessions=tuple(
+                [await self._session_row_to_record(r) for r in page.items]
+            ),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
@@ -383,11 +399,78 @@ class PostgresSessionPersistence(BaseRepository):
             offset=query.offset,
         )
         return SessionRecordPage(
-            events=tuple(_event_row_to_record(r) for r in page.items),
+            events=tuple([await self._event_row_to_record(r) for r in page.items]),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
         )
+
+    async def _protect_session_record(self, record: SessionRecord) -> SessionRecord:
+        if self._data_protection is None or record.tenant_id is None:
+            return record
+        subject_id = _session_subject_id(record)
+        context_attributes = await self._data_protection.encrypt_json_values(
+            dict(record.context_attributes),
+            tenant_id=record.tenant_id,
+            subject_id=subject_id,
+            field="operational_sessions.context_attributes",
+        )
+        context_notes = record.context_notes
+        if context_notes is not None:
+            context_notes = await self._data_protection.encrypt_text(
+                context_notes,
+                tenant_id=record.tenant_id,
+                subject_id=subject_id,
+                field="operational_sessions.context_notes",
+            )
+        return replace(
+            record,
+            context_attributes=context_attributes,
+            context_notes=context_notes,
+        )
+
+    async def _protect_event_record(
+        self,
+        record: SessionEventRecord,
+        *,
+        parent: SessionRow | None,
+    ) -> SessionEventRecord:
+        if (
+            self._data_protection is None
+            or parent is None
+            or parent.tenant_id is None
+        ):
+            return record
+        payload = await self._data_protection.encrypt_json_values(
+            dict(record.payload),
+            tenant_id=parent.tenant_id,
+            subject_id=_row_subject_id(parent),
+            field="session_events.payload",
+        )
+        return replace(record, payload=payload)
+
+    async def _session_row_to_record(self, row: SessionRow) -> SessionRecord:
+        record = _session_row_to_record(row)
+        if self._data_protection is None or row.tenant_id is None:
+            return record
+        context_attributes = await self._data_protection.decrypt_json_values(
+            record.context_attributes
+        )
+        context_notes = record.context_notes
+        if context_notes is not None:
+            context_notes = await self._data_protection.decrypt_text(context_notes)
+        return replace(
+            record,
+            context_attributes=context_attributes,
+            context_notes=context_notes,
+        )
+
+    async def _event_row_to_record(self, row: SessionEventRow) -> SessionEventRecord:
+        record = _event_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        payload = await self._data_protection.decrypt_json_values(record.payload)
+        return replace(record, payload=payload)
 
     async def list_correlations(
         self,
@@ -472,6 +555,18 @@ def _session_record_to_values(record: SessionRecord) -> dict[str, Any]:
         "context_notes": record.context_notes,
         "metadata_json": dict(record.metadata),
     }
+
+
+def _session_subject_id(record: SessionRecord) -> str:
+    return (
+        record.principal_id
+        or record.external_handle
+        or str(record.session_id)
+    )
+
+
+def _row_subject_id(row: SessionRow) -> str:
+    return row.principal_id or row.external_handle or str(row.session_id)
 
 
 def _update_session_row(

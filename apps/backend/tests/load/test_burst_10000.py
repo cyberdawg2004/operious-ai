@@ -206,9 +206,16 @@ async def test_burst_10000_admission_and_correctness(
         f"{deferred_record_count}"
     )
 
+    await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
     await set_pg_rls_tenant(pg_session, "burst-10000-isolation-tenant")
     visible_boundary = await pg_session.execute(
-        text("SELECT COUNT(*) FROM boundary_ingress")
+        text(
+            """
+            SELECT COUNT(*)
+            FROM boundary_ingress
+            WHERE external_message_id LIKE 'burst-10000-item-%'
+            """
+        )
     )
     assert visible_boundary.scalar_one() == 0, (
         "Isolation tenant can see burst-10000 boundary_ingress rows. "

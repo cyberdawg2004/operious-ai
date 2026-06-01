@@ -182,6 +182,10 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
         "DELETE FROM tenant_knowledge_chunks WHERE tenant_id = :t",
         "DELETE FROM tenant_knowledge_document_versions WHERE tenant_id = :t",
         "DELETE FROM tenant_knowledge_documents WHERE tenant_id = :t",
+        "DELETE FROM data_protection_erasure_requests WHERE tenant_id = :t",
+        "DELETE FROM data_protection_legal_holds WHERE tenant_id = :t",
+        "DELETE FROM tenant_data_retention_policies WHERE tenant_id = :t",
+        "DELETE FROM data_protection_data_keys WHERE tenant_id = :t",
         "DELETE FROM tenants WHERE tenant_id = :t",
     ):
         await session.execute(text(statement), {"t": tenant_id})
@@ -387,6 +391,17 @@ async def test_citation_provenance_in_event_payload(
                     },
                 )
             ).scalar_one()
+            # Spec 1c: cognition usage metadata is encrypted at rest (#27). The
+            # raw column above holds ciphertext markers; decrypt through the same
+            # data-protection runtime the repository read path uses before
+            # comparing logical citation content. Must run before cleanup, since
+            # deleting the tenant now cascades to the data-protection keys.
+            from app.core.config import get_settings
+            from app.data_protection.crypto import DataProtectionService
+
+            usage_metadata = await DataProtectionService.from_settings(
+                session, get_settings()
+            ).decrypt_json_values(usage_metadata)
     finally:
         async with get_owner_session_factory()() as session:
             await _delete_tenant_data(session, _TENANT_ID)

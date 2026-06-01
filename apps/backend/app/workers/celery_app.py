@@ -16,6 +16,7 @@ from kombu import Queue
 
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
+from app.data_protection.crypto import DataProtectionService
 from app.db.session import get_owner_session_factory
 from app.hardening.observability.alert_evaluator import (
     get_alert_evaluator,
@@ -191,6 +192,14 @@ celery_conf.update(
             "schedule": 7200.0,
             "options": {"queue": QUEUE_SOP_INTELLIGENCE},
         },
+        # Enforce per-tenant data-retention policy by crypto-shredding cognition
+        # audit data past its window (#56). Daily is sufficient for day-grained
+        # retention; legal holds are respected by the service.
+        "purge-expired-protected-data-daily": {
+            "task": "purge_expired_protected_data",
+            "schedule": 86400.0,
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
     },
 )
 
@@ -331,6 +340,44 @@ def expire_crisis_deployments(limit: int = 100) -> None:
     except Exception as exc:  # noqa: BLE001 - maintenance task must not crash worker.
         logger.warning(
             "crisis_deployments_expiry_failed",
+            extra={"error": str(exc)},
+        )
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="purge_expired_protected_data",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
+    ignore_result=True,
+    max_retries=1,
+    default_retry_delay=60,
+)
+def purge_expired_protected_data() -> None:
+    """PRIVILEGED_PATH: crypto-shred cognition audit data past each tenant's
+    retention window (#56).
+
+    Enforces the per-tenant data-retention policy automatically. Without this
+    scheduled run, ``purge_expired_cognition_audits`` would never execute and
+    retention would be policy-on-paper only. Legal holds are respected inside
+    the service (held tenants are skipped).
+    """
+
+    # DLQ intentionally omitted (periodic beat task): a missed run is covered
+    # by the next scheduled run; no replay needed.
+    async def _run() -> None:
+        async with get_owner_session_factory()() as session:
+            service = DataProtectionService.from_settings(session, settings)
+            purged = await service.purge_expired_cognition_audits()
+            await session.commit()
+            logger.info(
+                "data_protection_retention_purged",
+                extra={"count": purged},
+            )
+
+    try:
+        _run_async(_run())
+    except Exception as exc:  # noqa: BLE001 - maintenance task must not crash worker.
+        logger.warning(
+            "data_protection_retention_purge_failed",
             extra={"error": str(exc)},
         )
 

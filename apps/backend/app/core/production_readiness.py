@@ -81,6 +81,15 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "TENANT_CREDENTIAL_MASTER_KEY is empty -> tenant channel "
             "credentials cannot be encrypted/used."
         )
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        problems.append(
+            "DATA_PROTECTION_MASTER_KEYS is empty and no tenant credential "
+            "master key fallback is configured -> customer data cannot be "
+            "envelope-encrypted at rest."
+        )
     if not (settings.AUDIT_EXPORT_HMAC_SECRET or "").strip():
         problems.append(
             "AUDIT_EXPORT_HMAC_SECRET is empty -> audit exports cannot be "

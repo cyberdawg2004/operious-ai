@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, TypeGuard
 from uuid import UUID
 
 from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError
 
+from app.data_protection.crypto import DataProtectionService
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
 from app.resolution.db.models import (
@@ -42,6 +44,15 @@ from app.resolution.persistence.records import (
 class PostgresResolutionProposalPersistence(BaseRepository):
     """Postgres-backed resolution proposal persistence."""
 
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
+
     async def create_resolution_proposal(
         self,
         record: ResolutionProposalRecord,
@@ -49,7 +60,8 @@ class PostgresResolutionProposalPersistence(BaseRepository):
         expected_tenant_id: str,
     ) -> ResolutionProposalRecord:
         _enforce_expected_tenant(record.tenant_id, expected_tenant_id)
-        row = _record_to_row(record)
+        protected_record = await self._protect_proposal(record)
+        row = _record_to_row(protected_record)
         try:
             async with self.session.begin_nested():
                 self.session.add(row)
@@ -69,7 +81,7 @@ class PostgresResolutionProposalPersistence(BaseRepository):
             proposal_id,
             expected_tenant_id=expected_tenant_id,
         )
-        return None if row is None else _row_to_record(row)
+        return None if row is None else await self._row_to_record(row)
 
     async def list_resolution_proposals(
         self,
@@ -92,7 +104,7 @@ class PostgresResolutionProposalPersistence(BaseRepository):
             offset=query.offset,
         )
         return ResolutionProposalPage(
-            items=tuple(_row_to_record(row) for row in page.items),
+            items=tuple([await self._row_to_record(row) for row in page.items]),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
@@ -105,7 +117,8 @@ class PostgresResolutionProposalPersistence(BaseRepository):
         expected_tenant_id: str,
     ) -> ResolutionOutboundDraftRecord:
         _enforce_expected_tenant(record.tenant_id, expected_tenant_id)
-        row = _draft_record_to_row(record)
+        protected_record = await self._protect_draft(record)
+        row = _draft_record_to_row(protected_record)
         try:
             async with self.session.begin_nested():
                 self.session.add(row)
@@ -125,7 +138,7 @@ class PostgresResolutionProposalPersistence(BaseRepository):
             draft_id,
             expected_tenant_id=expected_tenant_id,
         )
-        return None if row is None else _draft_row_to_record(row)
+        return None if row is None else await self._draft_row_to_record(row)
 
     async def list_resolution_outbound_drafts(
         self,
@@ -148,11 +161,96 @@ class PostgresResolutionProposalPersistence(BaseRepository):
             offset=query.offset,
         )
         return ResolutionOutboundDraftPage(
-            items=tuple(_draft_row_to_record(row) for row in page.items),
+            items=tuple(
+                [await self._draft_row_to_record(row) for row in page.items]
+            ),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
         )
+
+    async def _protect_proposal(
+        self,
+        record: ResolutionProposalRecord,
+    ) -> ResolutionProposalRecord:
+        if self._data_protection is None:
+            return record
+        subject_id = (
+            record.session_id or record.execution_id or str(record.proposal_id)
+        )
+        proposed_customer_reply = await self._data_protection.encrypt_text(
+            record.proposed_customer_reply,
+            tenant_id=record.tenant_id,
+            subject_id=subject_id,
+            field="resolution_proposals.proposed_customer_reply",
+        )
+        evidence_items: list[dict[str, Any]] = []
+        for item in record.evidence:
+            evidence_items.append(
+                await self._data_protection.encrypt_json_values(
+                    dict(item),
+                    tenant_id=record.tenant_id,
+                    subject_id=subject_id,
+                    field="resolution_proposals.evidence",
+                )
+            )
+        return replace(
+            record,
+            proposed_customer_reply=proposed_customer_reply,
+            evidence=tuple(evidence_items),
+        )
+
+    async def _protect_draft(
+        self,
+        record: ResolutionOutboundDraftRecord,
+    ) -> ResolutionOutboundDraftRecord:
+        if self._data_protection is None:
+            return record
+        draft_body = await self._data_protection.encrypt_text(
+            record.draft_body,
+            tenant_id=record.tenant_id,
+            subject_id=record.session_id or record.execution_id,
+            field="resolution_outbound_drafts.draft_body",
+        )
+        metadata = await self._data_protection.encrypt_json_values(
+            dict(record.metadata),
+            tenant_id=record.tenant_id,
+            subject_id=record.session_id or record.execution_id,
+            field="resolution_outbound_drafts.metadata_json",
+        )
+        return replace(record, draft_body=draft_body, metadata=metadata)
+
+    async def _row_to_record(
+        self,
+        row: ResolutionProposalRow,
+    ) -> ResolutionProposalRecord:
+        record = _row_to_record(row)
+        if self._data_protection is None:
+            return record
+        proposed_customer_reply = await self._data_protection.decrypt_text(
+            record.proposed_customer_reply
+        )
+        evidence_items: list[dict[str, Any]] = []
+        for item in record.evidence:
+            evidence_items.append(
+                await self._data_protection.decrypt_json_values(dict(item))
+            )
+        return replace(
+            record,
+            proposed_customer_reply=proposed_customer_reply,
+            evidence=tuple(evidence_items),
+        )
+
+    async def _draft_row_to_record(
+        self,
+        row: ResolutionOutboundDraftRow,
+    ) -> ResolutionOutboundDraftRecord:
+        record = _draft_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        draft_body = await self._data_protection.decrypt_text(record.draft_body)
+        metadata = await self._data_protection.decrypt_json_values(dict(record.metadata))
+        return replace(record, draft_body=draft_body, metadata=metadata)
 
     async def _proposal_row(
         self,

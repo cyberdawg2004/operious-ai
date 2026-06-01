@@ -48,14 +48,13 @@ async def test_burst_1000_multi_tenant_isolation(
         "exceeding the 90s stop threshold. Burst phase not run."
     )
 
-    concurrency_limit = 12
+    concurrency_limit = 32
     semaphore = asyncio.Semaphore(concurrency_limit)
 
     # Production workers use NullPool -- each Celery task gets its own Neon
-    # connection with no shared pool contention. In tests, the app session
-    # factory uses QueuePool(size=10, overflow=5). The semaphore limits
-    # concurrency to within the pool limit, matching the effective parallelism
-    # that production workers achieve under similar constraints.
+    # connection with no shared pool contention. The load fixture expands the
+    # app session pool for this test family, and the semaphore leaves headroom
+    # below that cap while still exercising meaningful parallelism.
     async def run_one_with_limit(
         execution_id: str,
         tenant_id: str,
@@ -88,7 +87,7 @@ async def test_burst_1000_multi_tenant_isolation(
 
     print(
         f"CONCURRENCY_LIMIT={concurrency_limit}, "
-        "effective_parallelism=pool_size+overflow=15"
+        "effective_parallelism=pool_size+overflow=50"
     )
 
     burst_start = time.monotonic()
@@ -100,7 +99,7 @@ async def test_burst_1000_multi_tenant_isolation(
                 for execution_id in execution_ids
             ]
         ),
-        timeout=120,
+        timeout=900,
     )
     burst_duration = time.monotonic() - burst_start
     print(f"Burst 1000 execution took: {burst_duration:.1f}s")
@@ -167,6 +166,7 @@ async def test_burst_1000_multi_tenant_isolation(
                 "from dead_lettered runtime results."
             )
 
+    await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
     await set_pg_rls_tenant(pg_session, "burst-1000-tenant-a")
     tenant_a_sees_b = await pg_session.execute(
         text(

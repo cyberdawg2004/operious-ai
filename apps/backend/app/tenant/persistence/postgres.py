@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
+from app.data_protection.crypto import DataProtectionService
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
 from app.tenant.db.models import (
@@ -74,6 +76,15 @@ from app.tenant.persistence.records import (
 
 class PostgresTenantConfigurationRepository(BaseRepository):
     """Postgres-backed tenant-owned configuration repository."""
+
+    def __init__(
+        self,
+        session: Any,
+        *,
+        data_protection: DataProtectionService | None = None,
+    ) -> None:
+        super().__init__(session)
+        self._data_protection = data_protection
 
     async def save_channel_configuration(
         self,
@@ -241,6 +252,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         expected_tenant_id: str,
     ) -> None:
         _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        protected_record = await self._protect_document_record(record)
         await self._ensure_tenant(expected_tenant_id)
         existing = await self._document_row(
             record.document_id, expected_tenant_id=expected_tenant_id
@@ -248,9 +260,9 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         try:
             async with self.session.begin_nested():
                 if existing is None:
-                    self.session.add(_document_record_to_row(record))
+                    self.session.add(_document_record_to_row(protected_record))
                 else:
-                    _update_document_row(existing, record)
+                    _update_document_row(existing, protected_record)
         except IntegrityError as exc:
             raise TenantConfigurationPersistenceError(
                 "knowledge document could not be persisted"
@@ -265,7 +277,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         row = await self._document_row(
             document_id, expected_tenant_id=expected_tenant_id
         )
-        return None if row is None else _document_row_to_record(row)
+        return None if row is None else await self._document_row_to_record(row)
 
     async def list_knowledge_documents(
         self,
@@ -297,7 +309,9 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             offset=query.offset,
         )
         return TenantKnowledgeDocumentPage(
-            items=tuple(_document_row_to_record(row) for row in page.items),
+            items=tuple(
+                [await self._document_row_to_record(row) for row in page.items]
+            ),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
@@ -310,6 +324,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         expected_tenant_id: str,
     ) -> None:
         _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        protected_record = await self._protect_document_version_record(record)
         await self._ensure_tenant(expected_tenant_id)
         existing = await self._document_version_row(
             record.document_id,
@@ -319,7 +334,9 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         try:
             async with self.session.begin_nested():
                 if existing is None:
-                    self.session.add(_document_version_record_to_row(record))
+                    self.session.add(
+                        _document_version_record_to_row(protected_record)
+                    )
                 else:
                     assert_version_row_unchanged_or_raise(existing, record)
         except IntegrityError as exc:
@@ -339,7 +356,7 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             version,
             expected_tenant_id=expected_tenant_id,
         )
-        return None if row is None else _document_version_row_to_record(row)
+        return None if row is None else await self._document_version_row_to_record(row)
 
     async def list_knowledge_document_versions(
         self,
@@ -378,10 +395,69 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             offset=query.offset,
         )
         return TenantKnowledgeDocumentVersionPage(
-            items=tuple(_document_version_row_to_record(row) for row in page.items),
+            items=tuple(
+                [
+                    await self._document_version_row_to_record(row)
+                    for row in page.items
+                ]
+            ),
             total=page.total,
             limit=page.limit,
             offset=page.offset,
+        )
+
+    async def _protect_document_record(
+        self,
+        record: TenantKnowledgeDocumentRecord,
+    ) -> TenantKnowledgeDocumentRecord:
+        if self._data_protection is None:
+            return record
+        content = await self._data_protection.encrypt_text(
+            record.content,
+            tenant_id=record.tenant_id,
+            subject_id=None,
+            field="tenant_knowledge_documents.content",
+            tenant_scoped=True,
+        )
+        return replace(record, content=content)
+
+    async def _protect_document_version_record(
+        self,
+        record: TenantKnowledgeDocumentVersionRecord,
+    ) -> TenantKnowledgeDocumentVersionRecord:
+        if self._data_protection is None:
+            return record
+        content = await self._data_protection.encrypt_text(
+            record.content,
+            tenant_id=record.tenant_id,
+            subject_id=None,
+            field="tenant_knowledge_document_versions.content",
+            tenant_scoped=True,
+        )
+        return replace(record, content=content)
+
+    async def _document_row_to_record(
+        self,
+        row: TenantKnowledgeDocumentRow,
+    ) -> TenantKnowledgeDocumentRecord:
+        record = _document_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        return replace(
+            record,
+            content=await self._data_protection.decrypt_text(record.content),
+        )
+
+    async def _document_version_row_to_record(
+        self,
+        row: TenantKnowledgeDocumentVersionRow,
+    ) -> TenantKnowledgeDocumentVersionRecord:
+        record = _document_version_row_to_record(row)
+        if self._data_protection is None:
+            return record
+        return replace(
+            record,
+            content=await self._data_protection.decrypt_text(record.content),
         )
 
     async def save_governance_policy(

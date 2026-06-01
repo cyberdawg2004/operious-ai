@@ -135,6 +135,7 @@ class CognitionAuditRecord:
     token_usage: Mapping[str, Any]
     captured_at: datetime
     usage_id: CognitionLLMUsageId | None = None
+    subject_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

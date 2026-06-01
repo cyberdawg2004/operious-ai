@@ -61,6 +61,8 @@ def _create_app():
     from app.auth.providers import StaticTokenProvider
     from app.dependencies.authority import (
         TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
+        TENANT_GOVERNANCE_READ_CAPABILITY,
+        TENANT_OPERATIONS_READ_CAPABILITY,
     )
     from app.main import create_app
 
@@ -71,7 +73,11 @@ def _create_app():
                 tenant_id="anker-pilot",
                 principal_id="smoke-operator",
                 capabilities=frozenset(
-                    {TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY}
+                    {
+                        TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
+                        TENANT_GOVERNANCE_READ_CAPABILITY,
+                        TENANT_OPERATIONS_READ_CAPABILITY,
+                    }
                 ),
             )
         }
@@ -229,7 +235,8 @@ async def test_full_ticket_to_timeline_chain():
 
         # Step 3 — verify session timeline populated
         timeline = await client.get(
-            f"/api/v1/session/{session_id}/timeline", headers=SMOKE_HEADERS
+            f"/api/v1/session/{session_id}/timeline",
+            headers=SMOKE_ADMIN_HEADERS,
         )
         assert timeline.status_code == 200
         events = timeline.json()["events"]
@@ -237,7 +244,8 @@ async def test_full_ticket_to_timeline_chain():
 
         # Step 4 — verify governance decision recorded
         governance = await client.get(
-            "/api/v1/governance/decisions", headers=SMOKE_HEADERS
+            "/api/v1/governance/decisions",
+            headers=SMOKE_ADMIN_HEADERS,
         )
         assert governance.status_code == 200
         assert len(governance.json()["decisions"]) > 0

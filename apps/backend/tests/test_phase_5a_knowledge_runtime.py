@@ -15,7 +15,10 @@ from app.api.v1.routers import knowledge as knowledge_router
 from app.core.config import get_settings
 from app.auth import VerifiedIdentity
 from app.auth.providers import StaticTokenProvider
-from app.dependencies.authority import TENANT_KNOWLEDGE_WRITE_CAPABILITY
+from app.dependencies.authority import (
+    TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+    TENANT_OPERATIONS_READ_CAPABILITY,
+)
 from app.dependencies.database import get_db_session
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
@@ -608,12 +611,22 @@ async def knowledge_client(
             _TENANT_ID: VerifiedIdentity(
                 tenant_id=_TENANT_ID,
                 principal_id="principal-admin",
-                capabilities=frozenset({TENANT_KNOWLEDGE_WRITE_CAPABILITY}),
+                capabilities=frozenset(
+                    {
+                        TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+                        TENANT_OPERATIONS_READ_CAPABILITY,
+                    }
+                ),
             ),
             _OTHER_TENANT_ID: VerifiedIdentity(
                 tenant_id=_OTHER_TENANT_ID,
                 principal_id="principal-admin",
-                capabilities=frozenset({TENANT_KNOWLEDGE_WRITE_CAPABILITY}),
+                capabilities=frozenset(
+                    {
+                        TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+                        TENANT_OPERATIONS_READ_CAPABILITY,
+                    }
+                ),
             )
         }
     )

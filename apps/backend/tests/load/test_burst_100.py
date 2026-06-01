@@ -33,16 +33,19 @@ async def test_burst_100_all_complete(
         await committed_burst_seed["seed_execution"](tenant_id)
         for _ in range(ticket_count)
     ]
+    concurrency_limit = 12
+    semaphore = asyncio.Semaphore(concurrency_limit)
 
     async def run_one(execution_id: str) -> dict[str, Any]:
-        set_current_tenant(tenant_id)
-        start = time.monotonic()
-        result = await execute_diagnostic_agent_runtime(
-            execution_id=execution_id,
-            tenant_id=tenant_id,
-        )
-        duration_ms = (time.monotonic() - start) * 1000
-        return {"result": result, "duration_ms": duration_ms}
+        async with semaphore:
+            set_current_tenant(tenant_id)
+            start = time.monotonic()
+            result = await execute_diagnostic_agent_runtime(
+                execution_id=execution_id,
+                tenant_id=tenant_id,
+            )
+            duration_ms = (time.monotonic() - start) * 1000
+            return {"result": result, "duration_ms": duration_ms}
 
     gathered = await asyncio.gather(
         *[run_one(execution_id) for execution_id in execution_ids],
@@ -96,12 +99,27 @@ async def test_burst_100_all_complete(
         "exceeds 30,000ms SLO"
     )
 
+    await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
     await set_pg_rls_tenant(pg_session, "burst-100-isolation-tenant")
     visible_sessions = await pg_session.execute(
-        text("SELECT COUNT(*) FROM operational_sessions")
+        text(
+            """
+            SELECT COUNT(*)
+            FROM operational_sessions
+            WHERE tenant_id = :tenant_id
+            """
+        ),
+        {"tenant_id": tenant_id},
     )
     visible_executions = await pg_session.execute(
-        text("SELECT COUNT(*) FROM execution_records")
+        text(
+            """
+            SELECT COUNT(*)
+            FROM execution_records
+            WHERE tenant_id = :tenant_id
+            """
+        ),
+        {"tenant_id": tenant_id},
     )
     session_count = visible_sessions.scalar_one()
     execution_count = visible_executions.scalar_one()

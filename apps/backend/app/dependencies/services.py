@@ -81,6 +81,7 @@ from app.cognition.sop_approval_event_publisher import (
 from app.core.config import get_settings
 from app.core.admission import admission_thresholds_from_settings
 from app.core.redis import get_redis_client
+from app.data_protection.crypto import DataProtectionService
 from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import (
     ExecutionOutboxClaimId,
@@ -230,6 +231,18 @@ def get_quota_runtime(request: Request) -> TenantQuotaRuntime:
     return cast(TenantQuotaRuntime, request.app.state.quota_runtime)
 
 
+def _data_protection_service(
+    session: AsyncSession,
+) -> DataProtectionService | None:
+    settings = get_settings()
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        return None
+    return DataProtectionService.from_settings(session, settings)
+
+
 # ─── Phase 3.2 substrate repository factories ───────────────────────────
 
 
@@ -248,7 +261,10 @@ def get_session_repository(
     session: AsyncSession = Depends(get_db_session),
 ) -> SessionPersistenceProtocol:
     """Return the Postgres session-persistence backend for this request."""
-    return PostgresSessionPersistence(session)
+    return PostgresSessionPersistence(
+        session,
+        data_protection=_data_protection_service(session),
+    )
 
 
 def get_session_read_service(
@@ -262,7 +278,10 @@ def get_coordination_repository(
     session: AsyncSession = Depends(get_db_session),
 ) -> CoordinationPersistenceProtocol:
     """Return the Postgres coordination-persistence backend for this request."""
-    return PostgresCoordinationPersistence(session)
+    return PostgresCoordinationPersistence(
+        session,
+        data_protection=_data_protection_service(session),
+    )
 
 
 def get_arbitration_repository(
@@ -276,7 +295,10 @@ def get_boundary_repository(
     session: AsyncSession = Depends(get_db_session),
 ) -> BoundaryPersistenceProtocol:
     """Return the Postgres boundary-persistence backend for this request."""
-    return PostgresBoundaryPersistence(session)
+    return PostgresBoundaryPersistence(
+        session,
+        data_protection=_data_protection_service(session),
+    )
 
 
 def get_ticket_ingress_service(
@@ -457,6 +479,7 @@ async def get_conversation_service(
 ) -> AsyncIterator[ConversationService]:
     """Return the live conversation service for this request."""
 
+    data_protection = _data_protection_service(session)
     execution_persistence = PostgresExecutionPersistence(session)
     execution_runtime = ExecutionRuntime(persistence=execution_persistence)
     deferred_execution_publisher = _DeferredExecutionPublisher(
@@ -466,7 +489,10 @@ async def get_conversation_service(
         publisher_id="api:conversation",
     )
     service = build_conversation_service(
-        session_repository=PostgresSessionPersistence(session),
+        session_repository=PostgresSessionPersistence(
+            session,
+            data_protection=data_protection,
+        ),
         # CoordinationRuntime is composed per request. There is no
         # app-state CoordinationPolicyRuntime singleton to invalidate;
         # each newly created service receives the current composition.
@@ -474,7 +500,10 @@ async def get_conversation_service(
             governance_runtime=_dispatch_governance_runtime(
                 PostgresGovernanceRepository(session)
             ),
-            persistence=PostgresCoordinationPersistence(session),
+            persistence=PostgresCoordinationPersistence(
+                session,
+                data_protection=data_protection,
+            ),
             registry=_dispatch_coordination_registry(),
         ),
         execution_runtime=execution_runtime,
@@ -504,6 +533,7 @@ async def get_dispatch_service(
     execution_publisher: ExecutionPublisher = Depends(get_execution_publisher),
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
+    data_protection = _data_protection_service(session)
     execution_runtime = ExecutionRuntime(
         persistence=PostgresExecutionPersistence(session),
     )
@@ -518,7 +548,10 @@ async def get_dispatch_service(
         escalation_runtime=EscalationAgentRuntime(
             escalation_persistence=PostgresEscalationPersistence(session),
             governance_repository=PostgresGovernanceRepository(session),
-            session_persistence=PostgresSessionPersistence(session),
+            session_persistence=PostgresSessionPersistence(
+                session,
+                data_protection=data_protection,
+            ),
         ),
         session=session,
         publisher_id="api:dispatch",
@@ -528,7 +561,10 @@ async def get_dispatch_service(
             repository=PostgresTenantConfigurationRepository(session),
         )
     )
-    session_repository = PostgresSessionPersistence(session)
+    session_repository = PostgresSessionPersistence(
+        session,
+        data_protection=data_protection,
+    )
     service = DispatchService(
         # Request-scoped coordination runtime: no cross-request policy
         # registry cache exists in the web process.
@@ -536,10 +572,16 @@ async def get_dispatch_service(
             governance_runtime=_dispatch_governance_runtime(
                 PostgresGovernanceRepository(session)
             ),
-            persistence=PostgresCoordinationPersistence(session),
+            persistence=PostgresCoordinationPersistence(
+                session,
+                data_protection=data_protection,
+            ),
             registry=_dispatch_coordination_registry(),
         ),
-        boundary_ingress_repository=PostgresBoundaryPersistence(session),
+        boundary_ingress_repository=PostgresBoundaryPersistence(
+            session,
+            data_protection=data_protection,
+        ),
         session_repository=session_repository,
         execution_runtime=execution_runtime,
         execution_publisher=deferred_execution_publisher,
@@ -616,11 +658,15 @@ def get_escalation_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> EscalationService:
     """Return the Command Center escalation service for this request."""
+    data_protection = _data_protection_service(session)
     return EscalationService(
         runtime=EscalationAgentRuntime(
             escalation_persistence=PostgresEscalationPersistence(session),
             governance_repository=PostgresGovernanceRepository(session),
-            session_persistence=PostgresSessionPersistence(session),
+            session_persistence=PostgresSessionPersistence(
+                session,
+                data_protection=data_protection,
+            ),
         ),
         session=session,
     )
@@ -632,8 +678,12 @@ def get_tenant_configuration_service(
 ) -> TenantConfigurationService:
     """Return the tenant-owned configuration service for this request."""
     settings = get_settings()
+    data_protection = _data_protection_service(session)
     runtime = TenantConfigurationRuntime(
-        repository=PostgresTenantConfigurationRepository(session),
+        repository=PostgresTenantConfigurationRepository(
+            session,
+            data_protection=data_protection,
+        ),
         credential_encryptor=TenantCredentialEncryptor(
             platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
         ),
@@ -667,6 +717,7 @@ def get_cognition_service(
 ) -> CognitionService:
     """Return the Cognition Hub lifecycle service for this request."""
     settings = get_settings()
+    data_protection = _data_protection_service(session)
     audit_encryptor = (
         TenantCredentialEncryptor(
             platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
@@ -678,12 +729,16 @@ def get_cognition_service(
         runtime=CognitionRuntime(
             approval_persistence=PostgresSOPApprovalPersistence(session),
             tenant_configuration_repository=(
-                PostgresTenantConfigurationRepository(session)
+                PostgresTenantConfigurationRepository(
+                    session,
+                    data_protection=data_protection,
+                )
             ),
         ),
         usage_persistence=PostgresCognitionUsagePersistence(
             session,
             audit_encryptor=audit_encryptor,
+            data_protection=data_protection,
         ),
         approval_event_projector=PostgresSOPApprovalApplyEventProjector(
             session=session
@@ -697,14 +752,21 @@ def get_action_approval_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> ActionApprovalService:
     """Return the manager action-approval service for this request."""
+    data_protection = _data_protection_service(session)
     governance_repository = PostgresGovernanceRepository(session)
-    session_repository = PostgresSessionPersistence(session)
+    session_repository = PostgresSessionPersistence(
+        session,
+        data_protection=data_protection,
+    )
     timeline_runtime = TimelineRuntime(persistence=session_repository)
     return ActionApprovalService(
         approval_repository=PostgresActionApprovalRepository(session),
         grant_repository=PostgresAgentActionGrantRepository(session),
         governance_repository=governance_repository,
-        resolution_repository=PostgresResolutionProposalPersistence(session),
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session,
+            data_protection=data_protection,
+        ),
         session_repository=session_repository,
         orchestration_runtime=ActionOrchestrationRuntime(
             tool_invoker=ToolInvoker(
@@ -747,9 +809,16 @@ def get_knowledge_service(
 ) -> KnowledgeService:
     """Return the tenant knowledge ingestion/retrieval service."""
     settings = get_settings()
+    data_protection = _data_protection_service(session)
     runtime = KnowledgeRuntime(
-        repository=PostgresKnowledgeRepository(session),
-        tenant_configuration_repository=PostgresTenantConfigurationRepository(session),
+        repository=PostgresKnowledgeRepository(
+            session,
+            data_protection=data_protection,
+        ),
+        tenant_configuration_repository=PostgresTenantConfigurationRepository(
+            session,
+            data_protection=data_protection,
+        ),
         embedding_provider=DeterministicHashEmbeddingProvider(),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
@@ -766,15 +835,22 @@ def get_sop_intelligence_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> SOPIntelligenceService:
     """Return the SOP intelligence proposal service for this request."""
+    data_protection = _data_protection_service(session)
     return SOPIntelligenceService(
         runtime=SOPIntelligenceRuntime(
             approval_persistence=PostgresSOPApprovalPersistence(session),
-            session_persistence=PostgresSessionPersistence(session),
+            session_persistence=PostgresSessionPersistence(
+                session,
+                data_protection=data_protection,
+            ),
             supervisor_repository=PostgresSupervisorRepository(session),
             qa_persistence=PostgresQAPersistence(session),
             governance_repository=PostgresGovernanceRepository(session),
             tenant_configuration_repository=(
-                PostgresTenantConfigurationRepository(session)
+                PostgresTenantConfigurationRepository(
+                    session,
+                    data_protection=data_protection,
+                )
             ),
         )
     )

@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.runtime.db.models import ProviderCircuitStateRow
@@ -462,17 +463,19 @@ class ProviderCircuitBreaker:
         if self._session is None:
             self._memory[(snapshot.tenant_id, snapshot.provider_name)] = snapshot
             return snapshot
-        row = (
-            await self._session.execute(
-                select(ProviderCircuitStateRow).where(
-                    ProviderCircuitStateRow.state_id == snapshot.state_id
-                )
+        table = cast(Any, ProviderCircuitStateRow.__table__)
+        values = _snapshot_values(snapshot)
+        update_values = dict(values)
+        update_values.pop("state_id", None)
+        stmt = (
+            pg_insert(table)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=[table.c.state_id],
+                set_=update_values,
             )
-        ).scalar_one_or_none()
-        if row is None:
-            row = ProviderCircuitStateRow(state_id=snapshot.state_id)
-            self._session.add(row)
-        _apply_snapshot(row, snapshot)
+        )
+        await self._session.execute(stmt)
         await self._session.flush()
         if self._auto_commit:
             await self._session.commit()
@@ -543,23 +546,23 @@ def _str_or_existing(
     return value
 
 
-def _apply_snapshot(
-    row: ProviderCircuitStateRow,
-    snapshot: ProviderCircuitSnapshot,
-) -> None:
-    row.tenant_id = snapshot.tenant_id
-    row.provider_name = snapshot.provider_name
-    row.state = snapshot.state.value
-    row.consecutive_failures = snapshot.consecutive_failures
-    row.retry_count = snapshot.retry_count
-    row.retry_window_started_at = snapshot.retry_window_started_at
-    row.opened_at = snapshot.opened_at
-    row.open_until = snapshot.open_until
-    row.half_open_trial_started_at = snapshot.half_open_trial_started_at
-    row.last_failure_reason = snapshot.last_failure_reason
-    row.last_transition_at = snapshot.last_transition_at
-    row.updated_at = snapshot.updated_at
-    row.metadata_json = dict(snapshot.metadata)
+def _snapshot_values(snapshot: ProviderCircuitSnapshot) -> dict[str, Any]:
+    return {
+        "state_id": snapshot.state_id,
+        "tenant_id": snapshot.tenant_id,
+        "provider_name": snapshot.provider_name,
+        "state": snapshot.state.value,
+        "consecutive_failures": snapshot.consecutive_failures,
+        "retry_count": snapshot.retry_count,
+        "retry_window_started_at": snapshot.retry_window_started_at,
+        "opened_at": snapshot.opened_at,
+        "open_until": snapshot.open_until,
+        "half_open_trial_started_at": snapshot.half_open_trial_started_at,
+        "last_failure_reason": snapshot.last_failure_reason,
+        "last_transition_at": snapshot.last_transition_at,
+        "updated_at": snapshot.updated_at,
+        "metadata": dict(snapshot.metadata),
+    }
 
 
 def _snapshot_from_row(row: ProviderCircuitStateRow) -> ProviderCircuitSnapshot:

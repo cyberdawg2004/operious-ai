@@ -9,7 +9,11 @@ from app.api.v1.schemas.knowledge import (
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_knowledge_write,
+    require_tenant_operations_read,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_knowledge_service
 from app.knowledge.exceptions import (
     KnowledgeDocumentNotFoundError,
@@ -25,6 +29,7 @@ router = APIRouter(tags=["knowledge"])
 @router.post(
     "/documents/{document_id}/ingest",
     response_model=KnowledgeIngestionResponse,
+    dependencies=[Depends(require_tenant_knowledge_write)],
 )
 async def ingest_knowledge_document(
     document_id: str,
@@ -57,6 +62,7 @@ async def ingest_knowledge_document(
 @router.post(
     "/search",
     response_model=KnowledgeSearchResponse,
+    dependencies=[Depends(require_tenant_operations_read)],
 )
 async def search_knowledge(
     request: KnowledgeSearchRequest,
