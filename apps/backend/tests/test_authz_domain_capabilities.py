@@ -82,6 +82,10 @@ def test_permission_map_audit() -> None:
     assert PERMISSION_CAPABILITY_MAP.get("read:tenant_audit") == "tenant.audit.export"
 
 
+# ── Integration: shared TestClient import ────────────────────────────────────
+
+from starlette.testclient import TestClient
+
 # ── Structural: observability router uses the capability dep on all endpoints ─
 
 from app.api.v1.routers import observability as _obs_router_module
@@ -133,3 +137,52 @@ def test_observability_dep_present_on_metrics_dlq_alerts_traces() -> None:
         assert route is not None, f"Route {path!r} not found"
         deps = set(_dep_names(route))
         assert gated <= deps, f"{path} missing cap dep, has: {deps}"
+
+
+# ── Structural: audit export endpoint requires capability dep ─────────────────
+
+def test_audit_export_endpoint_has_capability_dep() -> None:
+    from app.api.v1.routers.audit_export import router as audit_router
+    export_routes = [
+        r for r in audit_router.routes
+        if getattr(r, "path", "") == "/export"
+    ]
+    assert export_routes, "GET /export route not found"
+    deps = set(_dep_names(export_routes[0]))
+    assert "require_tenant_audit_export" in deps, (
+        f"GET /export missing require_tenant_audit_export. Has: {deps}"
+    )
+
+
+# ── Body cap: POST /audit/verify rejects > 256 KiB ───────────────────────────
+
+def test_audit_verify_body_cap_rejects_large_body() -> None:
+    import json
+    import os
+    from unittest.mock import patch
+    from app.core.config import get_settings
+    from app.main import create_app
+
+    get_settings.cache_clear()
+    try:
+        with patch.dict(os.environ, {
+            "ENVIRONMENT": "test",
+            "RATE_LIMIT_ENABLED": "false",
+            "AUDIT_EXPORT_HMAC_SECRET": "s" * 32,
+        }):
+            app = create_app()
+    finally:
+        get_settings.cache_clear()
+
+    # Build a body just over 256 KiB.
+    large_export = {"signature": "x", "payload": "y" * (260 * 1024)}
+    body = json.dumps({"export": large_export}).encode()
+    assert len(body) > 256 * 1024
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/v1/audit/verify",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+    assert resp.status_code == 413

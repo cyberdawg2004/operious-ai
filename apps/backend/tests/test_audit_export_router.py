@@ -15,8 +15,16 @@ import pytest_asyncio
 from app.api.v1.schemas.audit_export import AuditExportResponse
 from app.boundary.persistence import InMemoryBoundaryPersistence
 from app.core.config import get_settings
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    require_tenant_audit_export,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_audit_export_service
+from app.identity import AuthorityContext
+
+_AUDIT_CAP_CTX = AuthorityContext(
+    tenant_id="tenant-acme", capabilities=("tenant.audit.export",)
+)
 from app.events import (
     EventCausality,
     EventChronology,
@@ -62,6 +70,7 @@ async def audit_export_client(
         service
     )
     app.dependency_overrides[require_tenant_scope] = _tenant_scope_override
+    app.dependency_overrides[require_tenant_audit_export] = lambda: _AUDIT_CAP_CTX
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -222,6 +231,7 @@ async def test_audit_export_503_without_secret(
         service
     )
     app.dependency_overrides[require_tenant_scope] = _tenant_scope_override
+    app.dependency_overrides[require_tenant_audit_export] = lambda: _AUDIT_CAP_CTX
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
