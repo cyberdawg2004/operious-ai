@@ -94,6 +94,19 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "the voice WebSocket cannot authenticate sessions."
         )
 
+    # ── Webhook signature canonical URL (spec 1b #23) ────────────────
+    if settings.WEBHOOK_TRUST_URL_HEADER:
+        problems.append(
+            "WEBHOOK_TRUST_URL_HEADER=true -> webhook/voice provider signatures "
+            "would trust a client-supplied canonical URL header; this must be "
+            "false in production."
+        )
+    elif not settings.public_base_url_normalized:
+        problems.append(
+            "PUBLIC_BASE_URL is empty -> webhook/voice provider signatures "
+            "cannot be verified against a server-derived URL."
+        )
+
     return tuple(problems)
 
 

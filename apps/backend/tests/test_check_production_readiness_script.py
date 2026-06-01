@@ -16,6 +16,7 @@ def _ready_production(**overrides: object) -> Settings:
         "OPENAI_API_KEY": "sk-openai-real",
         "TENANT_CREDENTIAL_MASTER_KEY": "x" * 32,
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
+        "PUBLIC_BASE_URL": "https://api.operious.com",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
