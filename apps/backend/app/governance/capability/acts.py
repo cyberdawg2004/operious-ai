@@ -74,6 +74,7 @@ class OperationalAct(StrEnum):
     TENANT_CONFIG_CHANGE_APPROVE = "governance:tenant_config_change_approve"
     TENANT_CONFIG_CHANGE_REJECT = "governance:tenant_config_change_reject"
     TENANT_CONFIG_CHANGE_APPLY = "governance:tenant_config_change_apply"
+    TENANT_CONFIG_CHANGE_REVOKE = "governance:tenant_config_change_revoke"
 
     # ─── execution chronology projection ────────────────────────────
     EXECUTION_REQUEST = "execution:request"

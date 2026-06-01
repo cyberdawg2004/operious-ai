@@ -184,6 +184,7 @@ async def test_apply_only_after_approved(pg_session: AsyncSession) -> None:
     applied = await service.apply(
         change_request_id=proposed.change_request_id,
         expected_tenant_id=tenant_id,
+        applied_by="principal-b",
     )
 
     assert applied.status is TenantConfigChangeRequestStatus.APPLIED
@@ -215,6 +216,7 @@ async def test_apply_unapproved_request_denied(pg_session: AsyncSession) -> None
         await service.apply(
             change_request_id=proposed.change_request_id,
             expected_tenant_id=tenant_id,
+            applied_by="principal-b",
         )
 
 

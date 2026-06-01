@@ -168,14 +168,20 @@ class TenantConfigChangeRequestService:
         *,
         change_request_id: uuid.UUID | str,
         expected_tenant_id: str,
+        applied_by: str,
     ) -> TenantConfigChangeRequestRecord:
+        if not applied_by or not applied_by.strip():
+            raise TenantConfigChangeRequestLifecycleError(
+                "applied_by must identify the principal who applied the change"
+            )
         record = await self._require(
             change_request_id,
             expected_tenant_id=expected_tenant_id,
         )
         if record.status is not TenantConfigChangeRequestStatus.APPROVED:
             raise TenantConfigChangeRequestLifecycleError(
-                "only APPROVED tenant config change requests can be applied"
+                f"cannot apply a {record.status.value} change request; "
+                "only APPROVED requests can be applied"
             )
         if record.approved_by is None:
             raise TenantConfigChangeRequestLifecycleError(
@@ -186,6 +192,7 @@ class TenantConfigChangeRequestService:
             record,
             status=TenantConfigChangeRequestStatus.APPLIED,
             applied_at=_utcnow(),
+            applied_by=applied_by,
             outcome_payload=outcome,
         )
         persisted = await self._repository.update(
@@ -198,6 +205,49 @@ class TenantConfigChangeRequestService:
             await self._tenant_configuration.publish_governance_policy_invalidation(
                 tenant_id=expected_tenant_id
             )
+        return persisted
+
+    async def revoke(
+        self,
+        *,
+        change_request_id: uuid.UUID | str,
+        expected_tenant_id: str,
+        revoked_by: str,
+    ) -> TenantConfigChangeRequestRecord:
+        """Revoke an APPROVED change request before it is applied.
+
+        Only APPROVED requests can be revoked; APPLIED, REJECTED, and
+        already-REVOKED requests raise
+        :class:`TenantConfigChangeRequestLifecycleError`. Any principal
+        holding the ``tenant.config.approve`` capability may revoke — there
+        is no additional same-principal restriction (revocation undoes a grant,
+        it is not a new approval).
+        """
+        if not revoked_by or not revoked_by.strip():
+            raise TenantConfigChangeRequestLifecycleError(
+                "revoked_by must identify the principal who revoked the change"
+            )
+        record = await self._require(
+            change_request_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if record.status is not TenantConfigChangeRequestStatus.APPROVED:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"cannot revoke a {record.status.value} change request; "
+                "only APPROVED requests can be revoked"
+            )
+        revoked = replace(
+            record,
+            status=TenantConfigChangeRequestStatus.REVOKED,
+            revoked_by=revoked_by,
+            revoked_at=_utcnow(),
+        )
+        persisted = await self._repository.update(
+            revoked,
+            expected_tenant_id=expected_tenant_id,
+        )
+        await self._append_status_event(persisted)
+        await self._session.commit()
         return persisted
 
     async def list(
@@ -624,6 +674,9 @@ def _act_for_status(status: TenantConfigChangeRequestStatus) -> OperationalAct:
         TenantConfigChangeRequestStatus.APPLIED: (
             OperationalAct.TENANT_CONFIG_CHANGE_APPLY
         ),
+        TenantConfigChangeRequestStatus.REVOKED: (
+            OperationalAct.TENANT_CONFIG_CHANGE_REVOKE
+        ),
     }[status]
 
 
@@ -633,6 +686,7 @@ def _sequence_for_status(status: TenantConfigChangeRequestStatus) -> int:
         TenantConfigChangeRequestStatus.APPROVED: 1,
         TenantConfigChangeRequestStatus.REJECTED: 1,
         TenantConfigChangeRequestStatus.APPLIED: 2,
+        TenantConfigChangeRequestStatus.REVOKED: 2,
     }[status]
 
 
@@ -643,6 +697,8 @@ def _timestamp_for_status(record: TenantConfigChangeRequestRecord) -> datetime:
         return record.rejected_at or record.proposed_at
     if record.status is TenantConfigChangeRequestStatus.APPLIED:
         return record.applied_at or record.approved_at or record.proposed_at
+    if record.status is TenantConfigChangeRequestStatus.REVOKED:
+        return record.revoked_at or record.approved_at or record.proposed_at
     return record.proposed_at
 
 
@@ -652,7 +708,9 @@ def _principal_for_status(record: TenantConfigChangeRequestRecord) -> str:
     if record.status is TenantConfigChangeRequestStatus.REJECTED:
         return record.rejected_by or record.proposed_by
     if record.status is TenantConfigChangeRequestStatus.APPLIED:
-        return record.approved_by or record.proposed_by
+        return record.applied_by or record.approved_by or record.proposed_by
+    if record.status is TenantConfigChangeRequestStatus.REVOKED:
+        return record.revoked_by or record.approved_by or record.proposed_by
     return record.proposed_by
 
 
