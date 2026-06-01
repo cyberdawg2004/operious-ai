@@ -121,3 +121,100 @@ async def test_ensure_stream_access_operator_bypass() -> None:
         calling_principal_id="principal-B",
         is_operator=True,
     )
+
+
+# ── Router-level (HTTP) wiring tests ─────────────────────────────────────────
+# The router must extract principal_id + operator capability from the verified
+# authority and thread them into the service, and map ConversationAccessDenied
+# to a 403. Service-layer tests alone do not prove this wiring.
+
+import os
+from unittest.mock import patch
+
+from starlette.testclient import TestClient
+
+from app.core.config import get_settings
+from app.main import create_app
+from app.dependencies.authority import OPERATOR_CAPABILITY, require_authority, require_tenant_scope
+from app.dependencies.services import get_conversation_service
+from app.identity import AuthorityContext
+from app.services.conversation_service import ConversationMessageSubmission
+
+
+class _RecordingService:
+    """Records the ownership kwargs the router threads in; optionally denies."""
+
+    def __init__(self, *, deny: bool = False) -> None:
+        self.deny = deny
+        self.received: dict[str, object] = {}
+
+    async def submit_message(self, **kwargs: object) -> ConversationMessageSubmission:
+        self.received = kwargs
+        if self.deny:
+            raise ConversationAccessDenied("denied")
+        return ConversationMessageSubmission(
+            turn_id="turn-1", phase_a_response="ok", execution_id="exec-1"
+        )
+
+
+def _conversation_client(*, principal_id: str | None, capabilities: tuple[str, ...], service):
+    ctx = AuthorityContext(
+        tenant_id="t-1", principal_id=principal_id, capabilities=capabilities
+    )
+    get_settings.cache_clear()
+    try:
+        with patch.dict(os.environ, {"ENVIRONMENT": "test", "RATE_LIMIT_ENABLED": "false"}):
+            app = create_app()
+    finally:
+        get_settings.cache_clear()
+    app.dependency_overrides[require_tenant_scope] = lambda: "t-1"
+    app.dependency_overrides[require_authority] = lambda: ctx
+    app.dependency_overrides[get_conversation_service] = lambda: service
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_router_threads_principal_id_and_non_operator() -> None:
+    service = _RecordingService()
+    client = _conversation_client(
+        principal_id="principal-A", capabilities=("tenant_read",), service=service
+    )
+    with client as c:
+        resp = c.post("/api/v1/conversation/s-1/message", json={"content": "hi"})
+    assert resp.status_code == 200
+    assert service.received["calling_principal_id"] == "principal-A"
+    assert service.received["is_operator"] is False
+
+
+def test_router_marks_operator_when_capability_present() -> None:
+    service = _RecordingService()
+    client = _conversation_client(
+        principal_id="op-1", capabilities=(OPERATOR_CAPABILITY,), service=service
+    )
+    with client as c:
+        resp = c.post("/api/v1/conversation/s-1/message", json={"content": "hi"})
+    assert resp.status_code == 200
+    assert service.received["is_operator"] is True
+
+
+def test_router_maps_access_denied_to_403() -> None:
+    service = _RecordingService(deny=True)
+    client = _conversation_client(
+        principal_id="principal-B", capabilities=("tenant_read",), service=service
+    )
+    with client as c:
+        resp = c.post("/api/v1/conversation/s-1/message", json={"content": "hi"})
+    assert resp.status_code == 403
+    # The global problem-details handler flattens the structured detail into a
+    # string; assert the code is present in the envelope.
+    assert "session_access_denied" in str(resp.json()["detail"])
+
+
+def test_router_anonymous_principal_threaded_as_none() -> None:
+    service = _RecordingService()
+    client = _conversation_client(
+        principal_id=None, capabilities=("tenant_read",), service=service
+    )
+    with client as c:
+        resp = c.post("/api/v1/conversation/s-1/message", json={"content": "hi"})
+    assert resp.status_code == 200
+    assert service.received["calling_principal_id"] is None
