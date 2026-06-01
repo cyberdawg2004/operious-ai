@@ -12,9 +12,15 @@ from app.api.v1.schemas.conversation import (
     ConversationMessageRequest,
     ConversationMessageResponse,
 )
-from app.dependencies.authority import require_tenant_scope
+from app.dependencies.authority import (
+    OPERATOR_CAPABILITY,
+    require_authority,
+    require_tenant_scope,
+)
 from app.dependencies.services import get_conversation_service
+from app.identity import AuthorityContext
 from app.services.conversation_service import (
+    ConversationAccessDenied,
     ConversationService,
     ConversationServiceError,
 )
@@ -30,6 +36,7 @@ async def submit_conversation_message(
     session_id: str,
     request: ConversationMessageRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_authority),
     service: ConversationService = Depends(get_conversation_service),
 ) -> ConversationMessageResponse:
     try:
@@ -39,8 +46,17 @@ async def submit_conversation_message(
                 tenant_id=expected_tenant_id,
                 content=request.content,
                 expected_tenant_id=expected_tenant_id,
+                calling_principal_id=(
+                    str(authority.principal_id) if authority.principal_id else None
+                ),
+                is_operator=OPERATOR_CAPABILITY in authority.capabilities,
             )
         )
+    except ConversationAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "session_access_denied", "message": str(exc)},
+        ) from exc
     except ConversationServiceError as exc:
         raise _http_error(exc) from exc
 
@@ -49,13 +65,23 @@ async def submit_conversation_message(
 async def stream_conversation(
     session_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_authority),
     service: ConversationService = Depends(get_conversation_service),
 ) -> EventSourceResponse:
     try:
         await service.ensure_stream_access(
             session_id=session_id,
             expected_tenant_id=expected_tenant_id,
+            calling_principal_id=(
+                str(authority.principal_id) if authority.principal_id else None
+            ),
+            is_operator=OPERATOR_CAPABILITY in authority.capabilities,
         )
+    except ConversationAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "session_access_denied", "message": str(exc)},
+        ) from exc
     except ConversationServiceError as exc:
         raise _http_error(exc) from exc
 

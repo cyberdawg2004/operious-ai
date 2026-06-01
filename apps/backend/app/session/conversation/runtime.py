@@ -258,6 +258,27 @@ class ConversationSessionRuntime:
         ]
         return turns[-limit:]
 
+    async def get_session_owner_principal_id(
+        self,
+        *,
+        session_id: str,
+        expected_tenant_id: str,
+    ) -> str | None:
+        """Return the ``principal_id`` bound to this session, or ``None``.
+
+        Returns ``None`` when the session does not exist (the normal flow will
+        surface the not-found error later) or when the session was created
+        without a bound user principal (e.g., webhook-ingested sessions).
+        The caller should pass through if ``None`` is returned.
+        """
+        record = await self._session_repository.get_session(
+            as_session_id(session_id),
+            expected_tenant_id=expected_tenant_id,
+        )
+        if record is None:
+            return None
+        return record.identity.principal_id
+
     async def _require_session(
         self,
         sid: SessionId,

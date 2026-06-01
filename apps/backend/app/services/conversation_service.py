@@ -52,6 +52,13 @@ class ConversationServiceError(RuntimeError):
     """Raised when the conversation service cannot satisfy a request."""
 
 
+class ConversationAccessDenied(ConversationServiceError):
+    """Raised when a principal attempts to access a session they do not own.
+
+    Maps to ``403 session_access_denied`` in the router.
+    """
+
+
 class RedisConversationEventPublisher:
     def __init__(self, *, redis_client: Any) -> None:
         self._redis_client = redis_client
@@ -168,6 +175,32 @@ class ConversationService:
         self._runtime = runtime
         self._redis_client = redis_client
 
+    async def _check_session_ownership(
+        self,
+        *,
+        session_id: str,
+        expected_tenant_id: str,
+        calling_principal_id: str | None,
+        is_operator: bool,
+    ) -> None:
+        """Verify the calling principal owns the session (or is an operator).
+
+        Passes through when the session has no bound principal (e.g., sessions
+        created by webhook ingestion) because there is no owner to compare
+        against. Fails closed when the session has a principal and the caller
+        does not match and is not an operator.
+        """
+        if is_operator:
+            return
+        owner = await self._runtime.get_session_owner_principal_id(
+            session_id=session_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if owner is not None and calling_principal_id != owner:
+            raise ConversationAccessDenied(
+                f"session {session_id!r} belongs to a different principal"
+            )
+
     async def submit_message(
         self,
         *,
@@ -175,7 +208,15 @@ class ConversationService:
         tenant_id: str,
         content: str,
         expected_tenant_id: str,
+        calling_principal_id: str | None = None,
+        is_operator: bool = False,
     ) -> ConversationMessageSubmission:
+        await self._check_session_ownership(
+            session_id=session_id,
+            expected_tenant_id=expected_tenant_id,
+            calling_principal_id=calling_principal_id,
+            is_operator=is_operator,
+        )
         try:
             result = await self._runtime.submit_message(
                 session_id=session_id,
@@ -216,7 +257,15 @@ class ConversationService:
         *,
         session_id: str,
         expected_tenant_id: str,
+        calling_principal_id: str | None = None,
+        is_operator: bool = False,
     ) -> None:
+        await self._check_session_ownership(
+            session_id=session_id,
+            expected_tenant_id=expected_tenant_id,
+            calling_principal_id=calling_principal_id,
+            is_operator=is_operator,
+        )
         try:
             await self._runtime.get_conversation_state(
                 session_id=session_id,
@@ -312,6 +361,7 @@ def build_conversation_service(
 
 
 __all__ = [
+    "ConversationAccessDenied",
     "ConversationMessageSubmission",
     "ConversationService",
     "ConversationServiceError",
