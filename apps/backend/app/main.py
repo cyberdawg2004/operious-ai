@@ -657,6 +657,7 @@ def create_app(
         legacy_header_authority_enabled=(
             settings.legacy_header_authority_enabled
         ),
+        coarsen_errors=settings.coarse_auth_errors_effective,
     )
     logger.info("middleware_authority_register_complete")
     if trusted_proxies is not None:

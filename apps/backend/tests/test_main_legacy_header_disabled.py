@@ -43,7 +43,9 @@ def test_production_rejects_legacy_tenant_header_from_trusted_peer() -> None:
                 "/healthz", headers={TENANT_HEADER: "victim-tenant"}
             )
         assert response.status_code == 401
-        assert response.json()["error"] == "header_authority_disabled"
+        # Production coarsens the external auth error (#25); the precise
+        # `header_authority_disabled` code is logged server-side only.
+        assert response.json()["error"] == "unauthorized"
     finally:
         get_settings.cache_clear()
 

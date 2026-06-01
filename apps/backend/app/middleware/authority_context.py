@@ -164,11 +164,31 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
         *,
         auth_provider: AuthProvider | None = None,
         legacy_header_authority_enabled: bool = True,
+        coarsen_errors: bool = False,
     ) -> None:
         super().__init__(app)
         self._auth_provider = auth_provider
         self._legacy_header_authority_enabled = (
             legacy_header_authority_enabled
+        )
+        # When true (production posture), recon-sensitive auth-state errors are
+        # returned as a generic body; the precise code is logged only (#25).
+        self._coarsen_errors = coarsen_errors
+
+    def _auth_error(
+        self,
+        *,
+        status_code: int,
+        internal_code: str,
+        reason: str,
+    ) -> Response:
+        from app.middleware.auth_error import auth_error_response
+
+        return auth_error_response(
+            status_code=status_code,
+            internal_code=internal_code,
+            reason=reason,
+            coarsen=self._coarsen_errors,
         )
 
     async def dispatch(
@@ -220,46 +240,40 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
         # (or anonymous) are honoured.
         if has_legacy and not self._legacy_header_authority_enabled:
             logger.warning("authority_header_authority_disabled")
-            return JSONResponse(
+            return self._auth_error(
                 status_code=401,
-                content={
-                    "error": "header_authority_disabled",
-                    "reason": (
-                        "legacy X-*-ID identity headers are not an "
-                        "accepted authority source in this deployment; "
-                        "present a verified bearer credential"
-                    ),
-                },
+                internal_code="header_authority_disabled",
+                reason=(
+                    "legacy X-*-ID identity headers are not an "
+                    "accepted authority source in this deployment; "
+                    "present a verified bearer credential"
+                ),
             )
 
         # 3. Source singularity.
         if credential is not None and has_legacy:
             logger.warning("authority_source_conflict")
-            return JSONResponse(
+            return self._auth_error(
                 status_code=400,
-                content={
-                    "error": "authority_source_conflict",
-                    "reason": (
-                        "request presents both an Authorization "
-                        "header and X-*-ID identity headers; "
-                        "authority source must be singular"
-                    ),
-                },
+                internal_code="authority_source_conflict",
+                reason=(
+                    "request presents both an Authorization "
+                    "header and X-*-ID identity headers; "
+                    "authority source must be singular"
+                ),
             )
 
         # 4–7. Resolve source-specific AuthorityContext.
         if credential is not None:
             if self._auth_provider is None:
                 logger.warning("authority_verification_unavailable")
-                return JSONResponse(
+                return self._auth_error(
                     status_code=401,
-                    content={
-                        "error": "verification_unavailable",
-                        "reason": (
-                            "no auth provider configured; cannot "
-                            "verify presented credential"
-                        ),
-                    },
+                    internal_code="verification_unavailable",
+                    reason=(
+                        "no auth provider configured; cannot "
+                        "verify presented credential"
+                    ),
                 )
             try:
                 verified = await self._auth_provider.verify(credential)
@@ -268,12 +282,10 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                     "authority_verification_failed",
                     extra={"reason": str(err)},
                 )
-                return JSONResponse(
+                return self._auth_error(
                     status_code=401,
-                    content={
-                        "error": "verification_failed",
-                        "reason": str(err),
-                    },
+                    internal_code="verification_failed",
+                    reason=str(err),
                 )
             try:
                 authority = verified_identity_to_authority(verified)
@@ -282,12 +294,10 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                     "authority_verified_claim_malformed",
                     extra={"reason": str(err)},
                 )
-                return JSONResponse(
+                return self._auth_error(
                     status_code=400,
-                    content={
-                        "error": "malformed_verified_claim",
-                        "reason": str(err),
-                    },
+                    internal_code="malformed_verified_claim",
+                    reason=str(err),
                 )
             source = AUTHORITY_SOURCE_VERIFIED
         elif has_legacy:
