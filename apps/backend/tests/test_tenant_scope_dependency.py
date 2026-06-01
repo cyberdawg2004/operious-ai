@@ -221,12 +221,14 @@ def test_module_exports_stable_contract() -> None:
         "ERROR_CODE_TENANT_AXIS_MISSING",
         "OPERATOR_CAPABILITY",
         "TENANT_ADMIN_CAPABILITY",
+        "TENANT_AUDIT_EXPORT_CAPABILITY",        # spec 1a #80
         "TENANT_CHANNEL_ADMIN_CAPABILITY",
         "TENANT_CONFIG_APPROVE_CAPABILITY",
         "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
         "TENANT_CONFIG_WRITE_CAPABILITY",
         "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
         "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
+        "TENANT_OBSERVABILITY_READ_CAPABILITY",  # spec 1a #26
         "TENANT_POLICY_WRITE_CAPABILITY",
         "TENANT_TOPOLOGY_WRITE_CAPABILITY",
         "request_authority_opt",
@@ -237,6 +239,8 @@ def test_module_exports_stable_contract() -> None:
         "require_config_apply_authorization_for",
         "require_operator_authority",
         "require_tenant_admin",
+        "require_tenant_audit_export",           # spec 1a #80
+        "require_tenant_observability_read",     # spec 1a #26
         "require_tenant_scope",
     ]
 
