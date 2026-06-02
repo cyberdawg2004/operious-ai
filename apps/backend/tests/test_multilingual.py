@@ -42,6 +42,7 @@ from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
+from app.workers import agent_tasks
 
 
 ARABIC_TICKET = "مرحبا، أحتاج مساعدة مع شاحن أنكر لأنه لا يعمل منذ الأمس"
@@ -361,8 +362,47 @@ async def test_resolution_draft_localized_for_arabic() -> None:
 
     assert draft.draft_body.startswith("[en→ar]")
     assert draft.metadata["source_language"] == "ar"
-    assert str(draft.metadata["canonical_reply"]).startswith("Thanks")
+    assert "approved support knowledge" in str(draft.metadata["canonical_reply"])
     assert draft.metadata["localized_reply"] == draft.draft_body
+
+
+@pytest.mark.asyncio
+async def test_worker_egress_uses_configured_translation_provider_for_arabic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = DeterministicStubTranslationProvider()
+    monkeypatch.setattr(
+        agent_tasks,
+        "build_translation_provider",
+        lambda settings: provider,
+    )
+    monkeypatch.setattr(
+        agent_tasks,
+        "build_capability_governance_runtime",
+        lambda **kwargs: build_capability_governance_runtime(),
+    )
+    persistence = InMemoryResolutionProposalPersistence()
+    proposal = await ResolutionRuntime(persistence=persistence).create_proposal(
+        ResolutionProposalRequest(
+            tenant_id="tenant-ar-worker",
+            session_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "session-ar-worker")),
+            execution_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "execution-ar-worker")),
+            dispatch_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "dispatch-ar-worker")),
+            diagnostic_event_id=None,
+            diagnostic_summary="Charging issue.",
+            diagnostic_category="charging_issue",
+            diagnostic_confidence=0.91,
+            original_content="Charger not working.",
+            source_language="ar",
+        )
+    )
+
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=persistence,
+        translation_runtime=agent_tasks._translation_runtime(cast(Any, object())),
+    ).create_draft_for_proposal(proposal)
+
+    assert draft.draft_body.startswith("[en→ar]")
 
 
 @pytest.mark.asyncio

@@ -210,8 +210,10 @@ class DeterministicDiagnosticLLMClient:
         temperature: float,
         tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
-        del system_prompt, max_output_tokens, temperature, tenant_id
+        del max_output_tokens, temperature, tenant_id
         content = "\n".join(message.content for message in messages)
+        if "generate governed customer-facing support replies" in system_prompt.casefold():
+            return _deterministic_grounded_reply_completion(content)
         lowered = content.casefold()
         category = _deterministic_category(lowered)
         governance_terms = tuple(term for term in _GOVERNANCE_TERMS if term in lowered)
@@ -244,6 +246,86 @@ class DeterministicDiagnosticLLMClient:
             ),
             raw_metadata={"deterministic": True},
         )
+
+
+def _deterministic_grounded_reply_completion(
+    content: str,
+) -> DiagnosticLLMCompletion:
+    try:
+        decoded = json.loads(content)
+    except json.JSONDecodeError:
+        decoded = {}
+    payload: Mapping[str, Any] = (
+        cast(Mapping[str, Any], decoded) if isinstance(decoded, Mapping) else {}
+    )
+    evidence_value = payload.get("retrieved_evidence")
+    evidence = cast(list[object], evidence_value) if isinstance(
+        evidence_value, list
+    ) else []
+    first = evidence[0] if evidence else None
+    if isinstance(first, Mapping):
+        first_map = cast(Mapping[str, Any], first)
+        rank = first_map.get("rank")
+        excerpt_value = first_map.get("safe_excerpt") or first_map.get("title")
+        excerpt = excerpt_value if isinstance(excerpt_value, str) else None
+    else:
+        rank = None
+        excerpt = None
+    if isinstance(rank, int) and rank > 0:
+        text = json.dumps(
+            {
+                "language": "en",
+                "segments": [
+                    {
+                        "kind": "claim",
+                        "text": (
+                            "I found approved support guidance relevant to "
+                            f"this issue: {excerpt or 'support guidance'}."
+                        ),
+                        "citation_ranks": [rank],
+                    },
+                    {
+                        "kind": "question",
+                        "text": (
+                            "Please share your order number or product model "
+                            "so we can confirm the next support step."
+                        ),
+                        "citation_ranks": [],
+                    },
+                ],
+            },
+            sort_keys=True,
+        )
+    else:
+        text = json.dumps(
+            {
+                "language": "en",
+                "segments": [
+                    {
+                        "kind": "claim",
+                        "text": (
+                            "I could not find approved support knowledge that "
+                            "grounds an automatic reply for this issue."
+                        ),
+                        "citation_ranks": [],
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+    prompt_tokens = _estimate_tokens(content)
+    completion_tokens = _estimate_tokens(text)
+    return DiagnosticLLMCompletion(
+        provider=DeterministicDiagnosticLLMClient.provider_name,
+        model=DeterministicDiagnosticLLMClient.model_name,
+        text=text,
+        usage=DiagnosticLLMUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        ),
+        raw_metadata={"deterministic": True, "mode": "grounded_reply"},
+    )
 
 
 def _extract_text(data: Mapping[str, Any]) -> str:

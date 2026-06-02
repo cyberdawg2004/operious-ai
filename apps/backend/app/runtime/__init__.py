@@ -59,6 +59,11 @@ from app.runtime.provider_circuit_breaker import (
     ProviderCircuitSnapshot,
     ProviderCircuitState,
 )
+from app.runtime.grounding import (
+    CitationCoverageGroundingChecker,
+    GroundingChecker,
+    StaticGroundingChecker,
+)
 from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateProtocol,
     ResolutionGovernanceGateRequest,
@@ -72,6 +77,7 @@ from app.runtime.resolution_runtime import (
     resolution_proposal_timeline_payload,
 )
 from app.runtime.resolution_governance_gate import (
+    GroundingPolicy,
     ResolutionCommunicationPolicy,
     ResolutionGovernanceGate,
     build_resolution_governance_runtime,
@@ -129,6 +135,7 @@ __all__ = [
     "BoundaryOperationalEventProjection",
     "BoundaryOperationalEventProjector",
     "BoundExecutionGovernanceConfigurationError",
+    "CitationCoverageGroundingChecker",
     "CoordinationEventProjectionError",
     "CoordinationOperationalEventProjection",
     "CoordinationOperationalEventProjector",
@@ -155,6 +162,8 @@ __all__ = [
     "GovernanceEventProjectionError",
     "GovernanceOperationalEventProjection",
     "GovernanceOperationalEventProjector",
+    "GroundingChecker",
+    "GroundingPolicy",
     "QAEventProjectionError",
     "QAOperationalEventProjection",
     "QAOperationalEventProjector",
@@ -171,6 +180,7 @@ __all__ = [
     "ResolutionOutboundDraftRuntime",
     "ResolutionProposalRequest",
     "ResolutionRuntime",
+    "StaticGroundingChecker",
     "build_resolution_governance_runtime",
     "resolution_outbound_draft_status_for_proposal",
     "resolution_outbound_draft_timeline_payload",

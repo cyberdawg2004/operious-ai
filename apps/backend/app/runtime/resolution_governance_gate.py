@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from typing import ClassVar, FrozenSet, Mapping, Sequence, cast
+from typing import Any, ClassVar, FrozenSet, Mapping, Sequence, cast
 
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
@@ -27,6 +27,10 @@ from app.governance.subjects.base import SubjectKind
 from app.governance.subjects.communication import CommunicationGovernanceSubject
 from app.identity import coerce_tenant_id
 from app.resolution.enums import ResolutionGovernanceVerdict
+from app.runtime.grounding import (
+    GroundingChecker,
+    GroundingCheckRequest,
+)
 from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateProtocol,
     ResolutionGovernanceGateRequest,
@@ -36,7 +40,6 @@ from app.runtime.resolution_runtime import (
 _CHAIN_ID = "resolution.communication.pre_execution"
 _ACTION = "resolution.proposal.prepare"
 _CHANNEL = "resolution/proposal"
-_AUTO_APPROVE_THRESHOLD = 0.80
 _SUMMARY_MAX_CHARS = 480
 _CORRELATION_NAMESPACE = uuid.UUID("2b7b4f5a-0002-4b01-9001-000000000001")
 
@@ -131,10 +134,8 @@ class ResolutionCommunicationPolicy(BaseGovernancePolicy):
             )
 
         category = _metadata_str(metadata, "resolution_category") or ""
-        confidence = _metadata_float(metadata, "diagnostic_confidence")
         approval_rule = _approval_rule(
             category=category,
-            confidence=confidence,
             local_status=local_status,
             local_autonomy=local_autonomy,
             local_governance=_metadata_str(metadata, "local_governance_verdict"),
@@ -149,6 +150,73 @@ class ResolutionCommunicationPolicy(BaseGovernancePolicy):
                 decision=Decision.ALLOW,
                 severity=ViolationSeverity.LOW,
                 reason="resolution proposal passed central communication governance",
+            ),
+        )
+
+
+class GroundingPolicy(BaseGovernancePolicy):
+    """Governance policy that blocks ungrounded customer-facing claims."""
+
+    name: ClassVar[str] = "resolution.grounding"
+    supported_stages: ClassVar[FrozenSet[EnforcementStage]] = frozenset(
+        {EnforcementStage.PRE_EXECUTION}
+    )
+    applicable_subject_kinds: ClassVar[FrozenSet[SubjectKind]] = frozenset(
+        {SubjectKind.COMMUNICATION}
+    )
+
+    def __init__(self, *, checker: GroundingChecker | None = None) -> None:
+        self._checker = checker
+
+    async def evaluate(
+        self,
+        context: GovernanceContext,
+    ) -> Sequence[PolicyEvaluationResult]:
+        subject = context.subject
+        if not isinstance(subject, CommunicationGovernanceSubject):
+            return (_grounding_deny("communication_subject_required"),)
+        metadata = dict(subject.metadata)
+        if self._checker is None:
+            trace = _grounding_trace(
+                status="ungrounded",
+                ungrounded_claims=(
+                    {
+                        "reason": "grounding_checker_missing",
+                        "claim": "",
+                        "citation_ranks": [],
+                    },
+                ),
+            )
+            return (
+                _grounding_deny(
+                    "grounding_checker_missing",
+                    metadata=_grounding_metadata(metadata, trace),
+                ),
+            )
+        segments = _metadata_list(metadata, "reply_segments")
+        evidence = _metadata_list(metadata, "evidence")
+        result = await self._checker.check(
+            GroundingCheckRequest(
+                tenant_id=subject.tenant_id or str(context.tenant_id or ""),
+                reply_segments=segments,
+                evidence=evidence,
+            )
+        )
+        if not result.allowed:
+            return (
+                _grounding_deny(
+                    "ungrounded_claim",
+                    metadata=_grounding_metadata(metadata, result.trace),
+                ),
+            )
+        return (
+            PolicyEvaluationResult(
+                policy_name=GroundingPolicy.name,
+                rule_id="grounding_claims_covered",
+                decision=Decision.ALLOW,
+                severity=ViolationSeverity.LOW,
+                reason="all customer-facing claims cite approved knowledge spans",
+                metadata={"grounding_trace": dict(result.trace)},
             ),
         )
 
@@ -196,6 +264,7 @@ class ResolutionGovernanceGate(ResolutionGovernanceGateProtocol):
 def build_resolution_governance_runtime(
     *,
     persistence: BaseGovernanceRepository | None = None,
+    grounding_checker: GroundingChecker | None = None,
 ) -> GovernanceRuntime:
     """Build the standard central governance runtime for resolution."""
 
@@ -216,7 +285,10 @@ def build_resolution_governance_runtime(
             EnforcementStage.PRE_EXECUTION: PolicyChain(
                 chain_id=_CHAIN_ID,
                 stage=EnforcementStage.PRE_EXECUTION,
-                policies=(ResolutionCommunicationPolicy(),),
+                policies=(
+                    ResolutionCommunicationPolicy(),
+                    GroundingPolicy(checker=grounding_checker),
+                ),
             )
         },
         persistence=persistence,
@@ -261,6 +333,11 @@ def _subject_metadata(
         "original_content_sha256": _sha256_text(request.original_content),
         "resolution_category": request.resolution_category,
         "diagnostic_confidence": request.diagnostic_confidence,
+        "diagnostic_summary": request.diagnostic_summary,
+        "original_content_excerpt": request.original_content[:_SUMMARY_MAX_CHARS],
+        "source_language": request.source_language,
+        "reply_segments": [dict(segment) for segment in request.reply_segments],
+        "evidence": [dict(item) for item in request.evidence],
     }
 
 
@@ -299,7 +376,6 @@ def _severe_flags(
 def _approval_rule(
     *,
     category: str,
-    confidence: float | None,
     local_status: str,
     local_autonomy: str,
     local_governance: str | None,
@@ -313,8 +389,6 @@ def _approval_rule(
         return "local_governance_not_allow"
     if local_supervisor != "pass":
         return "local_supervisor_not_pass"
-    if confidence is not None and confidence < _AUTO_APPROVE_THRESHOLD:
-        return "confidence_below_auto_threshold"
     if _category_requires_approval(category):
         return "resolution_category_requires_approval"
     if category not in _SAFE_AUTO_CATEGORIES:
@@ -339,6 +413,21 @@ def _deny(
         decision=Decision.DENY,
         severity=severity,
         reason=f"resolution communication denied: {rule_id}",
+        metadata=dict(metadata or {}),
+    )
+
+
+def _grounding_deny(
+    rule_id: str,
+    *,
+    metadata: Mapping[str, object] | None = None,
+) -> PolicyEvaluationResult:
+    return PolicyEvaluationResult(
+        policy_name=GroundingPolicy.name,
+        rule_id=rule_id,
+        decision=Decision.DENY,
+        severity=ViolationSeverity.HIGH,
+        reason=rule_id,
         metadata=dict(metadata or {}),
     )
 
@@ -373,14 +462,55 @@ def _metadata_int(
     return None
 
 
-def _metadata_float(
+def _metadata_list(
     metadata: Mapping[str, object],
     key: str,
-) -> float | None:
+) -> tuple[Mapping[str, Any], ...]:
     value = metadata.get(key)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return None
+    if not isinstance(value, list):
+        return ()
+    items: list[Mapping[str, Any]] = []
+    for item in cast(list[object], value):
+        if isinstance(item, Mapping):
+            items.append(cast(Mapping[str, Any], item))
+    return tuple(items)
+
+
+def _grounding_trace(
+    *,
+    status: str,
+    ungrounded_claims: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "schema_version": "2.1",
+        "status": status,
+        "approved_knowledge_found": [],
+        "ungrounded_claims": [dict(claim) for claim in ungrounded_claims],
+    }
+
+
+def _grounding_metadata(
+    subject_metadata: Mapping[str, object],
+    trace: Mapping[str, Any],
+) -> dict[str, object]:
+    handoff = {
+        "ticket_no": _metadata_str(subject_metadata, "session_id"),
+        "issue": _metadata_str(subject_metadata, "original_content_excerpt"),
+        "escalation": "ungrounded_claim",
+        "description": (
+            "A generated customer-facing reply contained a claim that could "
+            "not be traced to an approved knowledge span."
+        ),
+        "recommendation": (
+            "A human reviewer should answer from approved SOP knowledge or "
+            "update the approved knowledge base before automation resumes."
+        ),
+        "grounding_trace": dict(trace),
+    }
+    return {
+        "structured_handoff": handoff,
+        "grounding_trace": dict(trace),
+    }
 
 
 def _decision_seed(request: ResolutionGovernanceGateRequest) -> str:
@@ -410,6 +540,7 @@ def _sha256_text(value: str) -> str:
 
 
 __all__ = [
+    "GroundingPolicy",
     "ResolutionCommunicationPolicy",
     "ResolutionGovernanceGate",
     "build_resolution_governance_runtime",

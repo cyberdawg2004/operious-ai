@@ -21,13 +21,18 @@ from app.governance.persistence import (
     DecisionQuery,
     GovernanceDecisionRecord,
     InMemoryGovernanceRepository,
+    PolicyEvaluationResultRecord,
 )
-from app.session.enums import SessionLifecyclePhase, SessionScope
+from app.session.enums import SessionEventKind, SessionLifecyclePhase, SessionScope
 from app.session.identity import (
     SessionId,
     SessionLineageId,
 )
-from app.session.persistence import InMemorySessionPersistence, SessionRecord
+from app.session.persistence import (
+    InMemorySessionPersistence,
+    SessionEventQuery,
+    SessionRecord,
+)
 
 _TENANT = "tenant-acme"
 _OTHER_TENANT = "tenant-other"
@@ -54,7 +59,7 @@ def _session(*, tenant_id: str = _TENANT) -> SessionRecord:
         parent_session_id=None,
         ancestor_session_ids=(),
         lineage_depth=0,
-        sequence_head=0,
+        sequence_head=-1,
         revision=1,
     )
 
@@ -79,6 +84,57 @@ def _decision(
         tenant_id=tenant_id,
         subject_kind="communication",
         metadata=metadata,
+    )
+
+
+def _grounding_decision() -> GovernanceDecisionRecord:
+    trace = {
+        "schema_version": "2.1",
+        "status": "ungrounded",
+        "approved_knowledge_found": [{"rank": 1}],
+        "ungrounded_claims": [
+            {
+                "claim": "Unsupported replacement promise.",
+                "reason": "uncited_claim",
+                "citation_ranks": [],
+            }
+        ],
+    }
+    handoff = {
+        "ticket_no": _SESSION_ID,
+        "issue": "Customer reports a charging issue.",
+        "escalation": "ungrounded_claim",
+        "description": "Generated reply could not be grounded.",
+        "recommendation": "Human reviewer should answer from approved SOPs.",
+        "grounding_trace": trace,
+    }
+    return GovernanceDecisionRecord(
+        decision_id=_DENY_ID,
+        decision="deny",
+        stage="pre_execution",
+        policy_chain_id="resolution.communication.pre_execution",
+        reason="deny: resolution.grounding.ungrounded_claim",
+        decided_at=_NOW.isoformat(),
+        correlation_id="corr-grounding",
+        request_id="req-grounding",
+        tenant_id=_TENANT,
+        subject_kind="communication",
+        metadata={"session_id": _SESSION_ID},
+        evaluated_rules=(
+            PolicyEvaluationResultRecord(
+                policy_name="resolution.grounding",
+                rule_id="ungrounded_claim",
+                decision="deny",
+                severity=30,
+                reason="ungrounded_claim",
+                evaluated_at=_NOW.isoformat(),
+                metadata={
+                    "structured_handoff": handoff,
+                    "grounding_trace": trace,
+                },
+                policy_version="test",
+            ),
+        ),
     )
 
 
@@ -132,6 +188,46 @@ async def test_escalation_agent_creates_pending_record_from_deny_only() -> None:
         DecisionQuery(tenant_id=_TENANT)
     )
     assert [d.decision_id for d in decisions.items] == [_DENY_ID]
+
+
+@pytest.mark.asyncio
+async def test_ungrounded_denial_creates_handoff_metadata_and_timeline() -> None:
+    escalations = InMemoryEscalationPersistence()
+    governance = InMemoryGovernanceRepository()
+    sessions = InMemorySessionPersistence()
+    await sessions.save_session(_session())
+    await governance.record_decision(_grounding_decision())
+    runtime = EscalationAgentRuntime(
+        escalation_persistence=escalations,
+        governance_repository=governance,
+        session_persistence=sessions,
+    )
+
+    record = await runtime.create_for_governance_denial(
+        governance_decision_id=_DENY_ID,
+        expected_tenant_id=_TENANT,
+    )
+
+    assert record.metadata["structured_handoff"]["escalation"] == (
+        "ungrounded_claim"
+    )
+    assert record.metadata["grounding_trace"]["status"] == "ungrounded"
+    page = await sessions.list_events(
+        SessionEventQuery(session_id=SessionId(uuid.UUID(_SESSION_ID))),
+        expected_tenant_id=_TENANT,
+    )
+    handoff_events = [
+        event
+        for event in page.events
+        if event.kind is SessionEventKind.OPERATIONAL_OBSERVATION
+        and event.payload.get("event_type")
+        == "grounding_escalation_handoff_created"
+    ]
+    assert len(handoff_events) == 1
+    assert handoff_events[0].payload["escalation_id"] == record.escalation_id
+    assert handoff_events[0].payload["grounding_trace"]["status"] == (
+        "ungrounded"
+    )
 
 
 @pytest.mark.asyncio

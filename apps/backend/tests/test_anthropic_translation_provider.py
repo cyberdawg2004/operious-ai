@@ -20,8 +20,8 @@ from app.boundary.translation.adapters.base import (
     TranslationProviderRequest,
 )
 from app.boundary.translation.models.payload import TranslationPayload
+from app.boundary.translation.provider_factory import build_translation_provider
 from app.core.config import Settings
-from app.main import _build_translation_provider
 
 
 class _FakeResponse:
@@ -210,7 +210,7 @@ async def test_api_key_never_logged(
 
 
 def test_config_selects_anthropic_when_set() -> None:
-    provider = _build_translation_provider(
+    provider = build_translation_provider(
         Settings(
             TRANSLATION_PROVIDER="anthropic",
             ANTHROPIC_API_KEY="secret-test-key",
@@ -221,7 +221,7 @@ def test_config_selects_anthropic_when_set() -> None:
 
 
 def test_config_falls_back_to_identity_without_key() -> None:
-    provider = _build_translation_provider(
+    provider = build_translation_provider(
         Settings(
             TRANSLATION_PROVIDER="anthropic",
             ANTHROPIC_API_KEY="",

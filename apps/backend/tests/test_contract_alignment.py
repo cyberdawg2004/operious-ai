@@ -395,7 +395,8 @@ def test_diagnostic_worker_task_kwargs_align_with_work_item_contract() -> None:
     assert work_item.conversation_turn_id is None
     assert work_item_constructor_fields == work_item_fields
     assert set(_dead_letter_task_payload(work_item)) == (
-        work_item_fields - {"content", "conversation_turn_id"}
+        work_item_fields
+        - {"content", "conversation_history", "conversation_turn_id"}
     )
 
 

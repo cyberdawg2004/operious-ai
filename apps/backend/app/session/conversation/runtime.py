@@ -91,6 +91,8 @@ class ConversationDiagnosticRequester(Protocol):
         tenant_id: str,
         turn_id: str,
         customer_message: str,
+        source_language: str,
+        conversation_history: tuple[Mapping[str, Any], ...],
         expected_tenant_id: str,
     ) -> ConversationExecutionIntent: ...
 
@@ -129,6 +131,8 @@ class ConversationSessionRuntime:
         session_id: str,
         tenant_id: str,
         customer_message: str,
+        source_language: str = "en",
+        raw_customer_message: str | None = None,
         expected_tenant_id: str,
     ) -> ConversationSubmitResult:
         """Append a customer turn, send a template ack, then enqueue Phase B."""
@@ -153,6 +157,8 @@ class ConversationSessionRuntime:
         customer_turn = await self._append_customer_turn(
             sid=sid,
             content=content,
+            source_language=source_language,
+            raw_content=raw_customer_message,
         )
         await self._publish(
             session_id=session_id,
@@ -185,12 +191,22 @@ class ConversationSessionRuntime:
                 phase="A",
             ),
         )
+        history = tuple(
+            _history_turn(turn)
+            for turn in await self.get_recent_turns(
+                session_id=session_id,
+                expected_tenant_id=expected_tenant_id,
+                limit=20,
+            )
+        )
 
         execution = await self._diagnostic_requester.request_diagnostic_execution(
             session_id=session_id,
             tenant_id=tenant_id,
             turn_id=customer_turn.turn_id,
             customer_message=content,
+            source_language=source_language,
+            conversation_history=history,
             expected_tenant_id=expected_tenant_id,
         )
         await self._publish(
@@ -323,15 +339,21 @@ class ConversationSessionRuntime:
         *,
         sid: SessionId,
         content: str,
+        source_language: str,
+        raw_content: str | None,
     ) -> ConversationTurn:
+        payload: dict[str, Any] = {
+            "content": content,
+            "source_channel": "conversation_api",
+            "ingress_id": None,
+            "source_language": source_language,
+        }
+        if raw_content is not None and raw_content != content:
+            payload["raw_content"] = raw_content
         result = await self._append_turn_event(
             sid=sid,
             kind=SessionEventKind.CUSTOMER_MESSAGE,
-            payload={
-                "content": content,
-                "source_channel": "conversation_api",
-                "ingress_id": None,
-            },
+            payload=payload,
             annotation="customer_message",
             idempotency_key=None,
         )
@@ -505,6 +527,18 @@ def _turn_event(
     if turn.execution_id is not None:
         event["execution_id"] = turn.execution_id
     return event
+
+
+def _history_turn(turn: ConversationTurn) -> dict[str, object]:
+    return {
+        "turn_id": turn.turn_id,
+        "sequence": turn.sequence,
+        "role": turn.role,
+        "content": turn.content,
+        "timestamp": turn.timestamp.isoformat(),
+        "governance_decision_id": turn.governance_decision_id,
+        "execution_id": turn.execution_id,
+    }
 
 
 def _diagnostic_category(payload: Mapping[str, Any]) -> str | None:

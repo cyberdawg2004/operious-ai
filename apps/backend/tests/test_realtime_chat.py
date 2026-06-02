@@ -41,6 +41,8 @@ class _FakeDiagnosticRequester:
         tenant_id: str,
         turn_id: str,
         customer_message: str,
+        source_language: str,
+        conversation_history: tuple[Mapping[str, Any], ...],
         expected_tenant_id: str,
     ) -> ConversationExecutionIntent:
         self.calls.append(
@@ -49,6 +51,8 @@ class _FakeDiagnosticRequester:
                 "tenant_id": tenant_id,
                 "turn_id": turn_id,
                 "customer_message": customer_message,
+                "source_language": source_language,
+                "conversation_history_size": str(len(conversation_history)),
                 "expected_tenant_id": expected_tenant_id,
             }
         )
@@ -138,6 +142,8 @@ async def test_conversation_submit_message_returns_phase_a() -> None:
     assert result.phase_a_turn.content in phase_a_templates()
     assert result.execution.execution_id == "execution-chat"
     assert requester.calls[0]["customer_message"] == "My charger stopped charging"
+    assert requester.calls[0]["source_language"] == "en"
+    assert requester.calls[0]["conversation_history_size"] == "2"
     page = await store.list_events(
         SessionEventQuery(session_id=SessionId(uuid.UUID(session_id))),
         expected_tenant_id=TENANT_ID,

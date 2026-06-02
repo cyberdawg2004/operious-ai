@@ -37,6 +37,14 @@ from app.resolution.persistence import (
     ResolutionProposalPersistenceProtocol,
     ResolutionProposalRecord,
 )
+from app.runtime.conversation_generation import (
+    ConversationGenerationRequest,
+    ConversationGenerationRuntimeProtocol,
+    GroundedConversationGenerationRuntime,
+    GroundedReplyDraft,
+    GroundedReplySegment,
+    render_grounded_reply,
+)
 
 _DEFAULT_AUTO_APPROVE_THRESHOLD = 0.80
 _DIAGNOSTIC_EVENT_TYPE = "diagnostic_analysis_completed"
@@ -123,6 +131,7 @@ _OPTIONAL_EVIDENCE_TEXT_FIELDS = (
     "safe_excerpt",
     "safe_excerpt_sha256",
     "chunk_content_hash",
+    "document_review_status",
 )
 _OPTIONAL_EVIDENCE_INT_FIELDS = (
     "citation_schema_version",
@@ -152,6 +161,7 @@ class ResolutionProposalRequest:
     original_content: str
     source_language: str = "en"
     retrieved_citations: Sequence[Mapping[str, Any]] = ()
+    conversation_history: Sequence[Mapping[str, Any]] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +187,8 @@ class ResolutionGovernanceGateRequest:
     local_autonomy_decision: ResolutionAutonomyDecision
     local_status: ResolutionProposalStatus
     local_reasons: tuple[str, ...]
+    reply_segments: tuple[Mapping[str, Any], ...] = ()
+    source_language: str = "en"
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +226,7 @@ class ResolutionRuntime:
         *,
         persistence: ResolutionProposalPersistenceProtocol,
         governance_gate: ResolutionGovernanceGateProtocol | None = None,
+        conversation_generator: ConversationGenerationRuntimeProtocol | None = None,
         auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
     ) -> None:
         if auto_approve_threshold < 0 or auto_approve_threshold > 1:
@@ -221,6 +234,9 @@ class ResolutionRuntime:
         self._persistence = persistence
         self._governance_gate = governance_gate
         self._auto_approve_threshold = auto_approve_threshold
+        self._conversation_generator = (
+            conversation_generator or GroundedConversationGenerationRuntime()
+        )
 
     async def create_proposal(
         self,
@@ -233,19 +249,19 @@ class ResolutionRuntime:
             diagnostic_category=request.diagnostic_category,
             original_content=request.original_content,
         )
-        reply = _customer_reply(
+        reply_draft = await self._generate_reply_draft(
+            request=request,
             category=category,
             evidence=evidence,
-            original_content=request.original_content,
         )
+        reply_segments = tuple(segment.to_dict() for segment in reply_draft.segments)
+        reply = render_grounded_reply(reply_draft)
         recommended_actions = _recommended_actions(category)
         gate = _evaluate_gate(
             category=category,
-            confidence=request.diagnostic_confidence,
             original_content=request.original_content,
             reply=reply,
             evidence=evidence,
-            auto_approve_threshold=self._auto_approve_threshold,
         )
         proposal_id = derive_resolution_proposal_id(
             tenant_id=request.tenant_id,
@@ -283,6 +299,8 @@ class ResolutionRuntime:
                 local_autonomy_decision=gate.autonomy_decision,
                 local_status=gate.status,
                 local_reasons=gate.reasons,
+                reply_segments=reply_segments,
+                source_language=_normalise_language(request.source_language),
             )
         )
 
@@ -312,6 +330,46 @@ class ResolutionRuntime:
             record,
             expected_tenant_id=request.tenant_id,
         )
+
+    async def _generate_reply_draft(
+        self,
+        *,
+        request: ResolutionProposalRequest,
+        category: str,
+        evidence: tuple[Mapping[str, Any], ...],
+    ) -> GroundedReplyDraft:
+        try:
+            result = await self._conversation_generator.generate_reply(
+                ConversationGenerationRequest(
+                    tenant_id=request.tenant_id,
+                    session_id=request.session_id,
+                    diagnostic_summary=request.diagnostic_summary,
+                    diagnostic_category=category,
+                    diagnostic_confidence=request.diagnostic_confidence,
+                    original_content=request.original_content,
+                    source_language=_normalise_language(request.source_language),
+                    evidence=evidence,
+                    conversation_history=tuple(
+                        dict(turn) for turn in request.conversation_history
+                    ),
+                    target_language=CANONICAL_LANGUAGE,
+                )
+            )
+            return result.draft
+        except Exception:  # noqa: BLE001
+            return GroundedReplyDraft(
+                language=CANONICAL_LANGUAGE,
+                segments=(
+                    GroundedReplySegment(
+                        kind="claim",
+                        text=(
+                            "A customer-facing reply could not be grounded "
+                            "automatically for this issue."
+                        ),
+                        citation_ranks=(),
+                    ),
+                ),
+            )
 
     async def _evaluate_central_governance(
         self,
@@ -629,65 +687,6 @@ def _resolution_category(
     return category
 
 
-def _customer_reply(
-    *,
-    category: str,
-    evidence: tuple[Mapping[str, Any], ...],
-    original_content: str,
-) -> str:
-    del original_content
-    if not evidence:
-        return (
-            "Thanks for reaching out. I could not find cited support evidence "
-            "for a safe automatic response, so a human reviewer should check "
-            "this before we provide next steps. Please share any order details, "
-            "product model, screenshots, and the exact issue you are seeing."
-        )
-
-    source = _source_reference(evidence)
-    if category == "charging_issue":
-        return (
-            "Thanks for reaching out. Based on the cited support guidance I "
-            f"found ({source}), please try these charging checks: confirm the "
-            "cable and adapter are firmly connected, test a known-good outlet, "
-            "and let the device charge for at least 30 minutes. If it still "
-            "will not charge, reply with the device model, purchase or order "
-            "details, and any indicator-light behavior so we can review the "
-            "next support step."
-        )
-    if category == "warranty_replacement_inquiry":
-        return (
-            "Thanks for checking on warranty or replacement eligibility. I "
-            "cannot confirm a warranty or replacement outcome from this draft. "
-            f"Based on the cited support guidance I found ({source}), please "
-            "send your order number, purchase date, product model, photos of "
-            "the issue, and any troubleshooting already tried so a human "
-            "reviewer can apply the policy."
-        )
-    if category == "returns_refunds_inquiry":
-        return (
-            "Thanks for asking about a return or refund. I cannot confirm a "
-            "return or refund outcome from this draft. Based on the cited "
-            f"support guidance I found ({source}), please share your order "
-            "number, delivery date, item condition, and reason for the request "
-            "so a human reviewer can apply the policy."
-        )
-    if category == "unknown_low_confidence":
-        return (
-            "Thanks for reaching out. I do not have enough cited context to "
-            "give a reliable answer yet. Please share your order number or "
-            "account email, the product or service involved, and what outcome "
-            "you need so a human reviewer can continue safely."
-        )
-    return (
-        "Thanks for the details. Based on the cited support guidance I found "
-        f"({source}), please try restarting the device or app, checking the "
-        "connection or power source, and noting any error message. If the "
-        "issue continues, reply with the model, order details, and what "
-        "changed before the issue started."
-    )
-
-
 def _recommended_actions(
     category: str,
 ) -> tuple[Mapping[str, Any], ...]:
@@ -821,19 +820,15 @@ def _recommended_actions(
 def _evaluate_gate(
     *,
     category: str,
-    confidence: float,
     original_content: str,
     reply: str,
     evidence: tuple[Mapping[str, Any], ...],
-    auto_approve_threshold: float,
 ) -> _GateDecision:
     reasons: list[str] = []
     text = f"{original_content} {reply}".lower()
     evidence_empty = len(evidence) == 0
     if evidence_empty:
         reasons.append("missing_citations")
-    if confidence < auto_approve_threshold:
-        reasons.append("low_confidence")
     if _contains_any(text, _SAFETY_KEYWORDS):
         reasons.append("safety_risk")
     if _contains_any(text, _LEGAL_KEYWORDS):
@@ -911,17 +906,6 @@ def _normalise_evidence(
                 item[field] = int(value)
         evidence.append(item)
     return tuple(evidence)
-
-
-def _source_reference(evidence: tuple[Mapping[str, Any], ...]) -> str:
-    titles = [
-        str(item.get("title"))
-        for item in evidence
-        if isinstance(item.get("title"), str) and str(item.get("title")).strip()
-    ]
-    if not titles:
-        return "cited support guidance"
-    return "; ".join(titles[:2])
 
 
 def _has_conflicting_evidence(

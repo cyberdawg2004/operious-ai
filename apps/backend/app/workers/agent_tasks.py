@@ -75,12 +75,12 @@ from app.coordination.persistence import (
     PostgresCoordinationPersistence,
 )
 from app.boundary.translation import (
-    IdentityTranslationProvider,
     InMemoryTranslationPersistence,
     TranslationEgressRuntime,
     TranslationIngressRuntime,
     TranslationRuntime,
 )
+from app.boundary.translation.provider_factory import build_translation_provider
 from app.core.config import get_settings
 from app.core.queue_admission import (
     TenantQueueQoSClient,
@@ -108,6 +108,10 @@ from app.runtime.resolution_governance_gate import (
     ResolutionGovernanceGate,
     build_resolution_governance_runtime,
 )
+from app.runtime.conversation_generation import (
+    GroundedConversationGenerationRuntime,
+)
+from app.runtime.grounding import CitationCoverageGroundingChecker
 from app.runtime.resolution_runtime import (
     ResolutionOutboundDraftRuntime,
     ResolutionProposalRequest,
@@ -318,6 +322,7 @@ class _DiagnosticExecutionWorkItem:
     tenant_id: str
     content: str
     source_language: str = "en"
+    conversation_history: tuple[Mapping[str, Any], ...] = ()
     conversation_turn_id: str | None = None
 
 
@@ -325,6 +330,7 @@ class _DiagnosticExecutionWorkItem:
 class _DispatchContentContext:
     content: str
     source_language: str
+    conversation_history: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,6 +463,7 @@ async def _prepare_diagnostic_execution(
             tenant_id=tenant_id,
             content=content_context.content,
             source_language=content_context.source_language,
+            conversation_history=content_context.conversation_history,
             conversation_turn_id=conversation_turn_id,
         )
 
@@ -1139,10 +1146,12 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
             return _DispatchContentContext(
                 content=extracted,
                 source_language=source_language,
+                conversation_history=_extract_conversation_history(body),
             )
     return _DispatchContentContext(
         content=_extract_text(body),
         source_language=source_language,
+        conversation_history=_extract_conversation_history(body),
     )
 
 
@@ -1157,6 +1166,32 @@ def _extract_source_language(body: Mapping[str, Any]) -> str:
         if isinstance(payload_language, str) and payload_language.strip():
             return payload_language.strip().lower()
     return "en"
+
+
+def _extract_conversation_history(
+    body: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
+    history = body.get("conversation_history")
+    if not isinstance(history, list):
+        canonical_payload = body.get("canonical_payload")
+        if isinstance(canonical_payload, Mapping):
+            history = cast(Mapping[str, Any], canonical_payload).get(
+                "conversation_history"
+            )
+    if not isinstance(history, list):
+        return ()
+    turns: list[dict[str, Any]] = []
+    for item in cast(list[object], history):
+        if not isinstance(item, Mapping):
+            continue
+        turn = {
+            str(key): value
+            for key, value in cast(Mapping[str, Any], item).items()
+            if isinstance(value, (str, int, float, bool, type(None)))
+        }
+        if turn:
+            turns.append(turn)
+    return tuple(turns)
 
 
 def _extract_text(payload: Mapping[str, Any]) -> str:
@@ -1218,8 +1253,16 @@ async def _append_resolution_proposal_after_diagnostic(
                     # Per-task runtime construction bounds policy staleness
                     # to the current task; new tasks pick up new composition.
                     governance_runtime=build_resolution_governance_runtime(
-                        persistence=PostgresGovernanceRepository(session)
+                        persistence=PostgresGovernanceRepository(session),
+                        grounding_checker=CitationCoverageGroundingChecker(
+                            document_repository=(
+                                PostgresTenantConfigurationRepository(session)
+                            )
+                        ),
                     )
+                ),
+                conversation_generator=GroundedConversationGenerationRuntime(
+                    llm_client=_diagnostic_llm_client()
                 ),
             ).create_proposal(
                 ResolutionProposalRequest(
@@ -1234,6 +1277,7 @@ async def _append_resolution_proposal_after_diagnostic(
                     original_content=work_item.content,
                     source_language=work_item.source_language,
                     retrieved_citations=result.retrieved_citations,
+                    conversation_history=work_item.conversation_history,
                 )
             )
             await timeline.append_event(
@@ -1335,7 +1379,7 @@ def _action_orchestration_runtime(
 
 def _translation_runtime(session: AsyncSession) -> TranslationRuntime:
     persistence = InMemoryTranslationPersistence()
-    provider = IdentityTranslationProvider()
+    provider = build_translation_provider(get_settings())
     # Per-task runtime construction bounds policy staleness to the current
     # task; new tasks pick up new composition.
     governance = build_capability_governance_runtime(

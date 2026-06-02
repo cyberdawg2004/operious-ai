@@ -34,13 +34,12 @@ from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import ClaimMapping, JWKSAuthProvider
 from app.boundary.translation import (
-    BaseTranslationProvider,
-    IdentityTranslationProvider,
     InMemoryTranslationPersistence,
     TranslationEgressRuntime,
     TranslationIngressRuntime,
     TranslationRuntime,
 )
+from app.boundary.translation.provider_factory import build_translation_provider
 from app.boundary.voice import (
     DeterministicStubSpeechToTextProvider,
     DeterministicStubTextToSpeechProvider,
@@ -186,27 +185,6 @@ def _init_sentry(settings: Settings) -> None:
         release=settings.APP_VERSION,
     )
     logger.info("sentry_init_complete")
-
-
-def _build_translation_provider(settings: Settings) -> BaseTranslationProvider:
-    """Select the translation provider from runtime configuration."""
-
-    if (
-        settings.TRANSLATION_PROVIDER.casefold() == "anthropic"
-        and settings.ANTHROPIC_API_KEY.strip()
-    ):
-        from app.boundary.translation.adapters.anthropic import (
-            AnthropicTranslationProvider,
-        )
-
-        return AnthropicTranslationProvider(
-            api_key=settings.ANTHROPIC_API_KEY,
-            model=settings.TRANSLATION_MODEL,
-            base_url=settings.ANTHROPIC_BASE_URL,
-            anthropic_version=settings.ANTHROPIC_VERSION,
-            timeout_seconds=15.0,
-        )
-    return IdentityTranslationProvider()
 
 
 async def _governance_policy_invalidation_listener(app: FastAPI) -> None:
@@ -600,7 +578,7 @@ def create_app(
     )
 
     translation_persistence = InMemoryTranslationPersistence()
-    translation_provider = _build_translation_provider(settings)
+    translation_provider = build_translation_provider(settings)
     app.state.translation_runtime = TranslationRuntime(
         ingress=TranslationIngressRuntime(
             provider=translation_provider,

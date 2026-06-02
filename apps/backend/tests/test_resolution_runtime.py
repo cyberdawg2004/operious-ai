@@ -27,6 +27,16 @@ from app.resolution.persistence import (
     ResolutionProposalQuery,
 )
 from app.governance.persistence import InMemoryGovernanceRepository
+from app.runtime.conversation_generation import (
+    ConversationGenerationRequest,
+    ConversationGenerationResult,
+    GroundedReplyDraft,
+    GroundedReplySegment,
+)
+from app.runtime.grounding import (
+    CitationCoverageGroundingChecker,
+    StaticGroundingChecker,
+)
 from app.runtime.resolution_governance_gate import (
     ResolutionGovernanceGate,
     build_resolution_governance_runtime,
@@ -43,6 +53,13 @@ from app.runtime.resolution_runtime import (
     resolution_proposal_timeline_payload,
 )
 from app.tenant.db.models import TenantRow
+from app.tenant.enums import (
+    TenantKnowledgeDocumentStatus,
+    TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
+)
+from app.tenant.identity import as_knowledge_document_id
+from app.tenant.persistence import TenantKnowledgeDocumentRecord
 from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 TENANT_ID = "tenant-resolution"
@@ -74,6 +91,37 @@ class _StaticResolutionGovernanceGate:
         )
 
 
+class _StaticConversationGenerator:
+    def __init__(self, draft: GroundedReplyDraft) -> None:
+        self._draft = draft
+
+    async def generate_reply(
+        self,
+        request: ConversationGenerationRequest,
+    ) -> ConversationGenerationResult:
+        del request
+        return ConversationGenerationResult(
+            draft=self._draft,
+            provider="test-generator",
+            model="test-model",
+            raw_text="{}",
+        )
+
+
+class _FakeDocumentRepository:
+    def __init__(self, record: TenantKnowledgeDocumentRecord | None) -> None:
+        self._record = record
+
+    async def get_knowledge_document(
+        self,
+        document_id: object,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantKnowledgeDocumentRecord | None:
+        del document_id, expected_tenant_id
+        return self._record
+
+
 def _governed_resolution_runtime(
     *,
     governance_repository: InMemoryGovernanceRepository,
@@ -82,7 +130,8 @@ def _governed_resolution_runtime(
         persistence=InMemoryResolutionProposalPersistence(),
         governance_gate=ResolutionGovernanceGate(
             governance_runtime=build_resolution_governance_runtime(
-                persistence=governance_repository
+                persistence=governance_repository,
+                grounding_checker=StaticGroundingChecker(allowed=True),
             )
         ),
     )
@@ -110,6 +159,7 @@ def _immutable_citation() -> dict[str, object]:
             "chunk_id": "66666666-6666-4666-8666-666666666666",
             "vector_id": "77777777-7777-4777-8777-777777777777",
             "document_version": 3,
+            "document_review_status": "approved",
             "char_start": 12,
             "char_end": 69,
             "vector_index_name": "tenant_knowledge_default",
@@ -121,6 +171,24 @@ def _immutable_citation() -> dict[str, object]:
         }
     )
     return citation
+
+
+def _approved_document() -> TenantKnowledgeDocumentRecord:
+    return TenantKnowledgeDocumentRecord(
+        document_id=as_knowledge_document_id(
+            "55555555-5555-4555-8555-555555555555"
+        ),
+        tenant_id=TENANT_ID,
+        title="Charging Troubleshooting SOP",
+        content="Intro text. Check USB-C cable fit before warranty replacement triage.",
+        document_type=TenantKnowledgeDocumentType.SOP,
+        status=TenantKnowledgeDocumentStatus.ACTIVE,
+        version=3,
+        uploaded_by="test",
+        vector_indexed_at=None,
+        created_at=datetime.now(timezone.utc),
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
+    )
 
 
 def _request(
@@ -272,6 +340,140 @@ async def test_concrete_gate_persists_allow_decision_and_proposal_stores_id() ->
 
 
 @pytest.mark.asyncio
+async def test_grounding_policy_denies_high_confidence_uncited_claim() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=CitationCoverageGroundingChecker(
+                    document_repository=_FakeDocumentRepository(
+                        _approved_document()
+                    )
+                ),
+            )
+        ),
+        conversation_generator=_StaticConversationGenerator(
+            GroundedReplyDraft(
+                language="en",
+                segments=(
+                    GroundedReplySegment(
+                        kind="claim",
+                        text="This issue is covered by approved support guidance.",
+                        citation_ranks=(),
+                    ),
+                ),
+            )
+        ),
+    )
+
+    record = await runtime.create_proposal(
+        _request(confidence=0.99, citations=[_immutable_citation()])
+    )
+
+    assert record.status is ResolutionProposalStatus.DENIED
+    assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert resolution_proposal_is_send_eligible(record) is False
+    assert record.governance_decision_id is not None
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert decision is not None
+    assert decision.decision == "deny"
+    grounding = [
+        rule for rule in decision.evaluated_rules if rule.rule_id == "ungrounded_claim"
+    ]
+    assert grounding
+    assert grounding[0].metadata["grounding_trace"]["status"] == "ungrounded"
+    assert grounding[0].metadata["structured_handoff"]["escalation"] == (
+        "ungrounded_claim"
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolvable_claim_span_is_send_eligible() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=CitationCoverageGroundingChecker(
+                    document_repository=_FakeDocumentRepository(
+                        _approved_document()
+                    )
+                ),
+            )
+        ),
+        conversation_generator=_StaticConversationGenerator(
+            GroundedReplyDraft(
+                language="en",
+                segments=(
+                    GroundedReplySegment(
+                        kind="claim",
+                        text=(
+                            "Approved support guidance says to check the "
+                            "USB-C cable fit before warranty triage."
+                        ),
+                        citation_ranks=(1,),
+                    ),
+                    GroundedReplySegment(
+                        kind="question",
+                        text="Please share your order number or product model.",
+                    ),
+                ),
+            )
+        ),
+    )
+
+    record = await runtime.create_proposal(
+        _request(confidence=0.42, citations=[_immutable_citation()])
+    )
+
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
+    assert resolution_proposal_is_send_eligible(record) is True
+    assert "[1]" in record.proposed_customer_reply
+
+
+@pytest.mark.asyncio
+async def test_grounding_checker_interface_can_swap_implementations() -> None:
+    generator = _StaticConversationGenerator(
+        GroundedReplyDraft(
+            language="en",
+            segments=(
+                GroundedReplySegment(
+                    kind="claim",
+                    text="A checker implementation decides this claim coverage.",
+                    citation_ranks=(1,),
+                ),
+            ),
+        )
+    )
+
+    async def run_with_checker(allowed: bool) -> ResolutionProposalStatus:
+        runtime = ResolutionRuntime(
+            persistence=InMemoryResolutionProposalPersistence(),
+            governance_gate=ResolutionGovernanceGate(
+                governance_runtime=build_resolution_governance_runtime(
+                    persistence=InMemoryGovernanceRepository(),
+                    grounding_checker=StaticGroundingChecker(allowed=allowed),
+                )
+            ),
+            conversation_generator=generator,
+        )
+        record = await runtime.create_proposal(
+            _request(confidence=0.99, citations=[_immutable_citation()])
+        )
+        return record.status
+
+    assert await run_with_checker(True) is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert await run_with_checker(False) is ResolutionProposalStatus.DENIED
+
+
+@pytest.mark.asyncio
 async def test_missing_governance_gate_fails_closed_for_send_eligibility() -> None:
     record = await ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence()
@@ -386,7 +588,7 @@ async def test_old_citation_payloads_still_normalize() -> None:
 
 
 @pytest.mark.asyncio
-async def test_low_confidence_requires_human_approval() -> None:
+async def test_low_confidence_without_central_governance_still_fails_closed() -> None:
     record = await ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence()
     ).create_proposal(_request(confidence=0.42))
@@ -397,7 +599,7 @@ async def test_low_confidence_requires_human_approval() -> None:
 
 
 @pytest.mark.asyncio
-async def test_central_allow_cannot_override_low_confidence() -> None:
+async def test_confidence_is_recorded_but_not_used_as_send_gate() -> None:
     record = await ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence(),
         governance_gate=_StaticResolutionGovernanceGate(
@@ -405,11 +607,12 @@ async def test_central_allow_cannot_override_low_confidence() -> None:
         ),
     ).create_proposal(_request(confidence=0.42))
 
-    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
-    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
-    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.confidence == 0.42
+    assert record.autonomy_decision is ResolutionAutonomyDecision.AUTO_APPROVED
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
     assert record.governance_decision_id == GOVERNANCE_DECISION_ID
-    assert resolution_proposal_is_send_eligible(record) is False
+    assert resolution_proposal_is_send_eligible(record) is True
 
 
 @pytest.mark.asyncio
@@ -421,16 +624,16 @@ async def test_concrete_gate_local_pending_state_blocks_send_eligibility() -> No
 
     record = await runtime.create_proposal(_request(confidence=0.42))
 
-    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
-    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
     assert record.governance_decision_id is not None
-    assert resolution_proposal_is_send_eligible(record) is False
+    assert resolution_proposal_is_send_eligible(record) is True
     decision = await governance_repository.get_decision(
         str(record.governance_decision_id),
         expected_tenant_id=TENANT_ID,
     )
     assert decision is not None
-    assert decision.decision == "require_approval"
+    assert decision.decision == "allow"
 
 
 @pytest.mark.asyncio

@@ -25,9 +25,18 @@ from app.coordination.identity import (
 from app.coordination.models.payload import CoordinationPayload
 from app.coordination.models.recipients import CoordinationRecipient
 from app.coordination.runtime import CoordinationRuntime
+from app.boundary.translation import (
+    CANONICAL_LANGUAGE,
+    IngressTranslateRequest,
+    TranslationPayload,
+    TranslationRuntime,
+)
 from app.execution import ExecutionRuntime, GovernanceAdmissionToken
 from app.execution.publisher import ExecutionPublisher
+from app.governance.capability import OperationalAct
 from app.identity import AuthorityContext
+from app.identity import TenantId
+from app.language import LanguageDetector
 from app.runtime import ExecutionGovernanceRuntime
 from app.session.conversation import (
     ConversationExecutionIntent,
@@ -98,6 +107,8 @@ class ConversationDiagnosticExecutionRequester:
         tenant_id: str,
         turn_id: str,
         customer_message: str,
+        source_language: str,
+        conversation_history: tuple[Mapping[str, Any], ...],
         expected_tenant_id: str,
     ) -> ConversationExecutionIntent:
         if tenant_id != expected_tenant_id:
@@ -109,6 +120,8 @@ class ConversationDiagnosticExecutionRequester:
                 session_id=session_id,
                 turn_id=turn_id,
                 customer_message=customer_message,
+                source_language=source_language,
+                conversation_history=conversation_history,
                 authority=authority,
             )
         )
@@ -187,9 +200,13 @@ class ConversationService:
         *,
         runtime: ConversationSessionRuntime,
         redis_client: Any,
+        translation_runtime: TranslationRuntime | None = None,
+        language_detector: LanguageDetector | None = None,
     ) -> None:
         self._runtime = runtime
         self._redis_client = redis_client
+        self._translation_runtime = translation_runtime
+        self._language_detector = language_detector or LanguageDetector()
 
     async def _check_session_ownership(
         self,
@@ -233,11 +250,18 @@ class ConversationService:
             calling_principal_id=calling_principal_id,
             is_operator=is_operator,
         )
+        canonical_content, source_language = await self._canonicalize_message(
+            content=content,
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
         try:
             result = await self._runtime.submit_message(
                 session_id=session_id,
                 tenant_id=tenant_id,
-                customer_message=content,
+                customer_message=canonical_content,
+                source_language=source_language,
+                raw_customer_message=content,
                 expected_tenant_id=expected_tenant_id,
             )
         except ConversationRuntimeError as exc:
@@ -247,6 +271,61 @@ class ConversationService:
             phase_a_response=result.phase_a_turn.content,
             execution_id=result.execution.execution_id,
         )
+
+    async def _canonicalize_message(
+        self,
+        *,
+        content: str,
+        tenant_id: str,
+        session_id: str,
+    ) -> tuple[str, str]:
+        try:
+            detected_language = self._language_detector.detect(content)
+        except Exception:  # noqa: BLE001
+            return content, CANONICAL_LANGUAGE
+        if detected_language == CANONICAL_LANGUAGE:
+            return content, CANONICAL_LANGUAGE
+        if self._translation_runtime is None:
+            return content, CANONICAL_LANGUAGE
+        request_id = f"conversation:{session_id}"
+        try:
+            envelope = await self._translation_runtime.ingress.translate(
+                IngressTranslateRequest(
+                    source=TranslationPayload(
+                        text=content,
+                        language=detected_language,
+                    ),
+                    seed=(
+                        "conversation-ingress|"
+                        f"{tenant_id}|{session_id}|"
+                        f"{detected_language}|{CANONICAL_LANGUAGE}"
+                    ),
+                    correlation_id=session_id,
+                    request_id=request_id,
+                    tenant_id=tenant_id,
+                    authority=AuthorityContext(
+                        tenant_id=TenantId(tenant_id),
+                        capabilities=frozenset(
+                            {
+                                OperationalAct.BOUNDARY_TRANSLATION_INGRESS.value
+                            }
+                        ),
+                    ),
+                    attributes={
+                        "source_language": detected_language,
+                        "target_language": CANONICAL_LANGUAGE,
+                    },
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return content, CANONICAL_LANGUAGE
+        result = envelope.result
+        projection = getattr(result, "projection", None)
+        canonical_payload = getattr(projection, "canonical_payload", None)
+        canonical_text = getattr(canonical_payload, "text", None)
+        if envelope.is_fully_clean and isinstance(canonical_text, str):
+            return canonical_text, detected_language
+        return content, CANONICAL_LANGUAGE
 
     async def stream_events(
         self,
@@ -297,6 +376,8 @@ def _to_coordination_request(
     session_id: str,
     turn_id: str,
     customer_message: str,
+    source_language: str,
+    conversation_history: tuple[Mapping[str, Any], ...],
     authority: AuthorityContext,
 ) -> CoordinationDispatchRequest:
     lineage_seed = f"{tenant_id}|{session_id}|{turn_id}|conversation"
@@ -319,11 +400,19 @@ def _to_coordination_request(
                     "session_id": session_id,
                     "turn_id": turn_id,
                     "message": customer_message,
+                    "source_language": source_language,
+                    "conversation_history": [
+                        dict(turn) for turn in conversation_history
+                    ],
                     "canonical_payload": {
                         "message": customer_message,
                         "text": customer_message,
                         "session_id": session_id,
                         "turn_id": turn_id,
+                        "source_language": source_language,
+                        "conversation_history": [
+                            dict(turn) for turn in conversation_history
+                        ],
                     },
                 },
                 schema_version="1",
@@ -332,6 +421,7 @@ def _to_coordination_request(
             metadata={
                 "conversation.session_id": session_id,
                 "conversation.turn_id": turn_id,
+                "conversation.source_language": source_language,
             },
         ),
         direction=CoordinationDirection.RUNTIME_TO_AGENT,
@@ -349,6 +439,7 @@ def _to_coordination_request(
         metadata={
             "conversation.session_id": session_id,
             "conversation.turn_id": turn_id,
+            "conversation.source_language": source_language,
         },
     )
 
@@ -361,6 +452,7 @@ def build_conversation_service(
     execution_governance_runtime: ExecutionGovernanceRuntime,
     execution_publisher: ExecutionPublisher,
     redis_client: Any,
+    translation_runtime: TranslationRuntime | None = None,
 ) -> ConversationService:
     publisher = RedisConversationEventPublisher(redis_client=redis_client)
     runtime = ConversationSessionRuntime(
@@ -373,7 +465,11 @@ def build_conversation_service(
         ),
         event_publisher=publisher,
     )
-    return ConversationService(runtime=runtime, redis_client=redis_client)
+    return ConversationService(
+        runtime=runtime,
+        redis_client=redis_client,
+        translation_runtime=translation_runtime,
+    )
 
 
 __all__ = [

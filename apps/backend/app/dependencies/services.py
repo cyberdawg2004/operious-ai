@@ -494,6 +494,7 @@ def get_execution_publisher() -> ExecutionPublisher:
 
 
 async def get_conversation_service(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     execution_publisher: ExecutionPublisher = Depends(get_execution_publisher),
 ) -> AsyncIterator[ConversationService]:
@@ -538,6 +539,10 @@ async def get_conversation_service(
         ),
         execution_publisher=deferred_execution_publisher,
         redis_client=get_redis_client(),
+        translation_runtime=cast(
+            TranslationRuntime,
+            request.app.state.translation_runtime,
+        ),
     )
     try:
         yield service

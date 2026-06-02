@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from app.escalation.enums import EscalationOutboxStatus, EscalationStatus
 from app.escalation.exceptions import (
@@ -36,8 +36,11 @@ from app.governance.persistence import (
     GovernanceTraceRecord,
     PolicyEvaluationResultRecord,
 )
+from app.session.contracts.requests import AppendEventRequest
+from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import as_session_id
 from app.session.persistence import SessionPersistenceProtocol
+from app.session.runtime import SessionRuntime
 
 _SESSION_METADATA_KEYS = (
     "session_id",
@@ -110,6 +113,11 @@ class EscalationAgentRuntime:
             expected_tenant_id=expected_tenant_id,
         )
         if existing is not None:
+            await self._append_grounding_handoff_event_if_present(
+                existing,
+                decision=None,
+                expected_tenant_id=expected_tenant_id,
+            )
             return existing
 
         decision = await self._governance.get_decision(
@@ -153,6 +161,7 @@ class EscalationAgentRuntime:
             session_id=resolved_session_id,
             governance_decision_id=governance_decision_id,
         )
+        grounding_metadata = _grounding_escalation_metadata(decision)
         record = EscalationRecord(
             escalation_id=str(escalation_id),
             session_id=str(resolved_session_id),
@@ -171,13 +180,58 @@ class EscalationAgentRuntime:
                 "source_correlation_id": decision.correlation_id,
                 "session_id": str(resolved_session_id),
                 "record_only_agent": True,
+                **grounding_metadata,
             },
         )
         await self._escalations.create_escalation(
             record,
             expected_tenant_id=expected_tenant_id,
         )
+        await self._append_grounding_handoff_event_if_present(
+            record,
+            decision=decision,
+            expected_tenant_id=expected_tenant_id,
+        )
         return record
+
+    async def _append_grounding_handoff_event_if_present(
+        self,
+        record: EscalationRecord,
+        *,
+        decision: GovernanceDecisionRecord | None,
+        expected_tenant_id: str,
+    ) -> None:
+        metadata = dict(record.metadata)
+        if "structured_handoff" not in metadata and decision is not None:
+            metadata.update(_grounding_escalation_metadata(decision))
+        if "structured_handoff" not in metadata and "grounding_trace" not in metadata:
+            return
+        envelope = await SessionRuntime(
+            persistence=self._sessions
+        ).append_event(
+            AppendEventRequest(
+                session_id=as_session_id(record.session_id),
+                kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+                occurred_at=datetime.now(timezone.utc),
+                continuity_mode=SessionContinuityMode.SYNCHRONOUS,
+                payload={
+                    "event_type": "grounding_escalation_handoff_created",
+                    "escalation_id": record.escalation_id,
+                    "governance_decision_id": record.governance_decision_id,
+                    "structured_handoff": metadata.get("structured_handoff"),
+                    "grounding_trace": metadata.get("grounding_trace"),
+                },
+                annotation="grounding_escalation_handoff_created",
+                idempotency_key=(
+                    "grounding-escalation-handoff:"
+                    f"{record.escalation_id}"
+                ),
+            )
+        )
+        if not envelope.is_ok:
+            raise EscalationRuntimeError(
+                "grounding escalation timeline event append failed"
+            )
 
     async def get_escalation(
         self,
@@ -663,6 +717,35 @@ def _session_id_from_metadata(metadata: Mapping[str, Any]) -> str | None:
             if text:
                 return text
     return None
+
+
+def _grounding_escalation_metadata(
+    decision: GovernanceDecisionRecord,
+) -> dict[str, Any]:
+    for result in decision.evaluated_rules:
+        metadata = dict(result.metadata)
+        if "structured_handoff" in metadata or "grounding_trace" in metadata:
+            return _handoff_metadata(metadata)
+    for violation in decision.violations:
+        metadata = dict(violation.metadata)
+        if "structured_handoff" in metadata or "grounding_trace" in metadata:
+            return _handoff_metadata(metadata)
+    return {}
+
+
+def _handoff_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    extracted: dict[str, Any] = {}
+    structured_handoff = metadata.get("structured_handoff")
+    if isinstance(structured_handoff, Mapping):
+        extracted["structured_handoff"] = dict(
+            cast(Mapping[str, Any], structured_handoff)
+        )
+    grounding_trace = metadata.get("grounding_trace")
+    if isinstance(grounding_trace, Mapping):
+        extracted["grounding_trace"] = dict(
+            cast(Mapping[str, Any], grounding_trace)
+        )
+    return extracted
 
 
 def _ensure_resolvable(record: EscalationRecord) -> None:
