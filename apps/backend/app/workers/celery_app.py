@@ -29,6 +29,7 @@ from app.hardening.observability.metrics_collector import (
 )
 from app.queues import (
     ALL_QUEUES,
+    QUEUE_DEAD_LETTER,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
     QUEUE_KNOWLEDGE_INDEXING,
@@ -67,6 +68,7 @@ celery_app = Celery(
         "app.workers.knowledge_tasks",
         "app.workers.outbound_tasks",
         "app.workers.qa_tasks",
+        "app.workers.s10_probe_tasks",
         "app.workers.sop_intelligence_tasks",
         "app.workers.supervisor_tasks",
         "app.workers.webhook_nonce_tasks",
@@ -123,6 +125,7 @@ celery_conf.update(
         "recover_dead_letter_replays": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
+        "s10_dead_letter_probe": {"queue": QUEUE_DEAD_LETTER},
         "process_post_call_transcript": {"queue": QUEUE_INGRESS_VOICE},
     },
     task_acks_late=True,
