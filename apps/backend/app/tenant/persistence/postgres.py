@@ -541,7 +541,9 @@ class PostgresTenantConfigurationRepository(BaseRepository):
                 if existing is None:
                     self.session.add(_execution_governance_record_to_row(record))
                 else:
-                    _update_execution_governance_row(existing, record)
+                    _assert_execution_governance_row_unchanged_or_raise(
+                        existing, record
+                    )
         except IntegrityError as exc:
             raise TenantConfigurationPersistenceError(
                 "execution governance configuration could not be persisted"
@@ -1120,27 +1122,14 @@ def _execution_governance_record_to_row(
     )
 
 
-def _update_execution_governance_row(
+def _assert_execution_governance_row_unchanged_or_raise(
     row: TenantExecutionGovernanceConfigurationRow,
     record: TenantExecutionGovernanceConfigurationRecord,
 ) -> None:
-    row.status = record.status.value
-    row.execution_quota = record.execution_quota
-    row.throughput_limit = record.throughput_limit
-    row.throughput_window_minutes = record.throughput_window_minutes
-    row.governance_budget_limit = record.governance_budget_limit
-    row.governance_budget_window_minutes = record.governance_budget_window_minutes
-    row.circuit_failure_threshold = record.circuit_failure_threshold
-    row.circuit_window_minutes = record.circuit_window_minutes
-    row.circuit_cooldown_minutes = record.circuit_cooldown_minutes
-    row.version = record.version
-    row.configured_by = record.configured_by
-    row.created_at = record.created_at
-    row.updated_at = record.updated_at
-    row.metadata_json = dict(record.metadata)
-    row.source_approval_id = record.source_approval_id
-    row.content_sha256 = record.content_sha256
-    row.previous_version_sha256 = record.previous_version_sha256
+    if row.content_sha256 != record.content_sha256:
+        raise ChronologyImmutabilityError(
+            "execution governance configuration version is append-only"
+        )
 
 
 def _execution_governance_row_to_record(

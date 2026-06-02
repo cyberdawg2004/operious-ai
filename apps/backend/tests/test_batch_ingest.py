@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.ingress import (
     BatchIngestItem,
+    BatchIngestItemResult,
     BatchIngestRequest,
+    BatchIngestResponse,
     BatchItemStatus,
 )
 from app.boundary.db.models import BoundaryIngressRow
@@ -30,7 +32,6 @@ from app.boundary.persistence import (
 )
 from app.dependencies.services import (
     check_batch_ingest_admission,
-    get_admission_service,
     get_batch_ingest_service,
 )
 from app.hardening.admission import (
@@ -252,12 +253,9 @@ async def test_batch_cannot_inject_other_tenant_items(
 
 
 @pytest.mark.asyncio
-async def test_batch_returns_503_when_admission_defers() -> None:
+async def test_batch_route_preserves_capture_when_admission_would_defer() -> None:
     app = create_app()
-    service = _FailingBatchIngestService()
-    app.dependency_overrides[get_admission_service] = lambda: _FakeAdmissionService(
-        AdmissionOutcome.DEFER
-    )
+    service = _RecordingBatchIngestService()
     app.dependency_overrides[get_batch_ingest_service] = lambda: service
 
     async with httpx.AsyncClient(
@@ -270,9 +268,9 @@ async def test_batch_returns_503_when_admission_defers() -> None:
             headers={"X-Tenant-ID": TENANT_ID},
         )
 
-    assert response.status_code == 503
-    assert response.headers["Retry-After"] == "15"
-    assert service.calls == 0
+    assert response.status_code == 200
+    assert response.json()["accepted"] == 1
+    assert service.calls == 1
 
 
 @pytest.mark.asyncio
@@ -471,6 +469,34 @@ class _FailingBatchIngestService:
         del items, tenant_id
         self.calls += 1
         raise AssertionError("batch service should not be called")
+
+
+class _RecordingBatchIngestService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def process_batch(
+        self,
+        *,
+        items: list[BatchIngestItem],
+        tenant_id: str,
+    ) -> BatchIngestResponse:
+        self.calls += 1
+        return BatchIngestResponse(
+            total=len(items),
+            accepted=len(items),
+            rejected=0,
+            duplicate=0,
+            results=[
+                BatchIngestItemResult(
+                    index=index,
+                    external_message_id=item.external_message_id,
+                    status=BatchItemStatus.ACCEPTED,
+                    boundary_id=f"boundary-{tenant_id}-{index}",
+                )
+                for index, item in enumerate(items)
+            ],
+        )
 
 
 class _FakeAdmissionService:

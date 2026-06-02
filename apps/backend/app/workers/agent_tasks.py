@@ -82,6 +82,10 @@ from app.boundary.translation import (
     TranslationRuntime,
 )
 from app.core.config import get_settings
+from app.core.queue_admission import (
+    TenantQueueQoSClient,
+    release_tenant_queue_publish,
+)
 from app.core.redis import get_redis_client
 from app.db.session import dispose_engine, get_session_factory, reset_engine_state
 from app.db.tenant_context import get_current_tenant, set_current_tenant
@@ -111,6 +115,10 @@ from app.runtime.resolution_runtime import (
     resolution_outbound_draft_timeline_payload,
     resolution_proposal_timeline_payload,
     resolution_proposal_is_send_eligible,
+)
+from app.runtime.bound_governance import (
+    BoundGovernanceConfigurationError,
+    load_bound_governance_config,
 )
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.runtime.provider_circuit_breaker import (
@@ -376,6 +384,16 @@ async def _prepare_diagnostic_execution(
                 "reason": claim.reason or "not_claimable",
             }
         execution = claim.execution
+        await _release_execution_tenant_qos(tenant_id=execution.tenant_id)
+        try:
+            await load_bound_governance_config(
+                execution=execution,
+                tenant_configuration_repository=PostgresTenantConfigurationRepository(
+                    session
+                ),
+            )
+        except BoundGovernanceConfigurationError as exc:
+            raise DiagnosticExecutionError(str(exc)) from exc
         attempt = claim.attempt
         if attempt is None:
             raise DiagnosticExecutionError(
@@ -441,6 +459,16 @@ async def _prepare_diagnostic_execution(
             source_language=content_context.source_language,
             conversation_turn_id=conversation_turn_id,
         )
+
+
+async def _release_execution_tenant_qos(*, tenant_id: str) -> None:
+    if _running_under_pytest():
+        return
+    await release_tenant_queue_publish(
+        redis_client=cast(TenantQueueQoSClient, get_redis_client()),
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+        tenant_id=tenant_id,
+    )
 
 
 async def _generate_diagnostic_reasoning_for_work_item(

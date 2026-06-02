@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operious AI</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:#060609;color:#EEF2F8;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',system-ui,sans-serif;overflow-x:hidden;cursor:none;}
+
+#cursor{position:fixed;top:0;left:0;width:10px;height:10px;border-radius:50%;background:#C9A84C;pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:width .15s,height .15s;}
+#cursor-ring{position:fixed;top:0;left:0;width:34px;height:34px;border-radius:50%;border:1px solid rgba(201,168,76,.35);pointer-events:none;z-index:9998;transform:translate(-50%,-50%);}
+
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:20px 52px;display:flex;align-items:center;justify-content:space-between;transition:all .4s;}
+.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none;}
+.nav-wordmark{font-size:12px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#D8E4F4;font-family:'SF Mono','Fira Code',monospace;}
+.nav-wordmark span{color:#C9A84C;}
+.nav-links{display:flex;gap:32px;}
+.nav-link{font-size:12px;color:#3A4E62;cursor:pointer;transition:color .2s;text-decoration:none;letter-spacing:.03em;}
+.nav-link:hover{color:#EEF2F8;}
+.nav-cta{font-size:11px;font-weight:600;color:#C9A84C;border:1px solid rgba(201,168,76,.3);padding:8px 18px;border-radius:6px;cursor:pointer;transition:all .2s;background:transparent;font-family:inherit;letter-spacing:.08em;text-transform:uppercase;}
+.nav-cta:hover{background:rgba(201,168,76,.1);border-color:rgba(201,168,76,.6);}
+
+/* HERO */
+.hero{min-height:100vh;position:relative;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;padding:160px 40px 100px;}
+#hero-canvas{position:absolute;inset:0;z-index:1;pointer-events:none;}
+.grid-overlay{position:absolute;inset:0;z-index:2;opacity:.018;background-image:linear-gradient(rgba(216,228,244,1) 1px,transparent 1px),linear-gradient(90deg,rgba(216,228,244,1) 1px,transparent 1px);background-size:80px 80px;pointer-events:none;}
+.hero-content{position:relative;z-index:10;max-width:940px;}
+
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.2);border-radius:20px;font-size:10px;letter-spacing:.16em;color:#C9A84C;font-family:monospace;text-transform:uppercase;margin-bottom:40px;opacity:0;transform:translateY(18px);animation:fadeUp .8s cubic-bezier(.16,1,.3,1) .15s forwards;}
+.eyebrow-dot{width:5px;height:5px;border-radius:50%;background:#C9A84C;animation:blink 2.4s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+.hero-headline{font-size:clamp(46px,7.5vw,94px);font-weight:800;line-height:.93;letter-spacing:-.035em;color:#EEF2F8;margin-bottom:30px;}
+.word{display:inline-block;opacity:0;}
+.hero-headline em{font-style:normal;background:linear-gradient(130deg,#A8882C 0%,#C9A84C 30%,#E8C76A 60%,#C9A84C 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+
+.hero-sub{font-size:18px;line-height:1.72;color:#4A6078;max-width:640px;margin:0 auto 52px;font-weight:400;opacity:0;transform:translateY(18px);animation:fadeUp .9s cubic-bezier(.16,1,.3,1) 1.2s forwards;}
+@keyframes fadeUp{to{opacity:1;transform:none;}}
+
+.hero-ctas{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:80px;opacity:0;transform:translateY(18px);animation:fadeUp .9s cubic-bezier(.16,1,.3,1) 1.4s forwards;}
+
+.btn-primary{position:relative;padding:15px 32px;background:#C9A84C;border-radius:8px;border:none;font-size:14px;font-weight:700;color:#060609;cursor:pointer;font-family:inherit;letter-spacing:.02em;box-shadow:0 0 0 1px rgba(201,168,76,.3),0 8px 40px rgba(201,168,76,.18);transition:box-shadow .3s,transform .2s;overflow:hidden;}
+.btn-primary::after{content:'';position:absolute;inset:0;background:radial-gradient(circle at var(--mx,50%) var(--my,50%),rgba(255,255,255,.18),transparent 55%);opacity:0;transition:opacity .3s;}
+.btn-primary:hover::after{opacity:1;}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 0 0 1px rgba(201,168,76,.5),0 16px 52px rgba(201,168,76,.28);}
+.btn-ghost{padding:15px 32px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid rgba(255,255,255,.09);font-size:14px;font-weight:500;color:#8AA0B8;cursor:pointer;font-family:inherit;transition:all .25s;}
+.btn-ghost:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.18);color:#EEF2F8;}
+
+.substrate-row{display:flex;gap:0;justify-content:center;border:1px solid rgba(255,255,255,.05);border-radius:12px;overflow:hidden;background:rgba(255,255,255,.016);backdrop-filter:blur(14px);max-width:720px;margin:0 auto;opacity:0;transform:translateY(18px);animation:fadeUp .9s cubic-bezier(.16,1,.3,1) 1.6s forwards;}
+.s-item{flex:1;padding:15px 8px;text-align:center;border-right:1px solid rgba(255,255,255,.04);transition:background .25s;cursor:default;}
+.s-item:last-child{border-right:none;}
+.s-item:hover{background:rgba(201,168,76,.05);}
+.s-num{font-size:8px;color:rgba(201,168,76,.5);font-family:monospace;letter-spacing:.12em;margin-bottom:5px;}
+.s-name{font-size:10.5px;color:#2E3E50;font-weight:500;letter-spacing:.02em;transition:color .25s;}
+.s-item:hover .s-name{color:#8AA0B8;}
+.s-item:hover .s-num{color:#C9A84C;}
+
+.scroll-hint{position:absolute;bottom:36px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;opacity:.3;animation:fadeUp 1s 2.2s both;}
+.scroll-line{width:1px;height:50px;background:linear-gradient(to bottom,transparent,#C9A84C);animation:scrollAnim 2.4s ease-in-out infinite;}
+@keyframes scrollAnim{0%{opacity:0;transform:scaleY(.3) translateY(-12px)}60%{opacity:1}100%{opacity:0;transform:scaleY(.3) translateY(12px)}}
+
+/* MARQUEE */
+.marquee-band{padding:24px 0;border-top:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04);overflow:hidden;position:relative;}
+.marquee-inner{display:flex;gap:0;width:max-content;animation:marquee 26s linear infinite;}
+.m-item{display:flex;align-items:center;gap:10px;padding:0 32px;flex-shrink:0;}
+.m-dot{width:3px;height:3px;border-radius:50%;background:#30D158;box-shadow:0 0 5px rgba(48,209,88,.7);}
+.m-text{font-size:10px;color:#1E2E3E;font-family:monospace;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;}
+@keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* EVIDENCE TERMINAL */
+.terminal-section{padding:120px 52px;background:linear-gradient(180deg,#030306 0%,#060609 100%);}
+.section-inner{max-width:1100px;margin:0 auto;}
+.s-label{font-size:10px;letter-spacing:.2em;color:#C9A84C;font-family:monospace;text-transform:uppercase;margin-bottom:16px;}
+.s-title{font-size:clamp(30px,4.5vw,54px);font-weight:800;letter-spacing:-.025em;color:#EEF2F8;line-height:1.05;max-width:560px;margin-bottom:16px;}
+.s-sub{font-size:15px;color:#3A4E62;line-height:1.7;max-width:480px;margin-bottom:60px;}
+
+.terminal{background:#0B0D14;border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;font-family:'SF Mono','Fira Code',monospace;max-width:680px;}
+.terminal-bar{padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px;}
+.t-dot-r{width:10px;height:10px;border-radius:50%;background:#FF453A;}
+.t-dot-y{width:10px;height:10px;border-radius:50%;background:#FFD60A;}
+.t-dot-g{width:10px;height:10px;border-radius:50%;background:#30D158;}
+.t-label{font-size:10px;color:#2A3A4A;letter-spacing:.08em;margin-left:6px;}
+.t-live{display:flex;align-items:center;gap:6px;margin-left:auto;}
+.t-live-dot{width:6px;height:6px;border-radius:50%;background:#30D158;animation:blink 2s infinite;}
+.t-live-text{font-size:9px;color:#30D158;letter-spacing:.08em;}
+.terminal-body{padding:24px 28px;display:flex;flex-direction:column;gap:16px;}
+.t-row{display:flex;align-items:baseline;gap:0;flex-wrap:wrap;}
+.t-key{font-size:11px;color:#2A5CAA;letter-spacing:.08em;width:140px;flex-shrink:0;}
+.t-val{font-size:12px;color:#D8E4F4;}
+.t-val.green{color:rgba(48,209,88,.85);}
+.t-val.gold{color:rgba(201,168,76,.8);}
+.t-val.muted{color:rgba(122,144,180,.6);}
+.t-accent{font-size:10px;color:rgba(122,144,180,.45);margin-left:12px;}
+
+/* PIPELINE */
+.pipeline-section{padding:120px 52px;}
+.pipe-wrap{position:relative;margin-top:56px;}
+.pipe-connector{position:absolute;top:27px;left:30px;right:30px;height:1px;background:linear-gradient(90deg,rgba(201,168,76,.35),rgba(0,199,255,.2),rgba(48,209,88,.3));z-index:0;}
+.pipeline{display:grid;grid-template-columns:repeat(7,1fr);gap:0;position:relative;z-index:1;}
+.pipe-step{display:flex;flex-direction:column;align-items:center;gap:14px;padding:0 4px;}
+.pipe-dot{width:54px;height:54px;border-radius:50%;background:#060609;border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:10px;color:rgba(255,255,255,.1);font-family:monospace;letter-spacing:.06em;transition:all .4s cubic-bezier(.16,1,.3,1);cursor:default;position:relative;}
+.pipe-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1px solid transparent;transition:all .4s;}
+.pipe-step:hover .pipe-dot{background:rgba(201,168,76,.07);border-color:rgba(201,168,76,.4);color:#C9A84C;}
+.pipe-step:hover .pipe-dot::after{border-color:rgba(201,168,76,.12);box-shadow:0 0 28px rgba(201,168,76,.1);}
+.pipe-label{font-size:10px;color:#2A3A4A;text-align:center;letter-spacing:.04em;font-weight:500;line-height:1.4;transition:color .3s;}
+.pipe-step:hover .pipe-label{color:#6A8090;}
+
+/* CAPABILITIES */
+.cap-section{padding:120px 52px;background:#030306;}
+.cap-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:56px;}
+.cap-card{padding:30px;border-radius:16px;background:rgba(255,255,255,.018);border:1px solid rgba(255,255,255,.05);transition:all .35s cubic-bezier(.16,1,.3,1);cursor:default;position:relative;overflow:hidden;}
+.cap-card::before{content:'';position:absolute;inset:0;border-radius:16px;background:radial-gradient(circle at var(--mx,50%) var(--my,50%),rgba(201,168,76,.06) 0%,transparent 55%);opacity:0;transition:opacity .35s;}
+.cap-card:hover::before{opacity:1;}
+.cap-card:hover{border-color:rgba(201,168,76,.16);transform:translateY(-4px);box-shadow:0 28px 60px rgba(0,0,0,.4),0 0 0 1px rgba(201,168,76,.09);}
+.cap-icon-wrap{width:38px;height:38px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.18);border-radius:9px;margin-bottom:20px;display:flex;align-items:center;justify-content:center;transition:all .3s;}
+.cap-card:hover .cap-icon-wrap{background:rgba(201,168,76,.13);box-shadow:0 0 20px rgba(201,168,76,.12);}
+.cap-title{font-size:15px;font-weight:700;color:#B8CDD8;margin-bottom:8px;letter-spacing:-.01em;}
+.cap-desc{font-size:13px;color:#2E3E4E;line-height:1.65;transition:color .3s;}
+.cap-card:hover .cap-desc{color:#3E5060;}
+.cap-tag{display:inline-block;margin-top:14px;font-size:9px;color:rgba(201,168,76,.55);font-family:monospace;letter-spacing:.1em;text-transform:uppercase;border:1px solid rgba(201,168,76,.12);padding:3px 8px;border-radius:4px;}
+
+/* INDUSTRIES */
+.industry-section{padding:120px 52px;}
+.industry-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:56px;}
+.ind-card{padding:20px 16px;border-radius:12px;background:rgba(255,255,255,.018);border:1px solid rgba(255,255,255,.05);text-align:center;transition:all .3s;cursor:default;}
+.ind-card:hover{background:rgba(201,168,76,.04);border-color:rgba(201,168,76,.14);transform:translateY(-3px);}
+.ind-icon{width:32px;height:32px;margin:0 auto 10px;opacity:.4;transition:opacity .3s;}
+.ind-card:hover .ind-icon{opacity:.8;}
+.ind-name{font-size:11px;color:#2E3E4E;font-weight:600;letter-spacing:.04em;transition:color .3s;}
+.ind-card:hover .ind-name{color:#8AA0B8;}
+
+/* LAYERS */
+.layers-section{padding:120px 52px;background:linear-gradient(180deg,#030306 0%,#060609 100%);position:relative;}
+.layers-section::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.15),transparent);}
+.layers{max-width:680px;margin-top:56px;}
+.layer{display:flex;align-items:flex-start;gap:20px;padding:22px 0;border-bottom:1px solid rgba(255,255,255,.035);cursor:default;transition:all .3s;}
+.layer:last-child{border-bottom:none;}
+.layer-num{font-size:10px;color:rgba(201,168,76,.3);font-family:monospace;letter-spacing:.1em;padding-top:2px;flex-shrink:0;width:26px;transition:color .3s;}
+.layer-bar{width:2px;border-radius:2px;background:rgba(255,255,255,.04);flex-shrink:0;align-self:stretch;transition:all .3s;}
+.layer-body{flex:1;}
+.layer-title{font-size:14px;font-weight:700;color:#4A6072;margin-bottom:4px;transition:color .3s;}
+.layer-desc{font-size:13px;color:#1E2E3A;line-height:1.62;transition:color .3s;}
+.layer:hover .layer-num{color:#C9A84C;}
+.layer:hover .layer-bar{background:#C9A84C;box-shadow:0 0 8px rgba(201,168,76,.4);}
+.layer:hover .layer-title{color:#C8D8E8;}
+.layer:hover .layer-desc{color:#3A5060;}
+
+/* CTA */
+.cta-section{padding:120px 52px;text-align:center;}
+.cta-glow{position:relative;display:inline-block;}
+.cta-glow::before{content:'';position:absolute;inset:-80px -120px;background:radial-gradient(ellipse,rgba(201,168,76,.06) 0%,transparent 70%);z-index:0;}
+.cta-headline{font-size:clamp(30px,4vw,52px);font-weight:800;letter-spacing:-.025em;color:#EEF2F8;line-height:1.08;max-width:680px;margin:0 auto 20px;position:relative;z-index:1;}
+.cta-sub{font-size:16px;color:#3A4E62;max-width:440px;margin:0 auto 48px;line-height:1.65;position:relative;z-index:1;}
+
+/* REVEAL */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .85s cubic-bezier(.16,1,.3,1),transform .85s cubic-bezier(.16,1,.3,1);}
+.reveal.in{opacity:1;transform:none;}
+.stagger>*{opacity:0;transform:translateY(20px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1);}
+.stagger.in>*:nth-child(1){opacity:1;transform:none;transition-delay:.04s}
+.stagger.in>*:nth-child(2){opacity:1;transform:none;transition-delay:.12s}
+.stagger.in>*:nth-child(3){opacity:1;transform:none;transition-delay:.20s}
+.stagger.in>*:nth-child(4){opacity:1;transform:none;transition-delay:.28s}
+.stagger.in>*:nth-child(5){opacity:1;transform:none;transition-delay:.36s}
+.stagger.in>*:nth-child(6){opacity:1;transform:none;transition-delay:.44s}
+.stagger.in>*:nth-child(7){opacity:1;transform:none;transition-delay:.52s}
+
+.divider{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.045),transparent);}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}.reveal,.stagger>*{opacity:1;transform:none;}.word{opacity:1;}}
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+<div id="cursor-ring"></div>
+
+<!-- NAV -->
+<nav id="nav">
+  <a href="#" class="nav-logo">
+    <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+      <polygon points="16,2 28,9 28,23 16,30 4,23 4,9" stroke="#A8882C" stroke-width="1.5" fill="none"/>
+      <polygon points="16,8 22,11.5 22,18.5 16,22 10,18.5 10,11.5" stroke="#2A5CAA" stroke-width="1" fill="none"/>
+      <line x1="16" y1="2" x2="16" y2="8" stroke="#A8882C" stroke-width="1.5"/>
+      <line x1="28" y1="23" x2="22" y2="18.5" stroke="#A8882C" stroke-width="1.5"/>
+      <line x1="4" y1="23" x2="10" y2="18.5" stroke="#A8882C" stroke-width="1.5"/>
+      <circle cx="16" cy="15" r="1.5" fill="#A8882C"/>
+    </svg>
+    <span class="nav-wordmark">Operious<span>·</span></span>
+  </a>
+  <div class="nav-links">
+    <a href="#" class="nav-link">Platform</a>
+    <a href="#" class="nav-link">Industries</a>
+    <a href="#" class="nav-link">Trust</a>
+    <a href="#" class="nav-link">Insights</a>
+  </div>
+  <button class="nav-cta">Request Access</button>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <canvas id="hero-canvas"></canvas>
+  <div class="grid-overlay"></div>
+  <div class="hero-content">
+    <div class="eyebrow"><div class="eyebrow-dot"></div>Governed Execution Infrastructure</div>
+    <h1 class="hero-headline" id="hl"></h1>
+    <p class="hero-sub">The runtime that sits between AI decisions and enterprise actions. Every resolution governed by policy, every decision permanently reconstructible, every customer interaction auditable to the byte.</p>
+    <div class="hero-ctas">
+      <button class="btn-primary" id="cta-btn">Request enterprise access →</button>
+      <button class="btn-ghost">Explore the architecture</button>
+    </div>
+    <div class="substrate-row">
+      <div class="s-item"><div class="s-num">01</div><div class="s-name">Boundary</div></div>
+      <div class="s-item"><div class="s-num">02</div><div class="s-name">Coordination</div></div>
+      <div class="s-item"><div class="s-num">03</div><div class="s-name">Governance</div></div>
+      <div class="s-item"><div class="s-num">04</div><div class="s-name">Session</div></div>
+      <div class="s-item"><div class="s-num">05</div><div class="s-name">Execution</div></div>
+      <div class="s-item"><div class="s-num">06</div><div class="s-name">Supervisor</div></div>
+      <div class="s-item"><div class="s-num">07</div><div class="s-name">Arbitration</div></div>
+    </div>
+  </div>
+  <div class="scroll-hint"><div class="scroll-line"></div></div>
+</section>
+
+<!-- MARQUEE -->
+<div class="marquee-band">
+  <div class="marquee-inner" id="mq">
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Cryptographically Audited</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">UUID5 Identity</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Force RLS</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Append-Only Timelines</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Fail-Closed Governance</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Deterministic Replay</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Tenant-Isolated</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Multi-Agent Coordination</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Zero Silent Drops</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Six Languages Native</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Cryptographically Audited</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">UUID5 Identity</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Force RLS</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Append-Only Timelines</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Fail-Closed Governance</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Deterministic Replay</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Tenant-Isolated</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Multi-Agent Coordination</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Zero Silent Drops</span></div>
+    <div class="m-item"><div class="m-dot"></div><span class="m-text">Six Languages Native</span></div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- LIVE EVIDENCE TERMINAL -->
+<section class="terminal-section">
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Live Evidence</p>
+      <h2 class="s-title">Every decision, permanently auditable.</h2>
+      <p class="s-sub">The audit trail isn't a log. It's a forensic reconstruction surface — every governance decision, every SOP citation, every executed action signed and replayable.</p>
+    </div>
+    <div class="reveal" style="transition-delay:.1s">
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="t-dot-r"></div><div class="t-dot-y"></div><div class="t-dot-g"></div>
+          <span class="t-label">Session df6139ba · 2026-05-24T03:10:28Z</span>
+          <div class="t-live"><div class="t-live-dot"></div><span class="t-live-text">LIVE</span></div>
+        </div>
+        <div class="terminal-body" id="terminal-body">
+          <!-- rows typed in by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- PIPELINE -->
+<section class="pipeline-section">
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Architecture</p>
+      <h2 class="s-title">Seven substrates. No bypass.</h2>
+      <p class="s-sub" style="margin-bottom:0">Each substrate is independently inspectable. No AI output reaches the system without traversing all seven.</p>
+    </div>
+    <div class="pipe-wrap reveal" style="transition-delay:.12s">
+      <div class="pipe-connector"></div>
+      <div class="pipeline stagger">
+        <div class="pipe-step"><div class="pipe-dot">01</div><div class="pipe-label">Boundary<br>Admission</div></div>
+        <div class="pipe-step"><div class="pipe-dot">02</div><div class="pipe-label">Agent<br>Coordination</div></div>
+        <div class="pipe-step"><div class="pipe-dot">03</div><div class="pipe-label">Policy<br>Governance</div></div>
+        <div class="pipe-step"><div class="pipe-dot">04</div><div class="pipe-label">Session<br>State</div></div>
+        <div class="pipe-step"><div class="pipe-dot">05</div><div class="pipe-label">Controlled<br>Execution</div></div>
+        <div class="pipe-step"><div class="pipe-dot">06</div><div class="pipe-label">Supervisor<br>Review</div></div>
+        <div class="pipe-step"><div class="pipe-dot">07</div><div class="pipe-label">Conflict<br>Arbitration</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CAPABILITIES -->
+<section class="cap-section">
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Capabilities</p>
+      <h2 class="s-title">The infrastructure enterprise AI actually requires.</h2>
+    </div>
+    <div class="cap-grid stagger">
+      <div class="cap-card">
+        <div class="cap-icon-wrap"><svg width="16" height="16" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg></div>
+        <div class="cap-title">Constitutional Governance</div>
+        <div class="cap-desc">Policy chains evaluate every proposed action. No model output executes without passing governance. Empty chains return DENY — there is no implicit allow.</div>
+        <div class="cap-tag">Fail-Closed</div>
+      </div>
+      <div class="cap-card">
+        <div class="cap-icon-wrap"><svg width="16" height="16" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg></div>
+        <div class="cap-title">Forensic Reconstructibility</div>
+        <div class="cap-desc">Replay any decision at any point in time with cryptographic certainty. The audit trail is immutable by architecture. Every SOP citation, every governance decision, permanently signed.</div>
+        <div class="cap-tag">UUID5 Identity</div>
+      </div>
+      <div class="cap-card">
+        <div class="cap-icon-wrap"><svg width="16" height="16" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg></div>
+        <div class="cap-title">Multi-Agent Coordination</div>
+        <div class="cap-desc">Deterministic orchestration across Diagnostic, Resolution, Supervisor, and Trainer agents with structural guarantees against deadlock and cross-tenant contamination.</div>
+        <div class="cap-tag">Deterministic</div>
+      </div>
+      <div class="cap-card">
+        <div class="cap-icon-wrap"><svg width="16" height="16" fill="none" stroke="#00C7FF" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg></div>
+        <div class="cap-title">Multilingual Voice & Chat</div>
+        <div class="cap-desc">Native operational support in Arabic, English, and four further languages. Language context preserved through triage, policy decisions, and customer reply — never silently dropped.</div>
+        <div class="cap-tag">6 Languages</div>
+      </div>
+      <div class="cap-card">
+        <div class="cap-icon-wrap"><svg width="16" height="16" fill="none" stroke="#00C7FF" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg></div>
+        <div class="cap-title">Crisis Override Control</div>
+        <div class="cap-desc">Emergency rules take effect in milliseconds and override normal operations with full audit trail. Block a SKU, halt a refund class, escalate a category — with automatic expiry.</div>
+        <div class="cap-tag">Millisecond Activation</div>
+      </div>
+      <div class="cap-card">
+        <div class="cap-icon-wrap"><svg width="16" height="16" fill="none" stroke="#00C7FF" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg></div>
+        <div class="cap-title">Semantic Fraud Intelligence</div>
+        <div class="cap-desc">MinHash fingerprinting identifies duplicate and near-duplicate requests at sub-millisecond latency. Semantic circuit breakers quarantine anomalous clusters before execution.</div>
+        <div class="cap-tag">0.25ms Fingerprint</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- INDUSTRIES -->
+<section class="industry-section">
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Industries</p>
+      <h2 class="s-title">Built for regulated operations.</h2>
+      <p class="s-sub" style="margin-bottom:0">Designed for teams where operational decisions must remain governed, replayable, and tenant-contained.</p>
+    </div>
+    <div class="industry-grid stagger" style="margin-top:48px">
+      <div class="ind-card"><svg class="ind-icon" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"/></svg><div class="ind-name">Hardware</div></div>
+      <div class="ind-card"><svg class="ind-icon" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z"/></svg><div class="ind-name">Financial</div></div>
+      <div class="ind-card"><svg class="ind-icon" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg><div class="ind-name">Healthcare</div></div>
+      <div class="ind-card"><svg class="ind-icon" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg><div class="ind-name">Insurance</div></div>
+      <div class="ind-card"><svg class="ind-icon" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"/></svg><div class="ind-name">Telecom</div></div>
+      <div class="ind-card"><svg class="ind-icon" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg><div class="ind-name">Logistics</div></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CONTAINMENT -->
+<section class="layers-section">
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Security Architecture</p>
+      <h2 class="s-title">Five containment layers. None optional.</h2>
+      <p class="s-sub">The gap between what an AI model proposes and what it is permitted to execute is not a policy. It is architecture.</p>
+    </div>
+    <div class="layers reveal" style="transition-delay:.1s">
+      <div class="layer"><div class="layer-num">01</div><div class="layer-bar"></div><div class="layer-body"><div class="layer-title">ToolInvoker Enforcement</div><div class="layer-desc">LLM output is a proposal, not a command. Every action passes through ToolInvoker before execution. The model cannot bypass it.</div></div></div>
+      <div class="layer"><div class="layer-num">02</div><div class="layer-bar"></div><div class="layer-body"><div class="layer-title">Governance Substrate</div><div class="layer-desc">Policy chains evaluate every proposed action. Empty chains return DENY. There is no path to ALLOW without a passing policy.</div></div></div>
+      <div class="layer"><div class="layer-num">03</div><div class="layer-bar"></div><div class="layer-body"><div class="layer-title">Row-Level Security</div><div class="layer-desc">Enforced at the database layer on every tenant-scoped table. No query reaches data it isn't authorized to see, regardless of model instruction.</div></div></div>
+      <div class="layer"><div class="layer-num">04</div><div class="layer-bar"></div><div class="layer-body"><div class="layer-title">UUID5 Cryptographic Identity</div><div class="layer-desc">Every decision, agent, and execution carries a deterministic fingerprint. Replayable. Forensically reconstructible from any point in time.</div></div></div>
+      <div class="layer"><div class="layer-num">05</div><div class="layer-bar"></div><div class="layer-body"><div class="layer-title">Append-Only Timelines</div><div class="layer-desc">No event can be modified after creation. The audit trail is immutable by architecture — not by policy — and cannot be silently corrupted.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="cta-glow reveal">
+    <p class="s-label" style="margin-bottom:20px">See it live</p>
+    <h2 class="cta-headline">See how Operious closes the trust gap in enterprise AI operations.</h2>
+    <p class="cta-sub">We'll walk you through a live governance trace, an Arabic ticket flow, and the manager approval view — in 20 minutes.</p>
+    <div class="hero-ctas" style="animation:none;opacity:1;transform:none;">
+      <button class="btn-primary" id="cta-btn-2">Request enterprise access →</button>
+      <button class="btn-ghost">Read the architecture</button>
+    </div>
+  </div>
+</section>
+
+<script>
+// CURSOR
+const cur=document.getElementById('cursor'),ring=document.getElementById('cursor-ring');
+let mx=0,my=0,rx=0,ry=0;
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;cur.style.cssText+=`;left:${mx}px;top:${my}px`;});
+(function loopRing(){rx+=(mx-rx)*.1;ry+=(my-ry)*.1;ring.style.cssText+=`;left:${rx}px;top:${ry}px`;requestAnimationFrame(loopRing);})();
+
+// HEADLINE WORD STAGGER
+const words='The runtime that governs AI decisions at enterprise scale.'.split(' ');
+document.getElementById('hl').innerHTML=words.map((w,i)=>{
+  const isGold=w==='governs';
+  const d=0.35+i*0.07;
+  return `<span class="word" style="animation:wIn .7s cubic-bezier(.16,1,.3,1) ${d}s forwards;">${isGold?`<em>${w}</em>`:w}</span> `;
+}).join('');
+const st=document.createElement('style');
+st.textContent='@keyframes wIn{from{opacity:0;transform:translateY(32px) rotateX(16deg)}to{opacity:1;transform:none}}';
+document.head.appendChild(st);
+
+// CANVAS PARTICLES
+const cv=document.getElementById('hero-canvas'),cx2=cv.getContext('2d');
+let W,H,pts=[];
+function resize(){W=cv.width=cv.offsetWidth;H=cv.height=cv.offsetHeight;}
+resize();window.addEventListener('resize',()=>{resize();init();});
+function init(){pts=[];const n=Math.floor(W*H/12000);for(let i=0;i<n;i++)pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.2,vy:(Math.random()-.5)*.2,r:Math.random()*1.3+.3,a:Math.random()*.4+.1,gold:Math.random()>.6});}
+init();
+const orbs=Array.from({length:10},(_,i)=>({a:i/10*Math.PI*2,r:Math.random()*70+150,sp:(Math.random()*.0005+.0002)*(Math.random()>.5?1:-1),sz:Math.random()*1.8+.8,gold:Math.random()>.45,op:Math.random()*.55+.25}));
+let pmx=0,pmy=0;
+document.addEventListener('mousemove',e=>{pmx=e.clientX;pmy=e.clientY;});
+function draw(){
+  cx2.clearRect(0,0,W,H);
+  const ocx=W/2,ocy=H/2;
+  // particles
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i];
+    const d=Math.hypot(p.x-pmx,p.y-pmy);
+    if(d<130){cx2.beginPath();cx2.moveTo(p.x,p.y);cx2.lineTo(pmx,pmy);cx2.strokeStyle=`rgba(201,168,76,${(1-d/130)*.12})`;cx2.lineWidth=.5;cx2.stroke();}
+    for(let j=i+1;j<pts.length;j++){const q=pts[j],dd=Math.hypot(p.x-q.x,p.y-q.y);if(dd<75){cx2.beginPath();cx2.moveTo(p.x,p.y);cx2.lineTo(q.x,q.y);cx2.strokeStyle=`rgba(90,112,144,${(1-dd/75)*.035})`;cx2.lineWidth=.4;cx2.stroke();}}
+    cx2.beginPath();cx2.arc(p.x,p.y,p.r,0,Math.PI*2);cx2.fillStyle=p.gold?`rgba(201,168,76,${p.a})`:`rgba(60,90,120,${p.a*.7})`;cx2.fill();
+    p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+  }
+  // orbiting nodes
+  for(const o of orbs){
+    o.a+=o.sp;
+    const nx=ocx+Math.cos(o.a)*o.r,ny=ocy+Math.sin(o.a)*o.r;
+    // glow
+    const g=cx2.createRadialGradient(nx,ny,0,nx,ny,o.sz*4);
+    g.addColorStop(0,o.gold?`rgba(201,168,76,${o.op*.8})`:`rgba(0,199,255,${o.op*.6})`);
+    g.addColorStop(1,'transparent');
+    cx2.beginPath();cx2.arc(nx,ny,o.sz*4,0,Math.PI*2);cx2.fillStyle=g;cx2.fill();
+    cx2.beginPath();cx2.arc(nx,ny,o.sz,0,Math.PI*2);cx2.fillStyle=o.gold?`rgba(201,168,76,${o.op})`:`rgba(0,199,255,${o.op*.85})`;cx2.fill();
+    cx2.beginPath();cx2.moveTo(ocx,ocy);cx2.lineTo(nx,ny);cx2.strokeStyle='rgba(201,168,76,.025)';cx2.lineWidth=.5;cx2.stroke();
+  }
+  // center glow
+  const cg=cx2.createRadialGradient(ocx,ocy,0,ocx,ocy,200);
+  cg.addColorStop(0,'rgba(201,168,76,.045)');cg.addColorStop(.6,'rgba(201,168,76,.012)');cg.addColorStop(1,'transparent');
+  cx2.beginPath();cx2.arc(ocx,ocy,200,0,Math.PI*2);cx2.fillStyle=cg;cx2.fill();
+  requestAnimationFrame(draw);
+}
+draw();
+
+// MAGNETIC BUTTONS
+[document.getElementById('cta-btn'),document.getElementById('cta-btn-2')].filter(Boolean).forEach(btn=>{
+  btn.addEventListener('mousemove',e=>{
+    const r=btn.getBoundingClientRect();
+    btn.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');
+    btn.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%');
+    btn.style.transform=`translate(${(e.clientX-(r.left+r.width/2))*.07}px,${(e.clientY-(r.top+r.height/2))*.07}px)`;
+  });
+  btn.addEventListener('mouseleave',()=>btn.style.transform='');
+});
+
+// CARD GLOW
+document.querySelectorAll('.cap-card').forEach(c=>{
+  c.addEventListener('mousemove',e=>{const r=c.getBoundingClientRect();c.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');c.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%');});
+});
+
+// TERMINAL TYPEWRITER
+const rows=[
+  {key:'LANGUAGE',val:'Arabic (ar) → English (en)',cls:''},
+  {key:'CLASSIFICATION',val:'charging_issue',accent:'confidence 0.93',cls:''},
+  {key:'GOVERNANCE',val:'ALLOW',accent:'anker_confidence_thresholds v1',cls:'green'},
+  {key:'SOP CITATION',val:'Charging Policy v3',accent:'score 0.8921',cls:''},
+  {key:'RESOLUTION',val:'warranty_claim → replacement_order',accent:'requires_manager_approval: false',cls:''},
+  {key:'AUDIT SIGNATURE',val:'HMAC-SHA256 · e5de882a...9aac',cls:'gold'},
+  {key:'REPLAY',val:'Forensically reconstructible',accent:'from any checkpoint',cls:'muted'},
+];
+const tb=document.getElementById('terminal-body');
+let ri=0;
+function typeRow(){
+  if(ri>=rows.length)return;
+  const row=rows[ri++];
+  const el=document.createElement('div');el.className='t-row';
+  el.innerHTML=`<span class="t-key">${row.key}</span><span class="t-val ${row.cls}">${row.val}</span>${row.accent?`<span class="t-accent">${row.accent}</span>`:''}`;
+  el.style.opacity='0';el.style.transform='translateX(-8px)';el.style.transition='opacity .4s,transform .4s';
+  tb.appendChild(el);
+  requestAnimationFrame(()=>{el.style.opacity='1';el.style.transform='none';});
+  setTimeout(typeRow,680);
+}
+// start when terminal is visible
+const termObs=new IntersectionObserver(entries=>{if(entries[0].isIntersecting){typeRow();termObs.disconnect();}},{threshold:.3});
+termObs.observe(tb);
+
+// SCROLL REVEAL
+const obs=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');obs.unobserve(e.target);}}),{threshold:.1});
+document.querySelectorAll('.reveal,.stagger').forEach(el=>obs.observe(el));
+
+// NAV SCROLL
+window.addEventListener('scroll',()=>{
+  const n=document.getElementById('nav');
+  if(window.scrollY>50){n.style.background='rgba(6,6,9,.94)';n.style.backdropFilter='blur(22px)';n.style.borderBottom='1px solid rgba(255,255,255,.045)';}
+  else{n.style.background='';n.style.backdropFilter='blur(16px)';n.style.borderBottom='none';}
+});
+</script>
+</body>
+</html>

@@ -43,6 +43,8 @@ export const SessionEventKind = {
   TERMINATION_RECORDED: 'termination_recorded',
   ARCHIVAL_RECORDED: 'archival_recorded',
   OPERATIONAL_OBSERVATION: 'operational_observation',
+  CUSTOMER_MESSAGE: 'customer_message',
+  ASSISTANT_RESPONSE: 'assistant_response',
 } as const;
 export type SessionEventKind =
   (typeof SessionEventKind)[keyof typeof SessionEventKind];

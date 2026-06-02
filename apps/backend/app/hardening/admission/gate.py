@@ -251,7 +251,9 @@ class AdmissionGate:
         if unavailable_reasons:
             # Realtime chat can defer until pressure clears. Voice is live
             # media, so unknown capacity fails closed instead of queueing a
-            # customer into silence.
+            # customer into silence. Queued processing also defers because
+            # the customer payload must already be durably captured before
+            # this gate is used as processing admission.
             if channel_class is AdmissionChannelClass.REALTIME_CHAT:
                 return decision(
                     outcome=AdmissionOutcome.DEFER,
@@ -264,6 +266,11 @@ class AdmissionGate:
                     reason=AdmissionReason.TELEMETRY_UNAVAILABLE_VOICE,
                     retry_after_seconds=10,
                 )
+            return decision(
+                outcome=AdmissionOutcome.DEFER,
+                reason=AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING,
+                retry_after_seconds=30,
+            )
 
         return decision(
             outcome=AdmissionOutcome.ADMIT,

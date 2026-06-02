@@ -77,7 +77,7 @@ async def verify_audit_export(
     raw = await raw_request.body()
     if len(raw) > _VERIFY_MAX_BODY_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail={
                 "code": "audit_export_too_large",
                 "max_bytes": _VERIFY_MAX_BODY_BYTES,

@@ -8,7 +8,12 @@ from typing import Any, Protocol, cast
 
 from app.core.admission import QueueAgeSentinelClient, record_queue_age_sentinel
 from app.core.config import get_settings
-from app.core.queue_admission import RedisQueueDepthAdmission
+from app.core.queue_admission import (
+    RedisQueueDepthAdmission,
+    TenantQueueQoSClient,
+    admit_tenant_queue_publish,
+    release_tenant_queue_publish,
+)
 from app.core.redis import get_redis_client
 from app.execution.publisher import ExecutionPublisher
 from app.workers.agent_tasks import (
@@ -33,6 +38,7 @@ class CeleryExecutionPublisher(ExecutionPublisher):
         redis_client: QueueDepthClient | None = None,
         queue_name: str | None = None,
         max_queue_depth: int | None = None,
+        max_tenant_queue_depth: int | None = None,
         run_inline_under_pytest: bool | None = None,
     ) -> None:
         settings = get_settings()
@@ -42,6 +48,11 @@ class CeleryExecutionPublisher(ExecutionPublisher):
             max_queue_depth
             if max_queue_depth is not None
             else settings.EXECUTION_QUEUE_MAX_DEPTH
+        )
+        self._max_tenant_queue_depth = (
+            max_tenant_queue_depth
+            if max_tenant_queue_depth is not None
+            else settings.EXECUTION_QUEUE_TENANT_MAX_DEPTH
         )
         self._run_inline_under_pytest = (
             redis_client is None
@@ -78,15 +89,37 @@ class CeleryExecutionPublisher(ExecutionPublisher):
         tenant_id: str,
     ) -> None:
         await self.check_backpressure(tenant_id=tenant_id)
+        tenant_qos_admitted = False
+        client = self._redis_client
+        if client is None and not _running_under_pytest():
+            client = cast(QueueDepthClient, get_redis_client())
+            self._redis_client = client
+        if client is not None:
+            await admit_tenant_queue_publish(
+                redis_client=cast(TenantQueueQoSClient, client),
+                logical_queue=QUEUE_DIAGNOSTIC_NORMAL,
+                queue_name=self._queue_name,
+                tenant_id=tenant_id,
+                max_tenant_depth=self._max_tenant_queue_depth,
+            )
+            tenant_qos_admitted = True
         task = cast(Any, execute_diagnostic_agent)
         if _running_under_pytest():
-            if self._run_inline_under_pytest:
-                await execute_diagnostic_agent_runtime(
-                    execution_id=execution_id,
-                    tenant_id=tenant_id,
-                )
+            try:
+                if self._run_inline_under_pytest:
+                    await execute_diagnostic_agent_runtime(
+                        execution_id=execution_id,
+                        tenant_id=tenant_id,
+                    )
+            finally:
+                if tenant_qos_admitted and client is not None:
+                    await release_tenant_queue_publish(
+                        redis_client=cast(TenantQueueQoSClient, client),
+                        queue_name=self._queue_name,
+                        tenant_id=tenant_id,
+                    )
             return
-        else:
+        try:
             task.apply_async(
                 kwargs={
                     "execution_id": execution_id,
@@ -104,6 +137,14 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                 queue_name=self._queue_name,
                 member_id=execution_id,
             )
+        except Exception:
+            if tenant_qos_admitted and client is not None:
+                await release_tenant_queue_publish(
+                    redis_client=cast(TenantQueueQoSClient, client),
+                    queue_name=self._queue_name,
+                    tenant_id=tenant_id,
+                )
+            raise
 
 
 def _running_under_pytest() -> bool:

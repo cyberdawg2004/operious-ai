@@ -72,7 +72,7 @@ GOVERNANCE_DECISION_ID = uuid.UUID("00000000-0000-4000-8000-000000570001")
 
 
 @pytest.mark.asyncio
-async def test_publisher_failure_creates_orphaned_execution() -> None:
+async def test_publisher_backpressure_marks_outbox_failed() -> None:
     boundary_repo = InMemoryBoundaryPersistence()
     ingress = _boundary_ingress_record("aud3-backpressure")
     await boundary_repo.save_ingress(ingress)
@@ -117,8 +117,10 @@ async def test_publisher_failure_creates_orphaned_execution() -> None:
     assert executions.total == 1
     assert executions.executions[0].state is ExecutionState.REQUESTED
     assert outbox.total == 1
-    assert outbox.records[0].state is ExecutionOutboxState.PUBLISHING
+    assert outbox.records[0].state is ExecutionOutboxState.FAILED
     assert outbox.records[0].publisher_id == "test:aud3-backpressure"
+    assert outbox.records[0].last_error is not None
+    assert "queue_backpressure" in outbox.records[0].last_error
 
 
 @pytest.mark.asyncio

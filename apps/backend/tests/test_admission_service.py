@@ -12,6 +12,7 @@ from app.hardening.admission import (
     AdmissionGate,
     AdmissionGateThresholds,
     AdmissionOutcome,
+    AdmissionReason,
 )
 from app.queues import QUEUE_DIAGNOSTIC_NORMAL
 from app.services.admission_service import AdmissionService
@@ -93,7 +94,7 @@ def _thresholds() -> AdmissionGateThresholds:
     ),
 )
 @pytest.mark.asyncio
-async def test_telemetry_failure_admits_and_persists_for_low_risk_channels(
+async def test_telemetry_failure_defers_and_persists_for_processing_channels(
     channel: str,
     channel_class: AdmissionChannelClass,
 ) -> None:
@@ -112,12 +113,14 @@ async def test_telemetry_failure_admits_and_persists_for_low_risk_channels(
         channel=channel,
     )
 
-    assert decision.outcome is AdmissionOutcome.ADMIT
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.telemetry_unavailable is True
     assert decision.channel_class is channel_class
     assert session_factory.commits == 1
     row = session_factory.rows[0]
-    assert row.outcome == AdmissionOutcome.ADMIT.value
+    assert row.outcome == AdmissionOutcome.DEFER.value
+    assert row.reason == AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING.value
     assert row.telemetry_unavailable is True
     assert row.channel_class == channel_class.value
     assert row.queue_depth_available is False

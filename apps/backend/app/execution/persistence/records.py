@@ -43,6 +43,9 @@ class ExecutionRecord:
     governance_decision_id: uuid.UUID | None = None
     execution_governance_evaluation_id: uuid.UUID | None = None
     governance_admitted_at: datetime | None = None
+    execution_governance_config_id: uuid.UUID | None = None
+    execution_governance_config_version: int | None = None
+    execution_governance_config_sha256: str | None = None
     claimed_at: datetime | None = None
     completed_at: datetime | None = None
     failed_at: datetime | None = None

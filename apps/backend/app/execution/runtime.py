@@ -387,6 +387,18 @@ class ExecutionRuntime:
         request_metadata["execution_governance.admitted_at"] = (
             admission.admitted_at.isoformat()
         )
+        if admission.execution_governance_config_id is not None:
+            request_metadata["execution_governance.config_id"] = str(
+                admission.execution_governance_config_id
+            )
+        if admission.execution_governance_config_version is not None:
+            request_metadata["execution_governance.version"] = (
+                admission.execution_governance_config_version
+            )
+        if admission.execution_governance_config_sha256 is not None:
+            request_metadata["execution_governance.content_sha256"] = (
+                admission.execution_governance_config_sha256
+            )
         execution_id = derive_execution_id(
             kind=ExecutionKind.DIAGNOSTIC_AGENT.value,
             dispatch_id=dispatch_id,
@@ -407,6 +419,15 @@ class ExecutionRuntime:
                 admission.execution_governance_evaluation_id
             ),
             governance_admitted_at=admission.admitted_at,
+            execution_governance_config_id=(
+                admission.execution_governance_config_id
+            ),
+            execution_governance_config_version=(
+                admission.execution_governance_config_version
+            ),
+            execution_governance_config_sha256=(
+                admission.execution_governance_config_sha256
+            ),
             metadata=request_metadata,
         )
         outbox = ExecutionOutboxRecord(

@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operious AI — Interactive Preview</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: #060609;
+  color: #EEF2F8;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+  cursor: none;
+}
+
+/* ── CUSTOM CURSOR ── */
+#cursor {
+  position: fixed; top:0; left:0; width:12px; height:12px;
+  border-radius:50%; background:#C9A84C; pointer-events:none;
+  z-index:9999; transform:translate(-50%,-50%);
+  transition: width .15s, height .15s, background .15s;
+  mix-blend-mode: difference;
+}
+#cursor-ring {
+  position:fixed; top:0; left:0; width:36px; height:36px;
+  border-radius:50%; border:1px solid rgba(201,168,76,0.4);
+  pointer-events:none; z-index:9998; transform:translate(-50%,-50%);
+  transition: transform .08s, width .15s, height .15s, border-color .15s;
+}
+body:has(a:hover) #cursor, body:has(button:hover) #cursor { width:20px; height:20px; }
+body:has(a:hover) #cursor-ring, body:has(button:hover) #cursor-ring {
+  width:52px; height:52px; border-color:rgba(201,168,76,0.7);
+}
+
+/* ── NAV ── */
+nav {
+  position:fixed; top:0; left:0; right:0; z-index:100;
+  padding:20px 48px;
+  display:flex; align-items:center; justify-content:space-between;
+  backdrop-filter:blur(16px);
+  background: linear-gradient(to bottom, rgba(6,6,9,0.9), transparent);
+  transition: background .3s;
+}
+.nav-logo { display:flex; align-items:center; gap:10px; text-decoration:none; }
+.nav-wordmark {
+  font-size:12px; font-weight:600; letter-spacing:.18em;
+  text-transform:uppercase; color:#D8E4F4;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.nav-wordmark span { color:#C9A84C; margin-left:1px; }
+.nav-links { display:flex; gap:32px; }
+.nav-link {
+  font-size:12px; color:#4A5E72; cursor:pointer;
+  transition:color .2s; text-decoration:none;
+  letter-spacing:.03em;
+}
+.nav-link:hover { color:#EEF2F8; }
+.nav-cta {
+  font-size:12px; font-weight:600; color:#C9A84C;
+  border:1px solid rgba(201,168,76,0.3); padding:8px 18px;
+  border-radius:6px; cursor:pointer; transition:all .2s;
+  background: transparent; font-family:inherit;
+  letter-spacing:.04em; text-transform:uppercase;
+}
+.nav-cta:hover { background:rgba(201,168,76,0.1); border-color:rgba(201,168,76,.6); }
+
+/* ── HERO ── */
+.hero {
+  min-height:100vh; position:relative;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  text-align:center; overflow:hidden; padding:140px 40px 80px;
+}
+#hero-canvas {
+  position:absolute; inset:0; z-index:1;
+  pointer-events:none;
+}
+.grid-overlay {
+  position:absolute; inset:0; z-index:2; opacity:.022;
+  background-image:
+    linear-gradient(rgba(216,228,244,1) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(216,228,244,1) 1px,transparent 1px);
+  background-size:80px 80px; pointer-events:none;
+}
+.hero-content { position:relative; z-index:10; max-width:900px; }
+
+.eyebrow {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 16px;
+  background:rgba(201,168,76,.07);
+  border:1px solid rgba(201,168,76,.22);
+  border-radius:20px;
+  font-size:10px; letter-spacing:.18em;
+  color:#C9A84C; font-family:monospace;
+  text-transform:uppercase; margin-bottom:36px;
+  opacity:0; transform:translateY(20px);
+  animation: fadeUp .8s cubic-bezier(.16,1,.3,1) .2s forwards;
+}
+.eyebrow-dot {
+  width:5px;height:5px;border-radius:50%;background:#C9A84C;
+  animation:blink 2.2s ease-in-out infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+.hero-headline {
+  font-size:clamp(44px,7vw,90px);
+  font-weight:800; line-height:.94;
+  letter-spacing:-.035em; color:#EEF2F8;
+  margin-bottom:28px;
+}
+.hero-headline .word {
+  display:inline-block;
+  opacity:0; transform:translateY(40px) rotateX(20deg);
+}
+.hero-headline em {
+  font-style:normal;
+  background:linear-gradient(135deg,#C9A84C 0%,#E8C76A 45%,#C9A84C 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+
+.hero-sub {
+  font-size:18px; line-height:1.7; color:#5A7090;
+  max-width:620px; margin:0 auto 48px; font-weight:400;
+  opacity:0; transform:translateY(20px);
+  animation:fadeUp .9s cubic-bezier(.16,1,.3,1) 1.1s forwards;
+}
+
+.hero-ctas {
+  display:flex; gap:14px; justify-content:center; flex-wrap:wrap;
+  margin-bottom:72px;
+  opacity:0; transform:translateY(20px);
+  animation:fadeUp .9s cubic-bezier(.16,1,.3,1) 1.3s forwards;
+}
+
+@keyframes fadeUp {
+  to { opacity:1; transform:none; }
+}
+
+/* Magnetic primary button */
+.btn-primary {
+  position:relative; padding:15px 30px;
+  background:#C9A84C; border-radius:8px; border:none;
+  font-size:14px; font-weight:700; color:#060609;
+  cursor:pointer; font-family:inherit; letter-spacing:.02em;
+  box-shadow:0 0 0 1px rgba(201,168,76,.35),0 8px 32px rgba(201,168,76,.2);
+  transition:box-shadow .25s, background .2s;
+  overflow:hidden;
+}
+.btn-primary::after {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,.15), transparent 60%);
+  opacity:0; transition:opacity .3s;
+}
+.btn-primary:hover::after { opacity:1; }
+.btn-primary:hover {
+  box-shadow:0 0 0 1px rgba(201,168,76,.5),0 16px 48px rgba(201,168,76,.3);
+  background:#D4B35A;
+}
+.btn-ghost {
+  padding:15px 30px; background:rgba(255,255,255,.04);
+  border-radius:8px; border:1px solid rgba(255,255,255,.1);
+  font-size:14px; font-weight:500; color:#A0B4C8;
+  cursor:pointer; font-family:inherit; transition:all .2s;
+  letter-spacing:.01em;
+}
+.btn-ghost:hover { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.2); color:#EEF2F8; }
+
+/* Substrate row */
+.substrate-row {
+  display:flex; gap:0; justify-content:center;
+  border:1px solid rgba(255,255,255,.055);
+  border-radius:12px; overflow:hidden;
+  background:rgba(255,255,255,.018);
+  backdrop-filter:blur(12px);
+  max-width:700px; margin:0 auto;
+  opacity:0; transform:translateY(20px);
+  animation:fadeUp .9s cubic-bezier(.16,1,.3,1) 1.5s forwards;
+}
+.s-item {
+  flex:1; padding:14px 10px; text-align:center;
+  border-right:1px solid rgba(255,255,255,.04);
+  transition:background .25s; cursor:default;
+}
+.s-item:last-child{border-right:none;}
+.s-item:hover { background:rgba(201,168,76,.055); }
+.s-num { font-size:8px; color:rgba(201,168,76,.6); font-family:monospace; letter-spacing:.12em; margin-bottom:4px; }
+.s-name { font-size:10.5px; color:#3A4E62; font-weight:500; letter-spacing:.02em; transition:color .25s; }
+.s-item:hover .s-name { color:#9AB0C8; }
+.s-item:hover .s-num { color:#C9A84C; }
+
+/* Scroll indicator */
+.scroll-hint {
+  position:absolute; bottom:32px; left:50%; transform:translateX(-50%);
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  opacity:.35; animation:fadeUp 1s 2s both;
+}
+.scroll-line {
+  width:1px; height:52px;
+  background:linear-gradient(to bottom,transparent,#C9A84C);
+  animation:scroll-anim 2.2s ease-in-out infinite;
+}
+@keyframes scroll-anim{0%{opacity:0;transform:scaleY(.3) translateY(-12px)}60%{opacity:1}100%{opacity:0;transform:scaleY(.3) translateY(12px)}}
+
+/* ── TRUST BAND ── */
+.trust-band {
+  padding:28px 40px;
+  border-top:1px solid rgba(255,255,255,.04);
+  border-bottom:1px solid rgba(255,255,255,.04);
+  display:flex; gap:0; justify-content:center; align-items:center;
+  overflow:hidden; position:relative;
+}
+.trust-marquee {
+  display:flex; gap:48px; align-items:center;
+  animation:marquee 22s linear infinite;
+  white-space:nowrap;
+}
+.trust-marquee2 {
+  display:flex; gap:48px; align-items:center;
+  animation:marquee 22s linear infinite;
+  animation-delay:-11s;
+  white-space:nowrap; position:absolute;
+}
+@keyframes marquee { from{transform:translateX(0)} to{transform:translateX(-100%)} }
+.t-item { display:flex; align-items:center; gap:8px; }
+.t-dot { width:4px;height:4px;border-radius:50%;background:#30D158;box-shadow:0 0 6px rgba(48,209,88,.7); flex-shrink:0; }
+.t-text { font-size:11px; color:#2A3A4E; font-family:monospace; letter-spacing:.08em; text-transform:uppercase; }
+
+/* ── SECTIONS ── */
+section { padding:120px 48px; }
+.section-inner { max-width:1100px; margin:0 auto; }
+.s-label { font-size:10px;letter-spacing:.2em;color:#C9A84C;font-family:monospace;text-transform:uppercase;margin-bottom:16px; }
+.s-title {
+  font-size:clamp(32px,4.5vw,56px); font-weight:800;
+  letter-spacing:-.025em; color:#EEF2F8; line-height:1.05;
+  max-width:580px; margin-bottom:16px;
+}
+.s-sub { font-size:16px;color:#4A5E72;line-height:1.7;max-width:500px;margin-bottom:64px; }
+
+/* ── PIPELINE ── */
+.pipeline-wrap { position:relative; }
+.pipe-connector {
+  position:absolute; top:27px; left:28px; right:28px; height:1px;
+  background:linear-gradient(90deg,
+    rgba(201,168,76,.4),rgba(0,199,255,.3),rgba(48,209,88,.4));
+  z-index:0;
+}
+.pipeline {
+  display:grid; grid-template-columns:repeat(7,1fr);
+  gap:0; position:relative; z-index:1;
+}
+.pipe-step {
+  display:flex; flex-direction:column; align-items:center;
+  gap:14px; padding:0 6px;
+}
+.pipe-dot {
+  width:54px;height:54px;border-radius:50%;
+  background:rgba(6,6,9,.9);
+  border:1px solid rgba(255,255,255,.07);
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;color:rgba(255,255,255,.12);
+  font-family:monospace; letter-spacing:.06em;
+  transition:all .4s cubic-bezier(.16,1,.3,1);
+  cursor:default; position:relative;
+}
+.pipe-dot::after {
+  content:''; position:absolute; inset:-4px;
+  border-radius:50%; border:1px solid transparent;
+  transition:border-color .4s, box-shadow .4s;
+}
+.pipe-step:hover .pipe-dot {
+  background:rgba(201,168,76,.08);
+  border-color:rgba(201,168,76,.4);
+  color:#C9A84C;
+}
+.pipe-step:hover .pipe-dot::after {
+  border-color:rgba(201,168,76,.15);
+  box-shadow:0 0 24px rgba(201,168,76,.12);
+}
+.pipe-label {
+  font-size:10px; color:#384B5E; text-align:center;
+  letter-spacing:.05em; font-weight:500; line-height:1.4;
+  transition:color .3s;
+}
+.pipe-step:hover .pipe-label { color:#7A90A8; }
+
+/* ── FEATURE CARDS ── */
+.cap-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:16px;
+  margin-top:56px;
+}
+.cap-card {
+  padding:28px; border-radius:16px;
+  background:rgba(255,255,255,.02);
+  border:1px solid rgba(255,255,255,.055);
+  transition:all .35s cubic-bezier(.16,1,.3,1);
+  cursor:default; position:relative; overflow:hidden;
+}
+.cap-card::before {
+  content:''; position:absolute; inset:0; border-radius:16px;
+  background:radial-gradient(circle at var(--mx,50%) var(--my,50%),
+    rgba(201,168,76,.07) 0%, transparent 60%);
+  opacity:0; transition:opacity .35s;
+}
+.cap-card:hover::before { opacity:1; }
+.cap-card:hover {
+  border-color:rgba(201,168,76,.18);
+  transform:translateY(-4px);
+  box-shadow:0 24px 56px rgba(0,0,0,.35),0 0 0 1px rgba(201,168,76,.1);
+}
+.cap-icon {
+  width:38px;height:38px;
+  background:rgba(201,168,76,.09);
+  border:1px solid rgba(201,168,76,.2);
+  border-radius:9px; margin-bottom:20px;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .3s,box-shadow .3s;
+}
+.cap-card:hover .cap-icon {
+  background:rgba(201,168,76,.15);
+  box-shadow:0 0 16px rgba(201,168,76,.15);
+}
+.cap-title { font-size:15px;font-weight:700;color:#C8D8E8;margin-bottom:8px;letter-spacing:-.01em; }
+.cap-desc { font-size:13px;color:#3A4E62;line-height:1.65; }
+.cap-card:hover .cap-desc { color:#4A6070; }
+
+/* ── CONTAINMENT SECTION ── */
+.contain-section {
+  background:linear-gradient(180deg,#030306 0%,#060609 100%);
+  border-top:1px solid rgba(255,255,255,.04);
+}
+.layers { display:flex; flex-direction:column; gap:0; margin-top:56px; max-width:720px; }
+.layer-item {
+  display:flex; align-items:flex-start; gap:20px;
+  padding:22px 0; border-bottom:1px solid rgba(255,255,255,.04);
+  position:relative; transition:all .3s; cursor:default;
+}
+.layer-item:last-child{border-bottom:none;}
+.layer-num {
+  font-size:11px;color:rgba(201,168,76,.4);font-family:monospace;
+  letter-spacing:.1em;padding-top:2px;flex-shrink:0;width:28px;
+  transition:color .3s;
+}
+.layer-line {
+  width:2px;border-radius:2px;background:rgba(255,255,255,.04);
+  flex-shrink:0;align-self:stretch;
+  transition:background .3s,box-shadow .3s;
+}
+.layer-body { flex:1; }
+.layer-title { font-size:14px;font-weight:700;color:#6A7F9A;margin-bottom:4px;letter-spacing:-.005em;transition:color .3s; }
+.layer-desc { font-size:13px;color:#2A3A4A;line-height:1.6;transition:color .3s; }
+.layer-item:hover .layer-num { color:#C9A84C; }
+.layer-item:hover .layer-line { background:#C9A84C;box-shadow:0 0 8px rgba(201,168,76,.4); }
+.layer-item:hover .layer-title { color:#C8D8E8; }
+.layer-item:hover .layer-desc { color:#4A5E72; }
+
+/* reveal on scroll */
+.reveal {
+  opacity:0;transform:translateY(28px);
+  transition:opacity .8s cubic-bezier(.16,1,.3,1),transform .8s cubic-bezier(.16,1,.3,1);
+}
+.reveal.visible { opacity:1;transform:none; }
+
+/* reveal stagger children */
+.reveal-stagger > * {
+  opacity:0;transform:translateY(24px);
+  transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1);
+}
+.reveal-stagger.visible > *:nth-child(1){opacity:1;transform:none;transition-delay:.05s}
+.reveal-stagger.visible > *:nth-child(2){opacity:1;transform:none;transition-delay:.15s}
+.reveal-stagger.visible > *:nth-child(3){opacity:1;transform:none;transition-delay:.25s}
+.reveal-stagger.visible > *:nth-child(4){opacity:1;transform:none;transition-delay:.35s}
+.reveal-stagger.visible > *:nth-child(5){opacity:1;transform:none;transition-delay:.45s}
+.reveal-stagger.visible > *:nth-child(6){opacity:1;transform:none;transition-delay:.55s}
+.reveal-stagger.visible > *:nth-child(7){opacity:1;transform:none;transition-delay:.65s}
+
+/* divider */
+.divider{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);}
+
+/* ── REDUCED MOTION ── */
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;}
+  .reveal,.reveal-stagger>*{opacity:1;transform:none;}
+}
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+<div id="cursor-ring"></div>
+
+<!-- NAV -->
+<nav id="main-nav">
+  <a href="#" class="nav-logo">
+    <!-- Actual Operious logo SVG -->
+    <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <polygon points="16,2 28,9 28,23 16,30 4,23 4,9" stroke="#A8882C" stroke-width="1.5" fill="none"/>
+      <polygon points="16,8 22,11.5 22,18.5 16,22 10,18.5 10,11.5" stroke="#2A5CAA" stroke-width="1" fill="none"/>
+      <line x1="16" y1="2" x2="16" y2="8" stroke="#A8882C" stroke-width="1.5"/>
+      <line x1="28" y1="23" x2="22" y2="18.5" stroke="#A8882C" stroke-width="1.5"/>
+      <line x1="4" y1="23" x2="10" y2="18.5" stroke="#A8882C" stroke-width="1.5"/>
+      <circle cx="16" cy="15" r="1.5" fill="#A8882C"/>
+    </svg>
+    <span class="nav-wordmark">Operious<span>·</span></span>
+  </a>
+  <div class="nav-links">
+    <a href="#" class="nav-link">Platform</a>
+    <a href="#" class="nav-link">Industries</a>
+    <a href="#" class="nav-link">Trust</a>
+    <a href="#" class="nav-link">Insights</a>
+  </div>
+  <button class="nav-cta">Request Access</button>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <canvas id="hero-canvas"></canvas>
+  <div class="grid-overlay"></div>
+
+  <div class="hero-content">
+    <div class="eyebrow">
+      <div class="eyebrow-dot"></div>
+      Governed Execution Infrastructure
+    </div>
+
+    <h1 class="hero-headline" id="headline">
+      <!-- Words injected by JS for stagger animation -->
+    </h1>
+
+    <p class="hero-sub">
+      The runtime infrastructure between AI intent and enterprise execution.
+      Every operational decision governed, reconstructible,
+      and forensically auditable — not by policy, but by the system itself.
+    </p>
+
+    <div class="hero-ctas">
+      <button class="btn-primary" id="cta-main">Request enterprise access →</button>
+      <button class="btn-ghost">Explore the architecture</button>
+    </div>
+
+    <div class="substrate-row">
+      <div class="s-item"><div class="s-num">01</div><div class="s-name">Boundary</div></div>
+      <div class="s-item"><div class="s-num">02</div><div class="s-name">Coordination</div></div>
+      <div class="s-item"><div class="s-num">03</div><div class="s-name">Governance</div></div>
+      <div class="s-item"><div class="s-num">04</div><div class="s-name">Session</div></div>
+      <div class="s-item"><div class="s-num">05</div><div class="s-name">Execution</div></div>
+      <div class="s-item"><div class="s-num">06</div><div class="s-name">Supervisor</div></div>
+      <div class="s-item"><div class="s-num">07</div><div class="s-name">Arbitration</div></div>
+    </div>
+  </div>
+
+  <div class="scroll-hint"><div class="scroll-line"></div></div>
+</section>
+
+<div class="trust-band">
+  <div class="trust-marquee" id="m1">
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Tenant-Isolated State</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Cryptographic Decision Identity</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Append-Only Audit Trail</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Constitutional Governance</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Forensic Reconstructibility</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Multi-Language Operations</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Zero-Trust Architecture</span></div>
+    <div class="t-item"><div class="t-dot"></div><span class="t-text">Deterministic Execution</span></div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ARCHITECTURE -->
+<section>
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Architecture</p>
+      <h2 class="s-title">The layers that separate AI intent from enterprise execution.</h2>
+      <p class="s-sub">Seven independent substrates — each inspectable, each defensible. No model output reaches the system without passing every one.</p>
+    </div>
+
+    <div class="pipeline-wrap reveal">
+      <div class="pipe-connector"></div>
+      <div class="pipeline reveal-stagger">
+        <div class="pipe-step"><div class="pipe-dot">01</div><div class="pipe-label">Boundary<br>Admission</div></div>
+        <div class="pipe-step"><div class="pipe-dot">02</div><div class="pipe-label">Agent<br>Coordination</div></div>
+        <div class="pipe-step"><div class="pipe-dot">03</div><div class="pipe-label">Policy<br>Governance</div></div>
+        <div class="pipe-step"><div class="pipe-dot">04</div><div class="pipe-label">Session<br>State</div></div>
+        <div class="pipe-step"><div class="pipe-dot">05</div><div class="pipe-label">Controlled<br>Execution</div></div>
+        <div class="pipe-step"><div class="pipe-dot">06</div><div class="pipe-label">Supervisor<br>Review</div></div>
+        <div class="pipe-step"><div class="pipe-dot">07</div><div class="pipe-label">Conflict<br>Arbitration</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CAPABILITIES -->
+<section>
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Capabilities</p>
+      <h2 class="s-title">The control plane enterprise AI deployments usually lack.</h2>
+    </div>
+
+    <div class="cap-grid reveal-stagger">
+
+      <div class="cap-card">
+        <div class="cap-icon">
+          <svg width="16" height="16" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+        </div>
+        <div class="cap-title">Constitutional Governance</div>
+        <div class="cap-desc">Every proposed action passes through a policy chain before execution. The chain cannot be bypassed — not by the model, not by configuration.</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">
+          <svg width="16" height="16" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+        </div>
+        <div class="cap-title">Forensic Reconstructibility</div>
+        <div class="cap-desc">Replay any operational decision at any point in time. The audit trail is immutable by architecture — not policy — with cryptographic identity at every step.</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">
+          <svg width="16" height="16" fill="none" stroke="#C9A84C" stroke-width="1.5" viewBox="0 0 24 24"><path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+        </div>
+        <div class="cap-title">Multi-Agent Coordination</div>
+        <div class="cap-desc">Deterministic orchestration with structural guarantees against deadlock, conflict, and cross-tenant contamination — across voice, chat, and automated workflows.</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">
+          <svg width="16" height="16" fill="none" stroke="#00C7FF" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+        </div>
+        <div class="cap-title">Realtime Voice & Chat</div>
+        <div class="cap-desc">Native multilingual processing across six languages. Zero-queue voice capacity at scale, with automatic language routing and governed response execution.</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">
+          <svg width="16" height="16" fill="none" stroke="#00C7FF" stroke-width="1.5" viewBox="0 0 24 24"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+        </div>
+        <div class="cap-title">Crisis Override Control</div>
+        <div class="cap-desc">Emergency rule deployment takes effect in milliseconds and overrides normal operation with full audit evidence of activation, scope, and expiry.</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-icon">
+          <svg width="16" height="16" fill="none" stroke="#00C7FF" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+        </div>
+        <div class="cap-title">Semantic Fraud Intelligence</div>
+        <div class="cap-desc">Sub-millisecond fingerprinting identifies duplicate and near-duplicate requests before they reach execution. Circuit breakers halt anomalous patterns automatically.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- CONTAINMENT VESSEL -->
+<section class="contain-section">
+  <div class="section-inner">
+    <div class="reveal">
+      <p class="s-label">Security Architecture</p>
+      <h2 class="s-title">Five containment layers. None optional.</h2>
+      <p class="s-sub">The separation between what a model proposes and what it is permitted to execute is not a policy choice. It is architecture.</p>
+    </div>
+
+    <div class="layers reveal">
+      <div class="layer-item">
+        <div class="layer-num">01</div>
+        <div class="layer-line"></div>
+        <div class="layer-body">
+          <div class="layer-title">ToolInvoker Enforcement</div>
+          <div class="layer-desc">Every LLM output is a proposal, not a command. Actions pass through ToolInvoker before execution. The model cannot bypass it.</div>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-num">02</div>
+        <div class="layer-line"></div>
+        <div class="layer-body">
+          <div class="layer-title">Governance Substrate</div>
+          <div class="layer-desc">Policy chains evaluate every proposed action. Empty chains return DENY. There is no path to ALLOW without a passing policy.</div>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-num">03</div>
+        <div class="layer-line"></div>
+        <div class="layer-body">
+          <div class="layer-title">Row-Level Security</div>
+          <div class="layer-desc">Enforced at the database layer. No query reaches data it is not authorized to see, regardless of what the model instructs.</div>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-num">04</div>
+        <div class="layer-line"></div>
+        <div class="layer-body">
+          <div class="layer-title">UUID5 Cryptographic Identity</div>
+          <div class="layer-desc">Every decision, agent, and execution is deterministically fingerprinted. Replayable. Forensically reconstructible from any point in time.</div>
+        </div>
+      </div>
+      <div class="layer-item">
+        <div class="layer-num">05</div>
+        <div class="layer-line"></div>
+        <div class="layer-body">
+          <div class="layer-title">Append-Only Timelines</div>
+          <div class="layer-desc">No event can be modified after creation. The audit trail is immutable by architecture — not by policy — and cannot be silently corrupted.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+// ── CURSOR ──
+const cur = document.getElementById('cursor');
+const ring = document.getElementById('cursor-ring');
+let mx=0,my=0,rx=0,ry=0;
+document.addEventListener('mousemove',e=>{
+  mx=e.clientX; my=e.clientY;
+  cur.style.left=mx+'px'; cur.style.top=my+'px';
+});
+function animRing(){
+  rx+=(mx-rx)*.12; ry+=(my-ry)*.12;
+  ring.style.left=rx+'px'; ring.style.top=ry+'px';
+  requestAnimationFrame(animRing);
+}
+animRing();
+
+// ── HERO HEADLINE WORD STAGGER ──
+const lines = [
+  {text:'Autonomous enterprise', class:''},
+  {text:'operations,', class:''},
+  {text:'accountable', class:'em-gold'},
+  {text:'by architecture.', class:''},
+];
+const headline = document.getElementById('headline');
+const words = 'Autonomous enterprise operations, accountable by architecture.'.split(' ');
+headline.innerHTML = words.map((w,i)=>{
+  const isAccent = w==='accountable';
+  const delay = 0.4 + i*0.075;
+  return `<span class="word${isAccent?' em':''}" style="animation-delay:${delay}s;animation:wordIn .7s cubic-bezier(.16,1,.3,1) ${delay}s forwards;">${isAccent?`<em>${w}</em>`:w}</span> `;
+}).join('');
+
+// inject keyframe
+const ks = document.createElement('style');
+ks.textContent = '@keyframes wordIn{from{opacity:0;transform:translateY(36px) rotateX(18deg)}to{opacity:1;transform:none}}';
+document.head.appendChild(ks);
+
+// ── CANVAS PARTICLE FIELD ──
+const canvas = document.getElementById('hero-canvas');
+const ctx = canvas.getContext('2d');
+let W,H,particles=[];
+
+function resize(){
+  W=canvas.width=canvas.offsetWidth;
+  H=canvas.height=canvas.offsetHeight;
+}
+resize();
+window.addEventListener('resize',()=>{resize();initParticles();});
+
+function initParticles(){
+  particles=[];
+  const count = Math.floor((W*H)/14000);
+  for(let i=0;i<count;i++){
+    particles.push({
+      x:Math.random()*W, y:Math.random()*H,
+      vx:(Math.random()-.5)*.25, vy:(Math.random()-.5)*.25,
+      r:Math.random()*1.4+0.3,
+      a:Math.random()*.5+.1,
+      gold:Math.random()>.65,
+    });
+  }
+}
+initParticles();
+
+// Orbiting nodes around center
+const orbitNodes=[];
+const oc={x:0,y:0};
+function updateOC(){oc.x=W/2;oc.y=H/2;}
+updateOC();
+for(let i=0;i<8;i++){
+  orbitNodes.push({
+    angle:Math.random()*Math.PI*2,
+    r:Math.random()*60+140,
+    speed:(Math.random()*.0006+.0003)*(Math.random()>.5?1:-1),
+    size:Math.random()*2+1,
+    gold:Math.random()>.4,
+    opacity:Math.random()*.6+.3,
+  });
+}
+
+let mouseX=W/2,mouseY=H/2;
+document.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY;});
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // Connection lines near mouse
+  const maxDist=120;
+  for(let i=0;i<particles.length;i++){
+    const p=particles[i];
+    const d=Math.hypot(p.x-mouseX,p.y-mouseY);
+    if(d<maxDist){
+      ctx.beginPath();
+      ctx.moveTo(p.x,p.y);
+      ctx.lineTo(mouseX,mouseY);
+      const alpha=(1-d/maxDist)*0.15;
+      ctx.strokeStyle=`rgba(201,168,76,${alpha})`;
+      ctx.lineWidth=.5;
+      ctx.stroke();
+    }
+    // particle-to-particle connections
+    for(let j=i+1;j<particles.length;j++){
+      const q=particles[j];
+      const dd=Math.hypot(p.x-q.x,p.y-q.y);
+      if(dd<80){
+        ctx.beginPath();
+        ctx.moveTo(p.x,p.y);
+        ctx.lineTo(q.x,q.y);
+        const a=(1-dd/80)*.04;
+        ctx.strokeStyle=`rgba(122,144,180,${a})`;
+        ctx.lineWidth=.4;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw particles
+  for(const p of particles){
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fillStyle=p.gold?`rgba(201,168,76,${p.a})`:`rgba(90,112,144,${p.a*.8})`;
+    ctx.fill();
+    p.x+=p.vx; p.y+=p.vy;
+    if(p.x<0||p.x>W)p.vx*=-1;
+    if(p.y<0||p.y>H)p.vy*=-1;
+  }
+
+  // Orbiting nodes
+  updateOC();
+  for(const n of orbitNodes){
+    n.angle+=n.speed;
+    const nx=oc.x+Math.cos(n.angle)*n.r;
+    const ny=oc.y+Math.sin(n.angle)*n.r;
+    ctx.beginPath();
+    ctx.arc(nx,ny,n.size,0,Math.PI*2);
+    ctx.fillStyle=n.gold?`rgba(201,168,76,${n.opacity})`:`rgba(0,199,255,${n.opacity*.7})`;
+    ctx.fill();
+    // glow
+    ctx.beginPath();
+    ctx.arc(nx,ny,n.size*3,0,Math.PI*2);
+    const g=ctx.createRadialGradient(nx,ny,0,nx,ny,n.size*3);
+    g.addColorStop(0,n.gold?`rgba(201,168,76,.12)`:`rgba(0,199,255,.08)`);
+    g.addColorStop(1,'transparent');
+    ctx.fillStyle=g;
+    ctx.fill();
+    // line to center (faint)
+    ctx.beginPath();
+    ctx.moveTo(oc.x,oc.y);
+    ctx.lineTo(nx,ny);
+    ctx.strokeStyle=`rgba(201,168,76,.03)`;
+    ctx.lineWidth=.5;
+    ctx.stroke();
+  }
+
+  // Center orb glow
+  const cg=ctx.createRadialGradient(oc.x,oc.y,0,oc.x,oc.y,220);
+  cg.addColorStop(0,'rgba(201,168,76,.055)');
+  cg.addColorStop(0.5,'rgba(201,168,76,.02)');
+  cg.addColorStop(1,'transparent');
+  ctx.beginPath();
+  ctx.arc(oc.x,oc.y,220,0,Math.PI*2);
+  ctx.fillStyle=cg;
+  ctx.fill();
+
+  requestAnimationFrame(draw);
+}
+draw();
+
+// ── MAGNETIC BUTTON ──
+const ctaBtn = document.getElementById('cta-main');
+ctaBtn.addEventListener('mousemove',e=>{
+  const r=ctaBtn.getBoundingClientRect();
+  const bx=(e.clientX-r.left)/r.width*100;
+  const by=(e.clientY-r.top)/r.height*100;
+  ctaBtn.style.setProperty('--mx',bx+'%');
+  ctaBtn.style.setProperty('--my',by+'%');
+  const dx=(e.clientX-(r.left+r.width/2))*.08;
+  const dy=(e.clientY-(r.top+r.height/2))*.08;
+  ctaBtn.style.transform=`translate(${dx}px,${dy}px)`;
+});
+ctaBtn.addEventListener('mouseleave',()=>{
+  ctaBtn.style.transform='';
+});
+
+// ── FEATURE CARD GLOW ──
+document.querySelectorAll('.cap-card').forEach(card=>{
+  card.addEventListener('mousemove',e=>{
+    const r=card.getBoundingClientRect();
+    card.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');
+    card.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%');
+  });
+});
+
+// ── SCROLL REVEAL ──
+const observer=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      e.target.classList.add('visible');
+      observer.unobserve(e.target);
+    }
+  });
+},{threshold:.12});
+
+document.querySelectorAll('.reveal,.reveal-stagger').forEach(el=>observer.observe(el));
+
+// ── NAV SCROLL ──
+window.addEventListener('scroll',()=>{
+  const nav=document.getElementById('main-nav');
+  if(window.scrollY>40){
+    nav.style.background='rgba(6,6,9,0.92)';
+    nav.style.backdropFilter='blur(20px)';
+    nav.style.borderBottom='1px solid rgba(255,255,255,0.05)';
+  } else {
+    nav.style.background='linear-gradient(to bottom,rgba(6,6,9,0.9),transparent)';
+    nav.style.backdropFilter='blur(16px)';
+    nav.style.borderBottom='none';
+  }
+});
+</script>
+</body>
+</html>

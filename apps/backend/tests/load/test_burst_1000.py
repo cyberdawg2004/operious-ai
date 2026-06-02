@@ -155,6 +155,7 @@ async def test_burst_1000_multi_tenant_isolation(
                     SELECT COUNT(*)
                     FROM dead_letter_tasks
                     WHERE tenant_id = :tenant_id
+                      AND task_name = 'execute_diagnostic_agent'
                     """
                 ),
                 {"tenant_id": tenant_id},

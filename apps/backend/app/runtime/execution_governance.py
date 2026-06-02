@@ -9,12 +9,16 @@ from typing import Any, Mapping
 
 from app.execution.enums import ExecutionState
 from app.execution.persistence import (
+    ExecutionRecord,
     ExecutionPersistenceProtocol,
     ExecutionQuery,
 )
 from app.governance.persistence import BaseGovernanceRepository, DecisionQuery
 from app.tenant.enums import TenantExecutionCircuitState
-from app.tenant.identity import derive_execution_circuit_breaker_id
+from app.tenant.identity import (
+    as_execution_governance_configuration_id,
+    derive_execution_circuit_breaker_id,
+)
 from app.tenant.persistence import (
     TenantConfigurationRepository,
     TenantExecutionCircuitBreakerRecord,
@@ -295,6 +299,50 @@ class ExecutionGovernanceRuntime:
         return breaker
 
 
+class BoundExecutionGovernanceConfigurationError(RuntimeError):
+    """Raised when a retained execution-governance config cannot be replayed."""
+
+
+async def load_bound_execution_governance_config(
+    *,
+    execution: ExecutionRecord,
+    tenant_configuration_repository: TenantConfigurationRepository,
+) -> TenantExecutionGovernanceConfigurationRecord | None:
+    """Load and verify the execution-governance version bound at admission."""
+
+    if execution.execution_governance_config_id is None:
+        return None
+    if execution.execution_governance_config_version is None:
+        raise BoundExecutionGovernanceConfigurationError(
+            "execution governance binding is missing config version"
+        )
+    if execution.execution_governance_config_sha256 is None:
+        raise BoundExecutionGovernanceConfigurationError(
+            "execution governance binding is missing content sha256"
+        )
+    config = (
+        await tenant_configuration_repository.get_execution_governance_configuration(
+            as_execution_governance_configuration_id(
+                execution.execution_governance_config_id
+            ),
+            expected_tenant_id=execution.tenant_id,
+        )
+    )
+    if config is None:
+        raise BoundExecutionGovernanceConfigurationError(
+            "execution governance configuration version is unavailable"
+        )
+    if config.version != execution.execution_governance_config_version:
+        raise BoundExecutionGovernanceConfigurationError(
+            "execution governance configuration version mismatch"
+        )
+    if config.content_sha256 != execution.execution_governance_config_sha256:
+        raise BoundExecutionGovernanceConfigurationError(
+            "execution governance configuration sha256 mismatch"
+        )
+    return config
+
+
 def _deny(
     *,
     evaluation_id: uuid.UUID,
@@ -328,4 +376,9 @@ def _evaluation_id(
     )
 
 
-__all__ = ["ExecutionGovernanceEvaluation", "ExecutionGovernanceRuntime"]
+__all__ = [
+    "BoundExecutionGovernanceConfigurationError",
+    "ExecutionGovernanceEvaluation",
+    "ExecutionGovernanceRuntime",
+    "load_bound_execution_governance_config",
+]

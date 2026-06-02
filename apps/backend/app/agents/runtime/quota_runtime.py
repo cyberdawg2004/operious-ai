@@ -66,6 +66,10 @@ class _RedisCount:
     available: bool
 
 
+class _QuotaBackendUnavailable(RuntimeError):
+    """Raised when Redis-backed quota state cannot be trusted."""
+
+
 class TenantQuotaRuntime:
     """Redis sliding-window quota enforcement per tenant/provider/model."""
 
@@ -115,8 +119,8 @@ class TenantQuotaRuntime:
         """
         Check quota and increment counters.
 
-        Redis failures fail open: the request proceeds and only a warning is
-        logged. Operator force-open blocks before any Redis increment;
+        Redis failures fail closed for pre-call quota admission. Operator
+        force-open blocks before any Redis increment;
         force-close bypasses quota only, leaving downstream governance intact.
         """
 
@@ -139,7 +143,8 @@ class TenantQuotaRuntime:
         # Token-per-minute enforcement (S-09). Token usage is recorded
         # post-call via ``record_token_usage``; here we block NEW calls
         # once the current minute window's token budget is exhausted.
-        # Read-only check, fails open on Redis error.
+        # Read-only check, fails closed on Redis error because this is
+        # pre-call money-adjacent admission.
         token_count = await self._read_redis_count(
             self._token_minute_key(
                 tenant_id=tenant_id,
@@ -148,6 +153,14 @@ class TenantQuotaRuntime:
                 now=now,
             )
         )
+        if not token_count.available:
+            raise ProviderQuotaExceededError(
+                tenant_id=tenant_id,
+                provider=provider,
+                model=model,
+                quota_type="quota_backend_unavailable",
+                retry_after_seconds=60,
+            )
         if token_count.available and token_count.count >= self._tokens_per_minute_limit:
             raise ProviderQuotaExceededError(
                 tenant_id=tenant_id,
@@ -163,11 +176,20 @@ class TenantQuotaRuntime:
             model=model,
             now=now,
         )
-        minute_count = await self._check_redis_window(
-            minute_key,
-            limit=self._requests_per_minute_limit,
-            window_seconds=60,
-        )
+        try:
+            minute_count = await self._check_redis_window(
+                minute_key,
+                limit=self._requests_per_minute_limit,
+                window_seconds=60,
+            )
+        except _QuotaBackendUnavailable as exc:
+            raise ProviderQuotaExceededError(
+                tenant_id=tenant_id,
+                provider=provider,
+                model=model,
+                quota_type="quota_backend_unavailable",
+                retry_after_seconds=60,
+            ) from exc
         if minute_count > self._requests_per_minute_limit:
             raise ProviderQuotaExceededError(
                 tenant_id=tenant_id,
@@ -183,11 +205,20 @@ class TenantQuotaRuntime:
             model=model,
             now=now,
         )
-        hour_count = await self._check_redis_window(
-            hour_key,
-            limit=self._requests_per_hour_limit,
-            window_seconds=3_600,
-        )
+        try:
+            hour_count = await self._check_redis_window(
+                hour_key,
+                limit=self._requests_per_hour_limit,
+                window_seconds=3_600,
+            )
+        except _QuotaBackendUnavailable as exc:
+            raise ProviderQuotaExceededError(
+                tenant_id=tenant_id,
+                provider=provider,
+                model=model,
+                quota_type="quota_backend_unavailable",
+                retry_after_seconds=60,
+            ) from exc
         if hour_count > self._requests_per_hour_limit:
             raise ProviderQuotaExceededError(
                 tenant_id=tenant_id,
@@ -403,7 +434,7 @@ class TenantQuotaRuntime:
         Returns current count after increment.
 
         The INCR + EXPIRE pipeline gives a compact fixed-bucket sliding
-        window and fails open when Redis is unavailable.
+        window and fails closed when Redis is unavailable.
         """
 
         try:
@@ -422,7 +453,7 @@ class TenantQuotaRuntime:
                     "window_seconds": window_seconds,
                 },
             )
-            return 0
+            raise _QuotaBackendUnavailable(str(exc)) from exc
 
     async def _read_redis_count(self, key: str) -> _RedisCount:
         try:

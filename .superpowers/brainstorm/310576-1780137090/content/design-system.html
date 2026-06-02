@@ -1,0 +1,150 @@
+<h2>Phase 1 — Shared Design System</h2>
+<p class="subtitle">The token layer both apps inherit. Does this look right before we build on top of it?</p>
+
+<div class="section">
+  <div class="label">Color Palette</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:12px;">
+    <!-- Backgrounds -->
+    <div>
+      <div style="height:48px;border-radius:8px;background:#030508;border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--bg-base</div>
+      <div style="font-size:10px;color:#888;">#030508 · Page background</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#0B0D14;border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--bg-surface</div>
+      <div style="font-size:10px;color:#888;">#0B0D14 · Cards</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#141720;border:1px solid rgba(255,255,255,0.1);"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--bg-raised</div>
+      <div style="font-size:10px;color:#888;">#141720 · Hover / sidebar</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(8px);"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--bg-glass</div>
+      <div style="font-size:10px;color:#888;">rgba(255,255,255,0.04) · Glass cards</div>
+    </div>
+    <!-- Brand -->
+    <div>
+      <div style="height:48px;border-radius:8px;background:#C9A84C;box-shadow:0 0 20px rgba(201,168,76,0.35);"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--gold</div>
+      <div style="font-size:10px;color:#888;">#C9A84C · Primary brand</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#E8C76A;"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--gold-hover</div>
+      <div style="font-size:10px;color:#888;">#E8C76A · Hover state</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#00C7FF;box-shadow:0 0 20px rgba(0,199,255,0.25);"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--cyan</div>
+      <div style="font-size:10px;color:#888;">#00C7FF · Data / stats</div>
+    </div>
+    <!-- Text -->
+    <div>
+      <div style="height:48px;border-radius:8px;background:#E8EEF8;"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--text-primary</div>
+      <div style="font-size:10px;color:#888;">#E8EEF8 · Headings</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#7A90B4;"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--text-secondary</div>
+      <div style="font-size:10px;color:#888;">#7A90B4 · Body / labels</div>
+    </div>
+    <!-- Status -->
+    <div>
+      <div style="height:48px;border-radius:8px;background:#30D158;"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--success</div>
+      <div style="font-size:10px;color:#888;">#30D158 · ALLOW / OK</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#FF453A;"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--danger</div>
+      <div style="font-size:10px;color:#888;">#FF453A · DENY / error</div>
+    </div>
+    <div>
+      <div style="height:48px;border-radius:8px;background:#FFD60A;"></div>
+      <div style="margin-top:6px;font-size:11px;font-weight:600;">--warning</div>
+      <div style="font-size:10px;color:#888;">#FFD60A · Crisis / alert</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Typography</div>
+  <div style="background:#0B0D14;border-radius:12px;padding:24px;margin-top:12px;border:1px solid rgba(255,255,255,0.07);">
+    <div style="font-size:42px;font-weight:700;color:#E8EEF8;line-height:1.05;letter-spacing:-0.02em;font-family:system-ui;margin-bottom:6px;">Governed execution infrastructure.</div>
+    <div style="font-size:10px;color:#7A90B4;font-family:monospace;letter-spacing:0.1em;margin-bottom:20px;">H1 — system-ui, 700, -0.02em tracking, clamp(48px, 8vw, 96px)</div>
+
+    <div style="font-size:26px;font-weight:600;color:#E8EEF8;line-height:1.1;letter-spacing:-0.015em;font-family:system-ui;margin-bottom:6px;">The control plane enterprise AI usually lacks.</div>
+    <div style="font-size:10px;color:#7A90B4;font-family:monospace;letter-spacing:0.1em;margin-bottom:20px;">H2 — system-ui, 600, -0.015em tracking, clamp(36px, 5vw, 56px)</div>
+
+    <div style="font-size:17px;color:#7A90B4;line-height:1.65;font-family:system-ui;margin-bottom:6px;">Every decision is governed. Every action is reconstructible. Every byte of state is tenant-isolated. Operious is the deterministic multi-agent system that runs Tier 1 and Tier 2 operational workflows with forensic auditability.</div>
+    <div style="font-size:10px;color:#7A90B4;font-family:monospace;letter-spacing:0.1em;margin-bottom:20px;">Body — system-ui, 400, 17px, line-height 1.65</div>
+
+    <div style="display:flex;gap:16px;align-items:center;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.18em;color:#C9A84C;font-family:monospace;">OPERIOUS AI</div>
+      <div style="font-size:10px;color:#7A90B4;font-family:monospace;">Eyebrow label — monospace, 10px, 0.18em</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Component Primitives</div>
+  <div style="background:#0B0D14;border-radius:12px;padding:24px;margin-top:12px;border:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;gap:20px;">
+
+    <!-- Glass card -->
+    <div>
+      <div style="font-size:11px;color:#7A90B4;font-family:monospace;margin-bottom:8px;">Glass card</div>
+      <div style="padding:20px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;backdrop-filter:blur(12px);max-width:320px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.18em;color:#C9A84C;font-family:monospace;margin-bottom:8px;">Governance</div>
+        <div style="font-size:16px;font-weight:600;color:#E8EEF8;margin-bottom:6px;font-family:system-ui;">Constitutional Governance</div>
+        <div style="font-size:13px;color:#7A90B4;line-height:1.5;">Policies execute, not suggest. Decisions cannot bypass the governance layer.</div>
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div>
+      <div style="font-size:11px;color:#7A90B4;font-family:monospace;margin-bottom:8px;">Buttons</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button style="padding:10px 20px;background:#C9A84C;border-radius:6px;border:none;font-size:13px;font-weight:600;color:#030508;cursor:pointer;font-family:system-ui;box-shadow:0 0 20px rgba(201,168,76,0.3);">Request enterprise access →</button>
+        <button style="padding:10px 20px;background:rgba(255,255,255,0.05);border-radius:6px;border:1px solid rgba(255,255,255,0.1);font-size:13px;color:#E8EEF8;cursor:pointer;font-family:system-ui;">Read the architecture</button>
+        <button style="padding:10px 20px;background:transparent;border-radius:6px;border:1px solid rgba(201,168,76,0.3);font-size:13px;color:#C9A84C;cursor:pointer;font-family:system-ui;">View trust center</button>
+      </div>
+    </div>
+
+    <!-- Stat -->
+    <div>
+      <div style="font-size:11px;color:#7A90B4;font-family:monospace;margin-bottom:8px;">Animated stat (count-up on scroll intersection)</div>
+      <div style="display:flex;gap:20px;">
+        <div style="text-align:center;padding:16px 20px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;">
+          <div style="font-size:32px;font-weight:700;color:#00C7FF;font-family:system-ui;letter-spacing:-0.02em;">2,816</div>
+          <div style="font-size:9px;color:#7A90B4;font-family:monospace;text-transform:uppercase;letter-spacing:0.12em;margin-top:4px;">Backend Tests</div>
+        </div>
+        <div style="text-align:center;padding:16px 20px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;">
+          <div style="font-size:32px;font-weight:700;color:#00C7FF;font-family:system-ui;letter-spacing:-0.02em;">0.25ms</div>
+          <div style="font-size:9px;color:#7A90B4;font-family:monospace;text-transform:uppercase;letter-spacing:0.12em;margin-top:4px;">Fingerprint Latency</div>
+        </div>
+        <div style="text-align:center;padding:16px 20px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;">
+          <div style="font-size:32px;font-weight:700;color:#C9A84C;font-family:system-ui;letter-spacing:-0.02em;">846/846</div>
+          <div style="font-size:9px;color:#7A90B4;font-family:monospace;text-transform:uppercase;letter-spacing:0.12em;margin-top:4px;">Audit Items: YES</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security badge -->
+    <div>
+      <div style="font-size:11px;color:#7A90B4;font-family:monospace;margin-bottom:8px;">Security badge pills</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="padding:6px 12px;background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.25);border-radius:20px;font-size:11px;color:#30D158;font-family:monospace;display:flex;gap:6px;align-items:center;"><span>✓</span> FORCE RLS All Tables</div>
+        <div style="padding:6px 12px;background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.25);border-radius:20px;font-size:11px;color:#30D158;font-family:monospace;display:flex;gap:6px;align-items:center;"><span>✓</span> UUID5 Cryptographic Identity</div>
+        <div style="padding:6px 12px;background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.25);border-radius:20px;font-size:11px;color:#30D158;font-family:monospace;display:flex;gap:6px;align-items:center;"><span>✓</span> Append-Only Audit Trail</div>
+        <div style="padding:6px 12px;background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.25);border-radius:20px;font-size:11px;color:#30D158;font-family:monospace;display:flex;gap:6px;align-items:center;"><span>✓</span> 846/846 Audit Items YES</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p style="margin-top:16px;font-size:13px;color:#888;">These tokens live in <code>globals.css</code> for both apps — no duplication. Does this design system look right?</p>

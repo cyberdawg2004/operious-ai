@@ -363,6 +363,21 @@ class DispatchService:
                 ),
                 admitted_at=execution_governance.evaluated_at,
                 tenant_id=tenant_id,
+                execution_governance_config_id=(
+                    None
+                    if execution_governance.config is None
+                    else uuid.UUID(str(execution_governance.config.config_id))
+                ),
+                execution_governance_config_version=(
+                    None
+                    if execution_governance.config is None
+                    else execution_governance.config.version
+                ),
+                execution_governance_config_sha256=(
+                    None
+                    if execution_governance.config is None
+                    else execution_governance.config.content_sha256
+                ),
             ),
             metadata={
                 "boundary.ingress_id": str(ingress.ingress_id),
@@ -407,7 +422,7 @@ class DispatchService:
                     arbitration.outcome if arbitration is not None else None
                 ),
                 halted=True,
-                halt_reason=QueueBackpressureError.reason,
+                halt_reason=exc.reason,
             )
 
         return DispatchResult(

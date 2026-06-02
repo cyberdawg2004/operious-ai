@@ -365,7 +365,7 @@ async def test_worker_restart_does_not_duplicate_execution(
 @requires_postgres
 @pytest.mark.asyncio
 @pytest.mark.chaos
-async def test_processing_continues_when_redis_unavailable(
+async def test_processing_dead_letters_when_quota_redis_unavailable(
     committed_burst_seed,
     suppress_supervisor_enqueue,
     suppress_semantic_validation,
@@ -395,23 +395,23 @@ async def test_processing_continues_when_redis_unavailable(
         tenant_id=tenant_id,
     )
 
-    assert result["status"] == "completed", result
+    assert result["status"] == "dead_lettered", result
+    assert result["error_class"] == "QUOTA_EXCEEDED"
+    assert result["dead_letter_task_recorded"] is True
     async with get_owner_session_factory()() as session:
-        decisions = await session.execute(
+        dlq = await session.execute(
             text(
                 """
-                SELECT policy_chain_id, COUNT(*)
-                FROM governance_decisions
+                SELECT COUNT(*), MAX(metadata->>'error_class')
+                FROM dead_letter_tasks
                 WHERE tenant_id = :tenant_id
-                GROUP BY policy_chain_id
                 """
             ),
             {"tenant_id": tenant_id},
         )
-    assert dict(decisions.all()) == {
-        "cognition.llm_diagnostic.pre_execution": 1,
-        "resolution.communication.pre_execution": 1,
-    }
+    dlq_count, dlq_error_class = dlq.one()
+    assert dlq_count == 1
+    assert dlq_error_class == "QUOTA_EXCEEDED"
 
 
 def _email_webhook_body(

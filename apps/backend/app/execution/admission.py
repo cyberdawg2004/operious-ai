@@ -15,6 +15,9 @@ class GovernanceAdmissionToken:
     execution_governance_evaluation_id: uuid.UUID
     admitted_at: datetime
     tenant_id: str
+    execution_governance_config_id: uuid.UUID | None = None
+    execution_governance_config_version: int | None = None
+    execution_governance_config_sha256: str | None = None
 
 
 __all__ = ["GovernanceAdmissionToken"]

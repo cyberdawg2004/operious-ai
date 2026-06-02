@@ -10,7 +10,6 @@ from app.api.v1.schemas.ingress import (
 )
 from app.dependencies.authority import require_tenant_scope
 from app.dependencies.services import (
-    check_batch_ingest_admission,
     get_batch_ingest_service,
 )
 from app.services.batch_ingest_service import BatchIngestService
@@ -26,7 +25,6 @@ router = APIRouter(tags=["ingress"])
 async def batch_ingest(
     body: BatchIngestRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _admission: object = Depends(check_batch_ingest_admission),
     service: BatchIngestService = Depends(get_batch_ingest_service),
 ) -> BatchIngestResponse:
     try:

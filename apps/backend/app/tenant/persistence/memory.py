@@ -357,6 +357,16 @@ class InMemoryTenantConfigurationRepository:
     ) -> None:
         _assert_write_tenant(record.tenant_id, expected_tenant_id)
         async with self._lock:
+            existing = self._execution_governance_configurations.get(
+                record.config_id
+            )
+            if (
+                existing is not None
+                and existing.content_sha256 != record.content_sha256
+            ):
+                raise ChronologyImmutabilityError(
+                    "execution governance configuration version is append-only"
+                )
             self._execution_governance_configurations[record.config_id] = record
 
     async def get_execution_governance_configuration(

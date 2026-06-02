@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 import math
-import uuid
-from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import Depends
 import httpx
 import pytest
 from sqlalchemy import text
@@ -12,16 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.ingress.batch import max_batch_size
 from app.db.session import get_owner_session_factory
+from app.dependencies.database import get_db_session
 from app.dependencies.services import (
     get_admission_service,
-    get_execution_publisher,
+    get_dispatch_service,
 )
-from app.hardening.admission.models import (
-    AdmissionDecision,
-    AdmissionOutcome,
-    AdmissionReason,
-)
-from app.queues import DIAGNOSTIC_QUEUE_PRIORITY
 from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 
@@ -44,66 +39,38 @@ async def test_burst_10000_admission_and_correctness(
     batch_count = math.ceil(batch_size / max_items_per_call)
     calls = {"count": 0}
 
-    class NoOpExecutionPublisher:
-        async def publish_execution(
-            self,
-            execution_id: str,
-            *,
-            tenant_id: str,
-        ) -> None:
-            del execution_id, tenant_id
-
-    class LocalAdmissionService:
-        async def evaluate_and_persist(self, **kwargs: Any) -> AdmissionDecision:
+    class UnexpectedAdmissionService:
+        async def evaluate_and_persist(self, **kwargs: Any) -> None:
             del kwargs
             calls["count"] += 1
-            if calls["count"] == 1:
-                return AdmissionDecision(
-                    decision_id=uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"burst-10000-admission-admit:{tenant_id}",
-                    ),
-                    outcome=AdmissionOutcome.ADMIT,
-                    reason=None,
-                    queue_name=",".join(DIAGNOSTIC_QUEUE_PRIORITY),
-                    queue_depth=0,
-                    queue_age_seconds=0.0,
-                    redis_memory_pct=0.0,
-                    db_pool_wait_ms=0.0,
-                    retry_after_seconds=0,
-                    evaluated_at=datetime.now(timezone.utc),
-                )
-            return AdmissionDecision(
-                decision_id=uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    "burst-10000-admission-defer:"
-                    f"{tenant_id}:{calls['count']}",
-                ),
-                outcome=AdmissionOutcome.DEFER,
-                reason=AdmissionReason.QUEUE_DEPTH_EXCEEDED,
-                queue_name=",".join(DIAGNOSTIC_QUEUE_PRIORITY),
-                queue_depth=2_500,
-                queue_age_seconds=None,
-                redis_memory_pct=None,
-                db_pool_wait_ms=None,
-                retry_after_seconds=30,
-                evaluated_at=datetime.now(timezone.utc),
-            )
+            raise AssertionError("batch ingest must not pre-admit before capture")
+
+    class NoOpDispatchService:
+        async def dispatch(self, ingress_id: str, tenant_id: str) -> None:
+            del ingress_id, tenant_id
+
+    async def get_noop_dispatch_service(
+        session: AsyncSession = Depends(get_db_session),
+    ) -> AsyncIterator[NoOpDispatchService]:
+        try:
+            yield NoOpDispatchService()
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
     await committed_burst_seed["seed_tenant"](tenant_id)
 
     from app.main import create_app
 
     app = create_app()
-    app.dependency_overrides[get_execution_publisher] = NoOpExecutionPublisher
-    app.dependency_overrides[get_admission_service] = LocalAdmissionService
+    app.dependency_overrides[get_dispatch_service] = get_noop_dispatch_service
+    app.dependency_overrides[get_admission_service] = UnexpectedAdmissionService
 
     items = [_batch_item(index) for index in range(batch_size)]
     total_accepted = 0
     total_duplicate = 0
     total_rejected = 0
-    deferred_items = 0
-    deferred_batches = 0
 
     print(
         "Burst 10000 batching: "
@@ -124,50 +91,28 @@ async def test_burst_10000_admission_and_correctness(
                 headers={"X-Tenant-ID": tenant_id},
             )
 
-            if batch_index == 0:
-                assert response.status_code == 200, response.text
-                payload = response.json()
-                total_accepted += int(payload["accepted"])
-                total_duplicate += int(payload["duplicate"])
-                total_rejected += int(payload["rejected"])
-                assert payload["accepted"] == max_items_per_call, (
-                    "First batch should be fully admitted when queues are empty, "
-                    f"got {payload}"
-                )
-                assert payload["duplicate"] == 0
-                assert payload["rejected"] == 0
-                assert all(
-                    item["status"] == "ACCEPTED"
-                    for item in payload["results"]
-                )
-                continue
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            total_accepted += int(payload["accepted"])
+            total_duplicate += int(payload["duplicate"])
+            total_rejected += int(payload["rejected"])
+            assert payload["accepted"] == end - start
+            assert payload["duplicate"] == 0
+            assert payload["rejected"] == 0
+            assert all(item["status"] == "ACCEPTED" for item in payload["results"])
 
-            assert response.status_code == 503, response.text
-            assert response.headers["Retry-After"] == "30"
-            print(f"503 response body: {response.json()!r}")
-            detail = response.json()["detail"]
-            assert "admission_deferred" in detail
-            assert AdmissionReason.QUEUE_DEPTH_EXCEEDED.value in detail
-            assert "'retry_after_seconds': 30" in detail
-            deferred_batches += 1
-            deferred_items += end - start
-
-    assert calls["count"] == batch_count, (
-        f"Expected {batch_count} admission evaluations, got {calls['count']}"
+    assert calls["count"] == 0, (
+        "Batch ingest invoked pre-capture admission instead of preserving capture."
     )
-    assert total_accepted < batch_size, (
-        f"Admission control did not activate: all {batch_size} items accepted."
-    )
-    assert deferred_batches == batch_count - 1
-    assert deferred_items == batch_size - max_items_per_call
+    assert total_accepted == batch_size
+    assert total_duplicate == 0
+    assert total_rejected == 0
 
     print(
-        "Burst 10000 admission totals: "
+        "Burst 10000 capture totals: "
         f"accepted={total_accepted}, "
         f"duplicate={total_duplicate}, "
-        f"rejected={total_rejected}, "
-        f"deferred_items={deferred_items}, "
-        f"deferred_batches={deferred_batches}"
+        f"rejected={total_rejected}"
     )
 
     async with get_owner_session_factory()() as session:
@@ -183,7 +128,7 @@ async def test_burst_10000_admission_and_correctness(
             {"tenant_id": tenant_id},
         )
         boundary_count = boundary_records.scalar_one()
-        deferred_records = await session.execute(
+        tail_records = await session.execute(
             text(
                 """
                 SELECT COUNT(*)
@@ -195,15 +140,15 @@ async def test_burst_10000_admission_and_correctness(
             ),
             {"tenant_id": tenant_id},
         )
-        deferred_record_count = deferred_records.scalar_one()
+        tail_record_count = tail_records.scalar_one()
 
     assert boundary_count == total_accepted, (
         f"DB has {boundary_count} boundary records but "
         f"{total_accepted} items were admitted."
     )
-    assert deferred_record_count == 0, (
-        "Deferred batches left phantom boundary records: "
-        f"{deferred_record_count}"
+    assert tail_record_count == batch_size - max_items_per_call, (
+        "Post-first-batch valid items were not durably captured: "
+        f"{tail_record_count}"
     )
 
     await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))

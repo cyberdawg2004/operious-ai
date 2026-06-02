@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import inspect
 from pathlib import Path
@@ -45,6 +46,7 @@ from app.coordination.runtime import CoordinationRuntime
 from app.coordination.tracing import CoordinationTrace
 from app.execution import (
     ExecutionAdmissionError,
+    GovernanceAdmissionToken,
     ExecutionQuery,
     ExecutionRuntime,
     InMemoryExecutionPersistence,
@@ -55,7 +57,12 @@ from app.governance.persistence import (
     GovernanceDecisionRecord,
     InMemoryGovernanceRepository,
 )
-from app.runtime import ExecutionGovernanceEvaluation, ExecutionGovernanceRuntime
+from app.runtime import (
+    BoundExecutionGovernanceConfigurationError,
+    ExecutionGovernanceEvaluation,
+    ExecutionGovernanceRuntime,
+    load_bound_execution_governance_config,
+)
 from app.services.dispatch_service import DispatchService
 from app.session.persistence import InMemorySessionPersistence
 from app.queues import QUEUE_DIAGNOSTIC_NORMAL
@@ -64,6 +71,8 @@ from app.tenant.enums import (
     TenantExecutionCircuitState,
     TenantExecutionGovernanceStatus,
 )
+from app.tenant.exceptions import ChronologyImmutabilityError
+from app.tenant.persistence import TenantExecutionGovernanceConfigurationQuery
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
 from tests.conftest import approved_record, execution_admission_token
@@ -240,6 +249,91 @@ async def test_missing_execution_governance_configuration_fails_closed() -> None
     assert result.config is None
     assert result.circuit_breaker is None
     assert result.metadata["configuration"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_execution_record_reconstructs_bound_governance_version() -> None:
+    tenant_repo = InMemoryTenantConfigurationRepository()
+    execution_store = InMemoryExecutionPersistence()
+    governance_repo = InMemoryGovernanceRepository()
+    runtime = _execution_governance_runtime(
+        tenant_repo=tenant_repo,
+        execution_store=execution_store,
+        governance_repo=governance_repo,
+    )
+    await _configure_limits(
+        tenant_repo,
+        tenant_id=TENANT_ID,
+        execution_quota=10,
+    )
+    v1 = await runtime.evaluate(tenant_id=TENANT_ID, now=NOW)
+    assert v1.config is not None
+
+    with pytest.raises(ChronologyImmutabilityError):
+        await tenant_repo.save_execution_governance_configuration(
+            replace(
+                v1.config,
+                execution_quota=999,
+                content_sha256="f" * 64,
+            ),
+            expected_tenant_id=TENANT_ID,
+        )
+
+    request = await ExecutionRuntime(
+        persistence=execution_store,
+    ).request_diagnostic_execution(
+        dispatch_id="dispatch-bound-governance-v1",
+        session_id="session-bound-governance-v1",
+        tenant_id=TENANT_ID,
+        requested_at=NOW,
+        admission_token=GovernanceAdmissionToken(
+            governance_decision_id=GOVERNANCE_DECISION_ID,
+            execution_governance_evaluation_id=v1.evaluation_id,
+            admitted_at=v1.evaluated_at,
+            tenant_id=TENANT_ID,
+            execution_governance_config_id=uuid.UUID(str(v1.config.config_id)),
+            execution_governance_config_version=v1.config.version,
+            execution_governance_config_sha256=v1.config.content_sha256,
+        ),
+    )
+    await _configure_limits(
+        tenant_repo,
+        tenant_id=TENANT_ID,
+        execution_quota=20,
+    )
+
+    latest = await runtime.evaluate(
+        tenant_id=TENANT_ID,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert latest.config is not None
+    assert latest.config.version == 2
+    loaded = await load_bound_execution_governance_config(
+        execution=request.execution,
+        tenant_configuration_repository=tenant_repo,
+    )
+
+    assert loaded is not None
+    assert loaded.config_id == v1.config.config_id
+    assert loaded.version == 1
+    assert loaded.execution_quota == 10
+    assert loaded.content_sha256 == v1.config.content_sha256
+    with pytest.raises(
+        BoundExecutionGovernanceConfigurationError,
+        match="sha256 mismatch",
+    ):
+        await load_bound_execution_governance_config(
+            execution=replace(
+                request.execution,
+                execution_governance_config_sha256="0" * 64,
+            ),
+            tenant_configuration_repository=tenant_repo,
+        )
+    page = await tenant_repo.list_execution_governance_configurations(
+        TenantExecutionGovernanceConfigurationQuery(),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert [item.version for item in page.items] == [1, 2]
 
 
 def test_dispatch_service_requires_execution_governance() -> None:

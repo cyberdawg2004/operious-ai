@@ -1154,6 +1154,18 @@ def _execution_to_row(record: ExecutionRecord) -> ExecutionRow:
         metadata["execution_governance.admitted_at"] = (
             record.governance_admitted_at.isoformat()
         )
+    if record.execution_governance_config_id is not None:
+        metadata["execution_governance.config_id"] = str(
+            record.execution_governance_config_id
+        )
+    if record.execution_governance_config_version is not None:
+        metadata["execution_governance.version"] = (
+            record.execution_governance_config_version
+        )
+    if record.execution_governance_config_sha256 is not None:
+        metadata["execution_governance.content_sha256"] = (
+            record.execution_governance_config_sha256
+        )
     return ExecutionRow(
         execution_id=record.execution_id,
         kind=record.kind.value,
@@ -1235,6 +1247,15 @@ def _row_to_execution(row: ExecutionRow) -> ExecutionRecord:
         governance_admitted_at=_optional_datetime(
             metadata.get("execution_governance.admitted_at")
         ),
+        execution_governance_config_id=_optional_uuid(
+            metadata.get("execution_governance.config_id")
+        ),
+        execution_governance_config_version=_optional_int(
+            metadata.get("execution_governance.version")
+        ),
+        execution_governance_config_sha256=_optional_str(
+            metadata.get("execution_governance.content_sha256")
+        ),
         claimed_at=row.claimed_at,
         completed_at=row.completed_at,
         failed_at=row.failed_at,
@@ -1301,6 +1322,26 @@ def _optional_datetime(value: object) -> datetime | None:
         return datetime.fromisoformat(str(value))
     except ValueError:
         return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text or None
 
 
 _TERMINAL_OUTBOX_RETRY_EXECUTION_STATE_VALUES = (

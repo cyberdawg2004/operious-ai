@@ -22,6 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -281,16 +282,22 @@ def _reload_governance_policy_singletons(app: FastAPI) -> None:
 
 
 async def _close_pubsub(pubsub: Any) -> None:
-    close = getattr(pubsub, "aclose", None)
-    if close is not None:
-        await close()
-        return
-    close = getattr(pubsub, "close", None)
-    if close is None:
-        return
-    result = close()
-    if isinstance(result, Awaitable):
-        await result
+    try:
+        close = getattr(pubsub, "aclose", None)
+        if close is not None:
+            await close()
+            return
+        close = getattr(pubsub, "close", None)
+        if close is None:
+            return
+        result = close()
+        if isinstance(result, Awaitable):
+            await result
+    except RedisTimeoutError as exc:
+        get_logger(__name__).warning(
+            "redis_pubsub_close_timeout",
+            extra={"error": str(exc)},
+        )
 
 
 @asynccontextmanager

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
+import uuid
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.execution import InMemoryExecutionPersistence
 from app.governance.persistence import InMemoryGovernanceRepository
@@ -14,10 +18,11 @@ from app.runtime import (
     ProviderCircuitOpenError,
     ProviderCircuitState,
 )
+from app.runtime.provider_circuit_breaker import ProviderCircuitSnapshot
 from app.tenant.enums import TenantExecutionGovernanceStatus
 from app.tenant.persistence import InMemoryTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
-from tests.conftest import approved_record
+from tests.conftest import approved_record, requires_postgres, set_pg_rls_tenant
 
 TENANT_ID = "tenant-provider-circuit"
 PROVIDER = "anthropic"
@@ -124,3 +129,75 @@ async def test_execution_governance_denies_when_provider_circuit_open() -> None:
     assert evaluation.provider_circuit_state == opened.state.value
     assert opened.open_until is not None
     assert evaluation.metadata["provider_open_until"] == opened.open_until.isoformat()
+
+
+@pytest.mark.asyncio
+@requires_postgres
+async def test_postgres_get_state_concurrent_creation_is_idempotent(
+    pg_engine: AsyncEngine,
+) -> None:
+    tenant_id = f"tenant-provider-circuit-{uuid.uuid4().hex[:12]}"
+    provider = "operious-deterministic-llm"
+    session_factory = async_sessionmaker(
+        pg_engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+    )
+
+    async with pg_engine.begin() as connection:
+        await connection.execute(
+            text("INSERT INTO tenants (tenant_id) VALUES (:t) ON CONFLICT DO NOTHING"),
+            {"t": tenant_id},
+        )
+
+    snapshot = ProviderCircuitSnapshot(
+        state_id=uuid.uuid5(uuid.NAMESPACE_URL, f"{tenant_id}|{provider}"),
+        tenant_id=tenant_id,
+        provider_name=provider,
+        state=ProviderCircuitState.CLOSED,
+        consecutive_failures=0,
+        retry_count=0,
+        retry_window_started_at=None,
+        opened_at=None,
+        open_until=None,
+        half_open_trial_started_at=None,
+        last_failure_reason=None,
+        last_transition_at=NOW,
+        updated_at=NOW,
+        metadata={"origin": "test"},
+    )
+
+    async def create_state() -> None:
+        async with session_factory() as session:
+            await set_pg_rls_tenant(session, tenant_id)
+            await ProviderCircuitBreaker(
+                session=session,
+                auto_commit=True,
+            )._save(snapshot)  # pyright: ignore[reportPrivateUsage]
+
+    try:
+        await asyncio.gather(*(create_state() for _ in range(8)))
+        async with pg_engine.connect() as connection:
+            count = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM provider_circuit_states
+                        WHERE tenant_id = :t AND provider_name = :provider
+                        """
+                    ),
+                    {"t": tenant_id, "provider": provider},
+                )
+            ).scalar_one()
+        assert count == 1
+    finally:
+        async with pg_engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM provider_circuit_states WHERE tenant_id = :t"),
+                {"t": tenant_id},
+            )
+            await connection.execute(
+                text("DELETE FROM tenants WHERE tenant_id = :t"),
+                {"t": tenant_id},
+            )

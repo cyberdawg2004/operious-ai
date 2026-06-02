@@ -1106,7 +1106,16 @@ class _DeferredExecutionPublisher(ExecutionPublisher):
             )
         claim_id = _require_execution_outbox_claim_id(claim.outbox.claim_id)
         if isinstance(self._delegate, QueueBackpressureCheck):
-            await self._delegate.check_backpressure(tenant_id=tenant_id)
+            try:
+                await self._delegate.check_backpressure(tenant_id=tenant_id)
+            except Exception as exc:
+                await self._execution_runtime.mark_outbox_failed(
+                    outbox_id=str(claim.outbox.outbox_id),
+                    claim_id=str(claim_id),
+                    error=_bounded_publish_error(exc),
+                )
+                await self._session.commit()
+                raise
         self._diagnostic_executions.append(
             _DiagnosticExecutionIntent(
                 execution_id=execution_id,

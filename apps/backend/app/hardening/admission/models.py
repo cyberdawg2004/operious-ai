@@ -24,6 +24,7 @@ class AdmissionReason(str, enum.Enum):
     REDIS_MEMORY_PRESSURE = "REDIS_MEMORY_PRESSURE"
     DB_POOL_PRESSURE = "DB_POOL_PRESSURE"
     TENANT_QUOTA_EXCEEDED = "TENANT_QUOTA_EXCEEDED"
+    TELEMETRY_UNAVAILABLE_PROCESSING = "telemetry_unavailable_processing"
     TELEMETRY_UNAVAILABLE_REALTIME = "telemetry_unavailable_realtime"
     TELEMETRY_UNAVAILABLE_VOICE = "telemetry_unavailable_voice"
 
@@ -31,9 +32,9 @@ class AdmissionReason(str, enum.Enum):
 class AdmissionChannelClass(str, enum.Enum):
     """Risk class used when admission telemetry is unavailable.
 
-    Async ticket channels may fail open because queued work can recover
-    later. Voice is realtime and fails closed when capacity telemetry is
-    unavailable because overflow becomes customer-facing silence.
+    Processing channels preserve ingress and defer downstream work.
+    Realtime chat defers the request, while voice fails closed because
+    overflow becomes customer-facing silence.
     """
 
     ASYNC_TICKET = "async_ticket"

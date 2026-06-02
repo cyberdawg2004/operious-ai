@@ -22,6 +22,20 @@ class QueueDepthClient(Protocol):
         ...
 
 
+class TenantQueueQoSClient(QueueDepthClient, Protocol):
+    def get(self, key: str) -> Awaitable[object | None] | object | None:
+        ...
+
+    def incr(self, key: str) -> Awaitable[int] | int:
+        ...
+
+    def decr(self, key: str) -> Awaitable[int] | int:
+        ...
+
+    def expire(self, key: str, seconds: int) -> Awaitable[bool] | bool:
+        ...
+
+
 class QueueBackpressureError(RuntimeError):
     """Raised when a Redis-backed queue is above its admission threshold."""
 
@@ -36,13 +50,16 @@ class QueueBackpressureError(RuntimeError):
         logical_queue: str | None = None,
         tenant_id: str | None = None,
         dispatch_id: str | None = None,
+        reason: str | None = None,
     ) -> None:
         logical = logical_queue or queue_name
+        effective_reason = reason or self.reason
         super().__init__(
-            "queue backpressure: "
+            f"{effective_reason}: "
             f"{logical} ({queue_name}) depth {queue_depth} exceeds max "
             f"{max_queue_depth}"
         )
+        self.reason = effective_reason
         self.logical_queue = logical
         self.queue_name = queue_name
         self.queue_depth = queue_depth
@@ -91,8 +108,8 @@ class RedisQueueDepthAdmission:
         dispatch_id: str | None = None,
     ) -> None:
         try:
-            depth = await _resolve_depth(self._redis_client.llen(queue_name))
-        except Exception as exc:  # noqa: BLE001 - admission must fail open here.
+            depth = await _resolve_int(self._redis_client.llen(queue_name))
+        except Exception as exc:  # noqa: BLE001 - processing admission fails closed.
             self._logger.warning(
                 "queue_depth_check_failed",
                 extra={
@@ -103,7 +120,15 @@ class RedisQueueDepthAdmission:
                     "error": exc.__class__.__name__,
                 },
             )
-            depth = 0
+            raise QueueBackpressureError(
+                logical_queue=logical_queue,
+                queue_name=queue_name,
+                queue_depth=max_queue_depth + 1,
+                max_queue_depth=max_queue_depth,
+                tenant_id=tenant_id,
+                dispatch_id=dispatch_id,
+                reason="queue_depth_unavailable",
+            ) from exc
         if depth <= max_queue_depth:
             return
         self._logger.warning(
@@ -135,7 +160,7 @@ async def collect_queue_depth_reports(
 ) -> dict[str, QueueDepthReport]:
     async def _collect(limit: QueueDepthLimit) -> tuple[str, QueueDepthReport]:
         try:
-            depth_coro = _resolve_depth(redis_client.llen(limit.queue_name))
+            depth_coro = _resolve_int(redis_client.llen(limit.queue_name))
             depth = (
                 await asyncio.wait_for(depth_coro, timeout=operation_timeout)
                 if operation_timeout is not None
@@ -186,7 +211,117 @@ def queue_depth_status(
     return "ok"
 
 
-async def _resolve_depth(value: Awaitable[int] | int) -> int:
+async def admit_tenant_queue_publish(
+    *,
+    redis_client: TenantQueueQoSClient,
+    logical_queue: str,
+    queue_name: str,
+    tenant_id: str | None,
+    max_tenant_depth: int,
+    dispatch_id: str | None = None,
+    ttl_seconds: int = 86_400,
+) -> None:
+    """Reserve one per-tenant slot before publishing to a shared queue."""
+
+    if tenant_id is None:
+        return
+    if max_tenant_depth < 1:
+        raise QueueBackpressureError(
+            logical_queue=logical_queue,
+            queue_name=queue_name,
+            queue_depth=1,
+            max_queue_depth=max_tenant_depth,
+            tenant_id=tenant_id,
+            dispatch_id=dispatch_id,
+            reason="tenant_queue_backpressure",
+        )
+    key = tenant_queue_backlog_key(queue_name=queue_name, tenant_id=tenant_id)
+    try:
+        count = await _resolve_int(redis_client.incr(key))
+        if count == 1:
+            await _resolve_bool(redis_client.expire(key, ttl_seconds))
+    except Exception as exc:  # noqa: BLE001 - QoS admission is processing-critical.
+        logging.getLogger(__name__).warning(
+            "tenant_queue_qos_check_failed",
+            extra={
+                "logical_queue": logical_queue,
+                "queue_name": queue_name,
+                "tenant_id": tenant_id,
+                "dispatch_id": dispatch_id,
+                "error": exc.__class__.__name__,
+            },
+        )
+        raise QueueBackpressureError(
+            logical_queue=logical_queue,
+            queue_name=queue_name,
+            queue_depth=max_tenant_depth + 1,
+            max_queue_depth=max_tenant_depth,
+            tenant_id=tenant_id,
+            dispatch_id=dispatch_id,
+            reason="tenant_queue_qos_unavailable",
+        ) from exc
+    if count <= max_tenant_depth:
+        return
+    await release_tenant_queue_publish(
+        redis_client=redis_client,
+        queue_name=queue_name,
+        tenant_id=tenant_id,
+    )
+    raise QueueBackpressureError(
+        logical_queue=logical_queue,
+        queue_name=queue_name,
+        queue_depth=count,
+        max_queue_depth=max_tenant_depth,
+        tenant_id=tenant_id,
+        dispatch_id=dispatch_id,
+        reason="tenant_queue_backpressure",
+    )
+
+
+async def release_tenant_queue_publish(
+    *,
+    redis_client: TenantQueueQoSClient,
+    queue_name: str,
+    tenant_id: str | None,
+) -> None:
+    """Release one per-tenant queue slot when work starts or publish fails."""
+
+    if tenant_id is None:
+        return
+    key = tenant_queue_backlog_key(queue_name=queue_name, tenant_id=tenant_id)
+    try:
+        value = await _resolve_any(redis_client.get(key))
+        if value is None or int(value) <= 0:
+            return
+        await _resolve_int(redis_client.decr(key))
+    except Exception as exc:  # noqa: BLE001 - release is best-effort cleanup.
+        logging.getLogger(__name__).warning(
+            "tenant_queue_qos_release_failed",
+            extra={
+                "queue_name": queue_name,
+                "tenant_id": tenant_id,
+                "error": exc.__class__.__name__,
+            },
+        )
+
+
+def tenant_queue_backlog_key(*, queue_name: str, tenant_id: str) -> str:
+    return f"queue:tenant_backlog:{queue_name}:{tenant_id}"
+
+
+async def _resolve_int(value: Awaitable[int] | int) -> int:
+    if isawaitable(value):
+        return await value
+    return value
+
+
+async def _resolve_bool(value: Awaitable[bool] | bool) -> bool:
+    if isawaitable(value):
+        return await value
+    return value
+
+
+async def _resolve_any(value: Awaitable[Any] | Any) -> Any:
     if isawaitable(value):
         return await value
     return value
@@ -233,8 +368,12 @@ __all__ = [
     "QueueDepthReport",
     "QueueHealthStatus",
     "RedisQueueDepthAdmission",
+    "TenantQueueQoSClient",
     "aggregate_queue_status",
+    "admit_tenant_queue_publish",
     "celery_queue_depth_limits",
     "collect_queue_depth_reports",
     "queue_depth_status",
+    "release_tenant_queue_publish",
+    "tenant_queue_backlog_key",
 ]

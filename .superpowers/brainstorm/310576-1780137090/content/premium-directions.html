@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Premium Direction Options</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; color: #fff; font-family: system-ui, -apple-system, sans-serif; padding: 32px; }
+
+  h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .subtitle { font-size: 14px; color: #666; margin-bottom: 32px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; }
+
+  .card {
+    border-radius: 16px;
+    overflow: hidden;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.2s;
+    background: #111;
+  }
+  .card:hover { transform: translateY(-2px); }
+  .card.selected { border-color: #C9A84C; }
+
+  .preview { height: 280px; position: relative; overflow: hidden; }
+  .card-meta { padding: 20px; }
+  .card-meta h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .card-meta p { font-size: 13px; color: #888; line-height: 1.5; }
+  .card-meta .tag { display: inline-block; margin-top: 10px; font-size: 11px; color: #C9A84C; border: 1px solid rgba(201,168,76,0.3); border-radius: 4px; padding: 3px 8px; font-family: monospace; }
+
+  /* ─── OPTION A: Cinematic Institutional ─── */
+  .preview-a {
+    background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .preview-a::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 70%),
+                radial-gradient(ellipse 60% 40% at 80% 100%, rgba(0,199,255,0.06) 0%, transparent 60%);
+  }
+  .a-grid {
+    position: absolute; inset: 0; opacity: 0.06;
+    background-image: linear-gradient(rgba(216,228,244,1) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(216,228,244,1) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .a-orb {
+    position: absolute; width: 400px; height: 400px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(201,168,76,0.08) 0%, transparent 70%);
+    top: -150px; left: 50%; transform: translateX(-50%);
+    animation: pulse 4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:0.6;transform:translateX(-50%) scale(1)} 50%{opacity:1;transform:translateX(-50%) scale(1.1)} }
+  .a-content { position: relative; z-index: 2; text-align: center; padding: 20px; }
+  .a-eyebrow { font-size: 9px; letter-spacing: 0.22em; color: #C9A84C; font-family: monospace; text-transform: uppercase; margin-bottom: 14px; }
+  .a-headline { font-size: 26px; font-weight: 700; color: #E8EEF8; line-height: 1.05; letter-spacing: -0.02em; margin-bottom: 10px; }
+  .a-sub { font-size: 11px; color: #7A90B4; line-height: 1.6; max-width: 260px; margin: 0 auto 16px; }
+  .a-btn { display: inline-block; padding: 8px 18px; background: #C9A84C; border-radius: 5px; font-size: 11px; font-weight: 600; color: #000; }
+  .a-particles { position: absolute; inset: 0; z-index: 1; }
+  .a-particles span {
+    position: absolute; width: 1px; height: 1px; border-radius: 50%;
+    background: rgba(201,168,76,0.6);
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-20px)} }
+
+  /* ─── OPTION B: Liquid Glass Premium ─── */
+  .preview-b {
+    background: linear-gradient(135deg, #05080F 0%, #0A0F1C 50%, #080C18 100%);
+    display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+    padding: 24px; position: relative; overflow: hidden;
+  }
+  .b-blob-1 {
+    position: absolute; width: 300px; height: 300px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(0,199,255,0.07) 0%, transparent 70%);
+    right: -80px; top: -80px;
+    animation: drift 8s ease-in-out infinite;
+  }
+  .b-blob-2 {
+    position: absolute; width: 200px; height: 200px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(201,168,76,0.06) 0%, transparent 70%);
+    left: -60px; bottom: -60px;
+    animation: drift 10s ease-in-out infinite reverse;
+  }
+  @keyframes drift { 0%,100%{transform:translate(0,0)} 33%{transform:translate(15px,-10px)} 66%{transform:translate(-10px,15px)} }
+  .b-glass-card {
+    position: relative; z-index: 2;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 20px;
+    padding: 20px;
+    backdrop-filter: blur(20px);
+    width: 100%;
+  }
+  .b-eyebrow { font-size: 9px; letter-spacing: 0.2em; color: #C9A84C; font-family: monospace; text-transform: uppercase; margin-bottom: 10px; }
+  .b-headline { font-size: 22px; font-weight: 700; color: #E8EEF8; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .b-sub { font-size: 11px; color: #5A7090; line-height: 1.5; margin-bottom: 14px; }
+  .b-stats { display: flex; gap: 12px; margin-bottom: 14px; }
+  .b-stat { flex: 1; text-align: center; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); }
+  .b-stat-n { font-size: 16px; font-weight: 700; color: #00C7FF; letter-spacing: -0.02em; }
+  .b-stat-l { font-size: 8px; color: #5A7090; font-family: monospace; text-transform: uppercase; letter-spacing: 0.1em; }
+  .b-btns { display: flex; gap: 8px; }
+  .b-btn-p { padding: 8px 16px; background: #C9A84C; border-radius: 6px; font-size: 10px; font-weight: 700; color: #000; box-shadow: 0 0 20px rgba(201,168,76,0.25); }
+  .b-btn-s { padding: 8px 16px; background: rgba(255,255,255,0.04); border-radius: 6px; font-size: 10px; color: #E8EEF8; border: 1px solid rgba(255,255,255,0.08); }
+
+  /* ─── OPTION C: Monumental Editorial ─── */
+  .preview-c {
+    background: #000;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 0; position: relative; overflow: hidden;
+  }
+  .c-3d-scene {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 120% 80% at 50% -10%, rgba(201,168,76,0.15) 0%, transparent 55%),
+      radial-gradient(ellipse 80% 60% at 100% 100%, rgba(0,199,255,0.06) 0%, transparent 50%),
+      linear-gradient(to bottom, #000 0%, #020408 100%);
+  }
+  .c-wireframe {
+    position: absolute; inset: 0; opacity: 0.04;
+    background:
+      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(201,168,76,0.8) 39px, rgba(201,168,76,0.8) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(201,168,76,0.8) 39px, rgba(201,168,76,0.8) 40px);
+  }
+  .c-sphere {
+    position: absolute;
+    top: 10px; right: 20px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, rgba(201,168,76,0.4) 0%, rgba(201,168,76,0.05) 50%, transparent 70%);
+    border: 1px solid rgba(201,168,76,0.15);
+    box-shadow: 0 0 40px rgba(201,168,76,0.1), inset 0 0 40px rgba(201,168,76,0.05);
+    animation: rotate 20s linear infinite;
+  }
+  @keyframes rotate { 0%{box-shadow: 0 0 40px rgba(201,168,76,0.1), inset 0 0 40px rgba(201,168,76,0.05)} 50%{box-shadow: 0 0 60px rgba(201,168,76,0.2), inset 0 0 60px rgba(201,168,76,0.08)} 100%{box-shadow: 0 0 40px rgba(201,168,76,0.1), inset 0 0 40px rgba(201,168,76,0.05)} }
+  .c-lines {
+    position: absolute; top: 60px; right: 80px;
+    width: 80px; height: 80px; opacity: 0.12;
+  }
+  .c-content { position: relative; z-index: 2; padding: 20px; }
+  .c-top-label {
+    position: absolute; top: 16px; left: 20px; z-index: 2;
+    display: flex; gap: 16px; align-items: center;
+  }
+  .c-logo { width: 20px; height: 20px; border: 1px solid rgba(201,168,76,0.5); display: flex; align-items: center; justify-content: center; }
+  .c-logo-dot { width: 6px; height: 6px; background: #C9A84C; }
+  .c-wordmark { font-size: 10px; letter-spacing: 0.15em; color: rgba(232,238,248,0.7); font-weight: 600; text-transform: uppercase; }
+  .c-headline-big { font-size: 30px; font-weight: 800; color: #E8EEF8; line-height: 0.95; letter-spacing: -0.03em; margin-bottom: 10px; }
+  .c-headline-big em { color: #C9A84C; font-style: normal; }
+  .c-meta { font-size: 9px; color: #4A5A74; font-family: monospace; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px; }
+  .c-divider { width: 40px; height: 1px; background: linear-gradient(90deg, #C9A84C, transparent); margin-bottom: 12px; }
+  .c-desc { font-size: 11px; color: #5A7090; line-height: 1.5; max-width: 240px; margin-bottom: 14px; }
+  .c-cta { display: inline-block; padding: 9px 20px; background: #C9A84C; border-radius: 4px; font-size: 10px; font-weight: 700; color: #000; letter-spacing: 0.04em; text-transform: uppercase; box-shadow: 0 8px 24px rgba(201,168,76,0.3); }
+
+  .selection-bar {
+    margin-top: 32px; padding: 16px; background: #111; border-radius: 12px;
+    border: 1px solid #222; font-size: 13px; color: #666; text-align: center;
+  }
+  .selection-bar span { color: #C9A84C; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Premium Marketing Site Direction</h1>
+<p class="subtitle">Three $10k-tier aesthetics — all dark, all enterprise, all with 3D + animation. Pick the feel that fits Operious.</p>
+
+<div class="grid">
+
+  <!-- A: Cinematic Institutional -->
+  <div class="card" onclick="selectCard(this,'cinematic')">
+    <div class="preview preview-a">
+      <div class="a-grid"></div>
+      <div class="a-orb"></div>
+      <div class="a-particles">
+        <span style="left:15%;top:20%;animation-delay:0s;width:2px;height:2px;"></span>
+        <span style="left:70%;top:40%;animation-delay:1s;width:1px;height:1px;"></span>
+        <span style="left:40%;top:70%;animation-delay:2s;width:2px;height:2px;"></span>
+        <span style="left:85%;top:15%;animation-delay:0.5s;width:1px;height:1px;"></span>
+        <span style="left:25%;top:55%;animation-delay:1.5s;width:2px;height:2px;"></span>
+        <span style="left:60%;top:80%;animation-delay:2.5s;width:1px;height:1px;"></span>
+      </div>
+      <div class="a-content">
+        <div class="a-eyebrow">Tier 1 + Tier 2 BPO Replacement</div>
+        <div class="a-headline">The Operating System<br>for Customer Operations</div>
+        <div class="a-sub">Every decision governed. Every action reconstructible. Every byte tenant-isolated.</div>
+        <div class="a-btn">Request enterprise access →</div>
+      </div>
+    </div>
+    <div class="card-meta">
+      <h3>A — Cinematic Institutional</h3>
+      <p>Gold radial glow crown, floating gold particles, fine grid overlay. Full-viewport hero. Feels like Palantir or Anduril — serious, powerful, institutional. 3D: Three.js particle field + floating geometry.</p>
+      <span class="tag">DEFENSE / GOVT / ENTERPRISE FEEL</span>
+    </div>
+  </div>
+
+  <!-- B: Liquid Glass -->
+  <div class="card" onclick="selectCard(this,'glass')">
+    <div class="preview preview-b">
+      <div class="b-blob-1"></div>
+      <div class="b-blob-2"></div>
+      <div class="b-glass-card">
+        <div class="b-eyebrow">Operious AI — Governed Execution</div>
+        <div class="b-headline">The infrastructure<br>between AI and<br>execution.</div>
+        <div class="b-sub">Deterministic multi-agent system for Tier 1 and Tier 2 operations. Forensically auditable by architecture.</div>
+        <div class="b-stats">
+          <div class="b-stat"><div class="b-stat-n">2,816</div><div class="b-stat-l">Tests</div></div>
+          <div class="b-stat"><div class="b-stat-n">54</div><div class="b-stat-l">RLS Tables</div></div>
+          <div class="b-stat"><div class="b-stat-n">846</div><div class="b-stat-l">Audit YES</div></div>
+        </div>
+        <div class="b-btns">
+          <div class="b-btn-p">Request access →</div>
+          <div class="b-btn-s">Architecture</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-meta">
+      <h3>B — Liquid Glass Premium</h3>
+      <p>Glassmorphism hero card floating over animated color blobs. Stats baked into the hero. Feels like Vercel or Linear at their most premium. 3D: animated blob meshes, depth layers.</p>
+      <span class="tag">MODERN SAAS / TECH PLATFORM</span>
+    </div>
+  </div>
+
+  <!-- C: Monumental Editorial -->
+  <div class="card" onclick="selectCard(this,'editorial')">
+    <div class="preview preview-c">
+      <div class="c-3d-scene"></div>
+      <div class="c-wireframe"></div>
+      <div class="c-sphere"></div>
+      <div class="c-top-label">
+        <div class="c-logo"><div class="c-logo-dot"></div></div>
+        <div class="c-wordmark">Operious AI</div>
+      </div>
+      <div class="c-content">
+        <div class="c-meta">Governed Execution Infrastructure · Est. 2024</div>
+        <div class="c-headline-big">Governed.<br><em>Reconstructible.</em><br>Sovereign.</div>
+        <div class="c-divider"></div>
+        <div class="c-desc">The deterministic runtime that separates AI intent from AI execution. Built for the enterprises that cannot afford to be wrong.</div>
+        <div class="c-cta">Request access</div>
+      </div>
+    </div>
+    <div class="card-meta">
+      <h3>C — Monumental Editorial</h3>
+      <p>Massive letterform headline. Gold wireframe sphere 3D object in upper-right. Copy that reads like a manifesto — "Governed. Reconstructible. Sovereign." Strategic enterprise messaging. Feels like a $50M Series B landing page.</p>
+      <span class="tag">PREMIUM / MANIFESTO / SERIES B</span>
+    </div>
+  </div>
+
+</div>
+
+<div class="selection-bar" id="selectionBar">
+  Click a direction to select it. You can also mix — e.g. "C's headline style with B's glass cards."
+</div>
+
+<script>
+function selectCard(el, choice) {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('selectionBar').innerHTML = 'Selected: <span>' + el.querySelector('h3').textContent + '</span> — tell me in the terminal if you want to mix anything.';
+  // record event
+  try {
+    fetch('/event', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'click',choice:choice,text:el.querySelector('h3').textContent,timestamp:Date.now()})});
+  } catch(e){}
+}
+</script>
+
+</body>
+</html>

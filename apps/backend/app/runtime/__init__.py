@@ -48,8 +48,10 @@ from app.runtime.escalation_event_projection import (
     project_escalation_record,
 )
 from app.runtime.execution_governance import (
+    BoundExecutionGovernanceConfigurationError,
     ExecutionGovernanceEvaluation,
     ExecutionGovernanceRuntime,
+    load_bound_execution_governance_config,
 )
 from app.runtime.provider_circuit_breaker import (
     ProviderCircuitBreaker,
@@ -126,6 +128,7 @@ __all__ = [
     "BoundaryEventProjectionError",
     "BoundaryOperationalEventProjection",
     "BoundaryOperationalEventProjector",
+    "BoundExecutionGovernanceConfigurationError",
     "CoordinationEventProjectionError",
     "CoordinationOperationalEventProjection",
     "CoordinationOperationalEventProjector",
@@ -198,6 +201,7 @@ __all__ = [
     "project_qa_score_record",
     "resolution_proposal_timeline_payload",
     "project_session_timeline_event",
+    "load_bound_execution_governance_config",
     "project_sop_approval_record",
     "project_supervisor_inspection_record",
 ]

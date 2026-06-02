@@ -301,7 +301,7 @@ async def test_quota_raises_when_limit_exceeded() -> None:
 
 
 @pytest.mark.asyncio
-async def test_quota_fails_open_when_redis_unavailable(
+async def test_quota_fails_closed_when_redis_unavailable(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     session_factory = _FakeSessionFactory()
@@ -309,12 +309,15 @@ async def test_quota_fails_open_when_redis_unavailable(
     runtime = _runtime(session_factory, redis=redis, requests_per_minute=0)
 
     caplog.set_level(logging.WARNING, logger="app.agents.runtime.quota_runtime")
-    await runtime.check_and_increment(
-        tenant_id="tenant-a",
-        provider="anthropic",
-        model="claude",
-    )
+    with pytest.raises(ProviderQuotaExceededError) as exc_info:
+        await runtime.check_and_increment(
+            tenant_id="tenant-a",
+            provider="anthropic",
+            model="claude",
+        )
 
+    assert exc_info.value.quota_type == "quota_backend_unavailable"
+    assert exc_info.value.retry_after_seconds == 60
     assert "quota_redis_unavailable" in caplog.text
 
 

@@ -61,7 +61,6 @@ from app.core.webhook_url import (
 from app.db.tenant_context import set_current_tenant
 from app.governance.capability import OperationalAct
 from app.hardening.admission import (
-    AdmissionDecision,
     AdmissionOutcome,
 )
 from app.identity import AuthorityContext, TenantId
@@ -484,16 +483,6 @@ class TicketIngressService:
             nonce=security_context.nonce,
         ):
             return WebhookDuplicateDeliveryResult()
-        await self._enforce_admission(
-            tenant_id=channel_config.tenant_id,
-            channel_type=tenant_channel_type,
-            request_correlation_id=_webhook_request_id(
-                channel=tenant_channel_type.value,
-                routing_address=channel_config.routing_address,
-                body=body,
-                raw_body=raw_body,
-            ),
-        )
         nonce_recorded = await self._record_webhook_freshness_nonce(
             tenant_id=channel_config.tenant_id,
             channel_type=tenant_channel_type.value,
@@ -612,6 +601,11 @@ class TicketIngressService:
                 code="channel_webhook_rejected",
                 reason=result.normalization.error or "normalization failed",
             )
+        await self._record_processing_admission_after_capture(
+            tenant_id=channel_config.tenant_id,
+            channel_type=tenant_channel_type,
+            request_correlation_id=webhook_request_id,
+        )
         return TicketIngressServiceResult(
             ingress_id=str(result.ingress_id),
             canonical_envelope_id=str(result.event_id),
@@ -720,7 +714,7 @@ class TicketIngressService:
                 status_code=401,
             ) from exc
 
-    async def _enforce_admission(
+    async def _record_processing_admission_after_capture(
         self,
         *,
         tenant_id: str,
@@ -741,7 +735,19 @@ class TicketIngressService:
         )
         if decision.outcome is AdmissionOutcome.ADMIT:
             return
-        raise _admission_rejection(decision)
+        logger.warning(
+            "post_capture_processing_admission_deferred",
+            extra={
+                "tenant_id": tenant_id,
+                "channel": channel_type.value,
+                "decision_id": str(decision.decision_id),
+                "outcome": decision.outcome.value,
+                "reason": (
+                    decision.reason.value if decision.reason is not None else None
+                ),
+                "retry_after_seconds": decision.retry_after_seconds,
+            },
+        )
 
 
 async def _end_read_only_routing_transaction(session: object) -> None:
@@ -1126,40 +1132,6 @@ def _admission_queues_for_channel(
         return tuple(queue_names)
     raise TicketIngressServiceError(
         f"admission queue map is not configured for {channel_type.value}"
-    )
-
-
-def _admission_rejection(decision: AdmissionDecision) -> TicketIngressRejected:
-    reason = decision.reason.value if decision.reason is not None else "UNKNOWN"
-    headers = {
-        "X-Operious-Admission-Decision-Id": str(decision.decision_id),
-    }
-    if decision.outcome is AdmissionOutcome.DEFER:
-        headers["Retry-After"] = str(decision.retry_after_seconds)
-        return TicketIngressRejected(
-            code="admission_deferred",
-            reason=reason,
-            status_code=503,
-            headers=headers,
-            response_body={
-                "error": "admission_deferred",
-                "reason": reason,
-                "decision_id": str(decision.decision_id),
-                "retry_after_seconds": decision.retry_after_seconds,
-                "message": "Platform under pressure. Retry after delay.",
-            },
-        )
-    return TicketIngressRejected(
-        code="admission_rejected",
-        reason=reason,
-        status_code=429,
-        headers=headers,
-        response_body={
-            "error": "admission_rejected",
-            "reason": reason,
-            "decision_id": str(decision.decision_id),
-            "message": "Platform capacity exceeded. Request rejected.",
-        },
     )
 
 

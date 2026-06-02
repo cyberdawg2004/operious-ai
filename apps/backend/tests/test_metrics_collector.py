@@ -339,6 +339,7 @@ class _MetricsRedis:
         self.hang_zrange = hang_zrange
         self.delay_llen_seconds = delay_llen_seconds
         self.zadds: list[tuple[str, Mapping[str, float], bool]] = []
+        self.values: dict[str, int] = {}
 
     async def llen(self, name: str) -> int:
         if self.delay_llen_seconds:
@@ -373,6 +374,23 @@ class _MetricsRedis:
     async def info(self, section: str | None = None) -> Mapping[str, Any]:
         del section
         return {"used_memory": 1, "maxmemory": 0}
+
+    async def get(self, key: str) -> int | None:
+        return self.values.get(key)
+
+    async def incr(self, key: str) -> int:
+        value = self.values.get(key, 0) + 1
+        self.values[key] = value
+        return value
+
+    async def decr(self, key: str) -> int:
+        value = max(0, self.values.get(key, 0) - 1)
+        self.values[key] = value
+        return value
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        del key, seconds
+        return True
 
 
 class _FakeTask:

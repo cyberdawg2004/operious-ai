@@ -9,7 +9,7 @@ from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from typing import Any, Mapping, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -467,15 +467,17 @@ class ProviderCircuitBreaker:
         values = _snapshot_values(snapshot)
         update_values = dict(values)
         update_values.pop("state_id", None)
-        stmt = (
-            pg_insert(table)
-            .values(**values)
-            .on_conflict_do_update(
-                index_elements=[table.c.state_id],
-                set_=update_values,
+        insert_stmt = pg_insert(table).values(**values).on_conflict_do_nothing()
+        update_stmt = (
+            update(table)
+            .where(
+                table.c.tenant_id == snapshot.tenant_id,
+                table.c.provider_name == snapshot.provider_name,
             )
+            .values(**update_values)
         )
-        await self._session.execute(stmt)
+        await self._session.execute(insert_stmt)
+        await self._session.execute(update_stmt)
         await self._session.flush()
         if self._auto_commit:
             await self._session.commit()

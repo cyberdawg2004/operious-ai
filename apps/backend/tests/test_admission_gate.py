@@ -64,6 +64,7 @@ class _AdmissionRedis:
         self.fail_llen = fail_llen
         self.fail_zrange = fail_zrange
         self.zadds: list[tuple[str, Mapping[str, float], bool]] = []
+        self.values: dict[str, int] = {}
 
     async def info(self, section: str | None = None) -> Mapping[str, Any]:
         del section
@@ -101,6 +102,21 @@ class _AdmissionRedis:
     ) -> int:
         self.zadds.append((name, mapping, nx))
         return 1
+
+    async def get(self, key: str) -> int | None:
+        return self.values.get(key)
+
+    async def incr(self, key: str) -> int:
+        self.values[key] = self.values.get(key, 0) + 1
+        return self.values[key]
+
+    async def decr(self, key: str) -> int:
+        self.values[key] = self.values.get(key, 0) - 1
+        return self.values[key]
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        del key, seconds
+        return True
 
 
 def _thresholds() -> AdmissionGateThresholds:
@@ -229,10 +245,11 @@ async def test_reject_on_db_pool_wait_reject() -> None:
 
 
 @pytest.mark.asyncio
-async def test_redis_memory_unavailable_fails_open() -> None:
+async def test_redis_memory_unavailable_defers_processing() -> None:
     decision = await _decision(_AdmissionRedis(fail_info=True))
 
-    assert decision.outcome is AdmissionOutcome.ADMIT
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.redis_memory_pct is None
     assert decision.redis_memory_available is False
     assert decision.telemetry_unavailable is True
@@ -240,10 +257,11 @@ async def test_redis_memory_unavailable_fails_open() -> None:
 
 
 @pytest.mark.asyncio
-async def test_queue_age_unavailable_fails_open() -> None:
+async def test_queue_age_unavailable_defers_processing() -> None:
     decision = await _decision(_AdmissionRedis(fail_zrange=True))
 
-    assert decision.outcome is AdmissionOutcome.ADMIT
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.queue_age_seconds is None
     assert decision.queue_age_available is False
     assert decision.telemetry_unavailable is True
@@ -256,7 +274,8 @@ async def test_queue_age_unavailable_fails_open() -> None:
 async def test_queue_depth_unavailable_is_not_silent_depth_zero() -> None:
     decision = await _decision(_AdmissionRedis(fail_llen=True))
 
-    assert decision.outcome is AdmissionOutcome.ADMIT
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.queue_depth == 0
     assert decision.queue_depth_available is False
     assert decision.telemetry_unavailable is True
@@ -407,49 +426,95 @@ async def test_execution_publisher_writes_queue_age_sentinel(
 
 
 @pytest.mark.asyncio
-async def test_webhook_reject_returns_429_and_headers() -> None:
+async def test_webhook_reject_decision_preserves_captured_ingress() -> None:
+    boundary_store = InMemoryBoundaryPersistence()
     service = await _webhook_service(
+        boundary_store=boundary_store,
         admission_service=_FakeAdmissionService(AdmissionOutcome.REJECT),
     )
     body = _email_body(nonce="reject-1")
     raw_body = _raw(body)
 
-    with pytest.raises(TicketIngressRejected) as exc_info:
-        await service.process_channel_webhook(
-            channel_type="email",
-            body=body,
-            headers=_signed_headers(raw_body),
-            raw_body=raw_body,
-            content_type="application/json",
-        )
+    result = await service.process_channel_webhook(
+        channel_type="email",
+        body=body,
+        headers=_signed_headers(raw_body),
+        raw_body=raw_body,
+        content_type="application/json",
+    )
 
-    assert exc_info.value.status_code == 429
-    assert exc_info.value.headers["X-Operious-Admission-Decision-Id"]
-    assert exc_info.value.response_body is not None
-    assert exc_info.value.response_body["error"] == "admission_rejected"
+    assert result.ingress_id
+    page = await boundary_store.list_ingress(
+        BoundaryIngressQuery(),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert page.total == 1
 
 
 @pytest.mark.asyncio
-async def test_webhook_defer_returns_503_retry_after_and_headers() -> None:
+async def test_webhook_defer_decision_preserves_captured_ingress() -> None:
+    boundary_store = InMemoryBoundaryPersistence()
     service = await _webhook_service(
+        boundary_store=boundary_store,
         admission_service=_FakeAdmissionService(AdmissionOutcome.DEFER),
     )
     body = _email_body(nonce="defer-1")
     raw_body = _raw(body)
 
-    with pytest.raises(TicketIngressRejected) as exc_info:
-        await service.process_channel_webhook(
-            channel_type="email",
-            body=body,
-            headers=_signed_headers(raw_body),
-            raw_body=raw_body,
-            content_type="application/json",
-        )
+    result = await service.process_channel_webhook(
+        channel_type="email",
+        body=body,
+        headers=_signed_headers(raw_body),
+        raw_body=raw_body,
+        content_type="application/json",
+    )
 
-    assert exc_info.value.status_code == 503
-    assert exc_info.value.headers["Retry-After"] == "15"
-    assert exc_info.value.response_body is not None
-    assert exc_info.value.response_body["error"] == "admission_deferred"
+    assert result.ingress_id
+    page = await boundary_store.list_ingress(
+        BoundaryIngressQuery(),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_webhook_redis_unavailable_preserves_captured_ingress() -> None:
+    boundary_store = InMemoryBoundaryPersistence()
+    session_factory = _RecordingSessionFactory()
+    admission_service = AdmissionService(
+        gate=AdmissionGate(
+            redis_client=_AdmissionRedis(fail_llen=True),
+            thresholds=_thresholds(),
+        ),
+        session_factory=session_factory,  # type: ignore[arg-type]
+    )
+    service = await _webhook_service(
+        boundary_store=boundary_store,
+        admission_service=admission_service,
+    )
+    body = _email_body(nonce="redis-down-1")
+    raw_body = _raw(body)
+
+    result = await service.process_channel_webhook(
+        channel_type="email",
+        body=body,
+        headers=_signed_headers(raw_body),
+        raw_body=raw_body,
+        content_type="application/json",
+    )
+
+    assert result.ingress_id
+    page = await boundary_store.list_ingress(
+        BoundaryIngressQuery(),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert page.total == 1
+    assert session_factory.commits == 1
+    assert session_factory.rows[0].outcome == AdmissionOutcome.DEFER.value
+    assert (
+        session_factory.rows[0].reason
+        == AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING.value
+    )
 
 
 @pytest.mark.asyncio
