@@ -1,11 +1,10 @@
 """PR-C1 tests for ``JWKSAuthProvider``.
 
 Offline-deterministic: every test generates a fresh RSA-2048
-keypair, builds an in-memory JWK set, constructs a
-:class:`PyJWKClient` pointed at a ``file://`` URL backed by a
-tempfile holding the JWKS bytes, and injects that client via
-:meth:`JWKSAuthProvider.with_jwk_client`. No network call is
-issued. The contract under test is identical to what the
+keypair, builds an in-memory JWK set, injects a
+:class:`PyJWKClient`-compatible test client via
+:meth:`JWKSAuthProvider.with_jwk_client`, and never contacts the
+network. The contract under test is identical to what the
 production provider exercises against Auth0 — only the JWKS
 transport differs.
 
@@ -20,8 +19,8 @@ Pinned contract:
 * Claim mapping projects ``sub`` / ``tenant_id`` / etc. into
   :class:`VerifiedIdentity`; namespaced custom claims work via
   a custom :class:`ClaimMapping`.
-* :meth:`with_jwk_client` does not invoke ``__init__`` so the
-  test factory bypasses the ``jwks_uri`` HTTP validation.
+* :meth:`with_jwk_client` accepts an injected JWK client so tests
+  can exercise token verification without an external JWKS service.
 * Constructor validation: empty audience / empty issuer / empty
   algorithms / ``"none"`` algorithm all raise ``ValueError``.
 """
@@ -32,13 +31,13 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from jwt import PyJWKClient
+from jwt import PyJWK, PyJWKClient, PyJWKClientError
 from jwt.algorithms import RSAAlgorithm
 
 from app.auth.credentials import Credential
@@ -74,10 +73,34 @@ def _jwk_from_public_key(
     return jwk
 
 
-def _write_jwks(tmp_path: Path, jwks: dict[str, Any]) -> Path:
-    path = tmp_path / "jwks.json"
-    path.write_text(json.dumps(jwks))
-    return path
+class _SigningKey:
+    def __init__(self, key: Any) -> None:
+        self.key = key
+
+
+class _InMemoryJWKClient:
+    uri = "memory://test-jwks"
+
+    def __init__(self, jwks: dict[str, Any]) -> None:
+        self._keys: dict[str, Any] = {}
+        for jwk in jwks.get("keys", []):
+            if not isinstance(jwk, dict):
+                continue
+            kid = jwk.get("kid")
+            if isinstance(kid, str):
+                self._keys[kid] = PyJWK.from_dict(jwk).key
+
+    def get_signing_key_from_jwt(self, token: str) -> _SigningKey:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if not isinstance(kid, str):
+            raise PyJWKClientError("JWT header is missing a string kid")
+        key = self._keys.get(kid)
+        if key is None:
+            raise PyJWKClientError(
+                f"Unable to find a signing key that matches: {kid!r}"
+            )
+        return _SigningKey(key)
 
 
 def _build_provider(
@@ -90,20 +113,10 @@ def _build_provider(
     claim_mapping: ClaimMapping | None = None,
     leeway: float = 0.0,
 ) -> JWKSAuthProvider:
-    """Construct a JWKSAuthProvider backed by a tempfile JWKS.
-
-    Uses a ``file://`` URL so :class:`PyJWKClient` can fetch
-    without contacting the network — :mod:`urllib.request`
-    natively supports the ``file://`` scheme.
-    """
+    """Construct a JWKSAuthProvider backed by an in-memory JWKS."""
+    del tmp_path
     jwks = {"keys": [_jwk_from_public_key(public_key, kid=kid)]}
-    jwks_path = _write_jwks(tmp_path, jwks)
-    jwk_client = PyJWKClient(
-        jwks_path.as_uri(),
-        cache_keys=True,
-        cache_jwk_set=True,
-        lifespan=3600.0,
-    )
+    jwk_client = cast(PyJWKClient, _InMemoryJWKClient(jwks))
     return JWKSAuthProvider.with_jwk_client(
         jwk_client=jwk_client,
         audience=audience,
@@ -464,9 +477,9 @@ def test_rejects_token_with_non_string_claim(tmp_path: Path) -> None:
 
 def test_required_claim_missing_raises(tmp_path: Path) -> None:
     private, public = _generate_rsa_keypair()
+    del tmp_path
     jwks = {"keys": [_jwk_from_public_key(public, kid="k1")]}
-    jwks_path = _write_jwks(tmp_path, jwks)
-    jwk_client = PyJWKClient(jwks_path.as_uri(), cache_jwk_set=True)
+    jwk_client = cast(PyJWKClient, _InMemoryJWKClient(jwks))
     provider = JWKSAuthProvider.with_jwk_client(
         jwk_client=jwk_client,
         audience="https://api.operious.ai",

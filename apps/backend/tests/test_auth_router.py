@@ -4,10 +4,8 @@ End-to-end: real :class:`AuthorityContextMiddleware`, real
 :class:`JWKSAuthProvider`, real :func:`require_authority`
 dependency, real FastAPI router. The only thing replaced is the
 JWKS transport — instead of fetching from Auth0 over the
-network, each test generates a fresh RSA-2048 keypair, writes
-the JWK set to a tempfile, and points :class:`PyJWKClient` at a
-``file://`` URL (same offline pattern as
-``test_auth_provider_jwks.py``).
+network, each test generates a fresh RSA-2048 keypair and injects
+a :class:`PyJWKClient`-compatible in-memory client.
 
 Pinned contract:
 
@@ -32,14 +30,14 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
-from jwt import PyJWKClient
+from jwt import PyJWK, PyJWKClient, PyJWKClientError
 from jwt.algorithms import RSAAlgorithm
 
 from app.auth.providers import JWKSAuthProvider
@@ -66,10 +64,34 @@ def _jwk_from_public_key(
     return jwk
 
 
-def _write_jwks(tmp_path: Path, jwks: dict[str, Any]) -> Path:
-    path = tmp_path / "jwks.json"
-    path.write_text(json.dumps(jwks))
-    return path
+class _SigningKey:
+    def __init__(self, key: Any) -> None:
+        self.key = key
+
+
+class _InMemoryJWKClient:
+    uri = "memory://test-jwks"
+
+    def __init__(self, jwks: dict[str, Any]) -> None:
+        self._keys: dict[str, Any] = {}
+        for jwk in jwks.get("keys", []):
+            if not isinstance(jwk, dict):
+                continue
+            kid = jwk.get("kid")
+            if isinstance(kid, str):
+                self._keys[kid] = PyJWK.from_dict(jwk).key
+
+    def get_signing_key_from_jwt(self, token: str) -> _SigningKey:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if not isinstance(kid, str):
+            raise PyJWKClientError("JWT header is missing a string kid")
+        key = self._keys.get(kid)
+        if key is None:
+            raise PyJWKClientError(
+                f"Unable to find a signing key that matches: {kid!r}"
+            )
+        return _SigningKey(key)
 
 
 _TEST_ISSUER = "https://operious-test.auth0.com/"
@@ -79,14 +101,9 @@ _TEST_AUDIENCE = "https://api.operious.test"
 def _build_jwks_provider(
     tmp_path: Path, *, public_key: rsa.RSAPublicKey, kid: str
 ) -> JWKSAuthProvider:
+    del tmp_path
     jwks = {"keys": [_jwk_from_public_key(public_key, kid=kid)]}
-    jwks_path = _write_jwks(tmp_path, jwks)
-    jwk_client = PyJWKClient(
-        jwks_path.as_uri(),
-        cache_keys=True,
-        cache_jwk_set=True,
-        lifespan=3600.0,
-    )
+    jwk_client = cast(PyJWKClient, _InMemoryJWKClient(jwks))
     return JWKSAuthProvider.with_jwk_client(
         jwk_client=jwk_client,
         audience=_TEST_AUDIENCE,
