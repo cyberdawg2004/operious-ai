@@ -54,7 +54,7 @@ from app._deprecated.rag.reranking.envelopes import RerankingEnvelope
 from app._deprecated.rag.reranking.models import RerankingRequest
 from app._deprecated.rag.reranking.registry import RerankerRegistry
 from app._deprecated.rag.retrieval.envelopes import RetrievalRuntimeEnvelope
-from app._deprecated.rag.retrieval.models import RetrievalCandidateSet, RetrievalRuntimeRequest
+from app._deprecated.rag.retrieval.models import RetrievalRuntimeRequest
 from app._deprecated.rag.retrieval.runtime import RetrievalRuntime
 from app.services.base import BaseService
 

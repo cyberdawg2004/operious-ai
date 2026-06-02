@@ -22,7 +22,6 @@ Failure condition: runtime ambiguity or inconsistent envelope shape.
 from __future__ import annotations
 
 import asyncio
-import uuid
 
 import pytest
 
@@ -37,7 +36,6 @@ from app.providers.embedding_exceptions import (
     EmbeddingBadRequestError,
     EmbeddingProviderError,
     EmbeddingRateLimitError,
-    EmbeddingTimeoutError,
 )
 from app.providers.embedding_models import (
     EmbeddingProviderCapability,

@@ -9,7 +9,6 @@ from typing import Any
 
 import httpx
 import pytest
-import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings

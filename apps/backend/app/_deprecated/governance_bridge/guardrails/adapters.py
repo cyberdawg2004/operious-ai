@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app.governance.context import GovernanceContext
 from app.governance.decisions import GovernanceDecision

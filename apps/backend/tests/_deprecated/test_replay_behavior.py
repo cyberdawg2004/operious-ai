@@ -234,7 +234,7 @@ async def test_replay_does_not_grow_vector_index(
     after the first ingestion."""
 
     service = _build_ingestion_service(session_factory, vector_provider)
-    first = await service.ingest(source="t/doc.md", content=_DOC)
+    await service.ingest(source="t/doc.md", content=_DOC)
     baseline = vector_provider.size("replay_test")
     assert baseline > 0
 

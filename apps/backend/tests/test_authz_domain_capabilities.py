@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
-from starlette.datastructures import Headers
 from starlette.requests import Request
+from starlette.testclient import TestClient
 
 from app.auth.providers.jwt import PERMISSION_CAPABILITY_MAP, ROLE_CAPABILITY_MAP
 from app.dependencies.authority import (
@@ -179,14 +179,7 @@ def test_permission_map_1aext_permissions(
     assert PERMISSION_CAPABILITY_MAP.get(permission) == capability
 
 
-# ── Integration: shared TestClient import ────────────────────────────────────
-
-from starlette.testclient import TestClient
-
 # ── Structural: observability router uses the capability dep on all endpoints ─
-
-from app.api.v1.routers import observability as _obs_router_module
-
 
 def _dep_names(route) -> list[str]:  # noqa: ANN001
     """Collect all FastAPI dependency function names on a route."""

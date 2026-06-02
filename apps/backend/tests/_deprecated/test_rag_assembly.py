@@ -39,7 +39,6 @@ from app.rag.reranking.registry import RerankerRegistry
 from app.rag.retrieval.base import BaseRetrievalStrategy, StrategyExecutionResult
 from app.rag.retrieval.models import (
     RetrievalCandidate,
-    RetrievalRuntimeRequest,
     RetrievalStrategyInfo,
 )
 from app.rag.retrieval.runtime import RetrievalRuntime

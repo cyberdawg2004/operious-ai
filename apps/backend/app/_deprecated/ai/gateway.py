@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from app._deprecated.ai.envelopes import ExecutionEnvelope
 from app._deprecated.ai.execution import ExecutionContext
 from app._deprecated.ai.retry import RetryPolicy, retry_async
-from app._deprecated.ai.tracing import ExecutionTrace, _TraceBuilder
+from app._deprecated.ai.tracing import _TraceBuilder
 from app._deprecated.observability.ai_logging import log_ai_attempt, log_ai_execution
 from app._deprecated.observability.ai_metrics import record_token_usage
 from app.observability.context import get_request_id

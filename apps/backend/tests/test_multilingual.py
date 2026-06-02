@@ -26,7 +26,6 @@ from app.boundary.translation.adapters.base import (
     TranslationProviderResponse,
 )
 from app.boundary.translation.enums import TranslationProviderKind
-from app.boundary.translation.models.payload import TranslationPayload
 from app.cognition.diagnostic_runtime import DiagnosticCognitionRuntime
 from app.cognition.llm import DiagnosticLLMMessage
 from app.governance.capability.runtime import build_capability_governance_runtime

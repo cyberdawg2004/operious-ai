@@ -26,19 +26,9 @@ from app.events import (
     EventFabricError,
     EventId,
     EventPersistenceError,
-    InMemoryOperationalEventPersistence,
     OperationalEvent,
-    OperationalEventAppendResult,
-    OperationalEventPage,
-    OperationalEventPersistenceProtocol,
     OperationalEventQuery,
     OperationalEventRuntime,
-    OperationalReplayFinding,
-    OperationalReplayFindingCode,
-    OperationalReplayFindingSeverity,
-    OperationalReplayRuntime,
-    OperationalReplayStatus,
-    OperationalReplayTrace,
     OperationalSubstrate,
     PostgresOperationalEventPersistence,
     derive_event_id,
@@ -481,6 +471,7 @@ def test_events_substrate_is_a_leaf() -> None:
         "app.auth",
         "app.observability",
     )
+    assert set(permitted_prefixes).isdisjoint(forbidden_prefixes)
     events_root = _repo_app_root() / "events"
     offenders: list[tuple[str, str]] = []
     for py in events_root.rglob("*.py"):

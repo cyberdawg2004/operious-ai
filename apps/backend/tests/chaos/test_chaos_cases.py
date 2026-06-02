@@ -13,13 +13,12 @@ from sqlalchemy import text
 from app.agents.runtime.quota_runtime import TenantQuotaRuntime
 from app.api.v1.schemas.ingress.batch import max_batch_size
 from app.cognition.exceptions import ProviderRateLimitError
-from app.db.session import get_owner_session_factory, get_session_factory
+from app.db.session import get_owner_session_factory
 from app.db.tenant_context import set_current_tenant
 from app.dependencies.services import (
     check_batch_ingest_admission,
     get_execution_publisher,
 )
-from app.hardening.admission.models import AdmissionReason
 from app.workers.agent_tasks import execute_diagnostic_agent_runtime
 from tests.conftest import requires_postgres
 

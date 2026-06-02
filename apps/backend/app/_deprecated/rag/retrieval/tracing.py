@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from app._deprecated.embeddings.tracing import EmbeddingTrace
 

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import ast
 import os
-import re
 import subprocess
 import sys
 import uuid
@@ -37,18 +36,14 @@ import pytest
 from app.governance.capability import (
     CAPABILITY_GOVERNED_ACTS,
     CapabilityDenied,
-    CapabilityLegalityRequest,
     OperationalAct,
-    evaluate_capability_legality,
     gate_or_deny,
 )
 from app.governance.context import GovernanceContext
 from app.governance.decisions import GovernanceDecision
-from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.enums import (
     Decision,
     EnforcementStage,
-    ViolationSeverity,
 )
 from app.governance.envelopes import GovernanceEnvelope
 from app.governance.exceptions import GovernanceConfigurationError

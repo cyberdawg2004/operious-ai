@@ -23,7 +23,6 @@ The constitutional guarantees these tests preserve:
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException

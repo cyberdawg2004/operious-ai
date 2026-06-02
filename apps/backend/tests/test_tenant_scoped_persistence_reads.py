@@ -73,8 +73,6 @@ from app.session.persistence.records import (
     SessionEventRecord,
     SessionRecord,
 )
-from app.supervisor.contracts.decisions import build_supervisor_decision
-from app.supervisor.contracts.evaluations import QAEvaluation
 from app.supervisor.enums import (
     EvaluationStatus,
     FindingCategory,
@@ -82,8 +80,6 @@ from app.supervisor.enums import (
     InspectionMode,
     SupervisorDecisionKind,
 )
-from app.supervisor.models.evidence import EvaluationEvidence
-from app.supervisor.models.findings import RuntimeFinding
 from app.supervisor.persistence.memory import InMemorySupervisorRepository
 from app.supervisor.persistence.records import (
     EscalationDecisionRecord,

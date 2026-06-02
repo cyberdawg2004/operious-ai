@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 from app._deprecated.rag.budgeting.models import BudgetConstraint, BudgetingResult
 from app._deprecated.rag.citations.models import CitationIndex

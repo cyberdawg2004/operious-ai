@@ -21,7 +21,6 @@ from openai import AsyncOpenAI
 
 from app._deprecated.providers.base import BaseAIProvider
 from app._deprecated.providers.exceptions import (
-    AIProviderError,
     ProviderAuthenticationError,
     ProviderBadRequestError,
     ProviderNotFoundError,

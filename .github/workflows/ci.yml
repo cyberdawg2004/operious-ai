@@ -74,8 +74,6 @@ jobs:
         with:
           node-version: "20"
       - name: Install
-        working-directory: tests-frontend
         run: npm install
       - name: Run invariant tests
-        working-directory: tests-frontend
-        run: npm test
+        run: npm run test:frontend

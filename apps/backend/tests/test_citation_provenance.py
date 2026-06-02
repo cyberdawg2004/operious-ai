@@ -7,7 +7,6 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any
 
 import pytest
 import pytest_asyncio

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import timezone
 from typing import Any
 
 import pytest

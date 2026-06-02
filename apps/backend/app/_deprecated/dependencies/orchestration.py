@@ -29,9 +29,8 @@ from __future__ import annotations
 from functools import lru_cache
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
 from app.dependencies.database import get_session_factory
 from app._deprecated.dependencies.memory import (
     build_document_ingestion_service_process_wide,

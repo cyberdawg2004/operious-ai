@@ -25,7 +25,6 @@ from app.queues import (
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_DIAGNOSTIC_RETRY,
     QUEUE_SEMANTIC_QUARANTINE,
-    QUEUE_WEBHOOK_MAINTENANCE,
 )
 
 EXPECTED_QUEUES = {
@@ -79,7 +78,7 @@ def test_no_bare_string_queue_names_in_worker() -> None:
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         violations.extend(_bare_queue_string_violations(py_file, tree))
     assert not violations, (
-        f"Bare string queue names found:\n" + "\n".join(violations)
+        "Bare string queue names found:\n" + "\n".join(violations)
     )
 
 

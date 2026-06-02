@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, ClassVar, FrozenSet
+from typing import ClassVar, FrozenSet
 
 import pytest
 

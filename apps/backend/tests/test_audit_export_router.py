@@ -20,11 +20,6 @@ from app.dependencies.authority import (
     require_tenant_scope,
 )
 from app.dependencies.services import get_audit_export_service
-from app.identity import AuthorityContext
-
-_AUDIT_CAP_CTX = AuthorityContext(
-    tenant_id="tenant-acme", capabilities=("tenant.audit.export",)
-)
 from app.events import (
     EventCausality,
     EventChronology,
@@ -35,6 +30,7 @@ from app.events import (
     derive_event_id,
 )
 from app.governance.capability.acts import OperationalAct
+from app.identity import AuthorityContext
 from app.main import create_app
 from app.runtime.tenant_production_hardening import (
     AUDIT_EXPORT_UNCONFIGURED_SIGNING_KEY,
@@ -44,6 +40,9 @@ from app.runtime.tenant_production_hardening import (
 )
 from app.services.audit_export_service import AuditExportService
 
+_AUDIT_CAP_CTX = AuthorityContext(
+    tenant_id="tenant-acme", capabilities=("tenant.audit.export",)
+)
 _NOW = datetime(2026, 5, 23, 8, 0, tzinfo=timezone.utc)
 _RUNTIME_ID = uuid.UUID("7e90b4de-14fb-53f7-9a8a-bcb9f4ec1412")
 _SIGNING_KEY = "phase-two-audit-export-signing-material"

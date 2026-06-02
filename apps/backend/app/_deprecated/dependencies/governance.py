@@ -35,7 +35,7 @@ from functools import lru_cache
 
 from fastapi import Depends
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
 from app._deprecated.dependencies.rag import (
     build_context_assembly_service_process_wide,
     get_context_assembly_service,

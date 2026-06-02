@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
-import pytest
+import os
+from unittest.mock import patch
 
+import pytest
+from starlette.testclient import TestClient
+
+from app.core.config import get_settings
+from app.dependencies.authority import (
+    OPERATOR_CAPABILITY,
+    require_authority,
+    require_tenant_scope,
+)
+from app.dependencies.services import get_conversation_service
+from app.identity import AuthorityContext
+from app.main import create_app
 from app.services.conversation_service import (
     ConversationAccessDenied,
+    ConversationMessageSubmission,
     ConversationService,
     ConversationServiceError,
 )
@@ -127,18 +141,6 @@ async def test_ensure_stream_access_operator_bypass() -> None:
 # The router must extract principal_id + operator capability from the verified
 # authority and thread them into the service, and map ConversationAccessDenied
 # to a 403. Service-layer tests alone do not prove this wiring.
-
-import os
-from unittest.mock import patch
-
-from starlette.testclient import TestClient
-
-from app.core.config import get_settings
-from app.main import create_app
-from app.dependencies.authority import OPERATOR_CAPABILITY, require_authority, require_tenant_scope
-from app.dependencies.services import get_conversation_service
-from app.identity import AuthorityContext
-from app.services.conversation_service import ConversationMessageSubmission
 
 
 class _RecordingService:

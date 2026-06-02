@@ -31,9 +31,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable
 
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _APP_ROOT = _REPO_ROOT / "app"

@@ -24,7 +24,6 @@ from app._deprecated.providers.embedding_exceptions import (
     EmbeddingAuthenticationError,
     EmbeddingBadRequestError,
     EmbeddingNotFoundError,
-    EmbeddingProviderError,
     EmbeddingRateLimitError,
     EmbeddingResponseError,
     EmbeddingTimeoutError,
