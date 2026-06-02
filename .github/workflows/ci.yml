@@ -92,6 +92,37 @@ jobs:
           PY
       - name: Apply migrations
         run: alembic upgrade head
+      - name: Grant Postgres test role table access
+        run: |
+          python - <<'PY'
+          import psycopg2
+
+          connection = psycopg2.connect(
+              host="localhost",
+              port=5432,
+              dbname="operious_test",
+              user="operious",
+              password="operious",
+          )
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              cursor.execute("GRANT USAGE ON SCHEMA public TO operious_app_test")
+              cursor.execute(
+                  """
+                  GRANT SELECT, INSERT, UPDATE, DELETE
+                  ON ALL TABLES IN SCHEMA public
+                  TO operious_app_test
+                  """
+              )
+              cursor.execute(
+                  """
+                  GRANT USAGE, SELECT
+                  ON ALL SEQUENCES IN SCHEMA public
+                  TO operious_app_test
+                  """
+              )
+          connection.close()
+          PY
       - name: Tests (incl. Postgres-backed RLS + integration)
         run: python -m pytest -q
 
