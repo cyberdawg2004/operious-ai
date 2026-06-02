@@ -208,6 +208,19 @@ def _payload() -> dict[str, object]:
     }
 
 
+async def _ensure_tenant(pg_session: AsyncSession, tenant_id: str) -> None:
+    await pg_session.execute(
+        text(
+            """
+            INSERT INTO public.tenants (tenant_id)
+            VALUES (:tenant_id)
+            ON CONFLICT (tenant_id) DO NOTHING
+            """
+        ),
+        {"tenant_id": tenant_id},
+    )
+
+
 async def _seed_base(
     pg_session: AsyncSession,
     *,
@@ -215,6 +228,7 @@ async def _seed_base(
     tenant_id: str = _TENANT_ID,
 ) -> dict[str, str]:
     ids = _ids(seed)
+    await _ensure_tenant(pg_session, tenant_id)
     sessions = PostgresSessionPersistence(pg_session)
     await sessions.save_session(_session(ids=ids, tenant_id=tenant_id))
     await pg_session.execute(

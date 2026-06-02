@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections import Counter
 from typing import Any
@@ -43,9 +44,13 @@ async def test_burst_1000_multi_tenant_isolation(
         ]
     seed_duration = time.monotonic() - seed_start
     print(f"Seeding 1000 executions took: {seed_duration:.1f}s")
-    assert seed_duration <= 90, (
+    seed_stop_threshold = float(
+        os.environ.get("LOAD_SEED_STOP_THRESHOLD_SECONDS", "90")
+    )
+    assert seed_duration <= seed_stop_threshold, (
         f"Seeding 1000 executions took {seed_duration:.1f}s, "
-        "exceeding the 90s stop threshold. Burst phase not run."
+        f"exceeding the {seed_stop_threshold:.0f}s stop threshold. "
+        "Burst phase not run."
     )
 
     concurrency_limit = 32
