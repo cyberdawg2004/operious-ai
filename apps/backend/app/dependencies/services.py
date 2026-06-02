@@ -54,6 +54,9 @@ from app.agents.tools.action_governance import (
 )
 from app.agents.tools.actions import build_action_tool_registry
 from app.agents.tools.approvals import PostgresActionApprovalRepository
+from app.agents.tools.connector_invocations import (
+    PostgresConnectorInvocationRepository,
+)
 from app.agents.tools.grants import PostgresAgentActionGrantRepository
 from app.agents.tools.invoker import ToolInvoker
 from app.agents.tools.orchestration import ActionOrchestrationRuntime
@@ -801,6 +804,9 @@ def get_action_approval_service(
                     redis_client=get_redis_client(),
                 ),
                 grant_repository=PostgresAgentActionGrantRepository(session),
+                connector_invocation_repository=(
+                    PostgresConnectorInvocationRepository(session)
+                ),
                 redis_client=get_redis_client(),
                 pre_approved_decision_ttl_seconds=(
                     get_settings().AGENT_PRE_APPROVED_DECISION_TTL_SECONDS

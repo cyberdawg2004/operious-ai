@@ -526,7 +526,91 @@ class OutboundDispatchRow(Base):
     )
 
 
+class ConnectorInvocationRow(Base):
+    """Durable idempotency ledger for tenant action connector side effects."""
+
+    __tablename__ = "connector_invocations"
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        primary_key=True,
+    )
+    provider_idempotency_key: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        primary_key=True,
+    )
+    connector_type: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    target_resource: Mapped[str] = mapped_column(String(512), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(_STATE_WIDTH),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
+    provider_id: Mapped[str | None] = mapped_column(String(_HANDLE_WIDTH), nullable=True)
+    provider_status: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True
+    )
+    provider_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    governance_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "governance_decisions.decision_id",
+            name="fk_connector_invocations_governance_decision_id_governance_decisions",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint(
+            "length(provider_idempotency_key) > 0",
+            name="provider_idempotency_key_nonempty",
+        ),
+        CheckConstraint("length(connector_type) > 0", name="connector_type_nonempty"),
+        CheckConstraint("length(action_type) > 0", name="action_type_nonempty"),
+        CheckConstraint("length(target_resource) > 0", name="target_resource_nonempty"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_valid"),
+        CheckConstraint(
+            "status IN ('pending', 'succeeded', 'failed')",
+            name="connector_invocation_status_valid",
+        ),
+        CheckConstraint("attempt >= 1", name="connector_invocation_attempt_positive"),
+        UniqueConstraint(
+            "tenant_id",
+            "provider_idempotency_key",
+            name="uq_connector_invocations_tenant_provider_key",
+        ),
+        Index("ix_connector_invocations_tenant_status", "tenant_id", "status"),
+        Index(
+            "ix_connector_invocations_tenant_governance",
+            "tenant_id",
+            "governance_decision_id",
+        ),
+    )
+
+
 __all__ = [
+    "ConnectorInvocationRow",
     "DeadLetterTaskRow",
     "DefectClusterRow",
     "DefectReportRow",
