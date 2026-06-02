@@ -25,6 +25,13 @@ class KnowledgeBudgetDecisionReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeCitation:
+    """Chunk citation with document-relative span provenance.
+
+    ``char_start`` / ``char_end`` index into ``document.content.strip()``.
+    The invariant is:
+    ``document.content.strip()[char_start:char_end] == chunk.content``.
+    """
+
     index: int
     chunk_id: KnowledgeChunkId
     vector_id: KnowledgeVectorId
@@ -32,6 +39,8 @@ class KnowledgeCitation:
     document_version: int
     content_hash: str
     ordinal: int
+    char_start: int
+    char_end: int
     score: float
     title: str
     estimated_tokens: int
@@ -40,12 +49,21 @@ class KnowledgeCitation:
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeRetrievalItem:
+    """Retrieved chunk with document-relative span provenance.
+
+    ``char_start`` / ``char_end`` index into ``document.content.strip()``.
+    The invariant is:
+    ``document.content.strip()[char_start:char_end] == content``.
+    """
+
     chunk_id: KnowledgeChunkId
     vector_id: KnowledgeVectorId
     document_id: TenantKnowledgeDocumentId
     document_version: int
     content_hash: str
     ordinal: int
+    char_start: int
+    char_end: int
     score: float
     content: str
     title: str

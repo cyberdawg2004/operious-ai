@@ -25,6 +25,7 @@ test('Trace Inspector renders resolution proposal events', () => {
   ok(source.includes('event.payload.evidence'));
   ok(source.includes('safe_excerpt?: string'));
   ok(source.includes('citation.safe_excerpt'));
+  ok(source.includes('char_start?: number'));
 });
 
 test('Trace Inspector keeps diagnostic citation rendering for old events', () => {
@@ -34,4 +35,5 @@ test('Trace Inspector keeps diagnostic citation rendering for old events', () =>
   ok(source.includes(': event.payload.retrieved_citations'));
   ok(source.includes('KnowledgeSources citations={citations}'));
   ok(source.includes('chunk_id?: string'));
+  ok(source.includes('optionalNumberField(citation.char_start)'));
 });

@@ -268,6 +268,7 @@ class KnowledgeRuntime:
         for citation_index, (score, entry) in enumerate(included, start=1):
             total_tokens += entry.chunk.token_count
             metadata = _entry_metadata(entry)
+            char_start, char_end = _entry_span_offsets(entry)
             item = KnowledgeRetrievalItem(
                 chunk_id=entry.chunk.chunk_id,
                 vector_id=entry.vector.vector_id,
@@ -275,6 +276,8 @@ class KnowledgeRuntime:
                 document_version=entry.vector.document_version,
                 content_hash=entry.chunk.content_hash,
                 ordinal=entry.chunk.ordinal,
+                char_start=char_start,
+                char_end=char_end,
                 score=score,
                 content=entry.chunk.content,
                 title=_entry_title(entry),
@@ -294,6 +297,8 @@ class KnowledgeRuntime:
                     document_version=entry.vector.document_version,
                     content_hash=entry.chunk.content_hash,
                     ordinal=entry.chunk.ordinal,
+                    char_start=char_start,
+                    char_end=char_end,
                     score=score,
                     title=_entry_title(entry),
                     estimated_tokens=entry.chunk.token_count,
@@ -367,6 +372,24 @@ def _entry_title(entry: KnowledgeVectorEntry) -> str:
 
 def _entry_score(entry: KnowledgeVectorEntry) -> float:
     return entry.cosine_score if entry.cosine_score is not None else 0.0
+
+
+def _entry_span_offsets(entry: KnowledgeVectorEntry) -> tuple[int, int]:
+    start = getattr(entry.chunk, "char_start", None)
+    end = getattr(entry.chunk, "char_end", None)
+    if type(start) is not int or type(end) is not int:
+        raise KnowledgeRetrievalError(
+            "knowledge chunk span offsets are missing"
+        )
+    if start < 0 or end <= start:
+        raise KnowledgeRetrievalError(
+            "knowledge chunk span offsets are invalid"
+        )
+    if end - start != len(entry.chunk.content):
+        raise KnowledgeRetrievalError(
+            "knowledge chunk span length does not match chunk content"
+        )
+    return start, end
 
 
 def _entry_metadata(entry: KnowledgeVectorEntry) -> dict[str, Any]:

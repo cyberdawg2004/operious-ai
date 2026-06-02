@@ -87,6 +87,8 @@ interface RetrievedCitation {
   document_status: string;
   score: number;
   chunk_ordinal: number;
+  char_start?: number;
+  char_end?: number;
   token_count: number;
   citation_schema_version?: number;
   chunk_id?: string;
@@ -646,6 +648,8 @@ function isRetrievedCitation(value: unknown): value is RetrievedCitation {
     typeof citation.document_status === "string" &&
     typeof citation.score === "number" &&
     typeof citation.chunk_ordinal === "number" &&
+    optionalNumberField(citation.char_start) &&
+    optionalNumberField(citation.char_end) &&
     typeof citation.token_count === "number" &&
     optionalNumberField(citation.citation_schema_version) &&
     optionalStringField(citation.chunk_id) &&

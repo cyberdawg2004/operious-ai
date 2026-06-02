@@ -20,6 +20,7 @@ class DiagnosticCompletedPayload:
     confidence: float | None
     summary: str | None
     governance_decision_id: str | None
+    retrieved_citations: list[dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,7 @@ class ResolutionProposalPayload:
     proposal_id: str | None
     governance_decision_id: str | None
     status: str | None
+    evidence: list[dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +135,9 @@ def _project_payload(
                 governance_decision_id=_payload_str(
                     event_payload, "governance_decision_id"
                 ),
+                retrieved_citations=_payload_list_of_dicts(
+                    event_payload, "retrieved_citations"
+                ),
             )
         )
     if event_type == "session_opened":
@@ -155,6 +160,7 @@ def _project_payload(
                     event_payload, "governance_decision_id"
                 ),
                 status=_payload_str(event_payload, "status"),
+                evidence=_payload_list_of_dicts(event_payload, "evidence"),
             )
         )
     if event_type == "action_executed":
@@ -185,6 +191,21 @@ def _payload_float(
         except ValueError:
             return None
     return None
+
+
+def _payload_list_of_dicts(
+    payload: Mapping[str, Any],
+    key: str,
+) -> list[dict[str, Any]]:
+    value = payload.get(key)
+    if not isinstance(value, (list, tuple)):
+        return []
+    raw_items = cast(list[object] | tuple[object, ...], value)
+    items: list[dict[str, Any]] = []
+    for item in raw_items:
+        if isinstance(item, Mapping):
+            items.append(dict(cast(Mapping[str, Any], item)))
+    return items
 
 
 def _first_float(*values: float | None) -> float | None:

@@ -110,6 +110,8 @@ def _immutable_citation() -> dict[str, object]:
             "chunk_id": "66666666-6666-4666-8666-666666666666",
             "vector_id": "77777777-7777-4777-8777-777777777777",
             "document_version": 3,
+            "char_start": 12,
+            "char_end": 69,
             "vector_index_name": "tenant_knowledge_default",
             "safe_excerpt": safe_excerpt,
             "safe_excerpt_sha256": hashlib.sha256(
@@ -357,6 +359,8 @@ async def test_resolution_evidence_preserves_immutable_citation_fields() -> None
     assert evidence["chunk_id"] == "66666666-6666-4666-8666-666666666666"
     assert evidence["vector_id"] == "77777777-7777-4777-8777-777777777777"
     assert evidence["document_version"] == 3
+    assert evidence["char_start"] == 12
+    assert evidence["char_end"] == 69
     assert evidence["vector_index_name"] == "tenant_knowledge_default"
     assert (
         evidence["safe_excerpt"]

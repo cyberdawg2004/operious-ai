@@ -127,6 +127,8 @@ _OPTIONAL_EVIDENCE_TEXT_FIELDS = (
 _OPTIONAL_EVIDENCE_INT_FIELDS = (
     "citation_schema_version",
     "document_version",
+    "char_start",
+    "char_end",
 )
 _MONEY_PATTERN = re.compile(
     r"(?:[$]\s*(?P<prefix>\d+(?:,\d{3})*(?:\.\d{1,2})?)|"

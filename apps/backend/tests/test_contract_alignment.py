@@ -9,6 +9,7 @@ import re
 import textwrap
 import uuid
 from dataclasses import fields
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -44,6 +45,7 @@ from app.knowledge.models import (
     KnowledgeRetrievalItem,
     KnowledgeRetrievalResult,
 )
+from app.models.timeline import TimelineEvent
 from app.resolution.db.models import (
     ResolutionOutboundDraftRow,
     ResolutionProposalRow,
@@ -72,6 +74,9 @@ from app.runtime.resolution_runtime import (
     resolution_proposal_is_send_eligible,
     resolution_proposal_timeline_payload,
 )
+from app.session.enums import SessionContinuityMode, SessionEventKind
+from app.session.identity import as_session_id, derive_event_id
+from app.session.models.timeline_event import SessionTimelineEvent
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.workers import agent_tasks
 from app.workers.agent_tasks import (
@@ -133,6 +138,8 @@ def _immutable_citation() -> dict[str, object]:
             "chunk_id": "66666666-6666-4666-8666-666666666666",
             "vector_id": "77777777-7777-4777-8777-777777777777",
             "document_version": 3,
+            "char_start": 12,
+            "char_end": 69,
             "vector_index_name": "tenant_knowledge_default",
             "safe_excerpt": safe_excerpt,
             "safe_excerpt_sha256": hashlib.sha256(
@@ -174,6 +181,29 @@ async def _send_eligible_proposal(
 
 def _dataclass_field_names(record_type: type[Any]) -> set[str]:
     return {field.name for field in fields(record_type)}
+
+
+def _session_timeline_event(
+    *,
+    event_type: str,
+    payload: dict[str, Any],
+    sequence: int,
+) -> SessionTimelineEvent:
+    session_id = as_session_id(SESSION_ID)
+    now = datetime.now(timezone.utc)
+    return SessionTimelineEvent(
+        event_id=derive_event_id(session_id=session_id, sequence=sequence),
+        session_id=session_id,
+        sequence=sequence,
+        kind=SessionEventKind.OPERATIONAL_OBSERVATION,
+        continuity_mode=SessionContinuityMode.SYNCHRONOUS,
+        occurred_at=now,
+        recorded_at=now,
+        payload={
+            "event_type": event_type,
+            "payload": payload,
+        },
+    )
 
 
 def _orm_column_names(row_type: type[Any]) -> set[str]:
@@ -234,6 +264,25 @@ def test_diagnostic_timeline_payload_matches_diagnostic_result_contract() -> Non
     assert DiagnosticResult.model_fields["retrieved_citations"].is_required() is False
 
 
+def test_projected_diagnostic_timeline_payload_carries_span_provenance() -> None:
+    event = _session_timeline_event(
+        event_type="diagnostic_analysis_completed",
+        payload={
+            "category": "charging_issue",
+            "confidence": 0.91,
+            "summary": "Charging issue found.",
+            "governance_decision_id": str(GOVERNANCE_DECISION_ID),
+            "retrieved_citations": [_immutable_citation()],
+        },
+        sequence=1,
+    )
+
+    projected = TimelineEvent.from_session_event(event)
+
+    assert projected.payload["retrieved_citations"][0]["char_start"] == 12
+    assert projected.payload["retrieved_citations"][0]["char_end"] == 69
+
+
 @pytest.mark.asyncio
 async def test_resolution_proposal_timeline_payload_alignment() -> None:
     record, _gate = await _send_eligible_proposal()
@@ -254,6 +303,21 @@ async def test_resolution_proposal_timeline_payload_alignment() -> None:
     assert payload["evidence"] == [dict(item) for item in record.evidence]
     assert payload["proposed_customer_reply"] == record.proposed_customer_reply
     assert payload["send_eligible"] is resolution_proposal_is_send_eligible(record)
+
+
+@pytest.mark.asyncio
+async def test_projected_resolution_timeline_payload_carries_span_provenance() -> None:
+    record, _gate = await _send_eligible_proposal()
+    event = _session_timeline_event(
+        event_type="resolution_proposal_created",
+        payload=resolution_proposal_timeline_payload(record),
+        sequence=2,
+    )
+
+    projected = TimelineEvent.from_session_event(event)
+
+    assert projected.payload["evidence"][0]["char_start"] == 12
+    assert projected.payload["evidence"][0]["char_end"] == 69
 
 
 @pytest.mark.asyncio
@@ -440,6 +504,8 @@ async def test_memory_and_citation_evidence_alignment() -> None:
         "vector_index_name",
         "safe_excerpt_sha256",
         "chunk_content_hash",
+        "char_start",
+        "char_end",
     }
 
     assert {
@@ -448,6 +514,8 @@ async def test_memory_and_citation_evidence_alignment() -> None:
         "document_id",
         "document_version",
         "content_hash",
+        "char_start",
+        "char_end",
         "content",
         "title",
         "estimated_tokens",
@@ -459,6 +527,8 @@ async def test_memory_and_citation_evidence_alignment() -> None:
         "document_id",
         "document_version",
         "content_hash",
+        "char_start",
+        "char_end",
     } <= citation_fields
 
     content = "Check USB-C cable fit before warranty replacement triage."
@@ -475,6 +545,8 @@ async def test_memory_and_citation_evidence_alignment() -> None:
                 document_version=3,
                 content_hash="sha256:charging-sop-chunk",
                 ordinal=0,
+                char_start=12,
+                char_end=69,
                 score=0.9242,
                 content=content,
                 title="Charging Troubleshooting SOP",
@@ -495,6 +567,8 @@ async def test_memory_and_citation_evidence_alignment() -> None:
     assert citation["chunk_id"] == "66666666-6666-4666-8666-666666666666"
     assert citation["vector_id"] == "77777777-7777-4777-8777-777777777777"
     assert citation["document_version"] == 3
+    assert citation["char_start"] == 12
+    assert citation["char_end"] == 69
     assert citation["vector_index_name"] == "tenant_knowledge_default"
     assert citation["safe_excerpt_sha256"] == hashlib.sha256(
         str(citation["safe_excerpt"]).encode("utf-8")
@@ -571,6 +645,8 @@ async def test_trace_inspector_event_and_optional_payload_contract_smoke() -> No
     assert "optionalStringField(citation.chunk_id)" in source
     assert "optionalStringField(citation.vector_id)" in source
     assert "optionalNumberField(citation.document_version)" in source
+    assert "optionalNumberField(citation.char_start)" in source
+    assert "optionalNumberField(citation.char_end)" in source
     assert "optionalStringField(citation.vector_index_name)" in source
     assert "optionalStringField(citation.safe_excerpt_sha256)" in source
     assert "optionalStringField(citation.chunk_content_hash)" in source

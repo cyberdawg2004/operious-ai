@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -36,6 +37,7 @@ from app.knowledge import (
 from app.knowledge.persistence import (
     InMemoryKnowledgeRepository,
     KnowledgeChunkRecord,
+    KnowledgeVectorEntry,
     KnowledgeVectorPage,
     KnowledgeVectorQuery,
     KnowledgeVectorRecord,
@@ -103,6 +105,86 @@ class _FailingVectorKnowledgeRepository(InMemoryKnowledgeRepository):
     ) -> KnowledgeVectorPage:
         del query, expected_tenant_id, query_embedding
         raise RuntimeError("vector store unavailable")
+
+
+class _BrokenSpanKnowledgeRepository(InMemoryKnowledgeRepository):
+    def __init__(self, *, char_start: object, char_end: object) -> None:
+        super().__init__()
+        self._char_start = char_start
+        self._char_end = char_end
+
+    async def list_vector_entries(
+        self,
+        query: KnowledgeVectorQuery,
+        *,
+        expected_tenant_id: str,
+        query_embedding: list[float] | None = None,
+    ) -> KnowledgeVectorPage:
+        del query_embedding
+        document_id = derive_knowledge_document_id(
+            tenant_id=expected_tenant_id,
+            title="Broken Span SOP",
+            document_type=TenantKnowledgeDocumentType.SOP,
+        )
+        chunk_id = derive_chunk_id(
+            tenant_id=expected_tenant_id,
+            document_id=document_id,
+            document_version=1,
+            ordinal=0,
+            content_hash="broken-span-content-hash",
+        )
+        vector_id = derive_vector_id(
+            tenant_id=expected_tenant_id,
+            chunk_id=chunk_id,
+            provider="deterministic_hash",
+            model="operious-hash-embedding-v1",
+            vector_index_name="phase_5a_test",
+        )
+        content = "Broken span chunk content."
+        return KnowledgeVectorPage(
+            items=(
+                KnowledgeVectorEntry(
+                    chunk=KnowledgeChunkRecord(
+                        chunk_id=chunk_id,
+                        tenant_id=expected_tenant_id,
+                        document_id=document_id,
+                        document_version=1,
+                        ordinal=0,
+                        content=content,
+                        content_hash="broken-span-content-hash",
+                        token_count=8,
+                        char_start=cast(int, self._char_start),
+                        char_end=cast(int, self._char_end),
+                        is_current=True,
+                        indexed_at=_NOW,
+                        metadata={"document_type": "sop"},
+                    ),
+                    vector=KnowledgeVectorRecord(
+                        vector_id=vector_id,
+                        tenant_id=expected_tenant_id,
+                        chunk_id=chunk_id,
+                        document_id=document_id,
+                        document_version=1,
+                        provider="deterministic_hash",
+                        model="operious-hash-embedding-v1",
+                        dimensions=16,
+                        vector_index_name="phase_5a_test",
+                        vector=(0.0,) * 16,
+                        is_current=True,
+                        indexed_at=_NOW,
+                        metadata={"document_type": "sop"},
+                    ),
+                    title="Broken Span SOP",
+                    document_type="sop",
+                    document_status="active",
+                    document_review_status="approved",
+                    cosine_score=0.99,
+                ),
+            ),
+            total=1,
+            limit=query.limit or 1,
+            offset=query.offset,
+        )
 
 
 class _EmptyEmbeddingProvider:
@@ -259,6 +341,76 @@ async def test_ingestion_uses_deterministic_uuid5_and_is_idempotent() -> None:
     assert stored_document.status is TenantKnowledgeDocumentStatus.ACTIVE
     assert stored_document.review_status is TenantKnowledgeReviewStatus.APPROVED
     assert stored_document.vector_indexed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_retrieval_span_offsets_round_trip_against_stripped_document() -> None:
+    runtime, tenant_repo, _knowledge_repo = await _runtime()
+    content = (
+        "   Charging support checks USB-C cable fit, battery indicator state, "
+        "and warranty replacement triage before safe escalation.   "
+    )
+    document = _document(title="Span Fidelity SOP", content=content)
+    await tenant_repo.save_knowledge_document(
+        document,
+        expected_tenant_id=_TENANT_ID,
+    )
+    await runtime.ingest_document(
+        tenant_id=_TENANT_ID,
+        document_id=document.document_id,
+    )
+
+    result = await runtime.retrieve(
+        tenant_id=_TENANT_ID,
+        query="charging cable warranty",
+        top_k=4,
+        max_tokens=256,
+    )
+
+    stripped_source = content.strip()
+    assert result.items
+    assert len(result.items) == len(result.citations)
+    for item in result.items:
+        assert item.char_start >= 0
+        assert item.char_end > item.char_start
+        assert stripped_source[item.char_start : item.char_end] == item.content
+        citation = result.citations[item.citation_index - 1]
+        assert citation.document_id == item.document_id
+        assert citation.document_version == item.document_version
+        assert citation.chunk_id == item.chunk_id
+        assert citation.content_hash == item.content_hash
+        assert citation.ordinal == item.ordinal
+        assert citation.score == item.score
+        assert citation.char_start == item.char_start
+        assert citation.char_end == item.char_end
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("char_start", "char_end", "message"),
+    (
+        (None, 27, "missing"),
+        (0, 0, "invalid"),
+    ),
+)
+async def test_retrieval_span_offsets_fail_loud(
+    char_start: object,
+    char_end: object,
+    message: str,
+) -> None:
+    runtime, _tenant_repo, _knowledge_repo = await _runtime(
+        knowledge_repo=_BrokenSpanKnowledgeRepository(
+            char_start=char_start,
+            char_end=char_end,
+        )
+    )
+
+    with pytest.raises(KnowledgeRetrievalError, match=message):
+        await runtime.retrieve(
+            tenant_id=_TENANT_ID,
+            query="charging",
+            top_k=1,
+        )
 
 
 @pytest.mark.asyncio
@@ -695,5 +847,15 @@ async def test_knowledge_router_ingests_and_searches_from_tenant_documents(
     assert searched.status_code == 200
     assert searched.json()["items"]
     assert {item["document_id"] for item in searched.json()["items"]} == {document_id}
+    search_item = searched.json()["items"][0]
+    assert isinstance(search_item["char_start"], int)
+    assert isinstance(search_item["char_end"], int)
+    assert search_item["char_end"] > search_item["char_start"]
+    assert search_item["char_end"] - search_item["char_start"] == len(
+        search_item["content"]
+    )
+    search_citation = searched.json()["citations"][0]
+    assert search_citation["char_start"] == search_item["char_start"]
+    assert search_citation["char_end"] == search_item["char_end"]
     assert other_tenant.status_code == 200
     assert other_tenant.json()["items"] == []

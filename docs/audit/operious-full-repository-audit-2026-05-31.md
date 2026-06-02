@@ -1,16 +1,16 @@
 # Operious AI Full Repository Audit
 
 Date: 2026-05-31
-Current-state update: 2026-06-01, after Claude/Codex Phase 1a/1b hardening review
+Current-state update: 2026-06-02, after Phase 1a-ext/1c/1d/1e hardening review
 Auditor: Codex static architecture/security review
-Audited HEAD: `e1eed47` (`feat(ledger): REVOKED status, applied_by, revoked_by, revoked_at fields on record and ORM (#5,#22)`)
-Local uncommitted audit-relevant drift: no uncommitted backend production-code drift observed; `packages/types/src/session.ts` still carries the local session enum mirror.
+Audited HEAD: `7731f5a` (`chore(1e): remove _deprecated + demo residue, deterministic DNS tests, fix MetadataMap errors, container + SBOM hardening`)
+Local uncommitted audit-relevant drift: no uncommitted backend production-code drift observed; one untracked planning/spec document exists at `docs/superpowers/specs/2026-06-02-data-protection-admin-api-design.md`.
 
 ## Executive Verdict
 
 Operious today is a serious governed-operations platform prototype, not a production-ready enterprise operating system. The repository contains real architecture: FastAPI APIs, Postgres with RLS discipline, Celery workers, Redis-backed queues, deterministic execution identities, governance decision persistence, supervisor/QA surfaces, tenant configuration, webhook ingress, outbound dispatch, Auth0 integration, RAG/cognition, voice media paths, and a Next.js command center.
 
-The current state is materially stronger than the original May 31 audit. Claude/Codex work after the baseline did not only touch the voice socket. It closed or materially remediated the core code-level security findings S-01 through S-09, and the latest edge-hardening commits also closed/downgraded several follow-on risks:
+The current state is materially stronger than the original May 31 audit. Claude/Codex follow-on work after the baseline did not only touch the voice socket. It closed or materially remediated the core code-level security findings S-01 through S-09, and the latest authorization, data-protection, resilience, and cleanup commits also closed/downgraded several follow-on risks:
 
 - Production header authority now fails closed by default.
 - Auth0 custom claims are mapped with the expected namespace.
@@ -27,22 +27,27 @@ The current state is materially stronger than the original May 31 audit. Claude/
 - Voice load/capacity test harnesses were repaired for the new provider-signature contract.
 - Most recon-sensitive authority-state errors are coarsened in production, and voice max-duration / idle / frame-rate caps are enforced in the WebSocket route.
 - Observability and audit-export endpoints now have domain read/export capability gates, and principal-bound conversation sessions now enforce owner access.
+- Object RBAC was broadened across sensitive tenant-scoped router modules, with structural and functional tests.
+- Tenant config apply now persists `applied_by`, and approved-but-not-applied change requests can be revoked through service/API paths.
+- Data protection now exists as production code: envelope encryption for sensitive customer content, DSAR dual-control crypto-shred, legal holds, retention policy API, purge behavior, and DB constraints.
+- Redis-dependent quota and queue-admission paths now fail closed for pre-call/publish admission, durable webhook ingress capture happens before processing admission, execution governance versions are bound to execution records, worker completion-event failures are dead-lettered, and per-tenant queue QoS exists.
+- The deleted `_deprecated` package is now absent and guarded by invariant tests. Container/supply-chain posture improved through digest-pinned images, non-root backend runtime, SBOM artifact generation, and `pip-audit`.
 
-The blocking issue has shifted. It is no longer "there are no controls." The blocker is live proof, operational completeness, and two new review findings from the latest Claude tranche. `S-10` remains open because Phase E deployment verification is not archived: no live proof yet that production rejects direct spoofed authority headers, enforces RLS under production roles, runs workers/DLQ correctly, and has real secrets/providers configured. New review caveats: the tenant-config apply path now violates the new `applied_by` DB constraint, auth-error coarsening is not yet wired to every malformed authority parse path, the per-IP limiter may key the immediate Fly proxy peer unless real client IP handling is proven live, and Redis quota/admission outage policy remains scoped to spec 1d.
+The blocking issue has shifted. It is no longer "there are no controls." The blocker is live proof and operational completeness. `S-10` remains open because Phase E deployment verification is not archived: no live proof yet that production rejects direct spoofed authority headers, enforces RLS under production roles, runs workers/DLQ correctly, and has real secrets/providers configured. Remaining review caveats: auth-error coarsening is not yet wired to every malformed authority parse path, the per-IP limiter may key the immediate Fly proxy peer unless real client IP handling is proven live, data-protection controls need KMS/retention/legal-operation proof before compliance claims, and real provider/integration side effects remain immature.
 
 Final status: safer for controlled internal demo and tightly scoped non-regulated pilot. Still not safe for Anker/Samsung/Microsoft/Amazon production operations.
 
 ## Scope And Evidence
 
-Repository traversal in the original audit found 2,437 discoverable files via `rg --files`.
+Repository traversal now finds 2,409 discoverable files via `rg --files`.
 
 Top-level inventory:
 
 | Area | Count | Notes |
 | --- | ---: | --- |
-| `apps` | 2,249 | Backend, command center, marketing, duplicated legacy app trees |
+| `apps` | 2,215 | Backend, command center, marketing, duplicated legacy app trees |
 | `packages` | 77 | TS shared/types/contracts/sdk/ui/auth/tracing/topology/observability |
-| `docs` | 55 | Architecture, runbooks, readiness, prior audits |
+| `docs` | 61 | Architecture, runbooks, readiness, prior audits |
 | `frontend` | 28 | Older standalone marketing frontend |
 | `tests-frontend` | 17 | Static frontend architecture tests |
 
@@ -50,22 +55,22 @@ Backend implementation inventory:
 
 | Backend area | Files | Notes |
 | --- | ---: | --- |
-| `boundary` | 145 | Ingress/egress, adapters, voice, language, media |
+| `boundary` | 146 | Ingress/egress, adapters, voice, language, media |
 | `coordination` | 98 | Topology, routing, policies |
-| `_deprecated` | 82 | Retained old code; deployment ambiguity risk |
-| `api` | 61 | FastAPI v1 routers |
+| `_deprecated` | 0 active | Deleted by `7731f5a`; invariant tests prevent recreation/imports |
+| `api` | 63 | FastAPI v1 routers |
 | `organizational_intelligence` | 56 | Intelligence/learning subsystems |
 | `hardening` | 55 | Metrics, alerts, operational hardening |
 | `governance` | 52 | Policy chains, enforcement, decisions, capability runtime |
 | `session` | 50 | Timeline/session lifecycle |
-| `agents` | 43 | Runtime, tools, action governance |
+| `agents` | 44 | Runtime, tools, action governance |
 | `arbitration` | 41 | Evaluators and records |
 | `supervisor` | 37 | Supervisor inspections and projections |
-| `services` | 30 | Tenant config, ingress, outbound, enrichment |
+| `services` | 32 | Tenant config, ingress, outbound, enrichment |
 | `workers` | 17 | Celery tasks and recovery |
 | `execution` | 17 | Durable execution authority |
-| `knowledge` | 16 | Knowledge ingestion/retrieval/vector runtime |
-| `tenant` | 15 | Tenant config runtime/persistence/credentials |
+| `knowledge` | 17 | Knowledge ingestion/retrieval/vector runtime |
+| `tenant` | 16 | Tenant config runtime/persistence/credentials |
 
 Evidence note: this audit reads the critical paths end to end: backend composition, auth/authority, RLS/session wiring, tenant config, governance, agent tool invocation, execution/worker flow, ingress/webhooks, voice, knowledge/RAG/cognition, frontend auth/API client, command center demo paths, deployment config, TODO/mock/stub markers, and readiness docs. It does not claim live Fly/Vercel production proof.
 
@@ -113,6 +118,15 @@ Recent security-relevant commits reviewed:
 | `f8268f1` | Enforces principal ownership for principal-bound conversation sessions. |
 | `8549492` | Adds migration 0066 for tenant-config `applied_by`, `REVOKED`, `revoked_by`, and `revoked_at`. |
 | `e1eed47` | Adds tenant-config ledger record/ORM fields for `applied_by`, `REVOKED`, `revoked_by`, and `revoked_at`. |
+| `df78ac7` | Tenant-config ledger `apply()` records `applied_by`; `revoke()` service path added. |
+| `d917d0e` | Tenant-config ledger schema/API exposes applied/revoked fields and `/revoke`. |
+| `7aa2507` | HTTP-level tests prove conversation router ownership wiring. |
+| `9d842d3` | Object RBAC sweep across sensitive read/write surfaces and action approval SoD. |
+| `a9d9d4c` | Break-control tests prove functional RBAC gates fail when removed. |
+| `dd3e7be` | Data-protection FK semantics repaired: legal hold/erasure restrict tenant deletion; data keys/retention cascade. |
+| `2335756` | Resilience tranche: fail-closed Redis policy for quota/admission, durable ingress capture, policy version binding, completion-event DLQ, per-tenant queue QoS. |
+| `9db40f0` | Data-protection admin API: DSAR dual-control erasure, legal hold, retention management. |
+| `7731f5a` | Deletes `_deprecated`, removes rewrite scripts, pins runtime images, adds SBOM/pip-audit CI artifacts, fixes type-map errors, and adds deterministic DNS-rebinding tests. |
 
 Focused verification evidence:
 
@@ -121,7 +135,7 @@ Focused verification evidence:
 | Header authority, Auth0 claim config, tenant RBAC, domain capabilities, direct-apply authorization | `28 passed in 5.40s` |
 | Header authority subset | `15 passed in 2.70s` |
 | SSRF guard, quota runtime, production readiness CLI/gate | `44 passed in 1.46s` |
-| DB-backed tenant config ledger, action grants, RLS coverage invariant | Previously `17 passed in 1.66s`; current tenant-config apply regression below supersedes the apply-path proof |
+| DB-backed tenant config ledger, action grants, RLS coverage invariant | Earlier `17 passed in 1.66s`; newer DB-backed proof below covers the repaired apply/revoke/data-protection paths |
 | Voice signed-token and provider-signature auth tests | `13 passed in 2.13s` |
 | Edge hardening settings, fixed-window limiter, fail policy, edge/tenant rate-limit middleware, app pipeline | `27 passed in 3.28s` |
 | Webhook canonical URL, channel signature URL, voice signature URL, voice provider signature, voice load/capacity | `27 passed in 4.30s` |
@@ -129,17 +143,22 @@ Focused verification evidence:
 | Spec 1b regression bundle after break-control restoration | `120 passed in 7.61s` |
 | Auth coarsening helper, authority-state coarsening, voice WS caps, domain authz, conversation ownership | `32 passed in 4.66s` |
 | CORS posture plus production readiness/readiness-webhook checks | `20 passed in 3.99s` |
+| Ledger unit/revocation, queue admission, quota runtime, production readiness, legacy deletion, dependency manifest | `45 passed in 4.08s` |
+| Object RBAC sweep | User rerun: `13 passed in 25.90s` |
+| Auth/domain/coarsening/conversation bundle | User rerun: `57 passed in 7.82s`; split proof: auth coarsening `7 passed in 0.19s`, domain capabilities `39 passed in 3.63s`, conversation ownership `11 passed in 7.02s` |
+| DB-backed tenant config ledger, data-protection controls/admin API, completion-event DLQ, execution-governance hardening | User rerun: `42 passed in 6.32s` |
 
 Non-clean verification:
 
 | Scope | Result | Interpretation |
 | --- | --- | --- |
 | Full combined audit suite | Timed out at 300s | Not counted as a pass. Smaller bundles above are used as proof. |
-| Current tenant config apply after migration 0066 | `test_apply_only_after_approved` failed | `TenantConfigChangeRequestService.apply()` sets status `APPLIED` without `applied_by`, violating `chk_applied_by_when_applied`. |
 | Prior voice auth plus load/capacity bundle | Previously `5 failed, 16 passed` | This is now repaired by `175dd52`; the current focused voice/canonical/load bundle passed. |
-| SSRF DNS-rebinding bundle in this sandbox | `4 failed, 52 passed, 1 skipped` | Failures were environmental: live DNS for `httpbin.org` and loopback binding. The DNS pinning tests are committed but should be made deterministic. |
+| Codex sandbox rerun of object-RBAC/app HTTP tests | Timed out entering `TestClient` lifespan | Not reproduced by user's normal-shell run (`13 passed`, `57 passed`). Likely local Redis/lifespan startup behavior; not counted as a code failure. |
+| Codex sandbox rerun of DB bundle | Timed out after an early error marker | Superseded by user's exact normal-shell rerun (`42 passed`). Not counted as a code failure. |
+| SSRF DNS-rebinding bundle in this sandbox | `3 failed, 2 passed` | Failures were sandbox loopback binding (`could not bind on 127.0.0.1:0`). The test file is now deterministic, but loopback-server cases still need normal-shell/CI proof before being claimed as locally green here. |
 
-Residual gaps update: S-01, S-02, S-04, S-05, S-06, S-07, S-08, and S-09 are no longer open original vulnerabilities. They are closed or closed-with-residuals as described below. S-03 remains closed for the original self-approval vulnerability, but the latest ledger attribution change introduced an apply-path regression that must be fixed before the ledger can be considered healthy. S-10 remains open.
+Residual gaps update: S-01 through S-09 are no longer open original vulnerabilities. They are closed or closed-with-residuals as described below. The previous tenant-config `applied_by` regression is fixed and proven by current DB-backed tests. S-10 remains open.
 
 ## Spec 1b Edge-Hardening Remediation (2026-06-01)
 
@@ -159,7 +178,7 @@ production proof remains part of Phase 3 / S-10):
 
 Also cleared during spec 1b: finding 63 (stale voice load/capacity harnesses now
 model the full provider-signature handshake). Finding 38 (Redis fail policy) is
-split by owner: rate-limiter portion closed in 1b; quota/admission portion owned by 1d.
+now code-closed for the audited rate-limit, quota, and queue-admission paths after 1d.
 
 Break-control proof for spec 1b was run with temporary production-code breaks,
 restored immediately after each run. Post-proof production diff check:
@@ -172,18 +191,21 @@ restored immediately after each run. Post-proof production diff check:
 | 1b-3 Server-derived canonical URL | Channel webhook verifier trusted `x-operious-webhook-url` again. | `test_channel_webhook_signature_url.py::test_signature_over_forged_url_rejected` failed: forged URL signature was accepted. | Restored; included in final `120 passed`. |
 | 1b-4 Voice WS caps | Frame-rate guard returned without enforcing the cap. | `test_voice_ws_caps.py::test_over_rate_stream_is_closed_and_call_terminated` failed: stream closed normally with `1000` instead of policy `1008`. | Restored; included in final `120 passed`. |
 
-Edge-hardening review update: #16, #23, #24, #39, #40, and #63 are now materially closed in code/tests. #25 is materially improved but not fully closed because malformed parse errors still leak detail. #38 remains split as above rather than reopened or dropped.
+Edge-hardening review update: #16, #23, #24, #39, #40, and #63 are now materially closed in code/tests. #25 is materially improved but not fully closed because malformed parse errors still leak detail. #38 is now code-closed for the audited rate-limit/quota/admission paths, with live outage proof still required.
 
-## Claude Phase 1a Authorization/Ledger Review (2026-06-01)
+## Phase 1a-ext/1c/1d/1e Review (2026-06-02)
 
-Claude's latest committed authorization and ledger tranche added useful controls, but not everything is correct:
+The latest committed tranche is materially correct at the production-code level. I did not find a new production-code blocker in the modified areas reviewed.
 
-- Observability endpoints are now gated on `tenant.observability.read`, and audit export is gated on `tenant.audit.export`. Structural tests prove the dependencies are present and Auth0 role/permission mappings exist.
-- Public audit export verification now has a 256 KiB endpoint cap, but the cap is checked inside the handler after FastAPI has parsed the Pydantic body. This is good for bounding HMAC work, not a complete pre-parse body-budget control.
-- Principal-bound conversation sessions now deny non-owner callers and allow operator bypass. Ownerless sessions still pass through under tenant authority, so object-level conversation RBAC remains a residual.
-- Tenant config ledger migration/ORM now require `applied_by` for `APPLIED` rows and add `REVOKED` / revoke fields, but `TenantConfigChangeRequestService.apply()` does not accept or set an applying principal. Evidence: `apps/backend/app/services/tenant_config_change_request_service.py:166-190` marks `APPLIED` without `applied_by`, while `apps/backend/app/tenant/db/models.py:514-516` and migration `0066_tenant_config_change_request_revocation.py:58-62` require it. Current DB-backed proof fails with `CheckViolationError` on `chk_applied_by_when_applied`.
+- Observability endpoints are gated on `tenant.observability.read`, audit export is gated on `tenant.audit.export`, and the broader object-RBAC sweep now covers sensitive tenant-scoped router modules with no allowlist. Functional RBAC proof passed in the user's normal shell.
+- Public audit export verification has a 256 KiB endpoint cap. This bounds HMAC/verification work after request parsing; it is not a complete pre-parse body-budget control.
+- Principal-bound conversation sessions now deny non-owner callers and allow operator bypass. Ownerless sessions still pass through under tenant authority, so ownerless/operator policy remains a residual rather than a closed enterprise object-policy story.
+- Tenant config ledger apply attribution is fixed: `TenantConfigChangeRequestService.apply()` now requires and persists `applied_by`, `apply_config_change_request()` threads the approving principal into the service, response schemas expose the field, and DB-backed tenant-config tests pass. Approved-but-not-applied requests can also be revoked through `revoke()` and `/revoke`.
+- Data-protection admin APIs are real: privacy-admin/approver gates, DSAR dual-control erasure, legal holds, retention policy management, envelope encryption, and FK/check constraints are implemented and DB-tested.
+- Resilience controls are real: quota and queue admission fail closed when Redis-backed admission state is unavailable, webhook capture happens before processing admission, execution records bind governance config id/version/sha, completion-event emission failure records a DLQ task, and per-tenant queue QoS exists.
+- Cleanup/hardening is real: the `_deprecated` package is deleted and guarded by invariant tests; backend Docker now pins the Python image digest and runs as non-root; CI emits SBOM and `pip-audit` artifacts.
 
-Required fix for the ledger regression: pass the applying principal from `apply_config_change_request()` into `TenantConfigChangeRequestService.apply()`, persist `applied_by`, update the response/tests to assert it, and rerun the DB-backed tenant config change-request suite.
+Remaining fixes are not the old ledger regression. The real residuals are: complete #25 malformed-parse coarsening, archive Phase E live production proof for S-10, prove real-client-IP behavior for rate limiting, run DNS-rebinding loopback tests in normal CI, and avoid presenting data-protection controls as full compliance until KMS, retention/legal operations, and live erasure evidence are complete.
 
 ## What Operious Is Today
 
@@ -206,7 +228,7 @@ What is implemented:
 - Production header authority fail-closed default and command-center verified-bearer default.
 - Tenant config mutation capability gates and domain capability split.
 - Durable tenant config change-request ledger with propose/list/approve/reject/apply APIs, DB-level proposer/approver separation, operational events, and FORCE RLS.
-- Tenant config ledger schema/ORM now includes `applied_by`, `REVOKED`, `revoked_by`, and `revoked_at`, but the service apply path currently fails to populate `applied_by`.
+- Tenant config ledger schema/ORM now includes `applied_by`, `REVOKED`, `revoked_by`, and `revoked_at`; service/API paths populate applying and revoking principals.
 - Direct tenant config mutation disabled in production and disabled by default outside production unless explicitly opted in.
 - Signed voice session tokens, voice feature flag, provider handshake signature verification, and frame byte/count/duration/idle/rate caps.
 - Voice and channel webhook provider signatures are now checked against a server-derived canonical URL (`PUBLIC_BASE_URL` + request path/query), not a client-controlled URL header.
@@ -215,11 +237,19 @@ What is implemented:
 - Fixed-window inbound rate limiting: per-IP pre-auth and per-tenant/principal post-auth, with 429 responses and production 503 fail-closed behavior for non-idempotent requests when Redis is unavailable.
 - Production coarsening for most recon-sensitive authority-state failures.
 - Domain read/export capability gates for observability and audit export.
+- Object-RBAC sweep across sensitive tenant-scoped operational, supervisor, governance, cognition, observability, action, training, and privacy surfaces.
 - Principal-bound conversation session ownership checks.
+- Data-protection runtime and admin API: envelope encryption, DSAR dual-control erasure, legal hold, retention policy, master-key rotation support, and purge behavior.
+- Fail-closed Redis-backed quota and queue-admission policy for pre-call/publish decisions.
+- Durable webhook capture before processing-admission evaluation.
+- Execution-governance config id/version/content hash binding and worker-side reconstruction checks.
+- Completion-event DLQ recording when worker operational-event emission fails.
+- Per-tenant queue QoS reservations.
 - Token-per-minute quota accounting/enforcement for diagnostic LLM usage.
 - RAG quarantine/review status, injection scanner, approved-only retrieval, and untrusted knowledge delimiters.
 - Production boot-readiness validation for provider stubs and security-critical secrets.
 - CI workflow, production readiness CLI gate, and RLS coverage invariant.
+- `_deprecated` package deletion invariants, pinned backend/container images, non-root backend runtime, SBOM artifact generation, and `pip-audit` CI artifact generation.
 - Tenant-scoped API dependencies.
 - Celery process groups, routes, retries, late acks, visibility timeout.
 - Execution state machine, claims, attempts, outbox, recovery.
@@ -232,13 +262,13 @@ What is implemented:
 What is partial:
 
 - Production proof remains missing: trusted proxy/Auth0/RLS/worker/DLQ/secrets checks are not archived.
-- Tenant config apply currently violates the new `APPLIED` requires `applied_by` constraint; the latest ledger attribution schema is not healthy until that service/API path is fixed.
 - Auth-error coarsening is partial: authority-state failures coarsen, but malformed authorization/header parse errors still return detailed bodies.
 - Voice auth/cap controls are closed, but production token issuance UX/API and real STT/TTS provider proof remain incomplete.
 - Action grants are much stronger, but real external connector side effects still need provider idempotency and connector tests.
-- Quotas include diagnostic token-per-minute enforcement and inbound request rate limiting; idempotent reads still degrade open when Redis is unavailable, per-IP limiting may key the Fly proxy peer, and quota is not a universal enterprise budget system.
+- Quotas include diagnostic token-per-minute enforcement, fail-closed pre-call Redis policy, queue admission, and inbound request rate limiting; idempotent rate-limit reads still degrade open by design, per-IP limiting may key the Fly proxy peer, and quota is not a universal enterprise budget system.
 - RAG poisoning controls exist, but human review UX, adversarial evals, and source-trust workflows remain immature.
-- Observability endpoints are now role-gated, but object-level operational RBAC and production alert/health/readiness checks are not live-proven.
+- Data-protection controls exist, but enterprise compliance remains partial until KMS/key custody, legal operations, retention jobs, live DSAR evidence, and access-control workflows are proven.
+- Broader object RBAC now covers selected sensitive tenant-scoped surfaces, but live Auth0 mapping, uncovered/future route coverage, and production alert/health/readiness checks are not live-proven.
 - Marketing/command-center proof improved materially, but public external validation, compliance proof, status/SLA pages, and some demo residue remain.
 
 What is mocked/stubbed:
@@ -256,9 +286,10 @@ What is planned/missing:
 - Real production STT/TTS and call initiation/token issuance flow.
 - Real external action integrations and idempotency contracts with providers.
 - Command-center workflow for the tenant config change-request ledger.
+- Data-protection operator workflow, KMS-backed key custody, live erasure/legal-hold/retention evidence, and compliance runbooks.
 - Real-client-IP proof or proxy-aware configuration for per-IP rate limiting on Fly.
 - Live proof of outbound connector allowlists/private-IP blocking in production.
-- Quota observability and fail-closed/degraded policy for Redis outages.
+- Redis outage chaos proof for quota/admission/rate-limit paths.
 - Production readiness verification for Fly health, workers, DLQ, RLS, secrets, Auth0 operator capability.
 - SOC 2/compliance artifacts, retention/deletion workflows, public SLA/status proof.
 
@@ -266,12 +297,12 @@ What is planned/missing:
 
 | Service | Role | Runtime dependencies | Current status |
 | --- | --- | --- | --- |
-| Backend API | Authority, orchestration, tenant APIs, governance, sessions | Postgres, Redis, Auth0 JWKS, Sentry, Anthropic/OpenAI optional | Stronger security controls; production proof pending |
-| Celery workers | Diagnostic execution, supervisor, QA, SOP intelligence, maintenance, outbound | Redis, Postgres, Anthropic optional | Real topology; live worker/DLQ proof pending |
+| Backend API | Authority, orchestration, tenant APIs, governance, sessions, data protection | Postgres, Redis, Auth0 JWKS, Sentry, Anthropic/OpenAI optional | Stronger security/data-protection controls; production proof pending |
+| Celery workers | Diagnostic execution, supervisor, QA, SOP intelligence, maintenance, outbound | Redis, Postgres, Anthropic optional | Real topology; completion-event DLQ improved; live worker/DLQ proof pending |
 | Command Center | Operator UI | Auth0, backend API | Real UI with typed channel settings; ledger workflow/demo residue remains |
 | Marketing app | Public website | Vercel/Next | Improved proof surface; claims must stay aligned with live proof |
 | Postgres | Tenant data, RLS, audit, execution, knowledge | App role and owner role discipline | Strong design; prod RLS proof missing |
-| Redis | Broker, queue depth, quotas, nonce/cache, inbound rate limits | Celery, runtime services | Real; writes fail closed on production rate-limit backend loss, reads still degrade open |
+| Redis | Broker, queue depth, quotas, nonce/cache, inbound rate limits, per-tenant QoS | Celery, runtime services | Real; quota/queue admission fail closed for pre-call/publish decisions; rate-limit idempotent paths still degrade open |
 | Auth0 | Browser/user identity | Next middleware, backend JWKS | Namespaced mapping present; live token proof missing |
 | External channels | Webhooks, Jira/Linear dispatch | Tenant credentials, SSRF guard | Guarded generic outbound; real connector proof pending |
 | Translation | Boundary localization | Identity or Anthropic provider | Real Anthropic path when configured |
@@ -289,13 +320,13 @@ Webhook:
 
 `channel webhook -> route secret resolver -> signature check -> tenant context -> boundary normalization -> session/dispatch/execution`
 
-Current answer: Twilio-style provider signatures now derive the canonical URL server-side from `PUBLIC_BASE_URL` and request path, instead of trusting a client-supplied URL header. Generic outbound dispatch is SSRF-guarded and redirect-blocked.
+Current answer: Twilio-style provider signatures now derive the canonical URL server-side from `PUBLIC_BASE_URL` and request path, instead of trusting a client-supplied URL header. Generic outbound dispatch is SSRF-guarded and redirect-blocked. Webhook ingress now captures durable boundary records before processing-admission decisions so Redis/admission pressure does not silently drop already-authenticated inbound events.
 
 Diagnostic execution:
 
 `dispatch -> governance admission token -> execution record/outbox -> Celery queue -> worker claim -> cognition snapshot -> approved-only RAG retrieval -> LLM/deterministic fallback -> quota usage record -> governance persistence -> timeline/resolution proposal`
 
-Current answer: RAG poisoning and token quota are materially improved, but live provider/readiness proof remains required.
+Current answer: RAG poisoning and token quota are materially improved. Execution records now bind the execution-governance configuration id/version/content hash used at admission, and workers verify that bound version before running. Live provider/readiness proof remains required.
 
 Action tool:
 
@@ -321,26 +352,27 @@ Sensitive data classes remain:
 - Tenant channel credentials and webhook secrets.
 - Governance policy parameters, action grants, and execution decisions.
 - Operational trace/audit records.
+- Data-protection key rows, erasure request ledger rows, legal hold rows, and retention policy rows.
 
 ## Scope Alignment Scorecard
 
 | Subsystem | Prior score | Current score | Status | Rationale |
 | --- | ---: | ---: | --- | --- |
-| Governance layer | 72 | 80 | Partial | Durable config ledger, action grants, domain capabilities, and RAG review status improve governance; live proof/workflow maturity still missing. |
-| Agent layer | 50 | 63 | Partial | Pre-approved action replay is now durably actor/payload-bound; real side-effect connectors remain incomplete. |
-| Supervisor layer | 60 | 60 | Partial | Supervisor/QA records exist; still more observability than hard production control. |
-| Execution layer | 62 | 65 | Partial | Durable execution/claims/outbox/recovery are real; action-grant persistence improves replay. |
-| Knowledge layer | 50 | 64 | Partial | Quarantine/review, injection scan, approved-only retrieval, and delimiters close the original poisoning path; review UX/evals remain. |
-| Audit layer | 68 | 70 | Partial | Better grant/ledger evidence and boot checks; live secret/rotation proof still missing. |
-| Compliance layer | 35 | 35 | Missing/partial | SOC 2, retention, DSAR, legal hold, and key management proof remain incomplete. |
-| Human escalation layer | 58 | 66 | Partial | Tenant config dual-control ledger exists; command-center workflow and expiry/revocation remain. |
-| Intelligence layer | 52 | 62 | Partial | Anthropic paths, TPM quota, and RAG controls improved; provider/quality proof remains. |
-| Auth/RBAC | 57 | 72 | Partial | Header authority, Auth0 namespaced mapping, domain config/observability/audit capabilities, and conversation ownership improved; live proof, partial auth-error coarsening, and object RBAC remain. |
-| Tenancy | 76 | 80 | Partial | RLS discipline plus header/voice fixes improve isolation; production proof remains. |
-| Observability | 58 | 58 | Partial | Logs/metrics/alerts exist; live operator and compliance proof incomplete. |
-| Reliability | 55 | 60 | Partial | Boot gates, CI, durable grants, repaired voice load harnesses, and rate-limit fail policy help; current tenant-config apply regression plus live worker/DLQ/full-suite proof keep this capped. |
-| Scalability | 49 | 53 | Partial | Queue topology, token quota, and inbound rate limiting help; no meaningful live load/scale proof and per-IP proxy semantics remain unproven. |
-| Enterprise readiness | 43 | 50 | Not ready | Security improved sharply and edge hardening helps, but S-10, compliance, integrations, and live proof cap readiness. |
+| Governance layer | 72 | 86 | Partial | Durable config ledger, apply attribution, revoke flow, action grants, domain capabilities, object-RBAC sweep, policy binding, and RAG review status improve governance; live proof/workflow maturity still missing. |
+| Agent layer | 50 | 66 | Partial | Pre-approved action replay is durably actor/payload-bound and quota/backpressure are stronger; real side-effect connectors remain incomplete. |
+| Supervisor layer | 60 | 62 | Partial | Supervisor/QA records exist and read gates improved; still more observability than hard production control. |
+| Execution layer | 62 | 70 | Partial | Durable execution/claims/outbox/recovery plus governance version binding, completion DLQ, and per-tenant QoS improve replay/reliability. |
+| Knowledge layer | 50 | 68 | Partial | Quarantine/review, injection scan, approved-only retrieval, delimiters, and data-protection encryption close more of the original path; review UX/evals remain. |
+| Audit layer | 68 | 74 | Partial | Better grant/ledger/DLQ/data-protection evidence and boot checks; live secret/rotation proof still missing. |
+| Compliance layer | 35 | 48 | Partial | DSAR erasure, legal holds, retention policy, and envelope encryption now exist; SOC 2, KMS/key custody, live evidence, and legal operations remain incomplete. |
+| Human escalation layer | 58 | 70 | Partial | Tenant config dual-control ledger, apply attribution, and revocation exist; command-center workflow and expiry remain. |
+| Intelligence layer | 52 | 64 | Partial | Anthropic paths, TPM quota, RAG controls, and encrypted sensitive audit/prompt fields improved; provider/quality proof remains. |
+| Auth/RBAC | 57 | 78 | Partial | Header authority, Auth0 namespaced mapping, domain capabilities, object-RBAC sweep, data-protection caps, and conversation ownership improved; live proof and partial auth-error coarsening remain. |
+| Tenancy | 76 | 82 | Partial | RLS discipline plus header/voice/data-protection/object-RBAC fixes improve isolation; production proof remains. |
+| Observability | 58 | 60 | Partial | Logs/metrics/alerts exist and completion-event DLQ is stronger; live operator and compliance proof incomplete. |
+| Reliability | 55 | 68 | Partial | Boot gates, CI, durable grants, repaired voice load harnesses, rate-limit fail policy, quota/queue fail-closed behavior, durable ingress capture, and completion DLQ help; live worker/DLQ/full-suite proof keep this capped. |
+| Scalability | 49 | 58 | Partial | Queue topology, token quota, inbound rate limiting, per-tenant QoS, and admission controls help; no meaningful live load/scale proof and per-IP proxy semantics remain unproven. |
+| Enterprise readiness | 43 | 58 | Not ready | Security and compliance primitives improved sharply, but S-10, formal compliance, real integrations, DR/SLO evidence, and live proof cap readiness. |
 
 ## Security Audit Summary
 
@@ -382,7 +414,7 @@ Current evidence:
 
 Status: closed by `8a7a7b1` and strengthened by `fe985fb`.
 
-Residual: live Auth0 role assignment proof and object-level RBAC are still needed for enterprise readiness.
+Residual: live Auth0 role assignment proof and broader object-scope policy for uncovered or future tenant-scoped surfaces are still needed for enterprise readiness.
 
 ### S-03: Production Self-Approval - CLOSED, Workflow Residuals
 
@@ -393,12 +425,16 @@ Current evidence:
 - `apps/backend/app/core/config.py:434-442` disables direct self-approval in production.
 - `apps/backend/app/api/v1/routers/tenant.py:126-240` exposes propose/list/approve/reject/apply endpoints.
 - `apps/backend/app/services/tenant_config_change_request_service.py:117-124` rejects same proposer/approver.
+- `apps/backend/app/services/tenant_config_change_request_service.py:166-208` requires and persists `applied_by` when applying an approved request.
+- `apps/backend/app/api/v1/routers/tenant.py:228-248` passes the applying principal into `service.apply()`.
+- `apps/backend/app/services/tenant_config_change_request_service.py:210-251` implements pre-apply revocation of approved requests.
+- `apps/backend/app/api/v1/routers/tenant.py:251-277` exposes `/config/change-requests/{id}/revoke`.
 - Migration `0063_tenant_config_change_requests` enforces `approved_by != proposed_by` and FORCE RLS.
-- Tests: `test_tenant_config_apply_authorization.py`; `test_tenant_config_change_requests.py` now exposes the `applied_by` regression after migration 0066.
+- Tests: `test_tenant_config_apply_authorization.py`, `test_tenant_config_change_requests.py`, `test_ledger_revocation.py`.
 
-Status: original self-approval vulnerability closed by `7602507`.
+Status: original self-approval vulnerability closed by `7602507`; apply attribution and revocation completed by `df78ac7`/`d917d0e` and proven by current user reruns.
 
-Residual: fix the new `applied_by` apply-path regression, then add expiry/revocation service/API flow, command-center workflow, and live Auth0 writer/approver proof.
+Residual: add expiry/time-bound approval behavior, command-center workflow adoption, and live Auth0 writer/approver proof.
 
 ### S-04: Voice WebSocket Authentication - CLOSED For Auth/Caps, Provider Residual
 
@@ -447,7 +483,7 @@ Current evidence:
 
 Status: closed by `cd8c6bc` and `20a890a`.
 
-Residual: DNS-rebinding tests should be made deterministic in CI; live egress proof remains part of S-10/Phase E.
+Residual: DNS-rebinding tests are now deterministic in code, but loopback-server proof still needs a normal-shell/CI pass here; live egress proof remains part of S-10/Phase E.
 
 ### S-07: RAG Poisoning Through Tenant Knowledge Writes - CLOSED For Original Path
 
@@ -488,20 +524,21 @@ Original finding: token quota settings existed but were not enforced.
 
 Current evidence:
 
-- `apps/backend/app/agents/runtime/quota_runtime.py:139-156` blocks calls after token-minute budget is exhausted.
-- `apps/backend/app/agents/runtime/quota_runtime.py:253-282` records post-call token usage.
+- `apps/backend/app/agents/runtime/quota_runtime.py:148-163` fails closed when Redis-backed token budget state is unavailable before a call.
+- `apps/backend/app/agents/runtime/quota_runtime.py:179-221` fails closed when request-minute/hour Redis windows cannot be incremented.
+- `apps/backend/app/agents/runtime/quota_runtime.py:284-315` records post-call token usage and intentionally fails open only after the provider call has already happened.
 - `apps/backend/app/cognition/diagnostic_runtime.py:261-309` checks quota before LLM calls and records real completion usage.
 - Tests: `test_quota_runtime.py`, `test_diagnostic_agent_quota_integration.py`.
 
-Status: closed by `4cdf202` for diagnostic LLM usage.
+Status: closed by `4cdf202` for diagnostic LLM usage and strengthened by `2335756` for Redis-backend fail-closed pre-call behavior.
 
-Residual: Redis outage still fails open by design; enterprise-wide provider budgets remain needed.
+Residual: enterprise-wide provider budgets, reservations, observability, and live Redis-outage chaos proof remain needed.
 
 ### S-10: Production Readiness - OPEN
 
 Current evidence:
 
-- `apps/backend/app/core/production_readiness.py:39-105` collects and raises on production readiness problems.
+- `apps/backend/app/core/production_readiness.py:39-119` collects and raises on production readiness problems, including provider stubs, tenant credential/data-protection key material, audit export HMAC, voice session secret, and public-base webhook URL posture.
 - `apps/backend/app/main.py:468-473` invokes readiness validation when enforced.
 - `apps/backend/scripts/check_production_readiness.py` exposes release-gate CLI.
 - `.github/workflows/ci.yml` runs backend/frontend and DB-backed checks.
@@ -520,13 +557,27 @@ Required to close:
 - Live secrets/provider/readiness CLI output.
 - Rollback evidence.
 
+## Data Protection, Resilience, And Cleanup Review
+
+The Phase 1c/1d/1e tranche materially changes the current state:
+
+- Data protection: `apps/backend/app/api/v1/routers/data_protection.py:41-247` exposes privacy-admin and privacy-approver gated erasure/legal-hold/retention APIs. `apps/backend/app/data_protection/crypto.py:425-493` implements dual-control DSAR erasure by deleting the subject data key only after an independent approver passes lifecycle/legal-hold checks. `apps/backend/app/data_protection/db/models.py:30-185` stores data keys, retention policies, legal holds, and erasure-request ledgers with check/FK constraints.
+- Data-protection proof: `test_data_protection_controls.py` proves envelope encryption, crypto-shred unreadability after erasure, legal-hold blocking, tenant-delete FK semantics, same-principal DB/app rejection, master-key rewrap, and tenant-owned knowledge encryption. `test_data_protection_admin_api.py` proves API gates, unconfigured-key `503`, propose/approve erasure, legal-hold release, same-principal rejection, and retention purge behavior.
+- Resilience: `apps/backend/app/core/queue_admission.py:101-152` fails closed when queue depth cannot be read; `apps/backend/app/core/queue_admission.py:214-278` adds per-tenant queue reservations. `apps/backend/app/agents/runtime/quota_runtime.py:148-221` fails closed for pre-call quota state loss.
+- Durable ingress: `apps/backend/app/services/ticket_ingress_service.py:543-608` commits the captured boundary ingress before recording processing-admission pressure, so authenticated inbound events are not lost when admission defers.
+- Governance binding: `apps/backend/app/execution/runtime.py:390-430` persists execution-governance config id/version/sha into the execution record, and `apps/backend/app/runtime/execution_governance.py:306-343` rejects missing/mismatched bound configs during reconstruction.
+- Completion DLQ: `apps/backend/app/workers/execution_completion_events.py:45-82` records a dead-letter task if worker completion-event emission fails.
+- Cleanup: `apps/backend/tests/test_legacy_module_quarantine.py:78-114` proves `_deprecated` is absent and not imported; `apps/backend/Dockerfile:1-22` pins the base image digest and runs as non-root; `.github/workflows/ci.yml:61-76` generates SBOM and `pip-audit` artifacts.
+
+Residuals: data protection is now real code, not a stub, but it is not yet a complete compliance program. KMS/key custody, live erasure evidence, retention/legal operations, audit access controls, and customer-facing compliance artifacts still sit outside this code closure. Resilience controls are stronger, but live Redis outage, worker, DLQ, and queue-pressure drills remain S-10/ops proof work.
+
 ## Edge-Hardening Review
 
 Claude's latest committed tranche materially improves the edge posture:
 
 - #23 webhook/voice canonical URL spoofing: closed in production code and tests. `derive_canonical_webhook_url` builds URLs from `PUBLIC_BASE_URL` plus trusted path/query, channel webhook signatures pass `request_path`, and voice provider signatures now ignore forged canonical URL headers unless `WEBHOOK_TRUST_URL_HEADER` is explicitly enabled for non-production testing.
 - #39 inbound rate limiting: closed at code/test level. `EdgeRateLimitMiddleware` runs pre-auth by IP, `TenantRateLimitMiddleware` runs post-auth by tenant/principal, and `main.py` registers both in the request pipeline.
-- #38 Redis backend-loss policy: split by owner. Rate-limiter production writes fail closed in 1b; quota/admission fail-closed/degraded Redis policy is explicitly owned by 1d.
+- #38 Redis backend-loss policy: code-closed for the audited quota/admission paths. Rate-limiter production writes fail closed in 1b; quota and queue admission now fail closed for pre-call/publish decisions in 1d. Residual: live outage drills and idempotent rate-limit degrade-open semantics must be documented.
 - #63 stale voice load/capacity harnesses: closed. The fake WebSocket harnesses now include signed session token, provider auth loader, server-derived signature URL, and provider signature headers.
 - #25 auth-error coarsening: partial. Authority-state errors are coarsened in production, but malformed `Authorization` and malformed legacy authority-header parse paths still return detailed bodies.
 - #40 voice wall-clock, idle, and frame-rate caps: closed at code/test level in the voice WebSocket route.
@@ -535,17 +586,17 @@ Remaining edge-hardening gaps:
 
 - Per-IP rate limiting may be per Fly proxy, not per real internet client, because the middleware keys `scope["client"]` and the Fly deployment comments say the app observes the proxy as an `fdaa::/16` peer. This still provides a coarse abuse brake, but live proxy/client-IP semantics must be proven before claiming true per-client edge rate limiting.
 - Malformed auth/header parse errors should be routed through the same coarsening helper used by verification/source-state failures before #25 is called closed. Evidence: `AuthorityContextMiddleware` returns direct detailed `JSONResponse` bodies for malformed authorization and legacy authority headers at `apps/backend/app/middleware/authority_context.py:207-214`, `224-232`, and `322-330`.
-- Quota/admission Redis outage policy is not dropped; it is deferred to spec 1d (Resilience), which owns the broader #38 quota/admission policy.
+- Redis quota/admission outage policy is no longer deferred: spec 1d implemented fail-closed pre-call/publish behavior. Remaining work is live chaos proof and operator runbook evidence.
 
 ## Multi-Tenancy Audit
 
 Could tenant A ever see tenant B data?
 
-Current answer: materially less likely than before, but still not proven impossible in production. The original direct-header spoof path is closed by default, Auth0 namespaced tenant claims are mapped, RLS discipline exists, and voice no longer trusts raw `?tenant=...`. Remaining risk sits in live deployment posture: trusted proxy range, Auth0 claim drift, production RLS proof, owner-session misuse, and any future route bypassing tenant dependencies.
+Current answer: materially less likely than before, but still not proven impossible in production. The original direct-header spoof path is closed by default, Auth0 namespaced tenant claims are mapped, RLS discipline exists, voice no longer trusts raw `?tenant=...`, object-RBAC coverage is broader, and sensitive data is increasingly protected by tenant/subject-scoped envelope keys. Remaining risk sits in live deployment posture: trusted proxy range, Auth0 claim drift, production RLS proof, owner-session misuse, and any future route bypassing tenant dependencies.
 
 Could tenant A affect tenant B execution?
 
-Current answer: not through normal execution runtime when authority and RLS are correct. Residual risk comes from production authority/RLS misconfiguration, privileged maintenance paths, or shared queue/noisy-neighbor behavior. Broker isolation is not per tenant.
+Current answer: not through normal execution runtime when authority and RLS are correct. Per-tenant queue QoS reduces shared-queue noisy-neighbor risk, but broker isolation is still not per tenant. Residual risk comes from production authority/RLS misconfiguration, privileged maintenance paths, or shared infrastructure failure.
 
 Could tenant A affect tenant B governance?
 
@@ -559,6 +610,8 @@ Tenant isolation strengths:
 - Production header authority fails closed by default.
 - Voice tenant binding uses signed session tokens and provider signatures.
 - Tenant config mutation is capability-gated and ledgered.
+- Object-RBAC sweep covers sensitive tenant-scoped operational/governance/cognition/privacy surfaces.
+- Subject-scoped data-protection keys make DSAR crypto-shred possible without deleting all tenant data.
 
 Tenant isolation weaknesses:
 
@@ -572,7 +625,7 @@ Tenant isolation weaknesses:
 
 Can governance be skipped?
 
-Current answer: much less than before for tenant config and action replay. Tenant config now has durable proposal, approval, rejection, and apply states with principal separation, but the newest `applied_by` DB constraint currently breaks the apply transition until the service persists the applying principal. Action grants are actor/payload-bound and consumed durably. Remaining gaps are UI workflow adoption, expiry/revocation, live Auth0 proof, and provider-side idempotency for real irreversible actions.
+Current answer: much less than before for tenant config and action replay. Tenant config now has durable proposal, approval, rejection, apply, and revoke states with principal separation and applier/revoker attribution. Action grants are actor/payload-bound and consumed durably. Remaining gaps are UI workflow adoption, expiry/time-bound approvals, live Auth0 proof, and provider-side idempotency for real irreversible actions.
 
 Can execution happen without authorization?
 
@@ -580,15 +633,15 @@ Diagnostic execution still expects governance admission. Voice call execution no
 
 Can stale policies be used?
 
-Yes, bounded but real. Worker comments accept policy staleness during in-flight diagnostic tasks. Policy version binding and cache invalidation remain important for high-value production operations.
+Much less than before. Execution records now bind the execution-governance config id/version/content hash admitted at request time, and workers reconstruct that bound config before executing. In-flight work intentionally uses the historical admitted version; the residual is live proof, replay tooling maturity, and cache invalidation discipline.
 
 Can evidence be tampered with?
 
-Evidence is stronger than before. Config change requests and action grants create durable replayable evidence. Residual gaps include the broken tenant-config apply applier attribution path, no service/API expiry/revocation lifecycle, and missing live secret/rotation proof.
+Evidence is stronger than before. Config change requests, apply/revoke attribution, action grants, data-protection erasure/legal-hold ledgers, and completion-event DLQ records create more durable replayable evidence. Residual gaps include no expiry lifecycle for config approvals, incomplete command-center workflows, and missing live secret/rotation proof.
 
 Can replay become inaccurate?
 
-Yes, but less than before. Action grant replay is now precise. RAG replay can still drift unless exact chunk hashes/content snapshots are bound to decisions. Knowledge activation now has review status but needs stronger production review workflow.
+Yes, but less than before. Action grant replay is now precise, and execution-governance config binding reduces stale-policy ambiguity. RAG replay can still drift unless exact chunk hashes/content snapshots are bound to decisions. Knowledge activation now has review status but needs stronger production review workflow.
 
 ## Agent Safety Audit
 
@@ -622,13 +675,15 @@ Strengths:
 - Owner sessions are explicitly privileged.
 - Execution transitions, config requests, action grants, cognition usage, and audit records are durable.
 - RLS coverage invariant now exists.
+- Data-protection keys, legal holds, erasure requests, and retention policies are first-class tables with constraints and FK semantics.
+- Sensitive session/cognition/knowledge values can be envelope-encrypted and crypto-shredded by subject key.
 
 Risks:
 
 - Production FORCE RLS proof is not archived.
 - Owner-session misuse would bypass RLS.
 - Some model/schema nullability drift can still exist.
-- Retention/archival/legal hold strategy is incomplete.
+- Retention/legal hold/erasure now exist in code, but live operations and compliance evidence are incomplete.
 - Knowledge/vector query-plan proof at production scale is missing.
 
 ## Performance Audit
@@ -639,6 +694,7 @@ Risks:
 - Diagnostic workers and provider quotas remain bottlenecks.
 - Token quota helps cost blast radius.
 - Inbound fixed-window rate limiting now adds a basic abuse brake.
+- Per-tenant queue QoS reduces one-tenant queue saturation but is not full broker isolation.
 
 100x scale:
 
@@ -649,14 +705,14 @@ Risks:
 
 1000x scale:
 
-- Current architecture needs per-tenant QoS/sharding strategy, autoscaling, broker isolation or strict QoS, vector index strategy, cost budget enforcement, and operational SLO proof.
+- Current architecture needs sharding strategy, autoscaling, stronger broker isolation or strict QoS, vector index strategy, cost budget enforcement, and operational SLO proof.
 
 Failure points:
 
 1. S-10 deployment misconfiguration.
 2. Provider quota/cost during diagnostic load.
 3. Queue backlog and worker saturation.
-4. Redis unavailable causing idempotent/read traffic to degrade open and write traffic to fail closed under rate-limit policy.
+4. Redis unavailable causing admission/quota writes to fail closed while idempotent rate-limit paths can still degrade open by design.
 5. Postgres connection/pool pressure.
 6. Operator trust damage from demo/stub residue.
 
@@ -671,13 +727,17 @@ Strengths:
 - Provider circuit breaker exists.
 - Boot/readiness gate and CI reduce accidental demo/stub deployments.
 - Config ledger and action grants improve durable recovery/replay.
+- Quota and queue admission now fail closed when Redis-backed admission state is unavailable.
+- Durable webhook capture happens before processing-admission decisions.
+- Worker completion-event emission failures are dead-lettered.
+- Per-tenant queue QoS exists for diagnostic publication.
 
 Risks:
 
 - Production worker process verification is not archived.
 - Voice load/capacity test suite has been repaired after the auth gate.
 - Some periodic tasks intentionally do not DLQ.
-- Queue admission/quota can fail open on Redis read failure; inbound write rate limits now fail closed in production when their Redis backend is unavailable.
+- Live Redis outage drills are not archived; rate-limit idempotent paths still degrade open by design.
 - No disaster recovery/backup restore evidence was found in active gates.
 - Real external action side effects are not integrated, so reliability claims are unproven.
 - Rate limiting itself is now a Redis dependency; idempotent traffic degrades open on rate-limit backend loss.
@@ -710,9 +770,9 @@ Strengths:
 
 Debt:
 
-- `_deprecated` code and duplicate app trees create deployment ambiguity.
+- Duplicate app trees still create deployment ambiguity, but the `_deprecated` backend package has been deleted and guarded by invariant tests.
 - Multiple runtime compositions use in-memory/deterministic defaults outside production gates.
-- Tenant config workflow currently has an `applied_by` apply regression and still needs UI adoption plus expiry/revocation.
+- Tenant config workflow still needs UI adoption and expiry/time-bound approvals.
 - Voice load/capacity test harnesses now model the provider-signature contract; real provider load proof remains.
 - Command center demo/proof constants remain in active product code.
 - Some abstractions are ahead of real integrations, increasing false confidence.
@@ -725,6 +785,7 @@ Known current proof:
 - Tenant config RBAC and direct-apply denial passed.
 - Domain capabilities passed.
 - Tenant config change-request lifecycle and RLS passed.
+- Tenant config apply attribution and revoke behavior passed.
 - Durable action grant consumption and RLS passed.
 - SSRF guard, quota runtime, production readiness passed.
 - Voice signed token and provider signature passed.
@@ -732,6 +793,9 @@ Known current proof:
 - Edge/tenant rate-limit middleware and app pipeline tests passed.
 - Channel webhook canonical URL signature tests passed.
 - RAG poisoning controls exist and are covered by targeted tests.
+- Data-protection controls/admin API, legal hold, retention, crypto-shred, master-key rotation, and FK semantics passed in DB-backed tests.
+- Object RBAC sweep and functional domain gates passed in the user's normal shell.
+- Deleted `_deprecated` and forbidden-dependency invariants passed.
 
 Untested or insufficiently proven:
 
@@ -740,10 +804,10 @@ Untested or insufficiently proven:
 - Production FORCE RLS query proof.
 - Production worker/DLQ/health checks.
 - Live production SSRF/egress proof.
-- Tenant config apply after migration 0066; current DB-backed proof fails on `chk_applied_by_when_applied`.
 - Auth-error coarsening for malformed authorization/header parse errors; authority-state errors are covered, parse errors still return detailed bodies.
 - Real provider STT/TTS/action integration behavior.
-- Quota behavior under production Redis outage policy.
+- Live quota/admission/rate-limit behavior under production Redis outage policy.
+- DNS-rebinding loopback-server tests need normal-shell/CI proof because Codex sandbox could not bind `127.0.0.1:0`.
 
 ## Website And Command Center Update
 
@@ -764,13 +828,13 @@ Residual website/product trust gaps:
 
 | Customer class | Readiness | Prior score | Current score | Verdict |
 | --- | --- | ---: | ---: | --- |
-| Internal demo | Ready with caveats | n/a | 80 | Good if demo/stub boundaries are disclosed. |
-| Scoped non-regulated pilot | Conditional | n/a | 66 | Stronger after edge hardening, but still requires pilot-environment spoof/RLS/worker/secrets checks and risky integrations disabled. |
-| $100k customer | Conditional pilot | 58 | 62 | More plausible after Phase B plus edge hardening, but still needs live proof. |
-| $500k customer | Not ready | 43 | 47 | Procurement/security gaps remain large. |
-| $1M customer | Not ready | 34 | 36 | Needs live production proof, compliance, real integrations, DR/SLO proof. |
-| Fortune 500 | Not ready | 25 | 27 | Below expected security/compliance/change-control bar. |
-| Regulated enterprise | Not ready | 20 | 20 | Missing formal controls, retention, legal hold, and audit/legal evidence. |
+| Internal demo | Ready with caveats | n/a | 84 | Good if demo/stub boundaries are disclosed and S-10 gaps are not represented as complete. |
+| Scoped non-regulated pilot | Conditional | n/a | 72 | Reasonable after code hardening if Phase E checks pass, risky integrations stay disabled, and pilot scope is explicit. |
+| $100k customer | Conditional pilot | 58 | 66 | More plausible after Phase B/1c/1d/1e, but still depends on live proof and constrained integrations. |
+| $500k customer | Not ready | 43 | 52 | Better security primitives, but procurement/security/compliance gaps remain large. |
+| $1M customer | Not ready | 34 | 42 | Needs live production proof, compliance, real integrations, DR/SLO proof, and operator runbooks. |
+| Fortune 500 | Not ready | 25 | 31 | Below expected security/compliance/change-control/supply-chain bar. |
+| Regulated enterprise | Not ready | 20 | 30 | Data-protection controls exist, but formal compliance, KMS/key custody, retention/legal operations, and evidence are incomplete. |
 
 ## Red Team Review
 
@@ -779,7 +843,7 @@ Most likely breach paths now:
 1. Production ingress/Auth0 misconfiguration or override reopens header authority.
 2. S-10 gaps: RLS/worker/DLQ/secrets not actually correct in deployed environment.
 3. Real refund/replacement/warehouse connector connected before provider idempotency and action side-effect tests.
-4. Voice enabled before production token issuance, real STT/TTS provider proof, and runtime wall-clock/idle/rate caps are enforced.
+4. Voice enabled before production token issuance and real STT/TTS provider proof are complete.
 5. Rate-limit per-IP assumptions wrong in production, causing proxy-wide throttling rather than true abusive-client throttling.
 6. RAG poisoning through approved-but-poorly-reviewed knowledge despite baseline quarantine controls.
 7. XSS in command center leading to token/localStorage authority theft.
@@ -806,14 +870,14 @@ Highest business risks:
 | 1 | Closed/High residual | Auth | S-01 closed in code; live proof pending under S-10 | Archive direct spoof rejection and bearer success proof |
 | 2 | Medium | Deployment | Fly/prod posture improved; proxy/secrets proof pending | Verify `TRUSTED_PROXIES`, secrets, health, RLS, workers |
 | 3 | Closed/Medium residual | Frontend | Command center defaults to verified bearer | Fail production if tenant-header mode is configured |
-| 4 | Closed/Medium residual | RBAC | S-02 closed; domain capabilities added | Verify live Auth0 roles and add object RBAC |
+| 4 | Closed/Medium residual | RBAC | S-02 closed; domain capabilities and object-RBAC sweep added | Verify live Auth0 roles and extend object-scope policy for uncovered/future routes |
 | 5 | Closed/Medium residual | Governance | `applied_by` persisted: service.apply() records applier, router threads principal, schema exposes it (spec 1a) | UI workflow + expiry remain |
 | 6 | Closed/High residual | Voice | S-04 auth closed; load harness repaired; frame byte/count/duration/idle/rate caps enforced; provider/issuance maturity remains | Prove issuance/STT/TTS and keep cap/load tests in CI |
 | 7 | Closed/Medium residual | Agent | S-05 replay closed by durable grants | Add real provider idempotency tests |
-| 8 | Closed/Medium residual | SSRF | S-06 closed for generic outbound | Make DNS tests deterministic and archive egress proof |
+| 8 | Closed/Medium residual | SSRF | S-06 closed for generic outbound; deterministic DNS-rebinding tests exist | Archive normal-shell/CI loopback proof and live egress proof |
 | 9 | Closed/High residual | RAG | S-07 original path closed | Add reviewer UX, evals, source trust policy |
 | 10 | Closed/Medium residual | Auth0 | S-08 code closed | Add live token contract fixture |
-| 11 | Closed/Medium residual | Quota | S-09 diagnostic TPM closed | Add reservations/outage policy/provider-wide budgets |
+| 11 | Closed/Medium residual | Quota | S-09 diagnostic TPM closed; Redis pre-call quota loss fails closed | Add enterprise budgets, provider-wide quotas, and live outage drills |
 | 12 | Open/High | Readiness | S-10 open | Complete Phase E live verification |
 | 13 | High | Voice | Real STT/TTS provider proof missing | Integrate/prove providers or keep voice disabled |
 | 14 | High | Actions | Refund/replacement/warranty tools stub-like | Implement connectors with idempotency/governance |
@@ -828,25 +892,25 @@ Highest business risks:
 | 23 | Closed/Medium residual | Webhook | Twilio/voice canonical URLs are server-derived in code/tests | Commit/readiness-gate `PUBLIC_BASE_URL`; archive live provider proof |
 | 24 | Closed/Medium residual | Webhook | Uniform `401 webhook_rejected` closes content oracle; timing oracle mitigated by rate limiting | Do not pursue constant-time DB lookups; keep rate limits live |
 | 25 | Partial | Auth | Authority-state errors coarsen in production, but malformed auth/header parse errors still expose detail | Route malformed parse paths through coarsening helper and add tests |
-| 26 | Closed/Medium residual | Tenant | Per-domain capability gates on observability (tenant.observability.read) and audit (tenant.audit.export) — spec 1a code-closed | Live Auth0 role assignment proof (Phase 3) |
+| 26 | Closed/Medium residual | Tenant | Domain gates plus object-RBAC sweep cover selected sensitive tenant-scoped surfaces | Live Auth0 proof and route-coverage invariant expansion |
 | 27 | High | Audit | LLM prompts/completions are sensitive | Encrypt/redact/retain by policy |
 | 28 | Closed/Medium residual | Prompt/RAG | Baseline injection controls added | Add adversarial evals and policy tuning |
 | 29 | High | Cognition | Citations not universally required | Require citations for prod tenants |
 | 30 | High | RAG | Deterministic embeddings may still be used outside prod | Real embedding provider and evals |
 | 31 | Medium | Provider | Boot gate helps; provider health proof missing | Provider health checks and override governance |
-| 32 | High | Deployment | Container/SBOM hardening incomplete | Add image scanning, pinned digest, SBOM |
-| 33 | Medium | Supply chain | CI exists; security scans incomplete | Add dependency review, SBOM, license audit |
+| 32 | Partial/Medium | Deployment | Backend runtime image is digest-pinned and non-root; SBOM/pip-audit artifacts exist, but scanning/signing/attestation are incomplete | Add image scanning, signing, provenance, and minimal multi-stage runtime |
+| 33 | Partial/Medium | Supply chain | SBOM and `pip-audit` artifacts added; dependency-review and license gates incomplete | Add dependency review, license audit, and artifact attestations |
 | 34 | High | Local secrets | Local `.env` hygiene risk | Keep gitignore and secret scanners |
 | 35 | High | Owner DB | Owner sessions bypass RLS | Separate creds, lint owner usage |
 | 36 | Closed/Medium residual | Migrations | RLS coverage invariant added | Keep invariant in CI and prove prod RLS |
-| 37 | High | Queue | Broker not isolated per tenant | Add per-tenant QoS/priority/rate limits |
-| 38 | Partial/Deferred to 1d | Admission | Rate-limiter portion closed in 1b; quota/admission Redis policy owned by 1d | Implement fail-closed/degraded quota+admission policy in Resilience |
+| 37 | Partial/Medium | Queue | Per-tenant queue QoS reservations added for diagnostic publication; broker still not isolated per tenant | Prove QoS live, extend priority/rate limits, and consider broker isolation |
+| 38 | Closed/Medium residual | Admission | Rate-limit, quota, and queue-admission audited paths fail closed for Redis-backed write/admission failures; idempotent rate-limit behavior still degrades open | Archive live Redis outage drills and runbooks |
 | 39 | Closed/Medium residual | Rate limit | Per-IP and tenant/principal rate limits are wired and tested | Prove real-client-IP behavior behind Fly/proxy |
 | 40 | Closed/Low residual | WebSocket | Voice frame byte/count plus wall-clock/idle/rate caps are enforced and tested | Keep handler-level cap proof in CI |
 | 41 | Medium | UX/Product | Demo proof sessions remain | Remove/isolate proof sessions |
 | 42 | Medium | Business | Claims can outrun live proof | Align claims to S-10 status |
 | 43 | Medium | Docs | Readiness source of truth must be canonical | Make Phase E checklist blocking |
-| 44 | Medium | Codebase | `_deprecated` active tree retained | Remove or hard-isolate |
+| 44 | Closed/Low residual | Codebase | `_deprecated` backend package deleted and invariant-tested | Keep quarantine test and avoid recreation |
 | 45 | Medium | Codebase | Duplicate app histories remain | Declare active apps and archive old ones |
 | 46 | Medium | Frontend | Browser token exposure/XSS blast radius | Harden CSP/BFF option |
 | 47 | Medium | Frontend | Local storage authority labels risk confusion | Store display state only |
@@ -857,8 +921,8 @@ Highest business risks:
 | 52 | Medium | Nonce | Nonce cleanup maintenance dependency | TTL/index/alert on growth |
 | 53 | Closed/Low residual | Outbound | Redirects disabled in generic adapter | Keep invariant tests |
 | 54 | Medium | Credentials | Credential master key proof pending | Verify injection and rotation |
-| 55 | Medium | Encryption | KMS/envelope proof missing | Use KMS/envelope encryption |
-| 56 | Medium | Retention | Retention/archival incomplete | Add retention/purge jobs |
+| 55 | Partial/Medium | Encryption | Envelope encryption and crypto-shred implemented for sensitive customer content; KMS/key custody proof missing | Move master keys to KMS and prove rotation/custody |
+| 56 | Partial/Medium | Retention | Retention policy API and purge behavior exist for covered data; universal archival/legal operations incomplete | Expand coverage, schedule jobs, and archive live purge/hold evidence |
 | 57 | Medium | DR | Backup/restore proof absent | Run restore drills |
 | 58 | Medium | Observability | Alert tasks best-effort | Alert on evaluator failure |
 | 59 | Medium | Metrics | Beat/queue observability gaps remain | Track beat health |
@@ -871,8 +935,8 @@ Highest business risks:
 | 66 | Medium | DB | Knowledge query plan unproven | Explain/analyze and indexes |
 | 67 | Medium | DB | Large JSON metadata can become hot blobs | Promote indexed fields |
 | 68 | Medium | DB | Tenant partitioning deferred | Partition when volume warrants |
-| 69 | Medium | Execution | In-flight tasks can use stale policies | Policy version binding |
-| 70 | Medium | Execution | Completion event sink can fail open | Dead-letter failed event emission |
+| 69 | Closed/Medium residual | Execution | Execution records bind governance config id/version/sha and workers verify the bound config | Add replay tooling, cache-invalidation proof, and live drills |
+| 70 | Closed/Medium residual | Execution | Completion-event emission failures are dead-lettered | Add replay/drill proof and alerting |
 | 71 | Medium | Execution | External side effects not fully modeled | Outbox per external provider |
 | 72 | Medium | Action | Stubs can be mistaken for integrations | Feature flags and clear labels |
 | 73 | Medium | Shopify | Enrichment fallback risk remains | Fail explicit in prod |
@@ -882,7 +946,7 @@ Highest business risks:
 | 77 | Medium | Governance | Policy invalidation partial | Central policy version/cache invalidation |
 | 78 | Medium | Governance | Content safety policy defaults need review | Require explicit prod policy |
 | 79 | Medium | Governance | Tenant allowlist/default ambiguity | Make defaults explicit/tested |
-| 80 | Closed/Medium residual | API | Observability endpoints are gated on `tenant.observability.read`; object-level RBAC remains | Verify live Auth0 role mapping and add object scopes where needed |
+| 80 | Closed/Medium residual | API | Object-RBAC sweep covers selected sensitive tenant-scoped modules; conversation ownership is covered separately | Verify live Auth0 mappings and extend object policies where needed |
 | 81 | Partial | API | Audit verify now has a 256 KiB handler cap, but no dedicated rate limit/pre-parse cap | Add route-specific rate limit and pre-parse cap if public traffic grows |
 | 82 | Medium | API | Batch ingest capability/quotas incomplete | Add ingest capability and quotas |
 | 83 | Partial | API | Principal-bound conversation sessions enforce owner access; ownerless tenant sessions remain tenant-wide | Add role/object policy for ownerless sessions |
@@ -890,8 +954,8 @@ Highest business risks:
 | 85 | Medium | UI | API base URL misconfig risk | Fail build without prod API URL |
 | 86 | Medium | UI | No generated API client contract | Generate from OpenAPI |
 | 87 | Medium | Packages | Shared auth package placeholder risk | Mature or remove |
-| 88 | Medium | License | License/SBOM review missing | License audit/SBOM |
-| 89 | Medium | Dependency | Runtime image/package hardening incomplete | Multi-stage/minimal runtime |
+| 88 | Partial/Medium | License | SBOM artifact exists; license review is still missing | Add license audit/gate |
+| 89 | Partial/Medium | Dependency | Digest-pinned non-root runtime and `pip-audit` artifact added; multi-stage/minimal/scanning posture incomplete | Add multi-stage/minimal runtime, scanner, and signing |
 | 90 | Medium | Dependency | Unused provider deps increase surface | Prune unused deps |
 | 91 | Low | Docs | Architecture docs can be aspirational | Add status per feature |
 | 92 | Low | Docs | Multiple audits can drift | Maintain single risk register |
@@ -908,23 +972,23 @@ Highest business risks:
 
 | Dimension | Prior score | Current score |
 | --- | ---: | ---: |
-| Architecture | 62 | 67 |
-| Security | 57 | 76 |
-| Scalability | 49 | 53 |
-| Reliability | 55 | 60 |
-| Governance | 72 | 80 |
-| Code quality | 68 | 71 |
-| Enterprise readiness | 43 | 50 |
+| Architecture | 62 | 72 |
+| Security | 57 | 82 |
+| Scalability | 49 | 58 |
+| Reliability | 55 | 68 |
+| Governance | 72 | 86 |
+| Code quality | 68 | 75 |
+| Enterprise readiness | 43 | 58 |
 
 ## Customer Survival Verdict
 
 Could Operious survive 10 customers?
 
-Yes, only as a controlled pilot platform with verified bearer auth, production readiness gate enabled, risky features disabled, live tenant isolation checks archived, and manual monitoring.
+Yes, as a controlled pilot platform with verified bearer auth, production readiness gate enabled, risky features disabled, live tenant isolation checks archived, and manual monitoring.
 
 Could Operious survive 100 customers?
 
-Not safely today. Queue, provider, tenancy, support, compliance, and production verification gaps would surface quickly.
+Not safely as a general production platform today. A narrow non-regulated pilot cohort is plausible after Phase E proof, but queue, provider, support, compliance, and production verification gaps would surface quickly outside a constrained scope.
 
 Could Operious survive 1,000 customers?
 
@@ -932,7 +996,7 @@ No. The architecture has promising primitives but lacks hard operational, compli
 
 Would I allow Anker production operations?
 
-No, not production. I would allow a scoped pilot after Phase E-style environment checks and with no real irreversible refund/replacement side effects.
+No, not production. I would allow a scoped pilot after Phase E environment checks and with no real irreversible refund/replacement side effects.
 
 Would I allow Samsung production operations?
 

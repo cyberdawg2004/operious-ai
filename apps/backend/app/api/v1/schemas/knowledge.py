@@ -61,6 +61,8 @@ class KnowledgeCitationResponse(BaseModel):
     document_id: str
     document_version: int
     ordinal: int
+    char_start: int
+    char_end: int
     score: float
     title: str
     estimated_tokens: int
@@ -78,6 +80,8 @@ class KnowledgeCitationResponse(BaseModel):
             document_id=str(citation.document_id),
             document_version=citation.document_version,
             ordinal=citation.ordinal,
+            char_start=citation.char_start,
+            char_end=citation.char_end,
             score=citation.score,
             title=citation.title,
             estimated_tokens=citation.estimated_tokens,
@@ -93,6 +97,8 @@ class KnowledgeSearchItemResponse(BaseModel):
     document_id: str
     document_version: int
     ordinal: int
+    char_start: int
+    char_end: int
     score: float
     content: str
     title: str
@@ -111,6 +117,8 @@ class KnowledgeSearchItemResponse(BaseModel):
             document_id=str(item.document_id),
             document_version=item.document_version,
             ordinal=item.ordinal,
+            char_start=item.char_start,
+            char_end=item.char_end,
             score=item.score,
             content=item.content,
             title=item.title,
