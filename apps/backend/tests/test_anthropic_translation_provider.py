@@ -21,7 +21,6 @@ from app.boundary.translation.adapters.base import (
 )
 from app.boundary.translation.models.payload import TranslationPayload
 from app.boundary.translation.provider_factory import build_translation_provider
-from app.core.config import Settings
 
 
 class _FakeResponse:
@@ -211,10 +210,11 @@ async def test_api_key_never_logged(
 
 def test_config_selects_anthropic_when_set() -> None:
     provider = build_translation_provider(
-        Settings(
-            TRANSLATION_PROVIDER="anthropic",
-            ANTHROPIC_API_KEY="secret-test-key",
-        )
+        provider_name="anthropic",
+        api_key="secret-test-key",
+        model="claude-test-model",
+        base_url="https://api.anthropic.com",
+        anthropic_version="2023-06-01",
     )
 
     assert isinstance(provider, AnthropicTranslationProvider)
@@ -222,10 +222,11 @@ def test_config_selects_anthropic_when_set() -> None:
 
 def test_config_falls_back_to_identity_without_key() -> None:
     provider = build_translation_provider(
-        Settings(
-            TRANSLATION_PROVIDER="anthropic",
-            ANTHROPIC_API_KEY="",
-        )
+        provider_name="anthropic",
+        api_key="",
+        model="claude-test-model",
+        base_url="https://api.anthropic.com",
+        anthropic_version="2023-06-01",
     )
 
     assert isinstance(provider, IdentityTranslationProvider)

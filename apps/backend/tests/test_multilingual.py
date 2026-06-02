@@ -374,7 +374,7 @@ async def test_worker_egress_uses_configured_translation_provider_for_arabic(
     monkeypatch.setattr(
         agent_tasks,
         "build_translation_provider",
-        lambda settings: provider,
+        lambda **kwargs: provider,
     )
     monkeypatch.setattr(
         agent_tasks,

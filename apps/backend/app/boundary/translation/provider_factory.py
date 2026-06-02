@@ -6,26 +6,30 @@ from app.boundary.translation.adapters import (
     BaseTranslationProvider,
     IdentityTranslationProvider,
 )
-from app.core.config import Settings
 
 
-def build_translation_provider(settings: Settings) -> BaseTranslationProvider:
-    """Select the translation provider from runtime configuration."""
+def build_translation_provider(
+    *,
+    provider_name: str,
+    api_key: str | None,
+    model: str | None,
+    base_url: str,
+    anthropic_version: str,
+    timeout_seconds: float = 15.0,
+) -> BaseTranslationProvider:
+    """Select the translation provider from explicit runtime configuration."""
 
-    if (
-        settings.TRANSLATION_PROVIDER.casefold() == "anthropic"
-        and settings.ANTHROPIC_API_KEY.strip()
-    ):
+    if provider_name.casefold() == "anthropic" and (api_key or "").strip():
         from app.boundary.translation.adapters.anthropic import (
             AnthropicTranslationProvider,
         )
 
         return AnthropicTranslationProvider(
-            api_key=settings.ANTHROPIC_API_KEY,
-            model=settings.TRANSLATION_MODEL,
-            base_url=settings.ANTHROPIC_BASE_URL,
-            anthropic_version=settings.ANTHROPIC_VERSION,
-            timeout_seconds=15.0,
+            api_key=api_key or "",
+            model=model or "",
+            base_url=base_url,
+            anthropic_version=anthropic_version,
+            timeout_seconds=timeout_seconds,
         )
     return IdentityTranslationProvider()
 

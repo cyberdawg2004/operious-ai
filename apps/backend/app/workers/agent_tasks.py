@@ -1379,7 +1379,14 @@ def _action_orchestration_runtime(
 
 def _translation_runtime(session: AsyncSession) -> TranslationRuntime:
     persistence = InMemoryTranslationPersistence()
-    provider = build_translation_provider(get_settings())
+    settings = get_settings()
+    provider = build_translation_provider(
+        provider_name=settings.TRANSLATION_PROVIDER,
+        api_key=settings.ANTHROPIC_API_KEY,
+        model=settings.TRANSLATION_MODEL,
+        base_url=settings.ANTHROPIC_BASE_URL,
+        anthropic_version=settings.ANTHROPIC_VERSION,
+    )
     # Per-task runtime construction bounds policy staleness to the current
     # task; new tasks pick up new composition.
     governance = build_capability_governance_runtime(

@@ -578,7 +578,13 @@ def create_app(
     )
 
     translation_persistence = InMemoryTranslationPersistence()
-    translation_provider = build_translation_provider(settings)
+    translation_provider = build_translation_provider(
+        provider_name=settings.TRANSLATION_PROVIDER,
+        api_key=settings.ANTHROPIC_API_KEY,
+        model=settings.TRANSLATION_MODEL,
+        base_url=settings.ANTHROPIC_BASE_URL,
+        anthropic_version=settings.ANTHROPIC_VERSION,
+    )
     app.state.translation_runtime = TranslationRuntime(
         ingress=TranslationIngressRuntime(
             provider=translation_provider,
