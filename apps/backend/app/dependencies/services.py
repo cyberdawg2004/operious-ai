@@ -52,7 +52,8 @@ from app.agents.runtime.quota_runtime import TenantQuotaRuntime
 from app.agents.tools.action_governance import (
     build_action_tool_governance_runtime,
 )
-from app.agents.tools.actions import build_action_tool_registry
+from app.agents.tools.actions import build_tenant_action_tool_registry
+from app.agents.tools.connectors import PostgresConnectorConfigRepository
 from app.agents.tools.approvals import PostgresActionApprovalRepository
 from app.agents.tools.connector_invocations import (
     PostgresConnectorInvocationRepository,
@@ -787,18 +788,23 @@ def get_action_approval_service(
         data_protection=data_protection,
     )
     timeline_runtime = TimelineRuntime(persistence=session_repository)
-    return ActionApprovalService(
-        approval_repository=PostgresActionApprovalRepository(session),
-        grant_repository=PostgresAgentActionGrantRepository(session),
-        governance_repository=governance_repository,
-        resolution_repository=PostgresResolutionProposalPersistence(
-            session,
-            data_protection=data_protection,
-        ),
-        session_repository=session_repository,
-        orchestration_runtime=ActionOrchestrationRuntime(
+    async def _orchestration_factory(tenant_id: str) -> ActionOrchestrationRuntime:
+        tenant_runtime = TenantConfigurationRuntime(
+            repository=PostgresTenantConfigurationRepository(
+                session,
+                data_protection=data_protection,
+            ),
+            credential_encryptor=TenantCredentialEncryptor(
+                platform_master_key=get_settings().TENANT_CREDENTIAL_MASTER_KEY,
+            ),
+        )
+        return ActionOrchestrationRuntime(
             tool_invoker=ToolInvoker(
-                tool_registry=build_action_tool_registry(),
+                tool_registry=await build_tenant_action_tool_registry(
+                    tenant_id=tenant_id,
+                    config_repository=PostgresConnectorConfigRepository(session),
+                    credential_runtime=tenant_runtime,
+                ),
                 governance_runtime=build_action_tool_governance_runtime(
                     persistence=governance_repository,
                     redis_client=get_redis_client(),
@@ -814,7 +820,18 @@ def get_action_approval_service(
             ),
             approval_repository=PostgresActionApprovalRepository(session),
             timeline_runtime=timeline_runtime,
+        )
+
+    return ActionApprovalService(
+        approval_repository=PostgresActionApprovalRepository(session),
+        grant_repository=PostgresAgentActionGrantRepository(session),
+        governance_repository=governance_repository,
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session,
+            data_protection=data_protection,
         ),
+        session_repository=session_repository,
+        orchestration_runtime_factory=_orchestration_factory,
         timeline_runtime=timeline_runtime,
         session=session,
     )

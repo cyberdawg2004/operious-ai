@@ -103,6 +103,87 @@ class TenantChannelConfigurationRow(Base):
     )
 
 
+class ConnectorConfigRow(Base):
+    """Non-secret per-tenant connector configuration."""
+
+    __tablename__ = "connector_configs"
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        primary_key=True,
+    )
+    connector_type: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        primary_key=True,
+    )
+    tool_name: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        primary_key=True,
+    )
+    http_method: Mapped[str] = mapped_column(String(16), nullable=False)
+    endpoint_template: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint_host: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    field_mappings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    idempotency_header_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    response_parse: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    success_status_codes: Mapped[list[int]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: [200, 201, 202],
+        server_default=text("'[200, 201, 202]'::jsonb"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        default="active",
+        server_default=text("'active'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint("length(connector_type) > 0", name="connector_type_nonempty"),
+        CheckConstraint("length(tool_name) > 0", name="tool_name_nonempty"),
+        CheckConstraint("length(http_method) > 0", name="http_method_nonempty"),
+        CheckConstraint(
+            "length(endpoint_template) > 0",
+            name="endpoint_template_nonempty",
+        ),
+        CheckConstraint("length(endpoint_host) > 0", name="endpoint_host_nonempty"),
+        CheckConstraint(
+            "length(idempotency_header_name) > 0",
+            name="idempotency_header_name_nonempty",
+        ),
+        CheckConstraint("status IN ('active', 'disabled')", name="status_valid"),
+        UniqueConstraint(
+            "tenant_id",
+            "tool_name",
+            name="uq_connector_configs_tenant_tool_name",
+        ),
+        Index("ix_connector_configs_tenant_status", "tenant_id", "status"),
+        Index("ix_connector_configs_tenant_tool", "tenant_id", "tool_name"),
+    )
+
+
 class TenantKnowledgeDocumentRow(Base):
     """ORM row for ``tenant_knowledge_documents``."""
 
@@ -528,6 +609,7 @@ class TenantConfigChangeRequestRow(Base):
 
 
 __all__ = [
+    "ConnectorConfigRow",
     "TenantChannelConfigurationRow",
     "TenantConfigChangeRequestRow",
     "TenantExecutionCircuitBreakerRow",

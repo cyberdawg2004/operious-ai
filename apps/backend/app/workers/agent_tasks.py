@@ -38,7 +38,8 @@ from app.agents.tools import ToolInvoker
 from app.agents.tools.action_governance import (
     build_action_tool_governance_runtime,
 )
-from app.agents.tools.actions import build_action_tool_registry
+from app.agents.tools.actions import build_tenant_action_tool_registry
+from app.agents.tools.connectors import PostgresConnectorConfigRepository
 from app.agents.tools.approvals import PostgresActionApprovalRepository
 from app.agents.tools.connector_invocations import (
     PostgresConnectorInvocationRepository,
@@ -151,6 +152,7 @@ from app.session.persistence import (
 from app.session.runtime import SessionRuntime
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.persistence import PostgresTenantConfigurationRepository
+from app.tenant.runtime import TenantConfigurationRuntime
 from app.workers.celery_app import celery_app, enqueued_at_iso
 from app.workers.dead_letter_persistence import record_dead_letter_task
 from app.workers.queue_admission import (
@@ -1315,10 +1317,12 @@ async def _append_resolution_proposal_after_diagnostic(
                 ),
             )
             if resolution_proposal_is_send_eligible(proposal):
-                await _action_orchestration_runtime(
+                action_runtime = await _action_orchestration_runtime(
                     session=session,
                     timeline=timeline,
-                ).execute_proposal_actions(
+                    tenant_id=work_item.tenant_id,
+                )
+                await action_runtime.execute_proposal_actions(
                     proposal=proposal,
                     execution_context=_action_execution_context(work_item),
                     expected_tenant_id=work_item.tenant_id,
@@ -1355,14 +1359,26 @@ async def _append_resolution_proposal_after_diagnostic(
         return _ResolutionAppendResult(success=False)
 
 
-def _action_orchestration_runtime(
+async def _action_orchestration_runtime(
     *,
     session: AsyncSession,
     timeline: TimelineRuntime,
+    tenant_id: str,
 ) -> ActionOrchestrationRuntime:
+    settings = get_settings()
+    tenant_runtime = TenantConfigurationRuntime(
+        repository=PostgresTenantConfigurationRepository(session),
+        credential_encryptor=TenantCredentialEncryptor(
+            platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+        ),
+    )
     return ActionOrchestrationRuntime(
         tool_invoker=ToolInvoker(
-            tool_registry=build_action_tool_registry(),
+            tool_registry=await build_tenant_action_tool_registry(
+                tenant_id=tenant_id,
+                config_repository=PostgresConnectorConfigRepository(session),
+                credential_runtime=tenant_runtime,
+            ),
             # Per-task runtime construction bounds policy staleness to the
             # current task; new tasks pick up new composition.
             governance_runtime=build_action_tool_governance_runtime(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -107,6 +107,12 @@ class ActionApprovalRuntimeError(ActionApprovalError):
     """Raised when approval processing cannot be completed."""
 
 
+ActionOrchestrationRuntimeFactory = Callable[
+    [str],
+    Awaitable[ActionOrchestrationRuntime],
+]
+
+
 class ActionApprovalService:
     def __init__(
         self,
@@ -116,16 +122,20 @@ class ActionApprovalService:
         governance_repository: BaseGovernanceRepository,
         resolution_repository: ResolutionProposalPersistenceProtocol,
         session_repository: SessionPersistenceProtocol,
-        orchestration_runtime: ActionOrchestrationRuntime,
         timeline_runtime: TimelineRuntime,
         session: AsyncSession,
+        orchestration_runtime: ActionOrchestrationRuntime | None = None,
+        orchestration_runtime_factory: ActionOrchestrationRuntimeFactory | None = None,
     ) -> None:
+        if orchestration_runtime is None and orchestration_runtime_factory is None:
+            raise ValueError("ActionApprovalService requires orchestration runtime")
         self._approvals = approval_repository
         self._grants = grant_repository
         self._governance = governance_repository
         self._resolutions = resolution_repository
         self._sessions = session_repository
         self._orchestration = orchestration_runtime
+        self._orchestration_factory = orchestration_runtime_factory
         self._timeline = timeline_runtime
         self._session = session
 
@@ -251,7 +261,8 @@ class ActionApprovalService:
                 approved_by=approved_by,
                 note=note,
             )
-            outcome = await self._orchestration.re_invoke_approved_action(
+            orchestration = await self._orchestration_for(expected_tenant_id)
+            outcome = await orchestration.re_invoke_approved_action(
                 approval_record=enriched,
                 approved_decision_id=manager_decision_id,
                 execution_context=_execution_context_for_approval(
@@ -283,6 +294,16 @@ class ActionApprovalService:
         except Exception:
             await self._session.rollback()
             raise
+
+    async def _orchestration_for(
+        self,
+        tenant_id: str,
+    ) -> ActionOrchestrationRuntime:
+        if self._orchestration_factory is not None:
+            return await self._orchestration_factory(tenant_id)
+        if self._orchestration is None:
+            raise ActionApprovalRuntimeError("action orchestration is unavailable")
+        return self._orchestration
 
     async def deny(
         self,
