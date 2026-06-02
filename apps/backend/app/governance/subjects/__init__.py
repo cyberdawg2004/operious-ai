@@ -28,12 +28,11 @@ small value-object summaries (`CandidateSummary`, `AttachmentSummary`)
 that callers build from operational inputs. This keeps the
 governance substrate a leaf in the dependency graph.
 
-Phase 2.1 quarantine note:
+Phase 2.1 cleanup note:
 
-* `factories.py` (legacy RAG → typed subject adapter) was moved under
-  `app/_deprecated/governance_bridge/subjects_factories.py` because
-  it imported from `app.rag.assembly` / `app.rag.retrieval`. Its
-  surface is no longer part of the constitutional governance
+* `factories.py` (legacy RAG -> typed subject adapter) was removed
+  because it imported from `app.rag.assembly` / `app.rag.retrieval`.
+  Its surface is no longer part of the constitutional governance
   substrate.
 """
 

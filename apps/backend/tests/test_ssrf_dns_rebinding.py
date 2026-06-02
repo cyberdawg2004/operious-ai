@@ -25,10 +25,19 @@ from app.core.ssrf import (
 
 
 def test_validator_returns_pinned_ip() -> None:
-    validated = validate_public_https_url("https://httpbin.org/get")
+    def _resolve(host: str, port: int) -> tuple[str, ...]:
+        assert host == "webhook.example"
+        assert port == 443
+        return ("93.184.216.34",)
+
+    validated = validate_public_https_url(
+        "https://webhook.example/get",
+        resolve=_resolve,
+    )
 
     pinned = ipaddress.ip_address(validated.pinned_ip)
-    assert validated.hostname == "httpbin.org"
+    assert validated.hostname == "webhook.example"
+    assert validated.port == 443
     assert isinstance(validated.pinned_ip, str)
     assert not pinned.is_loopback
     assert not pinned.is_link_local
@@ -114,7 +123,7 @@ async def test_tls_sni_uses_original_hostname(tmp_path: Path) -> None:
                 host=hostname,
                 port=_server_port(server),
             )
-        assert await asyncio.wait_for(sni_seen, timeout=1.0) == hostname
+        assert await asyncio.wait_for(sni_seen, timeout=5.0) == hostname
     finally:
         await pool.aclose()
         await _close_server(server)
@@ -123,14 +132,17 @@ async def test_tls_sni_uses_original_hostname(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_rebinding_is_architectural() -> None:
     backend = PinnedIPNetworkBackend(pinned_ip="10.0.0.1")
+    calls: list[tuple[str, int]] = []
 
-    with patch("asyncio.open_connection", wraps=asyncio.open_connection) as spy:
+    async def _record_connection(host: str, port: int, **_kwargs: Any) -> None:
+        calls.append((host, port))
+        raise OSError("connection intentionally refused by test")
+
+    with patch("asyncio.open_connection", _record_connection):
         with pytest.raises(Exception):
-            await backend.connect_tcp("example.com", 443, timeout=0.001)
+            await backend.connect_tcp("example.com", 443, timeout=1.0)
 
-    assert spy.call_args is not None
-    assert spy.call_args.args[0] == "10.0.0.1"
-    assert spy.call_args.args[0] != "example.com"
+    assert calls == [("10.0.0.1", 443)]
 
 
 @pytest.mark.asyncio

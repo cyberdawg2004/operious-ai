@@ -30,22 +30,6 @@
 # json_repair, docstring_parser) were also dropped because they had no
 # constitutional consumer.
 #
-# ─── TRANSITIONAL — RESTRICTED CONSUMPTION ────────────────────────────
-#
-# The following packages are kept ONLY so the quarantined modules under
-# `app/_deprecated/` remain syntactically loadable as forensic dead
-# code. They are FORBIDDEN from being imported by any constitutional
-# substrate (agents, arbitration, boundary, coordination, governance,
-# hardening, organizational_intelligence, session, supervisor, plus
-# future event_fabric / identity / replay-federation substrates). CI
-# invariant `tests/test_transitional_vendor_isolation.py` enforces this.
-#
-# * vendor LLM SDKs:           openai, anthropic
-# * retry libraries:           tenacity, backoff
-#
-# These pins will be removed in a future phase when `app/_deprecated/`
-# is itself deleted.
-#
 # ─── BASELINE — CONSTITUTIONAL INFRASTRUCTURE ─────────────────────────
 #
 # Everything else is either (a) used directly by the constitutional
@@ -62,11 +46,9 @@ alembic==1.14.1
 amqp==5.3.1
 annotated-doc==0.0.4
 annotated-types==0.7.0
-anthropic==0.101.0
 anyio==4.13.0
 asyncpg==0.30.0
 attrs==26.1.0
-backoff==2.2.1
 bcrypt==5.0.0
 billiard==4.2.4
 black==26.3.1
@@ -121,7 +103,6 @@ mmh3==5.2.1
 multidict==6.7.1
 mypy_extensions==1.1.0
 numpy==2.4.4
-openai==2.36.0
 opentelemetry-api==1.34.1
 opentelemetry-exporter-otlp-proto-common==1.34.1
 opentelemetry-exporter-otlp-proto-grpc==1.34.1
@@ -169,10 +150,9 @@ shellingham==1.5.4
 six==1.17.0
 sniffio==1.3.1
 SQLAlchemy==2.0.49
-starlette==1.0.0
+starlette==1.0.1
 StrEnum==0.4.15
 strictyaml==1.7.3
-tenacity==9.1.4
 textual==8.2.6
 tokenizers==0.23.1
 tomli==2.0.2
@@ -185,7 +165,7 @@ typing_extensions==4.15.0
 uc-micro-py==2.0.0
 urllib3==2.7.0
 uuid_utils==0.15.0
-uv==0.11.14
+uv==0.11.15
 uvicorn==0.46.0
 vine==5.1.0
 uvloop==0.22.1

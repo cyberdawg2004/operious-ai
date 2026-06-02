@@ -138,7 +138,7 @@ class _OkAgent(BaseAgent):
         )
         assert env.is_ok
         assert env.result is not None
-        return AgentExecutionResult(output={"echoed": env.result.output})
+        return AgentExecutionResult(output={"echoed": dict(env.result.output)})
 
 
 def _build_agent_runtime() -> AgentRuntime:

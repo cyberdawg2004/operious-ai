@@ -10,13 +10,9 @@ dependency surface produced by Phase 2.2 against drift:
    product analytics SDKs). Any of them re-appearing in
    `requirements.txt` fails CI.
 
-2. **Transitional distributions**: a small, explicitly-tracked set of
-   vendor LLM SDKs and retry libraries are kept on disk so that
-   quarantined modules under `app/_deprecated/` remain loadable. Their
-   presence is asserted exactly so it is impossible to silently drop
-   them without updating the contract — that would be a meaningful
-   change requiring deliberate review (e.g. when `_deprecated/` is
-   eventually deleted in a later phase).
+2. **Removed quarantine distributions**: direct vendor LLM SDKs and
+   retry libraries that existed solely for the deleted legacy quarantine
+   must stay out of the production lockfile.
 
 3. **Lockfile shape**: every entry must be `name==version` (PEP 440
    pinned), with one explicit Celery Redis transport extra. No floating
@@ -74,13 +70,11 @@ FORBIDDEN_DISTRIBUTIONS: frozenset[str] = frozenset(
 )
 
 
-# Transitional dependencies that are KEPT on disk so quarantined
-# modules under `app/_deprecated/` remain syntactically loadable.
-# `tests/test_transitional_vendor_isolation.py` enforces that no
-# constitutional substrate imports them. Removing one of these from
-# `requirements.txt` is allowed only when its dependents inside
-# `app/_deprecated/` are deleted in the same change.
-TRANSITIONAL_DISTRIBUTIONS: frozenset[str] = frozenset(
+# Direct dependencies that existed only to keep the deleted legacy
+# quarantine importable. They are still forbidden as imports by
+# `tests/test_transitional_vendor_isolation.py`; they must also stay
+# absent from the lockfile now that the quarantine is gone.
+REMOVED_QUARANTINE_DISTRIBUTIONS: frozenset[str] = frozenset(
     {
         "openai",
         "anthropic",
@@ -145,17 +139,16 @@ def test_forbidden_distributions_are_not_pinned() -> None:
     )
 
 
-# ─── Invariant 2: transitional distributions accounted-for ──────────
+# ─── Invariant 2: removed quarantine distributions absent ───────────
 
 
-def test_transitional_distributions_are_pinned_exactly() -> None:
+def test_removed_quarantine_distributions_are_not_pinned() -> None:
     pinned = _distribution_names()
-    transitional = {dist.lower() for dist in TRANSITIONAL_DISTRIBUTIONS}
-    missing = sorted(transitional - pinned)
-    assert not missing, (
-        "transitional distributions are missing from requirements.txt; "
-        "remove them from TRANSITIONAL_DISTRIBUTIONS in this test file "
-        "in the same change: " + ", ".join(missing)
+    removed = {dist.lower() for dist in REMOVED_QUARANTINE_DISTRIBUTIONS}
+    intruders = sorted(pinned & removed)
+    assert not intruders, (
+        "deleted-quarantine distributions are still pinned in "
+        "requirements.txt: " + ", ".join(intruders)
     )
 
 

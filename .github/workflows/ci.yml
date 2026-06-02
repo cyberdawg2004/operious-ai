@@ -58,7 +58,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r apps/backend/requirements.txt
-          pip install ruff
+          pip install ruff pip-audit cyclonedx-bom
+      - name: Generate backend SBOM
+        run: cyclonedx-py requirements apps/backend/requirements.txt --of JSON -o backend-sbom.cdx.json
+      - name: Upload backend SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-sbom
+          path: backend-sbom.cdx.json
+      - name: Dependency vulnerability scan (pip-audit)
+        run: pip-audit -r apps/backend/requirements.txt --no-deps --disable-pip --format json --output pip-audit-report.json
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
       - name: Lint (ruff)
         working-directory: apps/backend
         run: ruff check app tests scripts
@@ -123,6 +138,11 @@ jobs:
               )
           connection.close()
           PY
+      - name: DNS rebinding determinism proof
+        run: |
+          for i in 1 2 3; do
+            python -m pytest -q apps/backend/tests/test_ssrf_dns_rebinding.py
+          done
       - name: Tests (incl. Postgres-backed RLS + integration)
         run: python -m pytest -q
 

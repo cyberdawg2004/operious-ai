@@ -12,12 +12,12 @@ Services own transactions and orchestrate one or more repositories;
 this asymmetry is what keeps multi-step persistence work composable
 without dragging in a unit-of-work framework.
 
-Phase 2.1 quarantine note:
+Phase 2.1 cleanup note:
 
 * `DocumentRepository`, `DocumentChunkRepository`,
   `ChunkEmbeddingRepository`, `WorkflowExecutionRepository`, and
-  `TaskExecutionRepository` were quarantined under
-  `app._deprecated.repositories.*`. Only `BaseRepository` (the abstract
-  query base) and `SystemHealthRepository` (used by liveness probes)
-  remain in the constitutional surface.
+  `TaskExecutionRepository` were removed with the legacy quarantine.
+  Only `BaseRepository` (the abstract query base) and
+  `SystemHealthRepository` (used by liveness probes) remain in the
+  constitutional surface.
 """

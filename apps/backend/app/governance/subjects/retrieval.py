@@ -20,9 +20,8 @@ Why a summary, not a runtime candidate object:
   coupling is concentrated at one composition boundary, never inside
   the governance substrate.
 
-Phase 2.1 quarantine note: the prior `app/governance/subjects/
-factories.py` translation layer was quarantined under
-`app/_deprecated/governance_bridge/` together with the legacy
+Phase 2.1 cleanup note: the prior `app/governance/subjects/
+factories.py` translation layer was removed together with the legacy
 RAG / assembly pipeline. Subjects are now built directly by the
 composition root that invokes governance.
 """

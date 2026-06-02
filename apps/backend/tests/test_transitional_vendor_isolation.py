@@ -1,10 +1,8 @@
-"""Phase 2.2 — Transitional vendor SDK import-graph isolation.
+"""Phase 2.2 — Vendor SDK import-graph isolation.
 
-`requirements.txt` keeps four packages on disk only as "transitional"
-pins: `openai`, `anthropic`, `tenacity`, `backoff`. They exist solely
-so that quarantined modules under `app/_deprecated/` remain
-syntactically loadable as forensic dead code. The constitutional
-runtime must NEVER reach them.
+The constitutional runtime must never import direct vendor LLM SDKs or
+general retry libraries. Provider calls are expressed through the
+platform's typed HTTP adapters and internal retry policy objects.
 
 This test file enforces that contract at the AST level. It walks every
 `.py` module under the constitutional substrates and the surrounding
@@ -19,12 +17,9 @@ even though those packages are no longer pinned in `requirements.txt`,
 catching an attempted `import langchain` here gives a clearer
 architectural error than a `ModuleNotFoundError` at runtime.
 
-`app/_deprecated/**` is intentionally excluded — that subtree is the
-designated containment zone for any code that still touches these
-SDKs. The asymmetric quarantine invariants in
-`tests/test_legacy_module_quarantine.py` already guarantee that no
-constitutional code can reach `_deprecated/` to transitively pull a
-vendor SDK in.
+The deleted legacy quarantine used to be the only allowed containment
+zone for these imports. With that tree gone, any reintroduction is a
+hard architectural violation.
 """
 
 from __future__ import annotations
@@ -40,13 +35,13 @@ APP_ROOT = REPO_BACKEND_ROOT / "app"
 # Top-level distribution names that must NEVER be imported by
 # constitutional or infrastructure code. The set is the union of:
 #
-# * the four transitional pins (kept on disk solely for `_deprecated/`)
+# * the direct vendor SDK / retry residues removed with the quarantine
 # * a defensive subset of the forbidden-distributions list, mapped to
 #   their *import* names (PEP 503 distribution name → top-level Python
 #   package name; the two are usually but not always identical).
 _FORBIDDEN_TOPLEVEL_IMPORTS: frozenset[str] = frozenset(
     {
-        # Transitional vendor SDKs.
+        # Deleted-quarantine vendor SDK / retry residues.
         "openai",
         "anthropic",
         "tenacity",
@@ -80,8 +75,7 @@ _FORBIDDEN_TOPLEVEL_IMPORTS: frozenset[str] = frozenset(
 
 
 # Subtrees of `apps/backend/app/` whose import graph must satisfy the
-# isolation invariant. `_deprecated` is intentionally OUT — it's the
-# containment zone — and `__pycache__` is OUT for obvious reasons.
+# isolation invariant. `__pycache__` is OUT for obvious reasons.
 _GUARDED_PACKAGES: tuple[str, ...] = (
     "agents",
     "api",

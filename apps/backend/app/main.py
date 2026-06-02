@@ -331,12 +331,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         logger.info("lifespan_shutdown_begin")
         # The pre-Phase-2.1 orchestration / AI-provider lifespan hooks were
-        # removed when those substrates were quarantined into
-        # `app/_deprecated/`. The constitutional substrates are pure
-        # value-object layers and have no I/O resources to dispose of. The
-        # only live infra we still own is the SQLAlchemy engine, Redis
-        # connection, and shared outbound HTTP client (all lazy / no-op
-        # when not configured).
+        # removed with the legacy quarantine. The constitutional substrates
+        # are pure value-object layers and have no I/O resources to dispose
+        # of. The only live infra we still own is the SQLAlchemy engine,
+        # Redis connection, and shared outbound HTTP client (all lazy /
+        # no-op when not configured).
         quota_runtime = getattr(app.state, "quota_runtime", None)
         if isinstance(quota_runtime, TenantQuotaRuntime):
             await quota_runtime.close()

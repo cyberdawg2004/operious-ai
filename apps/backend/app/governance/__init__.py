@@ -39,13 +39,12 @@ Architectural invariants:
   `app.observability.{audit,context,governance_logging,governance_metrics}`
   but never imports any sibling substrate.
 
-Phase 2.1 quarantine note:
+Phase 2.1 cleanup note:
 
 * `app/governance/guardrails/` (the legacy `GovernedAssemblyRuntime`
   adapter that orchestrated the legacy `ContextAssemblyService`) and
-  `app/governance/subjects/factories.py` (legacy RAG → governance
-  subject translation) were moved under
-  `app/_deprecated/governance_bridge/`. They violated the "governance
-  evaluates, never orchestrates" rule and coupled the substrate to
-  the now-quarantined RAG / assembly pipeline.
+  `app/governance/subjects/factories.py` (legacy RAG -> governance
+  subject translation) were removed. They violated the "governance
+  evaluates, never orchestrates" rule and coupled the substrate to the
+  legacy RAG / assembly pipeline.
 """

@@ -25,13 +25,13 @@ Modules every constitutional substrate is allowed to import:
                            thresholds, structured spans, and DLQ read
                            authority.
 
-Phase 2.1 quarantine note:
+Phase 2.1 cleanup note:
 
-* The per-domain emitters that belong to the legacy stack were
-  quarantined under `app._deprecated.observability.*`:
-  `ai_*`, `context_assembly_*`, `embedding_*`, `orchestration_*`,
-  `rag_retrieval_*`, `retrieval_*`. They are not imported here and
-  must never be imported from constitutional code.
+* The per-domain emitters that belonged to the legacy stack
+  (`ai_*`, `context_assembly_*`, `embedding_*`, `orchestration_*`,
+  `rag_retrieval_*`, `retrieval_*`) were removed from the active
+  application surface. They are not imported here and must never be
+  imported from constitutional code.
 """
 
 from app.observability.enums import (

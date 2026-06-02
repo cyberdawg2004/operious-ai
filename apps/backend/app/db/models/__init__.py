@@ -13,13 +13,12 @@ explicit rather than relying on filesystem scanning.
 Phase 2.1 quarantine + PR-A1 cleanup:
 
 * `Document`, `DocumentChunk`, `ChunkEmbedding`, `WorkflowExecution`
-  and `TaskExecution` were quarantined under
-  `app._deprecated.db.models.*` (Phase 2.1) and then the underlying
-  tables were dropped in migration ``0004_drop_legacy_workflow_memory_tables``
-  (PR-A1). They are intentionally NOT imported here and no longer
-  register on `Base.metadata`. Their ORM modules were excised from
-  `app/_deprecated/db/models/` in the same PR; only the migration
-  history retains a forensic record of their existence.
+  and `TaskExecution` were removed from the active model manifest
+  (Phase 2.1) and then the underlying tables were dropped in migration
+  ``0004_drop_legacy_workflow_memory_tables`` (PR-A1). They are
+  intentionally NOT imported here and no longer register on
+  `Base.metadata`; only the migration history retains a forensic
+  record of their existence.
 """
 
 # Why per-substrate ORM modules are NOT imported here
