@@ -16,6 +16,8 @@ from app.dependencies.authority import (
     TENANT_GOVERNANCE_READ_CAPABILITY,
     TENANT_OBSERVABILITY_READ_CAPABILITY,
     TENANT_OPERATIONS_READ_CAPABILITY,
+    TENANT_PRIVACY_ADMIN_CAPABILITY,
+    TENANT_PRIVACY_APPROVE_CAPABILITY,
     TENANT_SUPERVISOR_READ_CAPABILITY,
     TENANT_TRAINING_WRITE_CAPABILITY,
     require_tenant_actions_approve,
@@ -24,6 +26,8 @@ from app.dependencies.authority import (
     require_tenant_governance_read,
     require_tenant_observability_read,
     require_tenant_operations_read,
+    require_tenant_privacy_admin,
+    require_tenant_privacy_approve,
     require_tenant_supervisor_read,
     require_tenant_training_write,
 )
@@ -47,6 +51,8 @@ def test_capability_constant_values() -> None:
     assert TENANT_COGNITION_READ_CAPABILITY == "tenant.cognition.read"
     assert TENANT_ACTIONS_APPROVE_CAPABILITY == "tenant.actions.approve"
     assert TENANT_TRAINING_WRITE_CAPABILITY == "tenant.training.write"
+    assert TENANT_PRIVACY_ADMIN_CAPABILITY == "tenant.privacy.admin"
+    assert TENANT_PRIVACY_APPROVE_CAPABILITY == "tenant.privacy.approve"
 
 
 def test_observability_dep_passes_with_capability() -> None:
@@ -84,6 +90,8 @@ def test_audit_export_dep_fails_without_capability() -> None:
         (TENANT_COGNITION_READ_CAPABILITY, require_tenant_cognition_read),
         (TENANT_ACTIONS_APPROVE_CAPABILITY, require_tenant_actions_approve),
         (TENANT_TRAINING_WRITE_CAPABILITY, require_tenant_training_write),
+        (TENANT_PRIVACY_ADMIN_CAPABILITY, require_tenant_privacy_admin),
+        (TENANT_PRIVACY_APPROVE_CAPABILITY, require_tenant_privacy_approve),
     ],
 )
 def test_1aext_capability_deps(capability: str, dependency) -> None:  # noqa: ANN001
@@ -122,6 +130,8 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
     assert "tenant.cognition.read" not in operator_caps
     assert "tenant.actions.approve" not in operator_caps
     assert "tenant.training.write" not in operator_caps
+    assert "tenant.privacy.admin" not in operator_caps
+    assert "tenant.privacy.approve" not in operator_caps
 
 
 @pytest.mark.parametrize(
@@ -133,6 +143,8 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
         ("TenantCognitionViewer", "tenant.cognition.read"),
         ("TenantActionApprover", "tenant.actions.approve"),
         ("TenantTrainingWriter", "tenant.training.write"),
+        ("TenantPrivacyAdmin", "tenant.privacy.admin"),
+        ("TenantPrivacyApprover", "tenant.privacy.approve"),
     ],
 )
 def test_role_map_1aext_roles(role: str, capability: str) -> None:
@@ -156,6 +168,8 @@ def test_permission_map_audit() -> None:
         ("read:tenant_cognition", "tenant.cognition.read"),
         ("approve:tenant_actions", "tenant.actions.approve"),
         ("write:tenant_training", "tenant.training.write"),
+        ("admin:tenant_privacy", "tenant.privacy.admin"),
+        ("approve:tenant_privacy", "tenant.privacy.approve"),
     ],
 )
 def test_permission_map_1aext_permissions(

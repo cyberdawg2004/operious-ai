@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum
 from typing import Any, Final, cast
 
 from cryptography.exceptions import InvalidTag
@@ -65,6 +66,29 @@ class LegalHoldBlockedError(DataProtectionError):
     """Raised when legal hold blocks purge or DSAR erasure."""
 
 
+class LegalHoldNotFoundError(DataProtectionError):
+    """Raised when a legal hold is absent or already inactive."""
+
+
+class ErasureRequestNotFoundError(DataProtectionError):
+    """Raised when an erasure request is absent or tenant-invisible."""
+
+
+class ErasureRequestLifecycleError(DataProtectionError):
+    """Raised when an erasure request transition is not legal."""
+
+
+class ErasureRequestSeparationError(DataProtectionError):
+    """Raised when one principal attempts propose and approve duties."""
+
+
+class ErasureRequestStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXECUTED = "executed"
+
+
 @dataclass(frozen=True, slots=True)
 class _DataKey:
     data_key_id: uuid.UUID
@@ -72,6 +96,34 @@ class _DataKey:
     scope: str
     scope_id: str
     key: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class DataProtectionErasureRequestRecord:
+    request_id: uuid.UUID
+    tenant_id: str
+    subject_id: str
+    reason: str
+    status: ErasureRequestStatus
+    proposed_by: str
+    proposed_at: datetime
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    executed_at: datetime | None = None
+    blocked_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DataProtectionLegalHoldRecord:
+    hold_id: uuid.UUID
+    tenant_id: str
+    scope: str
+    scope_id: str
+    reason: str
+    created_by: str
+    created_at: datetime
+    lifted_at: datetime | None = None
+    lifted_by: str | None = None
 
 
 class MasterKeyRing:
@@ -303,7 +355,7 @@ class DataProtectionService:
     ) -> uuid.UUID:
         normalized_scope_id = _scope_id(scope, scope_id)
         hold_id = uuid.uuid4()  # EPHEMERAL: random legal-hold record id
-        await self._session.merge(_tenant_row()(tenant_id=tenant_id))
+        await self._ensure_tenant(tenant_id)
         self._session.add(
             DataProtectionLegalHoldRow(
                 hold_id=hold_id,
@@ -317,6 +369,129 @@ class DataProtectionService:
         await self._session.flush()
         return hold_id
 
+    async def list_legal_holds(
+        self,
+        *,
+        tenant_id: str,
+    ) -> tuple[DataProtectionLegalHoldRecord, ...]:
+        stmt = (
+            select(DataProtectionLegalHoldRow)
+            .where(
+                DataProtectionLegalHoldRow.tenant_id == tenant_id,
+                DataProtectionLegalHoldRow.lifted_at.is_(None),
+            )
+            .order_by(
+                DataProtectionLegalHoldRow.created_at.desc(),
+                DataProtectionLegalHoldRow.hold_id.desc(),
+            )
+        )
+        rows = (await self._session.execute(stmt)).scalars()
+        return tuple(_legal_hold_record(row) for row in rows)
+
+    async def get_legal_hold(
+        self,
+        *,
+        tenant_id: str,
+        hold_id: uuid.UUID | str,
+    ) -> DataProtectionLegalHoldRecord | None:
+        stmt = select(DataProtectionLegalHoldRow).where(
+            DataProtectionLegalHoldRow.hold_id == _uuid(hold_id, field="hold_id"),
+            DataProtectionLegalHoldRow.tenant_id == tenant_id,
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        return None if row is None else _legal_hold_record(row)
+
+    async def release_legal_hold(
+        self,
+        *,
+        tenant_id: str,
+        hold_id: uuid.UUID | str,
+        lifted_by: str,
+    ) -> DataProtectionLegalHoldRecord:
+        normalized_hold_id = _uuid(hold_id, field="hold_id")
+        stmt = select(DataProtectionLegalHoldRow).where(
+            DataProtectionLegalHoldRow.hold_id == normalized_hold_id,
+            DataProtectionLegalHoldRow.tenant_id == tenant_id,
+            DataProtectionLegalHoldRow.lifted_at.is_(None),
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            raise LegalHoldNotFoundError("active legal hold not found")
+        row.lifted_at = datetime.now(timezone.utc)
+        row.lifted_by = _nonempty(lifted_by, field="lifted_by")
+        await self._session.flush()
+        return _legal_hold_record(row)
+
+    async def propose_erasure(
+        self,
+        *,
+        tenant_id: str,
+        subject_id: str,
+        reason: str,
+        proposed_by: str,
+    ) -> DataProtectionErasureRequestRecord:
+        request_id = uuid.uuid4()  # EPHEMERAL: random erasure-request record id
+        now = datetime.now(timezone.utc)
+        await self._ensure_tenant(tenant_id)
+        row = DataProtectionErasureRequestRow(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            subject_id=_nonempty(subject_id, field="subject_id"),
+            reason=_nonempty(reason, field="reason"),
+            status=ErasureRequestStatus.PROPOSED.value,
+            proposed_by=_nonempty(proposed_by, field="proposed_by"),
+            proposed_at=now,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return _erasure_request_record(row)
+
+    async def approve_erasure(
+        self,
+        *,
+        tenant_id: str,
+        request_id: uuid.UUID | str,
+        approved_by: str,
+    ) -> DataProtectionErasureRequestRecord:
+        approver = _nonempty(approved_by, field="approved_by")
+        row = await self._erasure_request_row(
+            tenant_id=tenant_id,
+            request_id=_uuid(request_id, field="request_id"),
+        )
+        if row is None:
+            raise ErasureRequestNotFoundError("erasure request not found")
+        status = ErasureRequestStatus(row.status)
+        if status is not ErasureRequestStatus.PROPOSED:
+            raise ErasureRequestLifecycleError(
+                f"cannot approve a {row.status} erasure request"
+            )
+        if approver == row.proposed_by:
+            raise ErasureRequestSeparationError(
+                "erasure approver must differ from proposer"
+            )
+        if await self.has_active_legal_hold(
+            tenant_id=tenant_id,
+            subject_id=row.subject_id,
+        ):
+            row.status = ErasureRequestStatus.REJECTED.value
+            row.blocked_reason = "active legal hold blocks DSAR erasure"
+            await self._session.flush()
+            raise LegalHoldBlockedError("active legal hold blocks DSAR erasure")
+        now = datetime.now(timezone.utc)
+        row.status = ErasureRequestStatus.APPROVED.value
+        row.approved_by = approver
+        row.approved_at = now
+        await self._session.flush()
+        await self._delete_subject_key(
+            tenant_id=tenant_id,
+            subject_id=row.subject_id,
+        )
+        row.status = ErasureRequestStatus.EXECUTED.value
+        row.executed_at = now
+        row.blocked_reason = None
+        await self._session.flush()
+        return _erasure_request_record(row)
+
     async def erase_subject_key(
         self,
         *,
@@ -324,46 +499,39 @@ class DataProtectionService:
         subject_id: str,
         requested_by: str,
     ) -> uuid.UUID:
-        request_id = uuid.uuid4()  # EPHEMERAL: random erasure-request record id
-        now = datetime.now(timezone.utc)
-        blocked = await self.has_active_legal_hold(
-            tenant_id=tenant_id,
-            subject_id=subject_id,
+        del tenant_id, subject_id, requested_by
+        raise DataProtectionError(
+            "subject erasure requires dual-control propose/approve"
         )
-        if blocked:
-            self._session.add(
-                DataProtectionErasureRequestRow(
-                    request_id=request_id,
-                    tenant_id=tenant_id,
-                    subject_id=subject_id,
-                    status="blocked",
-                    requested_by=requested_by,
-                    requested_at=now,
-                    blocked_reason="active legal hold blocks DSAR erasure",
-                )
-            )
-            await self._session.flush()
-            raise LegalHoldBlockedError("active legal hold blocks DSAR erasure")
-        await self._session.execute(
-            delete(DataProtectionDataKeyRow).where(
+
+    async def _delete_subject_key(
+        self,
+        *,
+        tenant_id: str,
+        subject_id: str,
+    ) -> int:
+        result = await self._session.execute(
+            delete(DataProtectionDataKeyRow)
+            .where(
                 DataProtectionDataKeyRow.tenant_id == tenant_id,
                 DataProtectionDataKeyRow.scope == "subject",
                 DataProtectionDataKeyRow.scope_id == subject_id,
             )
+            .returning(DataProtectionDataKeyRow.data_key_id)
         )
-        self._session.add(
-            DataProtectionErasureRequestRow(
-                request_id=request_id,
-                tenant_id=tenant_id,
-                subject_id=subject_id,
-                status="completed",
-                requested_by=requested_by,
-                requested_at=now,
-                completed_at=now,
-            )
+        return sum(1 for _ in result.scalars())
+
+    async def _erasure_request_row(
+        self,
+        *,
+        tenant_id: str,
+        request_id: uuid.UUID,
+    ) -> DataProtectionErasureRequestRow | None:
+        stmt = select(DataProtectionErasureRequestRow).where(
+            DataProtectionErasureRequestRow.request_id == request_id,
+            DataProtectionErasureRequestRow.tenant_id == tenant_id,
         )
-        await self._session.flush()
-        return request_id
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def erase_tenant_keys(self, *, tenant_id: str) -> int:
         if await self.has_active_legal_hold(tenant_id=tenant_id):
@@ -437,7 +605,7 @@ class DataProtectionService:
     ) -> None:
         if retention_days < 1:
             raise DataProtectionError("retention_days must be positive")
-        await self._session.merge(_tenant_row()(tenant_id=tenant_id))
+        await self._ensure_tenant(tenant_id)
         existing = await self._session.get(TenantDataRetentionPolicyRow, tenant_id)
         if existing is None:
             self._session.add(
@@ -505,7 +673,7 @@ class DataProtectionService:
         scope: str,
         scope_id: str,
     ) -> DataProtectionDataKeyRow:
-        await self._session.merge(_tenant_row()(tenant_id=tenant_id))
+        await self._ensure_tenant(tenant_id)
         data_key_id = uuid.uuid4()  # EPHEMERAL: random per-scope data-key id
         data_key = os.urandom(_DATA_KEY_BYTES)
         master_version, encrypted_key = self._ring.wrap_key(
@@ -537,6 +705,10 @@ class DataProtectionService:
                 raise
             return existing
         return row
+
+    async def _ensure_tenant(self, tenant_id: str) -> None:
+        await self._session.merge(_tenant_row()(tenant_id=tenant_id))
+        await self._session.flush()
 
     async def _encrypt_json_mapping(
         self,
@@ -673,6 +845,54 @@ def _scope_id(scope: str, value: str | None) -> str:
     return normalized
 
 
+def _nonempty(value: str, *, field: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise DataProtectionError(f"{field} must be non-empty")
+    return normalized
+
+
+def _uuid(value: uuid.UUID | str, *, field: str) -> uuid.UUID:
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except ValueError as exc:
+        raise DataProtectionError(f"{field} must be a valid UUID") from exc
+
+
+def _legal_hold_record(row: DataProtectionLegalHoldRow) -> DataProtectionLegalHoldRecord:
+    return DataProtectionLegalHoldRecord(
+        hold_id=row.hold_id,
+        tenant_id=row.tenant_id,
+        scope=row.scope,
+        scope_id=row.scope_id,
+        reason=row.reason,
+        created_by=row.created_by,
+        created_at=row.created_at,
+        lifted_at=row.lifted_at,
+        lifted_by=row.lifted_by,
+    )
+
+
+def _erasure_request_record(
+    row: DataProtectionErasureRequestRow,
+) -> DataProtectionErasureRequestRecord:
+    return DataProtectionErasureRequestRecord(
+        request_id=row.request_id,
+        tenant_id=row.tenant_id,
+        subject_id=row.subject_id,
+        reason=row.reason,
+        status=ErasureRequestStatus(row.status),
+        proposed_by=row.proposed_by,
+        proposed_at=row.proposed_at,
+        approved_by=row.approved_by,
+        approved_at=row.approved_at,
+        executed_at=row.executed_at,
+        blocked_reason=row.blocked_reason,
+    )
+
+
 def _payload_aad(*, data_key: _DataKey, field: str) -> bytes:
     return (
         "opdp.payload.v1|"
@@ -765,8 +985,15 @@ def _tenant_row() -> Any:
 
 
 __all__ = [
+    "DataProtectionErasureRequestRecord",
     "DataProtectionError",
+    "DataProtectionLegalHoldRecord",
     "DataProtectionService",
+    "ErasureRequestLifecycleError",
+    "ErasureRequestNotFoundError",
+    "ErasureRequestSeparationError",
+    "ErasureRequestStatus",
     "LegalHoldBlockedError",
+    "LegalHoldNotFoundError",
     "MasterKeyRing",
 ]

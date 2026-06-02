@@ -150,11 +150,16 @@ class DataProtectionErasureRequestRow(Base):
     )
     subject_id: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
     status: Mapped[str] = mapped_column(String(_SCOPE_WIDTH), nullable=False, index=True)
-    requested_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
-    requested_at: Mapped[datetime] = mapped_column(
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    proposed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    completed_at: Mapped[datetime | None] = mapped_column(
+    approved_by: Mapped[str | None] = mapped_column(String(_HANDLE_WIDTH), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    executed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     blocked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -162,15 +167,20 @@ class DataProtectionErasureRequestRow(Base):
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="erasure_tenant_nonempty"),
         CheckConstraint("length(subject_id) > 0", name="erasure_subject_nonempty"),
+        CheckConstraint("length(reason) > 0", name="erasure_reason_nonempty"),
         CheckConstraint(
-            "status IN ('completed', 'blocked')",
+            "status IN ('proposed', 'approved', 'rejected', 'executed')",
             name="erasure_status_valid",
+        ),
+        CheckConstraint(
+            "approved_by IS NULL OR approved_by != proposed_by",
+            name="erasure_approver_distinct",
         ),
         Index(
             "ix_data_protection_erasure_requests_subject",
             "tenant_id",
             "subject_id",
-            "requested_at",
+            "proposed_at",
         ),
     )
 

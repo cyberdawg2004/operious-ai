@@ -21,6 +21,7 @@ from app.api.v1.routers.cognition import router as cognition_router
 from app.api.v1.routers.conversation import router as conversation_router
 from app.api.v1.routers.coordination import router as coordination_router
 from app.api.v1.routers.crisis import router as crisis_router
+from app.api.v1.routers.data_protection import router as data_protection_router
 from app.api.v1.routers.dispatch import router as dispatch_router
 from app.api.v1.routers.escalation import router as escalation_router
 from app.api.v1.routers.governance import router as governance_router
@@ -55,6 +56,7 @@ api_router_v1.include_router(auth_router, prefix="/auth")
 api_router_v1.include_router(governance_router, prefix="/governance")
 api_router_v1.include_router(coordination_router, prefix="/coordination")
 api_router_v1.include_router(dispatch_router, prefix="/coordination")
+api_router_v1.include_router(data_protection_router, prefix="/data-protection")
 api_router_v1.include_router(escalation_router, prefix="/escalations")
 api_router_v1.include_router(cognition_router, prefix="/cognition")
 api_router_v1.include_router(

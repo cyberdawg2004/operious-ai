@@ -27,6 +27,8 @@ from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.data_protection.crypto import (
     DataProtectionError,
     DataProtectionService,
+    ErasureRequestSeparationError,
+    ErasureRequestStatus,
     LegalHoldBlockedError,
     MasterKeyRing,
 )
@@ -312,11 +314,24 @@ async def test_dsar_data_unrecoverable_after_erasure(
     await pg_session.flush()
 
     assert await session_repo.get_event(event.event_id, expected_tenant_id=TENANT_ID)
-    await protection.erase_subject_key(
+    proposed = await protection.propose_erasure(
         tenant_id=TENANT_ID,
         subject_id=SUBJECT_ID,
-        requested_by="dpo",
+        reason="customer GDPR Article 17 request",
+        proposed_by="dpo-a",
     )
+    assert proposed.status is ErasureRequestStatus.PROPOSED
+    assert await session_repo.get_event(event.event_id, expected_tenant_id=TENANT_ID)
+
+    executed = await protection.approve_erasure(
+        tenant_id=TENANT_ID,
+        request_id=proposed.request_id,
+        approved_by="dpo-b",
+    )
+    assert executed.status is ErasureRequestStatus.EXECUTED
+    assert executed.approved_by == "dpo-b"
+    assert executed.approved_at is not None
+    assert executed.executed_at is not None
     pg_session.expire_all()
 
     row_still_exists = (
@@ -422,22 +437,30 @@ async def test_legal_hold_blocks_dsar(
         reason="litigation",
         created_by="legal",
     )
+    proposed = await protection.propose_erasure(
+        tenant_id=TENANT_ID,
+        subject_id=SUBJECT_ID,
+        reason="customer GDPR Article 17 request",
+        proposed_by="dpo-a",
+    )
     await pg_session.flush()
 
     with pytest.raises(LegalHoldBlockedError):
-        await protection.erase_subject_key(
+        await protection.approve_erasure(
             tenant_id=TENANT_ID,
-            subject_id=SUBJECT_ID,
-            requested_by="dpo",
+            request_id=proposed.request_id,
+            approved_by="dpo-b",
         )
     blocked = (
         await pg_session.execute(
             select(DataProtectionErasureRequestRow).where(
-                DataProtectionErasureRequestRow.subject_id == SUBJECT_ID
+                DataProtectionErasureRequestRow.request_id == proposed.request_id
             )
         )
     ).scalar_one()
-    assert blocked.status == "blocked"
+    assert blocked.status == "rejected"
+    assert blocked.approved_by is None
+    assert blocked.blocked_reason == "active legal hold blocks DSAR erasure"
     key_row = (
         await pg_session.execute(
             select(DataProtectionDataKeyRow).where(
@@ -478,11 +501,17 @@ async def test_legal_hold_and_erasure_ledger_restrict_tenant_delete(
         reason="litigation",
         created_by="legal",
     )
+    proposed = await protection.propose_erasure(
+        tenant_id=TENANT_ID,
+        subject_id=SUBJECT_ID,
+        reason="customer GDPR Article 17 request",
+        proposed_by="dpo-a",
+    )
     with pytest.raises(LegalHoldBlockedError):
-        await protection.erase_subject_key(
+        await protection.approve_erasure(
             tenant_id=TENANT_ID,
-            subject_id=SUBJECT_ID,
-            requested_by="dpo",
+            request_id=proposed.request_id,
+            approved_by="dpo-b",
         )
     await pg_session.flush()
 
@@ -522,6 +551,92 @@ async def test_legal_hold_and_erasure_ledger_restrict_tenant_delete(
     retention = await pg_session.get(TenantDataRetentionPolicyRow, TENANT_ID)
     assert data_key is None
     assert retention is None
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_erasure_dual_control_rejects_same_principal_at_app_and_db(
+    pg_session: AsyncSession,
+) -> None:
+    protection = _service(pg_session)
+    proposed = await protection.propose_erasure(
+        tenant_id=TENANT_ID,
+        subject_id=SUBJECT_ID,
+        reason="customer GDPR Article 17 request",
+        proposed_by="dpo-a",
+    )
+
+    with pytest.raises(ErasureRequestSeparationError):
+        await protection.approve_erasure(
+            tenant_id=TENANT_ID,
+            request_id=proposed.request_id,
+            approved_by="dpo-a",
+        )
+
+    with pytest.raises(IntegrityError):
+        async with pg_session.begin_nested():
+            pg_session.add(
+                DataProtectionErasureRequestRow(
+                    request_id=uuid.uuid4(),
+                    tenant_id=TENANT_ID,
+                    subject_id="customer-anker-002",
+                    status="approved",
+                    reason="direct database bypass attempt",
+                    proposed_by="dpo-a",
+                    approved_by="dpo-a",
+                    approved_at=NOW,
+                )
+            )
+            await pg_session.flush()
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_released_legal_hold_stops_blocking_dsar_erasure(
+    pg_session: AsyncSession,
+) -> None:
+    protection = _service(pg_session)
+    await protection.encrypt_text(
+        "erasable customer note",
+        tenant_id=TENANT_ID,
+        subject_id=SUBJECT_ID,
+        field="test.subject_note",
+    )
+    hold_id = await protection.create_legal_hold(
+        tenant_id=TENANT_ID,
+        scope="subject",
+        scope_id=SUBJECT_ID,
+        reason="litigation",
+        created_by="legal",
+    )
+    assert len(await protection.list_legal_holds(tenant_id=TENANT_ID)) == 1
+
+    released = await protection.release_legal_hold(
+        tenant_id=TENANT_ID,
+        hold_id=hold_id,
+        lifted_by="legal-lead",
+    )
+    assert released.lifted_at is not None
+    assert released.lifted_by == "legal-lead"
+    assert await protection.list_legal_holds(tenant_id=TENANT_ID) == ()
+
+    proposed = await protection.propose_erasure(
+        tenant_id=TENANT_ID,
+        subject_id=SUBJECT_ID,
+        reason="customer GDPR Article 17 request",
+        proposed_by="dpo-a",
+    )
+    executed = await protection.approve_erasure(
+        tenant_id=TENANT_ID,
+        request_id=proposed.request_id,
+        approved_by="dpo-b",
+    )
+
+    assert executed.status is ErasureRequestStatus.EXECUTED
+    assert not await protection.has_active_legal_hold(
+        tenant_id=TENANT_ID,
+        subject_id=SUBJECT_ID,
+    )
 
 
 @requires_postgres

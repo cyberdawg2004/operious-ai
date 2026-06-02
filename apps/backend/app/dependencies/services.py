@@ -81,7 +81,7 @@ from app.cognition.sop_approval_event_publisher import (
 from app.core.config import get_settings
 from app.core.admission import admission_thresholds_from_settings
 from app.core.redis import get_redis_client
-from app.data_protection.crypto import DataProtectionService
+from app.data_protection.crypto import DataProtectionError, DataProtectionService
 from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import (
     ExecutionOutboxClaimId,
@@ -241,6 +241,26 @@ def _data_protection_service(
     ):
         return None
     return DataProtectionService.from_settings(session, settings)
+
+
+def get_data_protection_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> DataProtectionService:
+    """Return the request-scoped data-protection service or fail closed."""
+
+    try:
+        service = _data_protection_service(session)
+    except DataProtectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "data_protection_not_configured"},
+        ) from exc
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "data_protection_not_configured"},
+        )
+    return service
 
 
 # ─── Phase 3.2 substrate repository factories ───────────────────────────
@@ -1212,6 +1232,7 @@ __all__ = [
     "get_cognition_service",
     "get_conversation_service",
     "get_coordination_repository",
+    "get_data_protection_service",
     "get_escalation_service",
     "get_governance_repository",
     "get_health_service",

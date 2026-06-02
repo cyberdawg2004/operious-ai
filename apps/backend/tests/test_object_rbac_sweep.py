@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
+import uuid
 from typing import Any
 
 import pytest
@@ -23,19 +24,27 @@ from app.dependencies.authority import (
     TENANT_KNOWLEDGE_WRITE_CAPABILITY,
     TENANT_OBSERVABILITY_READ_CAPABILITY,
     TENANT_OPERATIONS_READ_CAPABILITY,
+    TENANT_PRIVACY_ADMIN_CAPABILITY,
+    TENANT_PRIVACY_APPROVE_CAPABILITY,
     TENANT_SUPERVISOR_READ_CAPABILITY,
     TENANT_TRAINING_WRITE_CAPABILITY,
 )
 from app.dependencies.services import (
     get_action_approval_service,
     get_cognition_service,
+    get_data_protection_service,
     get_governance_repository,
     get_operational_event_service,
     get_quarantine_service,
     get_supervisor_inbox_service,
     get_trainer_recommendation_service,
 )
+from app.dependencies.database import get_db_session
 from app.main import create_app
+from app.data_protection.crypto import (
+    DataProtectionErasureRequestRecord,
+    ErasureRequestStatus,
+)
 from app.services.quarantine_service import SemanticQuarantineRecord
 from app.trainer.records import TrainingRecommendationRecord
 
@@ -54,6 +63,7 @@ _SWEEP_ROUTER_MODULES = {
     "app.api.v1.routers.cognition",
     "app.api.v1.routers.coordination",
     "app.api.v1.routers.crisis",
+    "app.api.v1.routers.data_protection",
     "app.api.v1.routers.escalation",
     "app.api.v1.routers.governance",
     "app.api.v1.routers.operational_events",
@@ -76,6 +86,8 @@ _CAPABILITY_DEP_NAMES = {
     "require_tenant_knowledge_write",
     "require_tenant_observability_read",
     "require_tenant_operations_read",
+    "require_tenant_privacy_admin",
+    "require_tenant_privacy_approve",
     "require_tenant_supervisor_read",
     "require_tenant_training_write",
 }
@@ -150,6 +162,14 @@ def test_every_tenant_scoped_route_has_object_rbac_gate() -> None:
             "training",
             id="tenant.training.write",
         ),
+        pytest.param(
+            "privacy_admin",
+            id="tenant.privacy.admin",
+        ),
+        pytest.param(
+            "privacy_approve",
+            id="tenant.privacy.approve",
+        ),
     ],
 )
 def test_capability_gate_denies_without_and_allows_with(case: str) -> None:
@@ -185,6 +205,8 @@ def test_operator_bundle_excludes_separation_of_duties_capabilities() -> None:
     assert TENANT_COGNITION_READ_CAPABILITY not in operator_caps
     assert TENANT_ACTIONS_APPROVE_CAPABILITY not in operator_caps
     assert TENANT_TRAINING_WRITE_CAPABILITY not in operator_caps
+    assert TENANT_PRIVACY_ADMIN_CAPABILITY not in operator_caps
+    assert TENANT_PRIVACY_APPROVE_CAPABILITY not in operator_caps
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +216,15 @@ class _CapabilityCase:
     path: str
     overrides: Callable[[Any], None]
     json: dict[str, Any] | None = None
+
+
+def _install_fake_data_protection(app: Any) -> None:
+    app.dependency_overrides.update(
+        {
+            get_data_protection_service: lambda: _FakeDataProtectionService(),
+            get_db_session: _fake_db_session,
+        }
+    )
 
 
 _CAPABILITY_CASES: dict[str, _CapabilityCase] = {
@@ -263,6 +294,21 @@ _CAPABILITY_CASES: dict[str, _CapabilityCase] = {
         overrides=lambda app: app.dependency_overrides.update(
             {get_trainer_recommendation_service: lambda: _FakeTrainerService()}
         ),
+    ),
+    "privacy_admin": _CapabilityCase(
+        capability=TENANT_PRIVACY_ADMIN_CAPABILITY,
+        method="GET",
+        path="/api/v1/data-protection/legal-holds",
+        overrides=_install_fake_data_protection,
+    ),
+    "privacy_approve": _CapabilityCase(
+        capability=TENANT_PRIVACY_APPROVE_CAPABILITY,
+        method="POST",
+        path=(
+            "/api/v1/data-protection/erasure-requests/"
+            "00000000-0000-0000-0000-000000000101/approve"
+        ),
+        overrides=_install_fake_data_protection,
     ),
 }
 
@@ -418,6 +464,34 @@ class _FakeTrainerService:
             status="acknowledged",
             created_at=_NOW,
         )
+
+
+class _FakeDataProtectionService:
+    async def list_legal_holds(self, **_: Any) -> tuple[Any, ...]:
+        return ()
+
+    async def approve_erasure(self, **_: Any) -> DataProtectionErasureRequestRecord:
+        return DataProtectionErasureRequestRecord(
+            request_id=uuid.UUID("00000000-0000-0000-0000-000000000101"),
+            tenant_id=_TENANT_ID,
+            subject_id="subject-1",
+            reason="test approval",
+            status=ErasureRequestStatus.EXECUTED,
+            proposed_by="principal-proposer",
+            proposed_at=_NOW,
+            approved_by="principal-test",
+            approved_at=_NOW,
+            executed_at=_NOW,
+        )
+
+
+class _FakeDBSession:
+    async def commit(self) -> None:
+        return None
+
+
+async def _fake_db_session() -> AsyncIterator[_FakeDBSession]:
+    yield _FakeDBSession()
 
 
 def _action_approval_record(*, status: str) -> ActionApprovalRecord:

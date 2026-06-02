@@ -108,6 +108,8 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "read:tenant_cognition": "tenant.cognition.read",
     "approve:tenant_actions": "tenant.actions.approve",
     "write:tenant_training": "tenant.training.write",
+    "admin:tenant_privacy": "tenant.privacy.admin",
+    "approve:tenant_privacy": "tenant.privacy.approve",
 }
 
 ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
@@ -136,6 +138,8 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantCognitionViewer": "tenant.cognition.read",
     "TenantActionApprover": "tenant.actions.approve",
     "TenantTrainingWriter": "tenant.training.write",
+    "TenantPrivacyAdmin": "tenant.privacy.admin",
+    "TenantPrivacyApprover": "tenant.privacy.approve",
 }
 
 

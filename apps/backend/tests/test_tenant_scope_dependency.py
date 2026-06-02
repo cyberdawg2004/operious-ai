@@ -234,6 +234,8 @@ def test_module_exports_stable_contract() -> None:
         "TENANT_OBSERVABILITY_READ_CAPABILITY",  # spec 1a #26
         "TENANT_OPERATIONS_READ_CAPABILITY",      # spec 1a-ext #26
         "TENANT_POLICY_WRITE_CAPABILITY",
+        "TENANT_PRIVACY_ADMIN_CAPABILITY",        # spec 1c-ext
+        "TENANT_PRIVACY_APPROVE_CAPABILITY",      # spec 1c-ext
         "TENANT_SUPERVISOR_READ_CAPABILITY",     # spec 1a-ext #26
         "TENANT_TOPOLOGY_WRITE_CAPABILITY",
         "TENANT_TRAINING_WRITE_CAPABILITY",       # spec 1a-ext #26
@@ -252,6 +254,8 @@ def test_module_exports_stable_contract() -> None:
         "require_tenant_knowledge_write",        # spec 1a-ext #26
         "require_tenant_observability_read",     # spec 1a #26
         "require_tenant_operations_read",        # spec 1a-ext #26
+        "require_tenant_privacy_admin",          # spec 1c-ext
+        "require_tenant_privacy_approve",        # spec 1c-ext
         "require_tenant_scope",
         "require_tenant_supervisor_read",        # spec 1a-ext #26
         "require_tenant_training_write",         # spec 1a-ext #26

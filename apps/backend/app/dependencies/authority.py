@@ -172,6 +172,14 @@ TENANT_COGNITION_READ_CAPABILITY: Final[str] = "tenant.cognition.read"
 #: Domain capability required to approve/reject tenant operational actions.
 TENANT_ACTIONS_APPROVE_CAPABILITY: Final[str] = "tenant.actions.approve"
 
+#: Domain capability required to administer tenant privacy controls: legal
+#: holds, retention policies, and erasure proposals.
+TENANT_PRIVACY_ADMIN_CAPABILITY: Final[str] = "tenant.privacy.admin"
+
+#: Domain capability required to approve irreversible tenant privacy erasures.
+#: Deliberately distinct from ``tenant.privacy.admin`` for dual-control.
+TENANT_PRIVACY_APPROVE_CAPABILITY: Final[str] = "tenant.privacy.approve"
+
 #: Domain capability required to export a tenant's signed audit record (#80).
 TENANT_AUDIT_EXPORT_CAPABILITY: Final[str] = "tenant.audit.export"
 
@@ -235,6 +243,24 @@ def require_tenant_training_write(request: Request) -> AuthorityContext:
     return _require_capability_from_request(
         request,
         capability=TENANT_TRAINING_WRITE_CAPABILITY,
+    )
+
+
+def require_tenant_privacy_admin(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.privacy.admin capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_PRIVACY_ADMIN_CAPABILITY,
+    )
+
+
+def require_tenant_privacy_approve(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.privacy.approve capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_PRIVACY_APPROVE_CAPABILITY,
     )
 
 
@@ -520,6 +546,8 @@ __all__ = [
     "TENANT_OBSERVABILITY_READ_CAPABILITY",
     "TENANT_OPERATIONS_READ_CAPABILITY",
     "TENANT_POLICY_WRITE_CAPABILITY",
+    "TENANT_PRIVACY_ADMIN_CAPABILITY",
+    "TENANT_PRIVACY_APPROVE_CAPABILITY",
     "TENANT_SUPERVISOR_READ_CAPABILITY",
     "TENANT_TRAINING_WRITE_CAPABILITY",
     "TENANT_TOPOLOGY_WRITE_CAPABILITY",
@@ -538,6 +566,8 @@ __all__ = [
     "require_tenant_knowledge_write",
     "require_tenant_observability_read",
     "require_tenant_operations_read",
+    "require_tenant_privacy_admin",
+    "require_tenant_privacy_approve",
     "require_tenant_scope",
     "require_tenant_supervisor_read",
     "require_tenant_training_write",
