@@ -35,6 +35,9 @@ from app.tenant.persistence import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationPage,
+    TenantConnectorConfigurationQuery,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerQuery,
     TenantExecutionGovernanceConfigurationPage,
@@ -165,6 +168,85 @@ class TenantConfigurationService:
         if commit:
             await self._session.commit()
         return record
+
+    async def configure_connector(
+        self,
+        *,
+        tenant_id: str,
+        connector_type: str,
+        tool_name: str,
+        http_method: str,
+        endpoint_template: str,
+        endpoint_host: str,
+        field_mappings: Mapping[str, Any],
+        idempotency_header_name: str,
+        response_parse: Mapping[str, Any],
+        success_status_codes: tuple[int, ...],
+        status: str,
+        configured_by: str,
+        approval: ApprovalRecord | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
+    ) -> TenantConnectorConfigurationRecord:
+        _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if approval is None:
+            approval = _approved_configuration_change(
+                tenant_id=tenant_id,
+                target_id=f"connector:{tool_name}",
+                change_kind="connector_config_configure",
+                proposed_by=configured_by,
+                material={
+                    "connector_type": connector_type,
+                    "tool_name": tool_name,
+                    "http_method": http_method,
+                    "endpoint_template": endpoint_template,
+                    "endpoint_host": endpoint_host,
+                    "field_mappings": dict(field_mappings),
+                    "idempotency_header_name": idempotency_header_name,
+                    "response_parse": dict(response_parse),
+                    "success_status_codes": list(success_status_codes),
+                    "status": status,
+                },
+            )
+        record = await self._runtime.configure_connector(
+            tenant_id=tenant_id,
+            connector_type=connector_type,
+            tool_name=tool_name,
+            http_method=http_method,
+            endpoint_template=endpoint_template,
+            endpoint_host=endpoint_host,
+            field_mappings=field_mappings,
+            idempotency_header_name=idempotency_header_name,
+            response_parse=response_parse,
+            success_status_codes=success_status_codes,
+            status=status,
+            configured_by=configured_by,
+            approval=approval,
+        )
+        if commit:
+            await self._session.commit()
+        return record
+
+    async def list_connector_configurations(
+        self,
+        *,
+        tenant_id: str,
+        connector_type: str | None,
+        tool_name: str | None,
+        status: str | None,
+        limit: int | None,
+        offset: int,
+    ) -> TenantConnectorConfigurationPage:
+        return await self._runtime.list_connector_configurations(
+            tenant_id=tenant_id,
+            query=TenantConnectorConfigurationQuery(
+                connector_type=connector_type,
+                tool_name=tool_name,
+                status=status,
+                limit=limit,
+                offset=offset,
+            ),
+        )
 
     async def list_channels(
         self,

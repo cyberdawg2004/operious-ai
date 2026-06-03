@@ -26,6 +26,8 @@ from app.tenant.identity import (
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantConnectorConfigurationPage,
+    TenantConnectorConfigurationQuery,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerQuery,
     TenantExecutionGovernanceConfigurationPage,
@@ -41,6 +43,7 @@ from app.tenant.persistence.models import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerRecord,
     TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
@@ -56,6 +59,7 @@ class InMemoryTenantConfigurationRepository:
 
     __slots__ = (
         "_channels",
+        "_connectors",
         "_documents",
         "_document_versions",
         "_execution_circuit_breakers",
@@ -69,6 +73,10 @@ class InMemoryTenantConfigurationRepository:
         self._channels: dict[
             TenantChannelConfigurationId,
             TenantChannelConfigurationRecord,
+        ] = {}
+        self._connectors: dict[
+            tuple[str, str, str, int],
+            TenantConnectorConfigurationRecord,
         ] = {}
         self._documents: dict[
             TenantKnowledgeDocumentId,
@@ -199,6 +207,87 @@ class InMemoryTenantConfigurationRepository:
                 record.credential_rotation_expires_at
             ),
         )
+
+    async def save_connector_configuration(
+        self,
+        record: TenantConnectorConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        key = (
+            record.tenant_id,
+            record.connector_type,
+            record.tool_name,
+            record.version,
+        )
+        async with self._lock:
+            existing = self._connectors.get(key)
+            if (
+                existing is not None
+                and existing.content_sha256 != record.content_sha256
+            ):
+                raise ChronologyImmutabilityError(
+                    "connector configuration version is append-only"
+                )
+            self._connectors[key] = record
+
+    async def get_connector_configuration(
+        self,
+        *,
+        connector_type: str,
+        tool_name: str,
+        version: int,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationRecord | None:
+        record = self._connectors.get(
+            (expected_tenant_id, connector_type, tool_name, version)
+        )
+        if record is None or record.tenant_id != expected_tenant_id:
+            return None
+        return record
+
+    async def list_connector_configurations(
+        self,
+        query: TenantConnectorConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationPage:
+        rows = [
+            r for r in self._connectors.values() if r.tenant_id == expected_tenant_id
+        ]
+        if query.connector_type is not None:
+            rows = [r for r in rows if r.connector_type == query.connector_type]
+        if query.tool_name is not None:
+            rows = [r for r in rows if r.tool_name == query.tool_name]
+        if query.status is not None:
+            rows = [r for r in rows if r.status == query.status]
+        if query.version is not None:
+            rows = [r for r in rows if r.version == query.version]
+        if query.source_approval_id is not None:
+            rows = [
+                r for r in rows if r.source_approval_id == query.source_approval_id
+            ]
+        rows.sort(key=lambda r: (r.connector_type, r.tool_name, r.version))
+        return _connector_page(rows, query.limit, query.offset)
+
+    async def resolve_active_connector_configuration(
+        self,
+        *,
+        tool_name: str,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationRecord | None:
+        rows = [
+            r
+            for r in self._connectors.values()
+            if r.tenant_id == expected_tenant_id
+            and r.tool_name == tool_name
+            and r.status == "active"
+        ]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: (r.version, r.connector_type), reverse=True)
+        return rows[0]
 
     async def save_knowledge_document(
         self,
@@ -572,6 +661,20 @@ def _document_page(
     if limit is not None:
         sliced = sliced[:limit]
     return TenantKnowledgeDocumentPage(items=tuple(sliced), total=total, offset=offset)
+
+
+def _connector_page(
+    rows: list[TenantConnectorConfigurationRecord],
+    limit: int | None,
+    offset: int,
+) -> TenantConnectorConfigurationPage:
+    total = len(rows)
+    sliced = rows[offset:]
+    if limit is not None:
+        sliced = sliced[:limit]
+    return TenantConnectorConfigurationPage(
+        items=tuple(sliced), total=total, offset=offset
+    )
 
 
 def _document_version_page(

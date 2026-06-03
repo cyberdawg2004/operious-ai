@@ -47,6 +47,28 @@ class TenantChannelConfigurationRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class TenantConnectorConfigurationRecord:
+    tenant_id: str
+    connector_type: str
+    tool_name: str
+    http_method: str
+    endpoint_template: str
+    endpoint_host: str
+    field_mappings: Mapping[str, Any]
+    idempotency_header_name: str
+    response_parse: Mapping[str, Any]
+    success_status_codes: tuple[int, ...]
+    status: str
+    version: int
+    configured_by: str
+    source_approval_id: str
+    content_sha256: str
+    previous_version_sha256: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class TenantWebhookRoutingSecretRecord:
     tenant_id: str
     config_id: TenantChannelConfigurationId
@@ -161,6 +183,7 @@ class TenantTopologyConfigurationRecord:
 
 __all__ = [
     "TenantChannelConfigurationRecord",
+    "TenantConnectorConfigurationRecord",
     "TenantExecutionCircuitBreakerRecord",
     "TenantExecutionGovernanceConfigurationRecord",
     "TenantGovernancePolicyRecord",

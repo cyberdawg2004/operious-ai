@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +35,40 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentRecord,
     TenantTopologyConfigurationRecord,
 )
+
+
+_SENSITIVE_CHANGE_PAYLOAD_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "auth_header",
+        "bearer_token",
+        "client_secret",
+        "credential",
+        "credentials",
+        "credentials_enc",
+        "secret",
+        "token",
+        "webhook_secret",
+    }
+)
+
+
+def _redact_sensitive_payload(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        redacted: dict[str, Any] = {}
+        mapping = cast(Mapping[Any, Any], value)
+        for key, item in mapping.items():
+            key_text = str(key)
+            if key_text.lower() in _SENSITIVE_CHANGE_PAYLOAD_KEYS:
+                redacted[key_text] = "<redacted>"
+            else:
+                redacted[key_text] = _redact_sensitive_payload(item)
+        return redacted
+    if isinstance(value, list):
+        items = cast(list[Any], value)
+        return [_redact_sensitive_payload(item) for item in items]
+    return value
 
 
 class TenantChannelCreateRequest(BaseModel):
@@ -419,7 +454,7 @@ class TenantConfigChangeRequestResponse(BaseModel):
             change_request_id=str(record.change_request_id),
             tenant_id=record.tenant_id,
             change_type=record.change_type,
-            proposed_payload=dict(record.proposed_payload),
+            proposed_payload=_redact_sensitive_payload(record.proposed_payload),
             status=record.status,
             proposed_by=record.proposed_by,
             proposed_at=record.proposed_at.isoformat(),
@@ -441,7 +476,9 @@ class TenantConfigChangeRequestResponse(BaseModel):
             ),
             rejection_reason=record.rejection_reason,
             outcome_payload=(
-                None if record.outcome_payload is None else dict(record.outcome_payload)
+                None
+                if record.outcome_payload is None
+                else _redact_sensitive_payload(record.outcome_payload)
             ),
         )
 

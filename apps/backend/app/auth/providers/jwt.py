@@ -81,6 +81,7 @@ TENANT_DOMAIN_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.policy.write",
     "tenant.topology.write",
     "tenant.execution_governance.write",
+    "tenant.connector.write",
 )
 
 TENANT_CONFIG_ADMIN_CAPABILITIES: Final[tuple[str, ...]] = (
@@ -108,6 +109,7 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "read:tenant_cognition": "tenant.cognition.read",
     "approve:tenant_actions": "tenant.actions.approve",
     "write:tenant_training": "tenant.training.write",
+    "write:tenant_connector": "tenant.connector.write",
     "admin:tenant_privacy": "tenant.privacy.admin",
     "approve:tenant_privacy": "tenant.privacy.approve",
 }
@@ -125,6 +127,7 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantPolicyWriter": "tenant.policy.write",
     "TenantTopologyWriter": "tenant.topology.write",
     "TenantExecGovWriter": "tenant.execution_governance.write",
+    "TenantConnectorWriter": "tenant.connector.write",
     "TenantViewer": "tenant_read",
     # Separation of duties (S-03): the approve duty is a DISTINCT role so
     # it can be granted to a different principal than ``TenantAdmin``.

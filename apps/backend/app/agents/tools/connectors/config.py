@@ -42,6 +42,11 @@ class ConnectorConfigRecord:
     response_parse: Mapping[str, Any] = field(default_factory=_empty_json_object)
     success_status_codes: tuple[int, ...] = (200, 201, 202)
     status: ConnectorConfigStatus = "active"
+    version: int = 1
+    configured_by: str = "test"
+    source_approval_id: str = "test"
+    content_sha256: str = "0" * 64
+    previous_version_sha256: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -109,10 +114,15 @@ class PostgresConnectorConfigRepository(BaseRepository):
         if tenant_id != expected_tenant_id:
             return None
         await self._scope(expected_tenant_id)
-        stmt = select(ConnectorConfigRow).where(
-            ConnectorConfigRow.tenant_id == expected_tenant_id,
-            ConnectorConfigRow.tool_name == tool_name,
-            ConnectorConfigRow.status == "active",
+        stmt = (
+            select(ConnectorConfigRow)
+            .where(
+                ConnectorConfigRow.tenant_id == expected_tenant_id,
+                ConnectorConfigRow.tool_name == tool_name,
+                ConnectorConfigRow.status == "active",
+            )
+            .order_by(ConnectorConfigRow.version.desc())
+            .limit(1)
         )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else _row_to_record(row)
@@ -130,6 +140,7 @@ class PostgresConnectorConfigRepository(BaseRepository):
             tenant_id=record.tenant_id,
             connector_type=record.connector_type,
             tool_name=record.tool_name,
+            version=record.version,
         )
         try:
             async with self.session.begin_nested():
@@ -148,11 +159,13 @@ class PostgresConnectorConfigRepository(BaseRepository):
         tenant_id: str,
         connector_type: str,
         tool_name: str,
+        version: int,
     ) -> ConnectorConfigRow | None:
         stmt = select(ConnectorConfigRow).where(
             ConnectorConfigRow.tenant_id == tenant_id,
             ConnectorConfigRow.connector_type == connector_type,
             ConnectorConfigRow.tool_name == tool_name,
+            ConnectorConfigRow.version == version,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -174,6 +187,11 @@ def _record_to_row(record: ConnectorConfigRecord) -> ConnectorConfigRow:
         response_parse=dict(record.response_parse),
         success_status_codes=list(record.success_status_codes),
         status=record.status,
+        version=record.version,
+        configured_by=record.configured_by,
+        source_approval_id=record.source_approval_id,
+        content_sha256=record.content_sha256,
+        previous_version_sha256=record.previous_version_sha256,
         created_at=record.created_at or now,
         updated_at=record.updated_at or now,
     )
@@ -191,6 +209,10 @@ def _update_row(
     row.response_parse = dict(record.response_parse)
     row.success_status_codes = list(record.success_status_codes)
     row.status = record.status
+    row.configured_by = record.configured_by
+    row.source_approval_id = record.source_approval_id
+    row.content_sha256 = record.content_sha256
+    row.previous_version_sha256 = record.previous_version_sha256
     row.updated_at = record.updated_at or _utcnow()
 
 
@@ -207,6 +229,11 @@ def _row_to_record(row: ConnectorConfigRow) -> ConnectorConfigRecord:
         response_parse=_as_dict(row.response_parse),
         success_status_codes=_status_codes(row.success_status_codes),
         status=cast(ConnectorConfigStatus, row.status),
+        version=row.version,
+        configured_by=row.configured_by,
+        source_approval_id=row.source_approval_id,
+        content_sha256=row.content_sha256,
+        previous_version_sha256=row.previous_version_sha256,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

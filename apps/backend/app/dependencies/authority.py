@@ -129,6 +129,9 @@ TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY: Final[str] = (
     "tenant.execution_governance.write"
 )
 
+#: Domain capability required to mutate outbound connector configuration.
+TENANT_CONNECTOR_WRITE_CAPABILITY: Final[str] = "tenant.connector.write"
+
 #: Backward-compatible capability for non-domain config-ledger reads.
 TENANT_CONFIG_WRITE_CAPABILITY: Final[str] = "tenant.config.write"
 
@@ -138,6 +141,7 @@ TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES: Final[tuple[str, ...]] = (
     TENANT_POLICY_WRITE_CAPABILITY,
     TENANT_TOPOLOGY_WRITE_CAPABILITY,
     TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
+    TENANT_CONNECTOR_WRITE_CAPABILITY,
 )
 
 #: Stable error code for "config change may be PROPOSED but not APPLIED
@@ -537,6 +541,7 @@ __all__ = [
     "TENANT_AUDIT_EXPORT_CAPABILITY",
     "TENANT_CHANNEL_ADMIN_CAPABILITY",
     "TENANT_COGNITION_READ_CAPABILITY",
+    "TENANT_CONNECTOR_WRITE_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
     "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
     "TENANT_CONFIG_WRITE_CAPABILITY",

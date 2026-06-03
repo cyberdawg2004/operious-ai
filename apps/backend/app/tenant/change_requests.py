@@ -26,6 +26,7 @@ class TenantConfigChangeType(StrEnum):
     EXECUTION_GOVERNANCE = "execution_governance"
     TOPOLOGY = "topology"
     CHANNEL = "channel"
+    CONNECTOR = "connector"
 
 
 class TenantConfigChangeRequestStatus(StrEnum):

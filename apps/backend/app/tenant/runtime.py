@@ -69,6 +69,9 @@ from app.tenant.persistence import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationPage,
+    TenantConnectorConfigurationQuery,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerQuery,
     TenantExecutionCircuitBreakerRecord,
@@ -325,6 +328,132 @@ class TenantConfigurationRuntime:
         return self._require_credential_encryptor().decrypt(
             tenant_id=tenant_id,
             encrypted_credentials=record.credentials_enc,
+        )
+
+    async def configure_connector(
+        self,
+        *,
+        tenant_id: str,
+        connector_type: str,
+        tool_name: str,
+        http_method: str,
+        endpoint_template: str,
+        endpoint_host: str,
+        field_mappings: Mapping[str, Any],
+        idempotency_header_name: str,
+        response_parse: Mapping[str, Any],
+        success_status_codes: Sequence[int],
+        status: str,
+        configured_by: str,
+        approval: ApprovalRecord | None = None,
+    ) -> TenantConnectorConfigurationRecord:
+        approval_record = _require_approval(approval, tenant_id=tenant_id)
+        normalized_connector_type = _normalize_text(
+            connector_type,
+            "connector_type",
+        )
+        normalized_tool_name = _normalize_text(tool_name, "tool_name")
+        page = await self._repository.list_connector_configurations(
+            TenantConnectorConfigurationQuery(
+                connector_type=normalized_connector_type,
+                tool_name=normalized_tool_name,
+            ),
+            expected_tenant_id=tenant_id,
+        )
+        existing = (
+            max(page.items, key=lambda item: item.version)
+            if page.items
+            else None
+        )
+        version = 1 if existing is None else existing.version + 1
+        now = _utcnow()
+        created_at = existing.created_at if existing is not None else now
+        normalized_status = _connector_status(status)
+        normalized_codes = _connector_success_status_codes(success_status_codes)
+        normalized_field_mappings = _json_object(field_mappings, "field_mappings")
+        normalized_response_parse = _json_object(response_parse, "response_parse")
+        normalized_http_method = _normalize_text(http_method, "http_method").upper()
+        normalized_endpoint_template = _normalize_text(
+            endpoint_template,
+            "endpoint_template",
+        )
+        normalized_endpoint_host = _normalize_text(
+            endpoint_host,
+            "endpoint_host",
+        ).lower()
+        normalized_idempotency_header_name = _normalize_text(
+            idempotency_header_name,
+            "idempotency_header_name",
+        )
+        normalized_configured_by = _normalize_text(configured_by, "configured_by")
+        content_sha256 = _connector_configuration_content_sha256(
+            tenant_id=tenant_id,
+            connector_type=normalized_connector_type,
+            tool_name=normalized_tool_name,
+            http_method=normalized_http_method,
+            endpoint_template=normalized_endpoint_template,
+            endpoint_host=normalized_endpoint_host,
+            field_mappings=normalized_field_mappings,
+            idempotency_header_name=normalized_idempotency_header_name,
+            response_parse=normalized_response_parse,
+            success_status_codes=normalized_codes,
+            status=normalized_status,
+            version=version,
+            configured_by=normalized_configured_by,
+            source_approval_id=approval_record.approval_id,
+        )
+        record = TenantConnectorConfigurationRecord(
+            tenant_id=tenant_id,
+            connector_type=normalized_connector_type,
+            tool_name=normalized_tool_name,
+            http_method=normalized_http_method,
+            endpoint_template=normalized_endpoint_template,
+            endpoint_host=normalized_endpoint_host,
+            field_mappings=normalized_field_mappings,
+            idempotency_header_name=normalized_idempotency_header_name,
+            response_parse=normalized_response_parse,
+            success_status_codes=normalized_codes,
+            status=normalized_status,
+            version=version,
+            configured_by=normalized_configured_by,
+            source_approval_id=approval_record.approval_id,
+            content_sha256=content_sha256,
+            previous_version_sha256=(
+                existing.content_sha256 if existing is not None else None
+            ),
+            created_at=created_at,
+            updated_at=now,
+        )
+        await self._repository.save_connector_configuration(
+            record,
+            expected_tenant_id=tenant_id,
+        )
+        return record
+
+    async def get_connector_configuration(
+        self,
+        *,
+        tenant_id: str,
+        connector_type: str,
+        tool_name: str,
+        version: int,
+    ) -> TenantConnectorConfigurationRecord | None:
+        return await self._repository.get_connector_configuration(
+            connector_type=connector_type,
+            tool_name=tool_name,
+            version=version,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def list_connector_configurations(
+        self,
+        *,
+        tenant_id: str,
+        query: TenantConnectorConfigurationQuery,
+    ) -> TenantConnectorConfigurationPage:
+        return await self._repository.list_connector_configurations(
+            query,
+            expected_tenant_id=tenant_id,
         )
 
     async def create_knowledge_document(
@@ -1051,6 +1180,76 @@ def _execution_governance_content_sha256(
             "metadata": dict(metadata),
         }
     )
+
+
+def _connector_configuration_content_sha256(
+    *,
+    tenant_id: str,
+    connector_type: str,
+    tool_name: str,
+    http_method: str,
+    endpoint_template: str,
+    endpoint_host: str,
+    field_mappings: Mapping[str, Any],
+    idempotency_header_name: str,
+    response_parse: Mapping[str, Any],
+    success_status_codes: Sequence[int],
+    status: str,
+    version: int,
+    configured_by: str,
+    source_approval_id: str,
+) -> str:
+    return canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "connector_type": connector_type,
+            "tool_name": tool_name,
+            "http_method": http_method,
+            "endpoint_template": endpoint_template,
+            "endpoint_host": endpoint_host,
+            "field_mappings": dict(field_mappings),
+            "idempotency_header_name": idempotency_header_name,
+            "response_parse": dict(response_parse),
+            "success_status_codes": list(success_status_codes),
+            "status": status,
+            "version": version,
+            "configured_by": configured_by,
+            "source_approval_id": source_approval_id,
+        }
+    )
+
+
+def _connector_status(value: str) -> str:
+    status = _normalize_text(value, "status")
+    if status not in {"active", "disabled"}:
+        raise TenantConfigurationError("connector status must be active or disabled")
+    return status
+
+
+def _connector_success_status_codes(values: Sequence[object]) -> tuple[int, ...]:
+    codes: list[int] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TenantConfigurationError(
+                "connector success_status_codes must contain integers"
+            )
+        if value < 100 or value > 599:
+            raise TenantConfigurationError(
+                "connector success_status_codes must be HTTP status codes"
+            )
+        codes.append(value)
+    if not codes:
+        raise TenantConfigurationError(
+            "connector success_status_codes must be non-empty"
+        )
+    return tuple(codes)
+
+
+def _json_object(value: object, field_name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TenantConfigurationError(f"{field_name} must be an object")
+    mapping = cast(Mapping[Any, Any], value)
+    return {str(key): item for key, item in mapping.items()}
 
 
 def _utcnow() -> datetime:

@@ -13,6 +13,7 @@ from app.data_protection.crypto import DataProtectionService
 from app.repositories.base import BaseRepository
 from app.repositories.pagination import fetch_scalar_page
 from app.tenant.db.models import (
+    ConnectorConfigRow,
     TenantChannelConfigurationRow,
     TenantExecutionCircuitBreakerRow,
     TenantExecutionGovernanceConfigurationRow,
@@ -49,6 +50,8 @@ from app.tenant.identity import (
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantConnectorConfigurationPage,
+    TenantConnectorConfigurationQuery,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerQuery,
     TenantExecutionGovernanceConfigurationPage,
@@ -64,6 +67,7 @@ from app.tenant.persistence.models import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerRecord,
     TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
@@ -244,6 +248,108 @@ class PostgresTenantConfigurationRepository(BaseRepository):
                 row["credential_rotation_expires_at"],
             ),
         )
+
+    async def save_connector_configuration(
+        self,
+        record: TenantConnectorConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        await self._ensure_tenant(expected_tenant_id)
+        existing = await self._connector_row(
+            connector_type=record.connector_type,
+            tool_name=record.tool_name,
+            version=record.version,
+            expected_tenant_id=expected_tenant_id,
+        )
+        try:
+            async with self.session.begin_nested():
+                if existing is None:
+                    self.session.add(_connector_record_to_row(record))
+                else:
+                    _assert_connector_row_unchanged_or_raise(existing, record)
+        except IntegrityError as exc:
+            raise TenantConfigurationPersistenceError(
+                "connector configuration could not be persisted"
+            ) from exc
+
+    async def get_connector_configuration(
+        self,
+        *,
+        connector_type: str,
+        tool_name: str,
+        version: int,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationRecord | None:
+        row = await self._connector_row(
+            connector_type=connector_type,
+            tool_name=tool_name,
+            version=version,
+            expected_tenant_id=expected_tenant_id,
+        )
+        return None if row is None else _connector_row_to_record(row)
+
+    async def list_connector_configurations(
+        self,
+        query: TenantConnectorConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationPage:
+        stmt = select(ConnectorConfigRow).where(
+            ConnectorConfigRow.tenant_id == expected_tenant_id
+        )
+        if query.connector_type is not None:
+            stmt = stmt.where(ConnectorConfigRow.connector_type == query.connector_type)
+        if query.tool_name is not None:
+            stmt = stmt.where(ConnectorConfigRow.tool_name == query.tool_name)
+        if query.status is not None:
+            stmt = stmt.where(ConnectorConfigRow.status == query.status)
+        if query.version is not None:
+            stmt = stmt.where(ConnectorConfigRow.version == query.version)
+        if query.source_approval_id is not None:
+            stmt = stmt.where(
+                ConnectorConfigRow.source_approval_id == query.source_approval_id
+            )
+        stmt = stmt.order_by(
+            ConnectorConfigRow.connector_type,
+            ConnectorConfigRow.tool_name,
+            ConnectorConfigRow.version,
+        )
+        page = await fetch_scalar_page(
+            self.session,
+            stmt,
+            limit=query.limit,
+            offset=query.offset,
+        )
+        return TenantConnectorConfigurationPage(
+            items=tuple(_connector_row_to_record(row) for row in page.items),
+            total=page.total,
+            limit=page.limit,
+            offset=page.offset,
+        )
+
+    async def resolve_active_connector_configuration(
+        self,
+        *,
+        tool_name: str,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationRecord | None:
+        stmt = (
+            select(ConnectorConfigRow)
+            .where(
+                ConnectorConfigRow.tenant_id == expected_tenant_id,
+                ConnectorConfigRow.tool_name == tool_name,
+                ConnectorConfigRow.status == "active",
+            )
+            .order_by(
+                ConnectorConfigRow.version.desc(),
+                ConnectorConfigRow.connector_type.desc(),
+            )
+            .limit(1)
+        )
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        return None if row is None else _connector_row_to_record(row)
 
     async def save_knowledge_document(
         self,
@@ -816,6 +922,22 @@ class PostgresTenantConfigurationRepository(BaseRepository):
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def _connector_row(
+        self,
+        *,
+        connector_type: str,
+        tool_name: str,
+        version: int,
+        expected_tenant_id: str,
+    ) -> ConnectorConfigRow | None:
+        stmt = select(ConnectorConfigRow).where(
+            ConnectorConfigRow.tenant_id == expected_tenant_id,
+            ConnectorConfigRow.connector_type == connector_type,
+            ConnectorConfigRow.tool_name == tool_name,
+            ConnectorConfigRow.version == version,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def _document_row(
         self,
         document_id: TenantKnowledgeDocumentId,
@@ -957,6 +1079,66 @@ def _channel_row_to_record(
         credential_rotated_at=row.credential_rotated_at,
         credential_rotation_expires_at=row.credential_rotation_expires_at,
         verified_at=row.verified_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _connector_record_to_row(
+    record: TenantConnectorConfigurationRecord,
+) -> ConnectorConfigRow:
+    return ConnectorConfigRow(
+        tenant_id=record.tenant_id,
+        connector_type=record.connector_type,
+        tool_name=record.tool_name,
+        http_method=record.http_method.upper(),
+        endpoint_template=record.endpoint_template,
+        endpoint_host=record.endpoint_host.lower(),
+        field_mappings=dict(record.field_mappings),
+        idempotency_header_name=record.idempotency_header_name,
+        response_parse=dict(record.response_parse),
+        success_status_codes=list(record.success_status_codes),
+        status=record.status,
+        version=record.version,
+        configured_by=record.configured_by,
+        source_approval_id=record.source_approval_id,
+        content_sha256=record.content_sha256,
+        previous_version_sha256=record.previous_version_sha256,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _assert_connector_row_unchanged_or_raise(
+    row: ConnectorConfigRow,
+    record: TenantConnectorConfigurationRecord,
+) -> None:
+    if row.content_sha256 != record.content_sha256:
+        raise ChronologyImmutabilityError(
+            "connector configuration version is append-only"
+        )
+
+
+def _connector_row_to_record(
+    row: ConnectorConfigRow,
+) -> TenantConnectorConfigurationRecord:
+    return TenantConnectorConfigurationRecord(
+        tenant_id=row.tenant_id,
+        connector_type=row.connector_type,
+        tool_name=row.tool_name,
+        http_method=row.http_method,
+        endpoint_template=row.endpoint_template,
+        endpoint_host=row.endpoint_host,
+        field_mappings=_as_dict(row.field_mappings),
+        idempotency_header_name=row.idempotency_header_name,
+        response_parse=_as_dict(row.response_parse),
+        success_status_codes=_status_codes(row.success_status_codes),
+        status=row.status,
+        version=row.version,
+        configured_by=row.configured_by,
+        source_approval_id=row.source_approval_id,
+        content_sha256=row.content_sha256,
+        previous_version_sha256=row.previous_version_sha256,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -1281,6 +1463,14 @@ def _as_dict(value: Any) -> dict[str, Any]:
         data = cast(dict[object, Any], value)
         return {str(k): v for k, v in data.items()}
     return {}
+
+
+def _status_codes(value: Any) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        return (200, 201, 202)
+    raw_items = cast(list[object], value)
+    codes = [item for item in raw_items if isinstance(item, int)]
+    return tuple(codes) or (200, 201, 202)
 
 
 __all__ = ["PostgresTenantConfigurationRepository"]

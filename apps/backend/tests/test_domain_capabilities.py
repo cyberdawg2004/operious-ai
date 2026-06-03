@@ -19,6 +19,7 @@ from app.auth.providers.jwt import (
 from app.core.config import get_settings
 from app.dependencies.authority import (
     TENANT_CHANNEL_ADMIN_CAPABILITY,
+    TENANT_CONNECTOR_WRITE_CAPABILITY,
     TENANT_CONFIG_APPROVE_CAPABILITY,
     TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES,
     TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
@@ -63,6 +64,7 @@ _DOMAIN_CAPABILITIES = {
     TENANT_POLICY_WRITE_CAPABILITY,
     TENANT_TOPOLOGY_WRITE_CAPABILITY,
     TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
+    TENANT_CONNECTOR_WRITE_CAPABILITY,
 }
 
 
@@ -197,6 +199,7 @@ def domain_client(monkeypatch: pytest.MonkeyPatch) -> _Harness:
             "channel": _identity(TENANT_CHANNEL_ADMIN_CAPABILITY),
             "knowledge": _identity(TENANT_KNOWLEDGE_WRITE_CAPABILITY),
             "policy": _identity(TENANT_POLICY_WRITE_CAPABILITY),
+            "connector": _identity(TENANT_CONNECTOR_WRITE_CAPABILITY),
             "empty": _identity(),
             "admin": _identity(*TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES),
         }
@@ -337,6 +340,34 @@ def test_channel_admin_cannot_write_knowledge_direct_or_propose(
     assert domain_client.change_service.proposals == []
 
 
+def test_read_only_operator_cannot_propose_connector_config(
+    domain_client: _Harness,
+) -> None:
+    denied = domain_client.client.post(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers("empty"),
+        json={
+            "change_type": "connector",
+            "payload": _connector_payload(),
+        },
+    )
+    ok = domain_client.client.post(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers("connector"),
+        json={
+            "change_type": "connector",
+            "payload": _connector_payload(),
+        },
+    )
+
+    assert denied.status_code == 403
+    assert TENANT_CONNECTOR_WRITE_CAPABILITY in denied.text
+    assert ok.status_code == 201
+    assert domain_client.change_service.proposals == [
+        TenantConfigChangeType.CONNECTOR
+    ]
+
+
 def test_auth0_role_maps_to_domain_capabilities() -> None:
     aggregate = _capabilities_for_roles("TenantConfigAdmin")
     legacy_aggregate = _capabilities_for_roles("TenantAdmin")
@@ -346,6 +377,7 @@ def test_auth0_role_maps_to_domain_capabilities() -> None:
         "TenantPolicyWriter",
         "TenantTopologyWriter",
         "TenantExecGovWriter",
+        "TenantConnectorWriter",
     )
     approver = _capabilities_for_roles("TenantApprover")
 
@@ -390,6 +422,20 @@ def _policy_payload() -> dict[str, Any]:
         "policy_type": "refund_limit",
         "parameters": {"max_refund_usd": 50},
         "effective_from": _NOW.isoformat(),
+    }
+
+
+def _connector_payload() -> dict[str, Any]:
+    return {
+        "connector_type": "zendesk",
+        "tool_name": "refund.request",
+        "http_method": "POST",
+        "endpoint_template": "https://refunds.example.com/refunds/{order_id}",
+        "endpoint_host": "refunds.example.com",
+        "field_mappings": {"order_id": "payload.order_id"},
+        "idempotency_header_name": "X-Idempotency-Key",
+        "response_parse": {"provider_id": "refund.id"},
+        "success_status_codes": [200, 201, 202],
     }
 
 

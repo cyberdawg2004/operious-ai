@@ -24,6 +24,7 @@ from app.tenant.identity import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerRecord,
     TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
@@ -38,6 +39,17 @@ class TenantChannelConfigurationQuery:
     config_id: TenantChannelConfigurationId | None = None
     channel_type: TenantChannelType | None = None
     status: TenantChannelStatus | None = None
+    limit: int | None = None
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class TenantConnectorConfigurationQuery:
+    connector_type: str | None = None
+    tool_name: str | None = None
+    status: str | None = None
+    version: int | None = None
+    source_approval_id: str | None = None
     limit: int | None = None
     offset: int = 0
 
@@ -105,6 +117,14 @@ class TenantChannelConfigurationPage:
 
 
 @dataclass(frozen=True, slots=True)
+class TenantConnectorConfigurationPage:
+    items: tuple[TenantConnectorConfigurationRecord, ...] = ()
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class TenantKnowledgeDocumentPage:
     items: tuple[TenantKnowledgeDocumentRecord, ...] = ()
     total: int = 0
@@ -155,6 +175,8 @@ class TenantTopologyConfigurationPage:
 __all__ = [
     "TenantChannelConfigurationPage",
     "TenantChannelConfigurationQuery",
+    "TenantConnectorConfigurationPage",
+    "TenantConnectorConfigurationQuery",
     "TenantExecutionCircuitBreakerPage",
     "TenantExecutionCircuitBreakerQuery",
     "TenantExecutionGovernanceConfigurationPage",

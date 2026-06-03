@@ -15,6 +15,8 @@ from app.tenant.identity import (
 from app.tenant.persistence.models import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
+    TenantConnectorConfigurationPage,
+    TenantConnectorConfigurationQuery,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerQuery,
     TenantExecutionGovernanceConfigurationPage,
@@ -30,6 +32,7 @@ from app.tenant.persistence.models import (
 )
 from app.tenant.persistence.records import (
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerRecord,
     TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
@@ -91,6 +94,36 @@ class TenantConfigurationRepository(Protocol):
         channel_type: str,
         routing_address: str,
     ) -> TenantWebhookRoutingSecretRecord | None: ...
+
+    async def save_connector_configuration(
+        self,
+        record: TenantConnectorConfigurationRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def get_connector_configuration(
+        self,
+        *,
+        connector_type: str,
+        tool_name: str,
+        version: int,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationRecord | None: ...
+
+    async def list_connector_configurations(
+        self,
+        query: TenantConnectorConfigurationQuery,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationPage: ...
+
+    async def resolve_active_connector_configuration(
+        self,
+        *,
+        tool_name: str,
+        expected_tenant_id: str,
+    ) -> TenantConnectorConfigurationRecord | None: ...
 
     async def save_knowledge_document(
         self,

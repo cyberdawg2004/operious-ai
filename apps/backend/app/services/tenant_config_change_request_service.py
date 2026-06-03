@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.tools.action_governance import (
+    ACTION_TOOLS_POLICY_TYPE,
+    ActionPolicyParseError,
+    validate_action_tools_policy_parameters,
+)
 from app.events import EventCausality, EventChronology, EventId, OperationalEvent
 from app.events.appender import OperationalEventAppender
 from app.events.substrates import OperationalSubstrate
@@ -293,6 +300,7 @@ class TenantConfigChangeRequestService:
         approval = _approval_for_record(record)
         payload = dict(record.proposed_payload)
         change = record.change_type
+        _validate_payload(change, payload)
         if change is TenantConfigChangeType.KNOWLEDGE:
             return await self._apply_knowledge(record, payload, approval)
         if change is TenantConfigChangeType.POLICY:
@@ -303,6 +311,8 @@ class TenantConfigChangeRequestService:
             return await self._apply_topology(record, payload)
         if change is TenantConfigChangeType.CHANNEL:
             return await self._apply_channel(record, payload)
+        if change is TenantConfigChangeType.CONNECTOR:
+            return await self._apply_connector(record, payload, approval)
         raise TenantConfigChangeRequestLifecycleError(
             f"unsupported tenant config change type: {change.value}"
         )
@@ -555,6 +565,38 @@ class TenantConfigChangeRequestService:
             f"unsupported channel change operation: {operation}"
         )
 
+    async def _apply_connector(
+        self,
+        record: TenantConfigChangeRequestRecord,
+        payload: Mapping[str, Any],
+        approval: ApprovalRecord,
+    ) -> dict[str, Any]:
+        result = await self._tenant_configuration.configure_connector(
+            tenant_id=record.tenant_id,
+            connector_type=_str(payload, "connector_type"),
+            tool_name=_str(payload, "tool_name"),
+            http_method=_str(payload, "http_method"),
+            endpoint_template=_str(payload, "endpoint_template"),
+            endpoint_host=_str(payload, "endpoint_host"),
+            field_mappings=_mapping(payload, "field_mappings", default={}),
+            idempotency_header_name=_str(payload, "idempotency_header_name"),
+            response_parse=_mapping(payload, "response_parse", default={}),
+            success_status_codes=_success_status_codes(payload),
+            status=str(payload.get("status") or "active"),
+            configured_by=record.approved_by or record.proposed_by,
+            approval=approval,
+            bypass_direct_apply_gate=True,
+            commit=False,
+        )
+        return {
+            "kind": "connector_config",
+            "operation": "configure",
+            "connector_type": result.connector_type,
+            "tool_name": result.tool_name,
+            "version": result.version,
+            "content_sha256": result.content_sha256,
+        }
+
     async def _append_status_event(
         self,
         record: TenantConfigChangeRequestRecord,
@@ -741,6 +783,7 @@ def _validate_payload(
             if operation != "update"
             else ("policy_id",)
         )
+        _validate_action_policy_payload(payload)
     elif change_type is TenantConfigChangeType.EXECUTION_GOVERNANCE:
         required = (
             "execution_quota",
@@ -754,6 +797,23 @@ def _validate_payload(
         )
     elif change_type is TenantConfigChangeType.TOPOLOGY:
         required = ("topology_name", "topology")
+    elif change_type is TenantConfigChangeType.CONNECTOR:
+        if _operation(payload, default="configure") != "configure":
+            raise TenantConfigChangeRequestLifecycleError(
+                "unsupported connector change operation"
+            )
+        required = (
+            "connector_type",
+            "tool_name",
+            "http_method",
+            "endpoint_template",
+            "endpoint_host",
+            "field_mappings",
+            "idempotency_header_name",
+            "response_parse",
+            "success_status_codes",
+        )
+        _validate_connector_payload(payload)
     else:
         required = (
             ("config_id",)
@@ -766,6 +826,129 @@ def _validate_payload(
             "tenant config change payload missing required field(s): "
             + ", ".join(missing)
         )
+
+
+def _validate_action_policy_payload(payload: Mapping[str, Any]) -> None:
+    parameters = payload.get("parameters")
+    policy_type = payload.get("policy_type")
+    if policy_type != ACTION_TOOLS_POLICY_TYPE:
+        return
+    if not isinstance(parameters, Mapping):
+        raise TenantConfigChangeRequestLifecycleError(
+            "action_tools policy parameters must be an object"
+        )
+    try:
+        validate_action_tools_policy_parameters(
+            _dict_from_mapping(cast(Mapping[Any, Any], parameters))
+        )
+    except ActionPolicyParseError as exc:
+        raise TenantConfigChangeRequestLifecycleError(
+            f"invalid action_tools policy parameters: {exc}"
+        ) from exc
+
+
+def _validate_connector_payload(payload: Mapping[str, Any]) -> None:
+    forbidden = sorted(
+        key
+        for key in (
+            "access_token",
+            "api_key",
+            "auth_header",
+            "bearer_token",
+            "credential",
+            "credentials",
+            "credentials_enc",
+            "webhook_secret",
+        )
+        if key in payload
+    )
+    if forbidden:
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector config credentials must use the channel credential path; "
+            "forbidden field(s): "
+            + ", ".join(forbidden)
+        )
+    try:
+        TenantChannelType(_str(payload, "connector_type"))
+    except ValueError as exc:
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector_type must map to a tenant channel type"
+        ) from exc
+    method = _str(payload, "http_method").upper()
+    if method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}:
+        raise TenantConfigChangeRequestLifecycleError(
+            "http_method must be one of DELETE, GET, PATCH, POST, PUT"
+        )
+    endpoint_host = _str(payload, "endpoint_host").lower()
+    _validate_public_host_shape(endpoint_host)
+    parsed = urlparse(_str(payload, "endpoint_template"))
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        raise TenantConfigChangeRequestLifecycleError(
+            "endpoint_template must be an absolute HTTPS URL"
+        )
+    template_host = (parsed.hostname or "").lower()
+    if template_host != endpoint_host:
+        raise TenantConfigChangeRequestLifecycleError(
+            "endpoint_template host must match endpoint_host"
+        )
+    _mapping(payload, "field_mappings", default={})
+    _mapping(payload, "response_parse", default={})
+    header_name = _str(payload, "idempotency_header_name")
+    if any(ch.isspace() for ch in header_name):
+        raise TenantConfigChangeRequestLifecycleError(
+            "idempotency_header_name must not contain whitespace"
+        )
+    status = str(payload.get("status") or "active")
+    if status not in {"active", "disabled"}:
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector status must be active or disabled"
+        )
+    _success_status_codes(payload)
+
+
+def _validate_public_host_shape(host: str) -> None:
+    if "://" in host or "/" in host or any(ch.isspace() for ch in host):
+        raise TenantConfigChangeRequestLifecycleError(
+            "endpoint_host must be a bare host name"
+        )
+    try:
+        address = ip_address(host)
+    except ValueError:
+        _validate_dns_host_shape(host)
+        return
+    if (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    ):
+        raise TenantConfigChangeRequestLifecycleError(
+            "endpoint_host must not be a private or reserved IP"
+        )
+
+
+def _validate_dns_host_shape(host: str) -> None:
+    labels = host.split(".")
+    if len(labels) < 2:
+        raise TenantConfigChangeRequestLifecycleError(
+            "endpoint_host must include a public DNS suffix"
+        )
+    for label in labels:
+        if not label or len(label) > 63:
+            raise TenantConfigChangeRequestLifecycleError(
+                "endpoint_host contains an invalid DNS label"
+            )
+        if label.startswith("-") or label.endswith("-"):
+            raise TenantConfigChangeRequestLifecycleError(
+                "endpoint_host contains an invalid DNS label"
+            )
+        for ch in label:
+            if not (ch.isascii() and (ch.isalnum() or ch == "-")):
+                raise TenantConfigChangeRequestLifecycleError(
+                    "endpoint_host contains an invalid DNS label"
+                )
 
 
 def _change_type(value: TenantConfigChangeType | str) -> TenantConfigChangeType:
@@ -832,6 +1015,30 @@ def _datetime(payload: Mapping[str, Any], key: str) -> datetime:
     if value is None:
         raise TenantConfigChangeRequestLifecycleError(f"{key} is required")
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _success_status_codes(payload: Mapping[str, Any]) -> tuple[int, ...]:
+    raw = payload.get("success_status_codes")
+    if not isinstance(raw, (list, tuple)):
+        raise TenantConfigChangeRequestLifecycleError(
+            "success_status_codes must be a non-empty list"
+        )
+    codes: list[int] = []
+    for item in cast(Sequence[Any], raw):
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise TenantConfigChangeRequestLifecycleError(
+                "success_status_codes must contain integers"
+            )
+        if item < 100 or item > 599:
+            raise TenantConfigChangeRequestLifecycleError(
+                "success_status_codes must be HTTP status codes"
+            )
+        codes.append(item)
+    if not codes:
+        raise TenantConfigChangeRequestLifecycleError(
+            "success_status_codes must be non-empty"
+        )
+    return tuple(codes)
 
 
 def _dict_from_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:

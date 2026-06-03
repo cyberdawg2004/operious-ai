@@ -152,6 +152,33 @@ class ConnectorConfigRow(Base):
         default="active",
         server_default=text("'active'"),
     )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        primary_key=True,
+        default=1,
+        server_default=text("1"),
+    )
+    configured_by: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        server_default=text("'legacy-bootstrap'"),
+    )
+    source_approval_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        server_default=text("'legacy-bootstrap'"),
+        index=True,
+    )
+    content_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("'" + ("0" * 64) + "'"),
+    )
+    previous_version_sha256: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -177,8 +204,16 @@ class ConnectorConfigRow(Base):
         UniqueConstraint(
             "tenant_id",
             "tool_name",
-            name="uq_connector_configs_tenant_tool_name",
+            "version",
+            name="uq_connector_configs_tenant_tool_version",
         ),
+        CheckConstraint("version >= 1", name="version_positive"),
+        CheckConstraint("length(configured_by) > 0", name="configured_by_nonempty"),
+        CheckConstraint(
+            "length(source_approval_id) > 0",
+            name="source_approval_id_nonempty",
+        ),
+        CheckConstraint("length(content_sha256) = 64", name="content_sha256_len"),
         Index("ix_connector_configs_tenant_status", "tenant_id", "status"),
         Index("ix_connector_configs_tenant_tool", "tenant_id", "tool_name"),
     )
@@ -580,7 +615,7 @@ class TenantConfigChangeRequestRow(Base):
         CheckConstraint(
             "change_type IN ("
             "'knowledge', 'policy', 'execution_governance', "
-            "'topology', 'channel'"
+            "'topology', 'channel', 'connector'"
             ")",
             name="change_type_valid",
         ),

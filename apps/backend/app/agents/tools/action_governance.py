@@ -345,6 +345,29 @@ def parse_action_tools_policy(
     record: TenantGovernancePolicyRecord,
 ) -> ParsedActionPolicy:
     parameters = _require_mapping(record.parameters, "parameters")
+    return _parse_action_tools_parameters(parameters, binding=_binding_for(record))
+
+
+def validate_action_tools_policy_parameters(parameters: Mapping[str, Any]) -> None:
+    """Validate action_tools policy parameters without requiring persistence fields."""
+
+    binding = ActionPolicyBinding(
+        policy_id="validation",
+        policy_type=ACTION_TOOLS_POLICY_TYPE,
+        version=0,
+        content_sha256="0" * 64,
+    )
+    _parse_action_tools_parameters(
+        _require_mapping(parameters, "parameters"),
+        binding=binding,
+    )
+
+
+def _parse_action_tools_parameters(
+    parameters: Mapping[str, object],
+    *,
+    binding: ActionPolicyBinding,
+) -> ParsedActionPolicy:
     tools = _require_mapping(parameters.get("tools"), "tools")
     missing = sorted(_REQUIRED_TOOL_RULES.difference(tools))
     if missing:
@@ -352,7 +375,7 @@ def parse_action_tools_policy(
             f"missing required tool rule(s): {', '.join(missing)}"
         )
     return ParsedActionPolicy(
-        binding=_binding_for(record),
+        binding=binding,
         warranty=_parse_warranty_rule(_tool_rule(tools, "warranty.claim")),
         replacement=_parse_replacement_rule(
             _tool_rule(tools, "replacement.order")
@@ -596,4 +619,5 @@ __all__ = [
     "TenantActionPolicy",
     "build_action_tool_governance_runtime",
     "parse_action_tools_policy",
+    "validate_action_tools_policy_parameters",
 ]

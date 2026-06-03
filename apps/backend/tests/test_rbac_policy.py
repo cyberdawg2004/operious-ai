@@ -189,6 +189,7 @@ def test_auth0_tenant_config_admin_role_grants_domain_capabilities() -> None:
         "tenant.policy.write",
         "tenant.topology.write",
         "tenant.execution_governance.write",
+        "tenant.connector.write",
     }.issubset(auth.capabilities)
 
 
@@ -199,12 +200,14 @@ def test_auth0_granular_tenant_roles_grant_domain_capabilities() -> None:
             "roles": [
                 "TenantChannelAdmin",
                 "TenantPolicyWriter",
+                "TenantConnectorWriter",
             ],
         }
     )
 
     assert "tenant.channel.admin" in auth.capabilities
     assert "tenant.policy.write" in auth.capabilities
+    assert "tenant.connector.write" in auth.capabilities
     assert "tenant.knowledge.write" not in auth.capabilities
 
 
