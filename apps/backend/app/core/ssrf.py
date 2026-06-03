@@ -21,13 +21,14 @@ import socket
 import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Final, Protocol, cast
+from typing import Any, Final, Protocol, TypeVar, cast
 from urllib.parse import urlsplit
 
 import httpcore
 import httpx
 
 _ALLOWED_SCHEMES: Final[frozenset[str]] = frozenset({"https"})
+_T = TypeVar("_T")
 
 Resolver = Callable[[str, int], Iterable[str]]
 
@@ -308,10 +309,10 @@ class _HttpCoreResponseStream(httpx.AsyncByteStream):
         await self._stream.aclose()
 
 
-async def _with_timeout[T](
-    awaitable: Awaitable[T],
+async def _with_timeout(
+    awaitable: Awaitable[_T],
     timeout: float | None,
-) -> T:
+) -> _T:
     if timeout is None:
         return await awaitable
     return await asyncio.wait_for(awaitable, timeout)
