@@ -403,6 +403,7 @@ async def _seed_connector(
 ) -> None:
     now = datetime(2026, 6, 4, tzinfo=timezone.utc)
     await session.merge(TenantRow(tenant_id=tenant_id))
+    await session.flush()
     session.add(
         ConnectorConfigRow(
             tenant_id=tenant_id,
