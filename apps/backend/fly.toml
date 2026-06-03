@@ -11,10 +11,10 @@ primary_region = "sin"
 [processes]
   web = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
   worker_diagnostic = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=4"
-  worker_escalation = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q escalation --concurrency=4"
-  worker_supervisor = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q supervisor,qa --concurrency=4"
-  worker_sop = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=4"
-  worker_maintenance = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=2"
+  worker_escalation = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q escalation --concurrency=1"
+  worker_supervisor = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q supervisor,qa --concurrency=1"
+  worker_sop = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=1"
+  worker_maintenance = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=1"
   worker_voice_realtime = "env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=8 --loglevel=info"
 
 [env]
@@ -86,7 +86,7 @@ primary_region = "sin"
 
 [[vm]]
   processes = ["worker_escalation"]
-  memory = "256mb"
+  memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
   min_machines_running = 1
@@ -94,7 +94,7 @@ primary_region = "sin"
 
 [[vm]]
   processes = ["worker_supervisor"]
-  memory = "256mb"
+  memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
   min_machines_running = 1
@@ -102,7 +102,7 @@ primary_region = "sin"
 
 [[vm]]
   processes = ["worker_sop"]
-  memory = "256mb"
+  memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
   min_machines_running = 1
@@ -110,7 +110,7 @@ primary_region = "sin"
 
 [[vm]]
   processes = ["worker_maintenance"]
-  memory = "256mb"
+  memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
   min_machines_running = 1

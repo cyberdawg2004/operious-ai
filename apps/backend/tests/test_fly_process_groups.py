@@ -24,20 +24,20 @@ EXPECTED_PROCESS_QUEUES = {
 
 EXPECTED_CONCURRENCY = {
     "worker_diagnostic": 4,
-    "worker_escalation": 4,
-    "worker_supervisor": 4,
-    "worker_sop": 4,
-    "worker_maintenance": 2,
+    "worker_escalation": 1,
+    "worker_supervisor": 1,
+    "worker_sop": 1,
+    "worker_maintenance": 1,
     "worker_voice_realtime": 8,
 }
 
 EXPECTED_VM_PROFILES = {
     "web": ("512mb", "shared", 1),
     "worker_diagnostic": ("1024mb", "shared", 2),
-    "worker_escalation": ("256mb", "shared", 1),
-    "worker_supervisor": ("256mb", "shared", 1),
-    "worker_sop": ("256mb", "shared", 1),
-    "worker_maintenance": ("256mb", "shared", 1),
+    "worker_escalation": ("512mb", "shared", 1),
+    "worker_supervisor": ("512mb", "shared", 1),
+    "worker_sop": ("512mb", "shared", 1),
+    "worker_maintenance": ("512mb", "shared", 1),
     "worker_voice_realtime": ("512mb", "shared", 2),
 }
 
