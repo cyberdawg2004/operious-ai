@@ -11,6 +11,10 @@ function getAuth0Domain() {
 export const auth0 = new Auth0Client({
   appBaseUrl: process.env.APP_BASE_URL || process.env.AUTH0_BASE_URL,
   domain: getAuth0Domain(),
+  authorizationParameters: {
+    audience: process.env.AUTH0_AUDIENCE || "https://api.operious.ai",
+    scope: process.env.AUTH0_SCOPE || "openid profile email",
+  },
   routes: {
     login: "/api/auth/login",
     logout: "/api/auth/logout",
