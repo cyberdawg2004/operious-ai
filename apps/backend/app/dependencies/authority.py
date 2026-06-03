@@ -132,6 +132,9 @@ TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY: Final[str] = (
 #: Domain capability required to mutate outbound connector configuration.
 TENANT_CONNECTOR_WRITE_CAPABILITY: Final[str] = "tenant.connector.write"
 
+#: Domain capability required to read outbound connector configuration.
+TENANT_CONNECTOR_READ_CAPABILITY: Final[str] = "tenant.connector.read"
+
 #: Backward-compatible capability for non-domain config-ledger reads.
 TENANT_CONFIG_WRITE_CAPABILITY: Final[str] = "tenant.config.write"
 
@@ -247,6 +250,15 @@ def require_tenant_training_write(request: Request) -> AuthorityContext:
     return _require_capability_from_request(
         request,
         capability=TENANT_TRAINING_WRITE_CAPABILITY,
+    )
+
+
+def require_tenant_connector_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.connector.read capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_CONNECTOR_READ_CAPABILITY,
     )
 
 
@@ -541,6 +553,7 @@ __all__ = [
     "TENANT_AUDIT_EXPORT_CAPABILITY",
     "TENANT_CHANNEL_ADMIN_CAPABILITY",
     "TENANT_COGNITION_READ_CAPABILITY",
+    "TENANT_CONNECTOR_READ_CAPABILITY",
     "TENANT_CONNECTOR_WRITE_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
     "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
@@ -567,6 +580,7 @@ __all__ = [
     "require_tenant_admin",
     "require_tenant_audit_export",
     "require_tenant_cognition_read",
+    "require_tenant_connector_read",
     "require_tenant_governance_read",
     "require_tenant_knowledge_write",
     "require_tenant_observability_read",

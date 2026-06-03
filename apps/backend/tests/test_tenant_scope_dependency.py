@@ -227,6 +227,7 @@ def test_module_exports_stable_contract() -> None:
         "TENANT_CONFIG_APPROVE_CAPABILITY",
         "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
         "TENANT_CONFIG_WRITE_CAPABILITY",
+        "TENANT_CONNECTOR_READ_CAPABILITY",       # spec 2.5b connector read
         "TENANT_CONNECTOR_WRITE_CAPABILITY",       # spec 2.5a connector config
         "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
         "TENANT_GOVERNANCE_READ_CAPABILITY",     # spec 1a-ext #26
@@ -250,6 +251,7 @@ def test_module_exports_stable_contract() -> None:
         "require_tenant_admin",
         "require_tenant_audit_export",           # spec 1a #80
         "require_tenant_cognition_read",         # spec 1a-ext #26
+        "require_tenant_connector_read",          # spec 2.5b connector read
         "require_tenant_governance_read",        # spec 1a-ext #26
         "require_tenant_knowledge_write",        # spec 1a-ext #26
         "require_tenant_observability_read",     # spec 1a #26

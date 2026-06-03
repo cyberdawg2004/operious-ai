@@ -13,6 +13,7 @@ from app.dependencies.authority import (
     TENANT_ACTIONS_APPROVE_CAPABILITY,
     TENANT_AUDIT_EXPORT_CAPABILITY,
     TENANT_COGNITION_READ_CAPABILITY,
+    TENANT_CONNECTOR_READ_CAPABILITY,
     TENANT_GOVERNANCE_READ_CAPABILITY,
     TENANT_OBSERVABILITY_READ_CAPABILITY,
     TENANT_OPERATIONS_READ_CAPABILITY,
@@ -23,6 +24,7 @@ from app.dependencies.authority import (
     require_tenant_actions_approve,
     require_tenant_audit_export,
     require_tenant_cognition_read,
+    require_tenant_connector_read,
     require_tenant_governance_read,
     require_tenant_observability_read,
     require_tenant_operations_read,
@@ -49,6 +51,7 @@ def test_capability_constant_values() -> None:
     assert TENANT_SUPERVISOR_READ_CAPABILITY == "tenant.supervisor.read"
     assert TENANT_GOVERNANCE_READ_CAPABILITY == "tenant.governance.read"
     assert TENANT_COGNITION_READ_CAPABILITY == "tenant.cognition.read"
+    assert TENANT_CONNECTOR_READ_CAPABILITY == "tenant.connector.read"
     assert TENANT_ACTIONS_APPROVE_CAPABILITY == "tenant.actions.approve"
     assert TENANT_TRAINING_WRITE_CAPABILITY == "tenant.training.write"
     assert TENANT_PRIVACY_ADMIN_CAPABILITY == "tenant.privacy.admin"
@@ -88,6 +91,7 @@ def test_audit_export_dep_fails_without_capability() -> None:
         (TENANT_SUPERVISOR_READ_CAPABILITY, require_tenant_supervisor_read),
         (TENANT_GOVERNANCE_READ_CAPABILITY, require_tenant_governance_read),
         (TENANT_COGNITION_READ_CAPABILITY, require_tenant_cognition_read),
+        (TENANT_CONNECTOR_READ_CAPABILITY, require_tenant_connector_read),
         (TENANT_ACTIONS_APPROVE_CAPABILITY, require_tenant_actions_approve),
         (TENANT_TRAINING_WRITE_CAPABILITY, require_tenant_training_write),
         (TENANT_PRIVACY_ADMIN_CAPABILITY, require_tenant_privacy_admin),
@@ -128,6 +132,7 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
     operator_caps = set(ROLE_CAPABILITY_MAP["Operator"])
     assert "tenant.governance.read" not in operator_caps
     assert "tenant.cognition.read" not in operator_caps
+    assert "tenant.connector.read" not in operator_caps
     assert "tenant.actions.approve" not in operator_caps
     assert "tenant.training.write" not in operator_caps
     assert "tenant.privacy.admin" not in operator_caps
@@ -141,6 +146,7 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
         ("TenantSupervisor", "tenant.supervisor.read"),
         ("TenantGovernanceViewer", "tenant.governance.read"),
         ("TenantCognitionViewer", "tenant.cognition.read"),
+        ("TenantConnectorViewer", "tenant.connector.read"),
         ("TenantActionApprover", "tenant.actions.approve"),
         ("TenantTrainingWriter", "tenant.training.write"),
         ("TenantPrivacyAdmin", "tenant.privacy.admin"),
@@ -166,6 +172,7 @@ def test_permission_map_audit() -> None:
         ("read:tenant_supervisor", "tenant.supervisor.read"),
         ("read:tenant_governance", "tenant.governance.read"),
         ("read:tenant_cognition", "tenant.cognition.read"),
+        ("read:tenant_connector", "tenant.connector.read"),
         ("approve:tenant_actions", "tenant.actions.approve"),
         ("write:tenant_training", "tenant.training.write"),
         ("admin:tenant_privacy", "tenant.privacy.admin"),
@@ -177,6 +184,17 @@ def test_permission_map_1aext_permissions(
     capability: str,
 ) -> None:
     assert PERMISSION_CAPABILITY_MAP.get(permission) == capability
+
+
+def test_connector_writer_role_and_permission_include_read() -> None:
+    assert ROLE_CAPABILITY_MAP.get("TenantConnectorWriter") == (
+        "tenant.connector.write",
+        "tenant.connector.read",
+    )
+    assert PERMISSION_CAPABILITY_MAP.get("write:tenant_connector") == (
+        "tenant.connector.write",
+        "tenant.connector.read",
+    )
 
 
 # ── Structural: observability router uses the capability dep on all endpoints ─

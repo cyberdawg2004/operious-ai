@@ -29,6 +29,7 @@ from app.tenant.change_requests import (
 )
 from app.tenant.persistence import (
     TenantChannelConfigurationRecord,
+    TenantConnectorConfigurationRecord,
     TenantExecutionCircuitBreakerRecord,
     TenantExecutionGovernanceConfigurationRecord,
     TenantGovernancePolicyRecord,
@@ -135,6 +136,63 @@ class TenantChannelConfigurationPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     items: list[TenantChannelConfigurationResponse] = []
+    total: int
+    offset: int
+
+
+class TenantConnectorConfigurationResponse(BaseModel):
+    """Credential-free connector configuration response."""
+
+    model_config = ConfigDict(frozen=True)
+
+    connector_type: str
+    tool_name: str
+    http_method: str
+    endpoint_template: str
+    endpoint_host: str
+    field_mappings: dict[str, Any] = Field(default_factory=dict)
+    idempotency_header_name: str
+    response_parse: dict[str, Any] = Field(default_factory=dict)
+    success_status_codes: list[int]
+    status: str
+    version: int
+    configured_by: str
+    source_approval_id: str
+    content_sha256: str
+    previous_version_sha256: str | None = None
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantConnectorConfigurationRecord,
+    ) -> "TenantConnectorConfigurationResponse":
+        return cls(
+            connector_type=record.connector_type,
+            tool_name=record.tool_name,
+            http_method=record.http_method,
+            endpoint_template=record.endpoint_template,
+            endpoint_host=record.endpoint_host,
+            field_mappings=dict(record.field_mappings),
+            idempotency_header_name=record.idempotency_header_name,
+            response_parse=dict(record.response_parse),
+            success_status_codes=list(record.success_status_codes),
+            status=record.status,
+            version=record.version,
+            configured_by=record.configured_by,
+            source_approval_id=record.source_approval_id,
+            content_sha256=record.content_sha256,
+            previous_version_sha256=record.previous_version_sha256,
+            created_at=record.created_at.isoformat(),
+            updated_at=record.updated_at.isoformat(),
+        )
+
+
+class TenantConnectorConfigurationPage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[TenantConnectorConfigurationResponse] = []
     total: int
     offset: int
 
@@ -514,6 +572,8 @@ __all__ = [
     "TenantChannelConfigurationResponse",
     "TenantChannelCreateRequest",
     "TenantChannelUpdateRequest",
+    "TenantConnectorConfigurationPage",
+    "TenantConnectorConfigurationResponse",
     "TenantExecutionCircuitBreakerPage",
     "TenantExecutionCircuitBreakerResponse",
     "TenantExecutionGovernanceCreateRequest",

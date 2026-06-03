@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -12,9 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import VerifiedIdentity
 from app.auth.providers import StaticTokenProvider
 from app.core.config import get_settings
-from app.dependencies.authority import TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES
+from app.dependencies.authority import (
+    TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES,
+    TENANT_CONNECTOR_READ_CAPABILITY,
+)
 from app.dependencies.database import get_db_session
 from app.main import create_app
+from app.tenant.db.models import ConnectorConfigRow, TenantRow
 from tests.conftest import requires_postgres
 
 pytestmark = [requires_postgres]
@@ -42,10 +47,25 @@ async def tenant_client(
                 principal_id="principal-a",
                 capabilities=frozenset(TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES),
             ),
+            "tenant-acme-reader": VerifiedIdentity(
+                tenant_id="tenant-acme",
+                principal_id="principal-reader",
+                capabilities=frozenset({TENANT_CONNECTOR_READ_CAPABILITY}),
+            ),
+            "tenant-acme-empty": VerifiedIdentity(
+                tenant_id="tenant-acme",
+                principal_id="principal-empty",
+                capabilities=frozenset(),
+            ),
             "tenant-other-admin": VerifiedIdentity(
                 tenant_id="tenant-other",
                 principal_id="principal-a",
                 capabilities=frozenset(TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES),
+            ),
+            "tenant-other-reader": VerifiedIdentity(
+                tenant_id="tenant-other",
+                principal_id="principal-reader",
+                capabilities=frozenset({TENANT_CONNECTOR_READ_CAPABILITY}),
             ),
         }
     )
@@ -64,8 +84,8 @@ async def tenant_client(
     get_settings.cache_clear()
 
 
-def _headers(tenant: str = "tenant-acme") -> dict[str, str]:
-    return {"Authorization": f"Bearer {tenant}-admin"}
+def _headers(tenant: str = "tenant-acme", role: str = "admin") -> dict[str, str]:
+    return {"Authorization": f"Bearer {tenant}-{role}"}
 
 
 @pytest.mark.asyncio
@@ -145,6 +165,103 @@ async def test_channel_point_update_and_verify_are_tenant_scoped(
     assert verified.status_code == 200
     assert verified.json()["status"] == "active"
     assert verified.json()["verified_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_connector_config_read_is_tenant_scoped(
+    pg_session: AsyncSession,
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    await _seed_connector(pg_session, tool_name="refund.visibility")
+
+    own = await tenant_client.get(
+        "/api/v1/tenant/connectors/refund.visibility",
+        headers=_headers("tenant-acme", "reader"),
+    )
+    cross = await tenant_client.get(
+        "/api/v1/tenant/connectors/refund.visibility",
+        headers=_headers("tenant-other", "reader"),
+    )
+
+    assert own.status_code == 200
+    assert own.json()["total"] == 1
+    assert cross.status_code == 404
+    assert "tenant_connector_configuration_not_found" in cross.text
+
+
+@pytest.mark.asyncio
+async def test_connector_config_read_requires_connector_read_capability(
+    pg_session: AsyncSession,
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    await _seed_connector(pg_session, tool_name="refund.capability")
+
+    denied = await tenant_client.get(
+        "/api/v1/tenant/connectors",
+        headers=_headers("tenant-acme", "empty"),
+    )
+    allowed = await tenant_client.get(
+        "/api/v1/tenant/connectors",
+        headers=_headers("tenant-acme", "reader"),
+    )
+
+    assert denied.status_code == 403
+    assert TENANT_CONNECTOR_READ_CAPABILITY in denied.text
+    assert allowed.status_code == 200
+    assert allowed.json()["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_connector_config_response_is_credential_free(
+    pg_session: AsyncSession,
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    secret = "connector-channel-secret"
+    channel = await tenant_client.post(
+        "/api/v1/tenant/channels",
+        headers=_headers(),
+        json={
+            "channel_type": "zendesk",
+            "routing_address": "https://tenant.zendesk.example",
+            "credentials": {"api_key": secret},
+            "webhook_secret": "connector-webhook-secret",
+        },
+    )
+    assert channel.status_code == 200
+    await _seed_connector(pg_session, tool_name="refund.redaction")
+
+    response = await tenant_client.get(
+        "/api/v1/tenant/connectors/refund.redaction",
+        headers=_headers("tenant-acme", "reader"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    item = body["items"][0]
+    assert set(item) == {
+        "connector_type",
+        "tool_name",
+        "http_method",
+        "endpoint_template",
+        "endpoint_host",
+        "field_mappings",
+        "idempotency_header_name",
+        "response_parse",
+        "success_status_codes",
+        "status",
+        "version",
+        "configured_by",
+        "source_approval_id",
+        "content_sha256",
+        "previous_version_sha256",
+        "created_at",
+        "updated_at",
+    }
+    assert "credentials" not in item
+    assert "credentials_enc" not in item
+    assert "webhook_secret" not in item
+    assert secret not in response.text
+    assert "connector-webhook-secret" not in response.text
 
 
 @pytest.mark.asyncio
@@ -273,3 +390,39 @@ async def test_execution_governance_configuration_endpoint(
     assert breakers.status_code == 200
     assert breakers.json()["total"] == 1
     assert breakers.json()["items"][0]["state"] == "closed"
+
+
+async def _seed_connector(
+    session: AsyncSession,
+    *,
+    tenant_id: str = "tenant-acme",
+    connector_type: str = "zendesk",
+    tool_name: str = "refund.request",
+    version: int = 1,
+    status: str = "active",
+) -> None:
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    await session.merge(TenantRow(tenant_id=tenant_id))
+    session.add(
+        ConnectorConfigRow(
+            tenant_id=tenant_id,
+            connector_type=connector_type,
+            tool_name=tool_name,
+            http_method="POST",
+            endpoint_template=f"https://{tool_name}.example.com/refunds/{{order_id}}",
+            endpoint_host=f"{tool_name}.example.com",
+            field_mappings={"order_id": "payload.order_id"},
+            idempotency_header_name="X-Idempotency-Key",
+            response_parse={"provider_id": "refund.id"},
+            success_status_codes=[200, 201, 202],
+            status=status,
+            version=version,
+            configured_by="principal-config",
+            source_approval_id=f"approval-{tool_name}-{version}",
+            content_sha256="a" * 64,
+            previous_version_sha256=None if version == 1 else "b" * 64,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await session.flush()

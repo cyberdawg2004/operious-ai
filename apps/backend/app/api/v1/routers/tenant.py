@@ -15,6 +15,8 @@ from app.api.v1.schemas.tenant import (
     TenantChannelConfigurationResponse,
     TenantChannelCreateRequest,
     TenantChannelUpdateRequest,
+    TenantConnectorConfigurationPage,
+    TenantConnectorConfigurationResponse,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerResponse,
     TenantExecutionGovernanceCreateRequest,
@@ -45,6 +47,7 @@ from app.dependencies.authority import (
     require_authority,
     require_capability,
     require_config_apply_authorization_for,
+    require_tenant_connector_read,
     require_tenant_scope,
 )
 from app.dependencies.services import (
@@ -90,6 +93,7 @@ from app.tenant.identity import (
 router = APIRouter(tags=["tenant"])
 require_tenant_config_write = require_capability(TENANT_CONFIG_WRITE_CAPABILITY)
 require_tenant_config_approve = require_capability(TENANT_CONFIG_APPROVE_CAPABILITY)
+require_tenant_connector_config_read = require_tenant_connector_read
 require_tenant_channel_direct_apply = require_config_apply_authorization_for(
     TENANT_CHANNEL_ADMIN_CAPABILITY
 )
@@ -304,6 +308,75 @@ async def configure_channel(
             detail={"code": "tenant_channel_configuration_failed"},
         ) from exc
     return TenantChannelConfigurationResponse.from_record(record)
+
+
+@router.get(
+    "/connectors",
+    response_model=TenantConnectorConfigurationPage,
+)
+async def list_connector_configurations(
+    connector_type: str | None = Query(None),
+    tool_name: str | None = Query(None),
+    status_filter: str | None = Query("active", alias="status"),
+    limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_connector_config_read),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantConnectorConfigurationPage:
+    page = await service.list_connector_configurations(
+        tenant_id=expected_tenant_id,
+        connector_type=connector_type,
+        tool_name=tool_name,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    return TenantConnectorConfigurationPage(
+        items=[
+            TenantConnectorConfigurationResponse.from_record(record)
+            for record in page.items
+        ],
+        total=page.total,
+        offset=page.offset,
+    )
+
+
+@router.get(
+    "/connectors/{tool_name}",
+    response_model=TenantConnectorConfigurationPage,
+)
+async def list_connector_configuration_history(
+    tool_name: str,
+    connector_type: str | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(_MAX_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_connector_config_read),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantConnectorConfigurationPage:
+    page = await service.list_connector_configurations(
+        tenant_id=expected_tenant_id,
+        connector_type=connector_type,
+        tool_name=tool_name,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+    if page.total == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_connector_configuration_not_found"},
+        )
+    return TenantConnectorConfigurationPage(
+        items=[
+            TenantConnectorConfigurationResponse.from_record(record)
+            for record in page.items
+        ],
+        total=page.total,
+        offset=page.offset,
+    )
 
 
 @router.put(
