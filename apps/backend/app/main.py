@@ -110,6 +110,8 @@ ALLOWED_ORIGINS = [
 ]
 
 _POLICY_INVALIDATION_PATTERN = "governance:policy:invalidate:*"
+_POLICY_INVALIDATION_RETRY_INITIAL_SECONDS = 1.0
+_POLICY_INVALIDATION_RETRY_MAX_SECONDS = 30.0
 
 
 def _build_cors_origins(raw: str) -> list[str]:
@@ -199,10 +201,12 @@ async def _governance_policy_invalidation_listener(app: FastAPI) -> None:
     redis_client = cast(
         Redis, getattr(app.state, "redis_client", get_redis_client())
     )
+    retry_delay_seconds = _POLICY_INVALIDATION_RETRY_INITIAL_SECONDS
     while True:
         pubsub: PubSub = redis_client.pubsub()  # type: ignore[reportUnknownMemberType]
         try:
             await pubsub.psubscribe(_POLICY_INVALIDATION_PATTERN)
+            retry_delay_seconds = _POLICY_INVALIDATION_RETRY_INITIAL_SECONDS
             async for raw_message in _iter_pubsub_messages(pubsub):
                 message = cast(Mapping[str, object], raw_message)
                 if message.get("type") != "pmessage":
@@ -226,11 +230,28 @@ async def _governance_policy_invalidation_listener(app: FastAPI) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "governance_invalidation_listener_failed",
-                extra={"error": str(exc)},
+                extra={
+                    "error": str(exc),
+                    "retry_after_seconds": retry_delay_seconds,
+                },
             )
-            await asyncio.sleep(1.0)
+            await _sleep_policy_invalidation_retry(retry_delay_seconds)
+            retry_delay_seconds = _next_policy_invalidation_retry_delay(
+                retry_delay_seconds
+            )
         finally:
             await _close_pubsub(pubsub)
+
+
+def _next_policy_invalidation_retry_delay(current_delay_seconds: float) -> float:
+    return min(
+        current_delay_seconds * 2.0,
+        _POLICY_INVALIDATION_RETRY_MAX_SECONDS,
+    )
+
+
+async def _sleep_policy_invalidation_retry(delay_seconds: float) -> None:
+    await asyncio.sleep(delay_seconds)
 
 
 def _tenant_id_from_invalidation_message(data: object) -> str:

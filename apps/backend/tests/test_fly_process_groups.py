@@ -7,6 +7,7 @@ import tomllib
 from pathlib import Path
 
 FLY_TOML = Path(__file__).resolve().parents[1] / "fly.toml"
+DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile"
 
 EXPECTED_PROCESS_QUEUES = {
     "worker_diagnostic": (
@@ -77,6 +78,20 @@ def test_fly_worker_concurrency_is_explicit() -> None:
 
 def test_http_service_targets_web_process_only() -> None:
     assert _fly_config()["http_service"]["processes"] == ["web"]
+
+
+def test_fly_health_check_uses_cheap_liveness_endpoint() -> None:
+    checks = _fly_config()["http_service"]["checks"]
+
+    assert len(checks) == 1
+    assert checks[0]["path"] == "/api/v1/live"
+
+
+def test_container_health_check_uses_cheap_liveness_endpoint() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "/api/v1/live" in dockerfile
+    assert "/api/v1/health" not in dockerfile
 
 
 def test_voice_process_groups_are_pre_warmed() -> None:
