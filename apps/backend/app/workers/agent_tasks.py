@@ -1366,8 +1366,9 @@ async def _action_orchestration_runtime(
     tenant_id: str,
 ) -> ActionOrchestrationRuntime:
     settings = get_settings()
+    tenant_repository = PostgresTenantConfigurationRepository(session)
     tenant_runtime = TenantConfigurationRuntime(
-        repository=PostgresTenantConfigurationRepository(session),
+        repository=tenant_repository,
         credential_encryptor=TenantCredentialEncryptor(
             platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
         ),
@@ -1384,6 +1385,7 @@ async def _action_orchestration_runtime(
             governance_runtime=build_action_tool_governance_runtime(
                 persistence=PostgresGovernanceRepository(session),
                 redis_client=get_redis_client(),
+                tenant_configuration_repository=tenant_repository,
             ),
             grant_repository=PostgresAgentActionGrantRepository(session),
             connector_invocation_repository=PostgresConnectorInvocationRepository(

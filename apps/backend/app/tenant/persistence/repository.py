@@ -156,6 +156,13 @@ class TenantConfigurationRepository(Protocol):
         expected_tenant_id: str,
     ) -> TenantGovernancePolicyPage: ...
 
+    async def resolve_active_governance_policy(
+        self,
+        *,
+        policy_type: str,
+        expected_tenant_id: str,
+    ) -> TenantGovernancePolicyRecord | None: ...
+
     async def save_execution_governance_configuration(
         self,
         record: TenantExecutionGovernanceConfigurationRecord,

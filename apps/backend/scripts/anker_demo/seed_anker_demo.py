@@ -105,7 +105,7 @@ GOVERNANCE_POLICIES: tuple[dict[str, Any], ...] = (
         "status": "active",
     },
     {
-        "policy_type": "anker_action_tools",
+        "policy_type": "action_tools",
         "parameters": {
             "phase": "RT6",
             "tools": {

@@ -643,6 +643,17 @@ class TenantConfigurationRuntime:
             expected_tenant_id=tenant_id,
         )
 
+    async def resolve_active_governance_policy(
+        self,
+        *,
+        tenant_id: str,
+        policy_type: str,
+    ) -> TenantGovernancePolicyRecord | None:
+        return await self._repository.resolve_active_governance_policy(
+            policy_type=policy_type,
+            expected_tenant_id=tenant_id,
+        )
+
     async def configure_execution_governance(
         self,
         *,

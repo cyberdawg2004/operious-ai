@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import ClassVar
 
 import pytest
@@ -20,7 +21,10 @@ from app.agents.enums import CapabilityScope
 from app.agents.identity import AgentIdentity, ExecutionIdentity
 from app.agents.results import ToolInvocationRequest, ToolInvocationResult
 from app.agents.tools import BaseTool, ToolCapability, ToolInvoker, ToolRegistry
-from app.agents.tools.action_governance import build_action_tool_governance_runtime
+from app.agents.tools.action_governance import (
+    ACTION_TOOLS_POLICY_TYPE,
+    build_action_tool_governance_runtime,
+)
 from app.agents.tools.connector_invocations import (
     CONNECTOR_INVOCATION_PENDING,
     CONNECTOR_INVOCATION_SUCCEEDED,
@@ -32,7 +36,14 @@ from app.agents.tools.connector_invocations import (
 from app.agents.tools.grants import AGENT_ACTION_PROVIDER_IDEMPOTENCY_KEY
 from app.agents.value_objects import CausalityMetadata
 from app.governance.persistence import PostgresGovernanceRepository
+from app.tenant.chronology import canonical_sha256
 from app.tenant.db.models import TenantRow
+from app.tenant.enums import TenantGovernancePolicyStatus
+from app.tenant.identity import derive_governance_policy_version_id
+from app.tenant.persistence import (
+    PostgresTenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
+)
 from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 pytestmark = [pytest.mark.asyncio, requires_postgres]
@@ -42,6 +53,7 @@ _OTHER_TENANT_ID = "tenant-connector-ledger-other"
 _TOOL_NAME = "refund.request"
 _TARGET_RESOURCE = "order:order-22:sku:A1771"
 _REQUEST_HASH = "a" * 64
+_POLICY_APPROVED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -295,6 +307,9 @@ def _invoker(
         governance_runtime=build_action_tool_governance_runtime(
             persistence=PostgresGovernanceRepository(session),
             redis_client=None,
+            tenant_configuration_repository=(
+                PostgresTenantConfigurationRepository(session)
+            ),
         ),
         connector_invocation_repository=ledger,
     )
@@ -356,9 +371,71 @@ async def _seed_tenants(
     for tenant_id in tenant_ids:
         await set_pg_rls_tenant(session, tenant_id)
         await session.merge(TenantRow(tenant_id=tenant_id))
+        await _seed_action_policy(session, tenant_id=tenant_id)
     await session.flush()
     if tenant_ids:
         await set_pg_rls_tenant(session, tenant_ids[0])
+
+
+async def _seed_action_policy(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+) -> None:
+    parameters = {
+        "phase": "2.4",
+        "tools": {
+            "warranty.claim": {
+                "allow": {
+                    "confidence_gte": 0.85,
+                    "issue_category_in": ["charging_issue", "product_defect"],
+                },
+                "else": "require_approval",
+            },
+            "replacement.order": {"always": "require_approval"},
+            "refund.request": {
+                "allow": {"refund_amount_cents_lte": 5000},
+                "else": "require_approval",
+            },
+            "warehouse.repair.report": {
+                "allow": {"severity_in": ["low", "medium"]},
+                "require_approval": {"severity_in": ["high", "critical"]},
+            },
+        },
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": ACTION_TOOLS_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": 1,
+            "approved_by": "test-policy-admin",
+            "effective_from": _POLICY_APPROVED_AT.isoformat(),
+            "source_approval_id": "approval-connector-ledger",
+        }
+    )
+    await PostgresTenantConfigurationRepository(session).save_governance_policy(
+        TenantGovernancePolicyRecord(
+            policy_id=derive_governance_policy_version_id(
+                tenant_id=tenant_id,
+                policy_type=ACTION_TOOLS_POLICY_TYPE,
+                version=1,
+            ),
+            tenant_id=tenant_id,
+            policy_type=ACTION_TOOLS_POLICY_TYPE,
+            parameters=parameters,
+            status=TenantGovernancePolicyStatus.ACTIVE,
+            version=1,
+            approved_by="test-policy-admin",
+            effective_from=_POLICY_APPROVED_AT,
+            created_at=_POLICY_APPROVED_AT,
+            source_approval_id="approval-connector-ledger",
+            content_sha256=content_sha256,
+            previous_version_sha256=None,
+        ),
+        expected_tenant_id=tenant_id,
+    )
 
 
 async def _insert_connector_invocation(

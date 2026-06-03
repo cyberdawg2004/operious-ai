@@ -11,6 +11,7 @@ from app.tenant.exceptions import (
 )
 from app.tenant.enums import (
     TenantExecutionGovernanceStatus,
+    TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantTopologyStatus,
 )
@@ -348,6 +349,24 @@ class InMemoryTenantConfigurationRepository:
             rows = [r for r in rows if r.status == query.status]
         rows.sort(key=lambda r: (r.policy_type, str(r.policy_id)))
         return _policy_page(rows, query.limit, query.offset)
+
+    async def resolve_active_governance_policy(
+        self,
+        *,
+        policy_type: str,
+        expected_tenant_id: str,
+    ) -> TenantGovernancePolicyRecord | None:
+        rows = [
+            r
+            for r in self._policies.values()
+            if r.tenant_id == expected_tenant_id
+            and r.policy_type == policy_type
+            and r.status is TenantGovernancePolicyStatus.ACTIVE
+        ]
+        if not rows:
+            return None
+        rows.sort(key=lambda r: (r.version, str(r.policy_id)), reverse=True)
+        return rows[0]
 
     async def save_execution_governance_configuration(
         self,

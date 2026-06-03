@@ -525,6 +525,29 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             offset=page.offset,
         )
 
+    async def resolve_active_governance_policy(
+        self,
+        *,
+        policy_type: str,
+        expected_tenant_id: str,
+    ) -> TenantGovernancePolicyRecord | None:
+        stmt = (
+            select(TenantGovernancePolicyRow)
+            .where(
+                TenantGovernancePolicyRow.tenant_id == expected_tenant_id,
+                TenantGovernancePolicyRow.policy_type == policy_type,
+                TenantGovernancePolicyRow.status
+                == TenantGovernancePolicyStatus.ACTIVE.value,
+            )
+            .order_by(
+                TenantGovernancePolicyRow.version.desc(),
+                TenantGovernancePolicyRow.policy_id.desc(),
+            )
+            .limit(1)
+        )
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        return None if row is None else _policy_row_to_record(row)
+
     async def save_execution_governance_configuration(
         self,
         record: TenantExecutionGovernanceConfigurationRecord,

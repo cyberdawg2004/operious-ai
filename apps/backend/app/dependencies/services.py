@@ -808,6 +808,12 @@ def get_action_approval_service(
                 governance_runtime=build_action_tool_governance_runtime(
                     persistence=governance_repository,
                     redis_client=get_redis_client(),
+                    tenant_configuration_repository=(
+                        PostgresTenantConfigurationRepository(
+                            session,
+                            data_protection=data_protection,
+                        )
+                    ),
                 ),
                 grant_repository=PostgresAgentActionGrantRepository(session),
                 connector_invocation_repository=(
