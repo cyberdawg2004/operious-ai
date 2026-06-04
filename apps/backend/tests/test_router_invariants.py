@@ -158,6 +158,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset(
         "get_supervisor_repository",
         "get_tenant_config_change_request_service",
         "get_tenant_configuration_service",
+        "get_tenant_lifecycle_service",
     }
 )
 

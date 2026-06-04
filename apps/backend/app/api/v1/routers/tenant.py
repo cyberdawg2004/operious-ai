@@ -52,6 +52,7 @@ from app.dependencies.authority import (
     require_capability,
     require_config_apply_authorization_for,
     require_platform_tenant_admin,
+    request_tenant_scope_opt,
     require_tenant_connector_read,
     require_tenant_scope,
 )
@@ -146,6 +147,7 @@ _DEFAULT_LIMIT = 25
 async def create_tenant_lifecycle(
     request: TenantLifecycleCreateRequest,
     authority: AuthorityContext = Depends(require_platform_lifecycle_admin),
+    _tenant_scope: str | None = Depends(request_tenant_scope_opt),
     service: TenantLifecycleService = Depends(get_tenant_lifecycle_service),
 ) -> TenantLifecycleResponse:
     try:
@@ -166,6 +168,7 @@ async def list_tenant_lifecycle(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     _authority: AuthorityContext = Depends(require_platform_lifecycle_admin),
+    _tenant_scope: str | None = Depends(request_tenant_scope_opt),
     service: TenantLifecycleService = Depends(get_tenant_lifecycle_service),
 ) -> TenantLifecyclePage:
     page = await service.list_tenants(limit=limit, offset=offset)

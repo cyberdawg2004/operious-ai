@@ -33,10 +33,12 @@ from app.dependencies.authority import (
     ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED,
     ERROR_CODE_TENANT_AXIS_MISSING,
     OPERATOR_CAPABILITY,
+    PLATFORM_TENANT_ADMIN_CAPABILITY,
     request_authority_opt,
     request_tenant_scope_opt,
     require_authority,
     require_operator_authority,
+    require_platform_tenant_admin,
     require_tenant_scope,
 )
 from app.identity.authority import AuthorityContext
@@ -219,6 +221,7 @@ def test_module_exports_stable_contract() -> None:
         "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
         "ERROR_CODE_TENANT_AXIS_MISSING",
         "OPERATOR_CAPABILITY",
+        "PLATFORM_TENANT_ADMIN_CAPABILITY",       # spec 2.5c platform lifecycle
         "TENANT_ACTIONS_APPROVE_CAPABILITY",    # spec 1a-ext #26
         "TENANT_ADMIN_CAPABILITY",
         "TENANT_AUDIT_EXPORT_CAPABILITY",        # spec 1a #80
@@ -248,6 +251,7 @@ def test_module_exports_stable_contract() -> None:
         "require_config_apply_authorization",
         "require_config_apply_authorization_for",
         "require_operator_authority",
+        "require_platform_tenant_admin",         # spec 2.5c platform lifecycle
         "require_tenant_actions_approve",        # spec 1a-ext #26
         "require_tenant_admin",
         "require_tenant_audit_export",           # spec 1a #80
@@ -274,7 +278,12 @@ def test_package_re_exports_helpers() -> None:
     assert deps.require_tenant_scope is require_tenant_scope
     assert deps.require_authority is require_authority
     assert deps.require_operator_authority is require_operator_authority
+    assert deps.require_platform_tenant_admin is require_platform_tenant_admin
     assert deps.OPERATOR_CAPABILITY == OPERATOR_CAPABILITY
+    assert (
+        deps.PLATFORM_TENANT_ADMIN_CAPABILITY
+        == PLATFORM_TENANT_ADMIN_CAPABILITY
+    )
     assert (
         deps.ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED
         == ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED
