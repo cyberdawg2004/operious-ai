@@ -39,6 +39,7 @@ from app.dependencies.authority import (
     TENANT_CHANNEL_ADMIN_CAPABILITY,
     TENANT_CONNECTOR_WRITE_CAPABILITY,
     TENANT_CONFIG_APPROVE_CAPABILITY,
+    TENANT_CONFIG_READ_CAPABILITY,
     TENANT_CONFIG_WRITE_CAPABILITY,
     TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
     TENANT_KNOWLEDGE_WRITE_CAPABILITY,
@@ -91,6 +92,7 @@ from app.tenant.identity import (
 )
 
 router = APIRouter(tags=["tenant"])
+require_tenant_config_read = require_capability(TENANT_CONFIG_READ_CAPABILITY)
 require_tenant_config_write = require_capability(TENANT_CONFIG_WRITE_CAPABILITY)
 require_tenant_config_approve = require_capability(TENANT_CONFIG_APPROVE_CAPABILITY)
 require_tenant_connector_config_read = require_tenant_connector_read
@@ -169,7 +171,7 @@ async def list_config_change_requests(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _writer: AuthorityContext = Depends(require_tenant_config_write),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigChangeRequestService = Depends(
         get_tenant_config_change_request_service
     ),

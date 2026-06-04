@@ -87,7 +87,13 @@ TENANT_DOMAIN_CAPABILITIES: Final[tuple[str, ...]] = (
 TENANT_CONFIG_ADMIN_CAPABILITIES: Final[tuple[str, ...]] = (
     *TENANT_DOMAIN_CAPABILITIES,
     "tenant.connector.read",
+    "tenant.config.read",
     "tenant.config.write",
+)
+
+TENANT_CONFIG_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
+    "tenant.config.read",
+    "tenant.config.approve",
 )
 
 OPERATOR_BUNDLE_CAPABILITIES: Final[tuple[str, ...]] = (
@@ -109,9 +115,14 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "read:tenant_governance": "tenant.governance.read",
     "read:tenant_cognition": "tenant.cognition.read",
     "read:tenant_connector": "tenant.connector.read",
+    "read:tenant_config": "tenant.config.read",
     "approve:tenant_actions": "tenant.actions.approve",
     "write:tenant_training": "tenant.training.write",
-    "write:tenant_connector": ("tenant.connector.write", "tenant.connector.read"),
+    "write:tenant_connector": (
+        "tenant.connector.write",
+        "tenant.connector.read",
+        "tenant.config.read",
+    ),
     "admin:tenant_privacy": "tenant.privacy.admin",
     "approve:tenant_privacy": "tenant.privacy.approve",
 }
@@ -123,18 +134,25 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "Operator": OPERATOR_BUNDLE_CAPABILITIES,
     "TenantAdmin": TENANT_CONFIG_ADMIN_CAPABILITIES,
     "TenantConfigAdmin": TENANT_CONFIG_ADMIN_CAPABILITIES,
-    "TenantConfigWriter": "tenant.config.write",
-    "TenantChannelAdmin": "tenant.channel.admin",
-    "TenantKnowledgeWriter": "tenant.knowledge.write",
-    "TenantPolicyWriter": "tenant.policy.write",
-    "TenantTopologyWriter": "tenant.topology.write",
-    "TenantExecGovWriter": "tenant.execution_governance.write",
-    "TenantConnectorWriter": ("tenant.connector.write", "tenant.connector.read"),
+    "TenantConfigWriter": ("tenant.config.write", "tenant.config.read"),
+    "TenantChannelAdmin": ("tenant.channel.admin", "tenant.config.read"),
+    "TenantKnowledgeWriter": ("tenant.knowledge.write", "tenant.config.read"),
+    "TenantPolicyWriter": ("tenant.policy.write", "tenant.config.read"),
+    "TenantTopologyWriter": ("tenant.topology.write", "tenant.config.read"),
+    "TenantExecGovWriter": (
+        "tenant.execution_governance.write",
+        "tenant.config.read",
+    ),
+    "TenantConnectorWriter": (
+        "tenant.connector.write",
+        "tenant.connector.read",
+        "tenant.config.read",
+    ),
     "TenantConnectorViewer": "tenant.connector.read",
     "TenantViewer": "tenant_read",
     # Separation of duties (S-03): the approve duty is a DISTINCT role so
     # it can be granted to a different principal than ``TenantAdmin``.
-    "TenantApprover":  "tenant.config.approve",
+    "TenantApprover":  TENANT_CONFIG_APPROVER_CAPABILITIES,
     # Observability + audit domain roles (#26/#80).
     "TenantObserver":  "tenant.observability.read",
     "TenantAuditor":   "tenant.audit.export",

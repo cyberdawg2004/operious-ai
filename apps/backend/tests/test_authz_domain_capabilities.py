@@ -133,6 +133,7 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
     assert "tenant.governance.read" not in operator_caps
     assert "tenant.cognition.read" not in operator_caps
     assert "tenant.connector.read" not in operator_caps
+    assert "tenant.config.read" not in operator_caps
     assert "tenant.actions.approve" not in operator_caps
     assert "tenant.training.write" not in operator_caps
     assert "tenant.privacy.admin" not in operator_caps
@@ -173,6 +174,7 @@ def test_permission_map_audit() -> None:
         ("read:tenant_governance", "tenant.governance.read"),
         ("read:tenant_cognition", "tenant.cognition.read"),
         ("read:tenant_connector", "tenant.connector.read"),
+        ("read:tenant_config", "tenant.config.read"),
         ("approve:tenant_actions", "tenant.actions.approve"),
         ("write:tenant_training", "tenant.training.write"),
         ("admin:tenant_privacy", "tenant.privacy.admin"),
@@ -190,10 +192,12 @@ def test_connector_writer_role_and_permission_include_read() -> None:
     assert ROLE_CAPABILITY_MAP.get("TenantConnectorWriter") == (
         "tenant.connector.write",
         "tenant.connector.read",
+        "tenant.config.read",
     )
     assert PERMISSION_CAPABILITY_MAP.get("write:tenant_connector") == (
         "tenant.connector.write",
         "tenant.connector.read",
+        "tenant.config.read",
     )
 
 

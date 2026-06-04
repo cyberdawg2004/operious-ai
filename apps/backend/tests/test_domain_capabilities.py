@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,6 +22,7 @@ from app.dependencies.authority import (
     TENANT_CONNECTOR_WRITE_CAPABILITY,
     TENANT_CONFIG_APPROVE_CAPABILITY,
     TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES,
+    TENANT_CONFIG_READ_CAPABILITY,
     TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY,
     TENANT_KNOWLEDGE_WRITE_CAPABILITY,
     TENANT_POLICY_WRITE_CAPABILITY,
@@ -33,6 +34,7 @@ from app.dependencies.services import (
 )
 from app.main import create_app
 from app.tenant.change_requests import (
+    TenantConfigChangeRequestPage,
     TenantConfigChangeRequestRecord,
     TenantConfigChangeRequestStatus,
     TenantConfigChangeType,
@@ -161,6 +163,28 @@ class _FakeTenantConfigurationService:
 class _FakeChangeRequestService:
     def __init__(self) -> None:
         self.proposals: list[TenantConfigChangeType] = []
+        self.records: list[TenantConfigChangeRequestRecord] = []
+
+    def seed(
+        self,
+        *,
+        change_type: TenantConfigChangeType = TenantConfigChangeType.CONNECTOR,
+        proposed_by: str = "principal-proposer",
+    ) -> TenantConfigChangeRequestRecord:
+        record = TenantConfigChangeRequestRecord(
+            change_request_id=uuid.uuid4(),
+            tenant_id=_TENANT_ID,
+            change_type=change_type,
+            proposed_payload={
+                "_schema_version": "1",
+                **_payload_for_change_type(change_type),
+            },
+            status=TenantConfigChangeRequestStatus.PROPOSED,
+            proposed_by=proposed_by,
+            proposed_at=_NOW,
+        )
+        self.records.append(record)
+        return record
 
     async def propose(
         self,
@@ -171,7 +195,7 @@ class _FakeChangeRequestService:
         proposed_by: str,
     ) -> TenantConfigChangeRequestRecord:
         self.proposals.append(change_type)
-        return TenantConfigChangeRequestRecord(
+        record = TenantConfigChangeRequestRecord(
             change_request_id=uuid.uuid4(),
             tenant_id=tenant_id,
             change_type=change_type,
@@ -180,6 +204,52 @@ class _FakeChangeRequestService:
             proposed_by=proposed_by,
             proposed_at=_NOW,
         )
+        self.records.append(record)
+        return record
+
+    async def list(
+        self,
+        *,
+        expected_tenant_id: str,
+        status: TenantConfigChangeRequestStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> TenantConfigChangeRequestPage:
+        items = [
+            record
+            for record in self.records
+            if record.tenant_id == expected_tenant_id
+            and (status is None or record.status == status)
+        ]
+        return TenantConfigChangeRequestPage(
+            items=tuple(items[offset : offset + limit]),
+            total=len(items),
+            limit=limit,
+            offset=offset,
+        )
+
+    async def approve(
+        self,
+        *,
+        change_request_id: str,
+        approved_by: str,
+        expected_tenant_id: str,
+    ) -> TenantConfigChangeRequestRecord:
+        request_id = uuid.UUID(change_request_id)
+        for index, record in enumerate(self.records):
+            if (
+                record.change_request_id == request_id
+                and record.tenant_id == expected_tenant_id
+            ):
+                approved = replace(
+                    record,
+                    status=TenantConfigChangeRequestStatus.APPROVED,
+                    approved_by=approved_by,
+                    approved_at=_NOW,
+                )
+                self.records[index] = approved
+                return approved
+        raise LookupError(change_request_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,12 +266,32 @@ def domain_client(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     get_settings.cache_clear()
     provider = StaticTokenProvider(
         tokens={
-            "channel": _identity(TENANT_CHANNEL_ADMIN_CAPABILITY),
-            "knowledge": _identity(TENANT_KNOWLEDGE_WRITE_CAPABILITY),
-            "policy": _identity(TENANT_POLICY_WRITE_CAPABILITY),
-            "connector": _identity(TENANT_CONNECTOR_WRITE_CAPABILITY),
+            "channel": _identity(
+                TENANT_CHANNEL_ADMIN_CAPABILITY,
+                TENANT_CONFIG_READ_CAPABILITY,
+            ),
+            "knowledge": _identity(
+                TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+                TENANT_CONFIG_READ_CAPABILITY,
+            ),
+            "policy": _identity(
+                TENANT_POLICY_WRITE_CAPABILITY,
+                TENANT_CONFIG_READ_CAPABILITY,
+            ),
+            "connector": _identity(
+                TENANT_CONNECTOR_WRITE_CAPABILITY,
+                TENANT_CONFIG_READ_CAPABILITY,
+            ),
             "empty": _identity(),
-            "admin": _identity(*TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES),
+            "read": _identity(TENANT_CONFIG_READ_CAPABILITY),
+            "approver": _identity(
+                TENANT_CONFIG_APPROVE_CAPABILITY,
+                TENANT_CONFIG_READ_CAPABILITY,
+            ),
+            "admin": _identity(
+                *TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES,
+                TENANT_CONFIG_READ_CAPABILITY,
+            ),
         }
     )
     config_service = _FakeTenantConfigurationService()
@@ -368,6 +458,72 @@ def test_read_only_operator_cannot_propose_connector_config(
     ]
 
 
+def test_config_approver_can_list_and_approve_without_write(
+    domain_client: _Harness,
+) -> None:
+    record = domain_client.change_service.seed(
+        change_type=TenantConfigChangeType.CONNECTOR,
+    )
+
+    proposer_list = domain_client.client.get(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers("connector"),
+        params={"status": "PROPOSED"},
+    )
+    approver_list = domain_client.client.get(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers("approver"),
+        params={"status": "PROPOSED"},
+    )
+    approved = domain_client.client.post(
+        f"/api/v1/tenant/config/change-requests/"
+        f"{record.change_request_id}/approve",
+        headers=_headers("approver"),
+    )
+
+    assert proposer_list.status_code == 200
+    assert proposer_list.json()["total"] == 1
+    assert approver_list.status_code == 200
+    assert approver_list.json()["items"][0]["change_request_id"] == str(
+        record.change_request_id
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "APPROVED"
+
+
+def test_config_read_can_list_but_not_propose_or_approve(
+    domain_client: _Harness,
+) -> None:
+    record = domain_client.change_service.seed(
+        change_type=TenantConfigChangeType.CONNECTOR,
+    )
+
+    listed = domain_client.client.get(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers("read"),
+    )
+    proposed = domain_client.client.post(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers("read"),
+        json={
+            "change_type": "connector",
+            "payload": _connector_payload(),
+        },
+    )
+    approved = domain_client.client.post(
+        f"/api/v1/tenant/config/change-requests/"
+        f"{record.change_request_id}/approve",
+        headers=_headers("read"),
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert proposed.status_code == 403
+    assert TENANT_CONNECTOR_WRITE_CAPABILITY in proposed.text
+    assert approved.status_code == 403
+    assert TENANT_CONFIG_APPROVE_CAPABILITY in approved.text
+
+
 def test_auth0_role_maps_to_domain_capabilities() -> None:
     aggregate = _capabilities_for_roles("TenantConfigAdmin")
     legacy_aggregate = _capabilities_for_roles("TenantAdmin")
@@ -385,7 +541,12 @@ def test_auth0_role_maps_to_domain_capabilities() -> None:
     assert _DOMAIN_CAPABILITIES.issubset(legacy_aggregate)
     assert "tenant_admin" not in legacy_aggregate
     assert _DOMAIN_CAPABILITIES.issubset(granular)
-    assert approver == frozenset({TENANT_CONFIG_APPROVE_CAPABILITY})
+    assert TENANT_CONFIG_READ_CAPABILITY in aggregate
+    assert TENANT_CONFIG_READ_CAPABILITY in legacy_aggregate
+    assert TENANT_CONFIG_READ_CAPABILITY in granular
+    assert approver == frozenset(
+        {TENANT_CONFIG_APPROVE_CAPABILITY, TENANT_CONFIG_READ_CAPABILITY}
+    )
 
 
 def _identity(*capabilities: str) -> VerifiedIdentity:
@@ -437,6 +598,18 @@ def _connector_payload() -> dict[str, Any]:
         "response_parse": {"provider_id": "refund.id"},
         "success_status_codes": [200, 201, 202],
     }
+
+
+def _payload_for_change_type(
+    change_type: TenantConfigChangeType,
+) -> dict[str, Any]:
+    if change_type is TenantConfigChangeType.CHANNEL:
+        return _channel_payload()
+    if change_type is TenantConfigChangeType.KNOWLEDGE:
+        return _knowledge_payload()
+    if change_type is TenantConfigChangeType.POLICY:
+        return _policy_payload()
+    return _connector_payload()
 
 
 def _capabilities_for_roles(*roles: str) -> frozenset[str]:

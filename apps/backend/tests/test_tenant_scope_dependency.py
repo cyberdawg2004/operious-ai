@@ -226,6 +226,7 @@ def test_module_exports_stable_contract() -> None:
         "TENANT_COGNITION_READ_CAPABILITY",      # spec 1a-ext #26
         "TENANT_CONFIG_APPROVE_CAPABILITY",
         "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
+        "TENANT_CONFIG_READ_CAPABILITY",
         "TENANT_CONFIG_WRITE_CAPABILITY",
         "TENANT_CONNECTOR_READ_CAPABILITY",       # spec 2.5b connector read
         "TENANT_CONNECTOR_WRITE_CAPABILITY",       # spec 2.5a connector config

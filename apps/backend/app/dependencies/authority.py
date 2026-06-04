@@ -135,7 +135,10 @@ TENANT_CONNECTOR_WRITE_CAPABILITY: Final[str] = "tenant.connector.write"
 #: Domain capability required to read outbound connector configuration.
 TENANT_CONNECTOR_READ_CAPABILITY: Final[str] = "tenant.connector.read"
 
-#: Backward-compatible capability for non-domain config-ledger reads.
+#: Domain capability required to read the tenant config change-request ledger.
+TENANT_CONFIG_READ_CAPABILITY: Final[str] = "tenant.config.read"
+
+#: Backward-compatible capability for non-domain config-ledger writes.
 TENANT_CONFIG_WRITE_CAPABILITY: Final[str] = "tenant.config.write"
 
 TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES: Final[tuple[str, ...]] = (
@@ -557,6 +560,7 @@ __all__ = [
     "TENANT_CONNECTOR_WRITE_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
     "TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES",
+    "TENANT_CONFIG_READ_CAPABILITY",
     "TENANT_CONFIG_WRITE_CAPABILITY",
     "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
     "TENANT_GOVERNANCE_READ_CAPABILITY",
