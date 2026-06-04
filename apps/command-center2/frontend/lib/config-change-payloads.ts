@@ -268,6 +268,40 @@ export function buildChannelCredentialChangePayload(
   return { change_type: "channel", payload };
 }
 
+export type ChannelCreateInput = {
+  channelType: string;
+  routingAddress: string;
+  credentials: Record<string, string>;
+  webhookSecret: string;
+  status?: string;
+};
+
+/**
+ * Build a `channel` change request body that CREATES a channel through the
+ * governed ledger (Phase 2.5d). In production, direct channel create is
+ * disabled — onboarding must propose a channel change request that goes
+ * proposed → approved → applied like every other control.
+ *
+ * This is the channel credential path, so credentials/webhook_secret are
+ * expected here (unlike the connector path, where they are forbidden). The
+ * 2.5a validator requires channel_type, routing_address, credentials, and
+ * webhook_secret for a `configure` operation.
+ */
+export function buildChannelChangePayload(
+  input: ChannelCreateInput
+): ConfigChangeRequestBody {
+  const payload: Record<string, unknown> = {
+    _schema_version: CONFIG_CHANGE_SCHEMA_VERSION,
+    operation: "configure",
+    channel_type: input.channelType,
+    routing_address: input.routingAddress,
+    credentials: dropBlankValues(input.credentials),
+    webhook_secret: input.webhookSecret,
+    status: input.status ?? "pending_verification",
+  };
+  return { change_type: "channel", payload };
+}
+
 function dropBlankValues(values: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {

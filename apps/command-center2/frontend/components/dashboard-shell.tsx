@@ -110,6 +110,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Config Change Approvals",
     description: "Approve or reject proposed connector and action-policy changes (dual control).",
   },
+  onboarding: {
+    eyebrow: "Platform",
+    title: "Tenant Onboarding",
+    description: "Governed, state-driven onboarding from inert tenant to operational across the re-auth boundary.",
+  },
   team: {
     eyebrow: "Identity",
     title: "Team & Roles",
@@ -298,6 +303,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           approvalCount={approvalCount}
           crisisActive={crisisActive}
           fraudActive={fraudActive}
+          capabilities={authSession.principal?.capabilities ?? null}
         />
 
         <div className="min-w-0 flex-1 lg:flex lg:min-h-screen lg:flex-col">

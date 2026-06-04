@@ -1,0 +1,722 @@
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowRight,
+  Check,
+  Clock,
+  Lock,
+  ExternalLink,
+} from "lucide-react";
+import {
+  ApiError,
+  createTenantLifecycle,
+  formatApiError,
+  listChannelConfigurations,
+  listConfigChangeRequests,
+  listConnectorConfigurations,
+  listGovernancePolicies,
+  listTenantLifecycle,
+  proposeConfigChangeRequest,
+  type TenantLifecycleRecord,
+} from "@/lib/api";
+import {
+  buildChannelChangePayload,
+  CONNECTOR_TYPE_OPTIONS,
+} from "@/lib/config-change-payloads";
+import {
+  computeOnboardingSteps,
+  findActiveActionPolicy,
+  hasPlatformAdmin,
+  tenantIsOperational,
+  type OnboardingSnapshot,
+  type OnboardingStep,
+  type OnboardingStepState,
+} from "@/lib/onboarding-state";
+import { dashboardRoutes } from "@/lib/dashboard-routes";
+import { useAuthSession } from "@/lib/use-auth-session";
+import { useApiResource } from "@/lib/use-api-resource";
+import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+
+const CHANNEL_SECRET_KEYS: Record<string, { key: string; label: string }> = {
+  email: { key: "smtp_password", label: "SMTP Password" },
+  whatsapp: { key: "access_token", label: "Access Token" },
+  voice: { key: "auth_token", label: "Auth Token" },
+  zendesk: { key: "api_token", label: "API Token" },
+  jira: { key: "api_token", label: "API Token" },
+  linear: { key: "api_key", label: "API Key" },
+  shopify: { key: "access_token", label: "Admin API Access Token" },
+  shulex: { key: "api_key", label: "API Key" },
+  lark: { key: "app_secret", label: "App Secret" },
+};
+
+const TARGET_STORAGE_KEY = "operious_onboarding_target";
+
+export function OnboardingWizard() {
+  const authSession = useAuthSession();
+  const principal = authSession.principal;
+  const isAdmin = hasPlatformAdmin(principal);
+
+  const [target, setTarget] = useState<string>(() => readStoredTarget());
+  const effectiveTarget = target.trim() || principal?.tenant_id || "";
+  const scoped = Boolean(
+    effectiveTarget && principal?.tenant_id === effectiveTarget
+  );
+
+  const [channelModalOpen, setChannelModalOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Phase B reads (channels/connectors/policies/change-requests) are
+  // tenant-scoped and 400 with tenant_axis_missing if the token is not scoped
+  // to the target tenant. Fetch them ONLY when scoped (the re-auth boundary).
+  const loadSnapshot = useCallback(async (): Promise<
+    Omit<OnboardingSnapshot, "principal" | "targetTenantId">
+  > => {
+    const tenants = isAdmin ? (await listTenantLifecycle()).items : [];
+    if (!scoped) {
+      return { tenants, channels: [], connectors: [], policies: [], changeRequests: [] };
+    }
+    const [channels, connectors, policies, proposed, approved] = await Promise.all([
+      listChannelConfigurations(),
+      listConnectorConfigurations({ status: "active" }),
+      listGovernancePolicies(),
+      listConfigChangeRequests({ status: "PROPOSED" }),
+      listConfigChangeRequests({ status: "APPROVED" }),
+    ]);
+    return {
+      tenants,
+      channels: channels.items,
+      connectors: connectors.items,
+      policies: policies.items,
+      changeRequests: [...proposed.items, ...approved.items],
+    };
+  }, [isAdmin, scoped]);
+
+  const { data, error, isLoading, reload } = useApiResource(loadSnapshot);
+
+  const snapshot: OnboardingSnapshot = useMemo(
+    () => ({
+      targetTenantId: effectiveTarget || null,
+      principal,
+      tenants: data?.tenants ?? [],
+      channels: data?.channels ?? [],
+      connectors: data?.connectors ?? [],
+      policies: data?.policies ?? [],
+      changeRequests: data?.changeRequests ?? [],
+    }),
+    [effectiveTarget, principal, data]
+  );
+
+  const steps = useMemo(() => computeOnboardingSteps(snapshot), [snapshot]);
+  const createdTenant = useMemo(
+    () => snapshot.tenants.find((tenant) => tenant.tenant_id === effectiveTarget) ?? null,
+    [snapshot.tenants, effectiveTarget]
+  );
+  const operational = tenantIsOperational(snapshot);
+  const activePolicy = findActiveActionPolicy(snapshot.policies);
+
+  const refreshAll = () => {
+    authSession.reload();
+    reload();
+  };
+
+  const commitTarget = (value: string) => {
+    setTarget(value);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(TARGET_STORAGE_KEY, value);
+    }
+  };
+
+  if (!isAdmin && !scoped) {
+    return (
+      <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
+        <WizardHeader />
+        <EmptyState
+          title="Onboarding requires platform or tenant authority"
+          message="Phase A (create tenant) requires the platform.tenant.admin capability. Phase B requires a token scoped to the tenant being onboarded. Your current token has neither."
+        />
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
+      <WizardHeader />
+
+      <div className="mb-5 rounded-lg border border-border-subtle bg-surface-raised p-4">
+        <label className="block">
+          <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+            Tenant being onboarded
+          </span>
+          <input
+            value={target}
+            onChange={(event) => commitTarget(event.target.value)}
+            placeholder={principal?.tenant_id ?? "tenant-2"}
+            className="h-11 w-full max-w-md rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+          />
+        </label>
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-tertiary">
+          Acting token scope:{" "}
+          <strong className="text-ink-secondary">
+            {principal?.tenant_id ?? "unscoped"}
+          </strong>
+          {scoped ? " · scoped to target (Phase B unlocked)" : " · not scoped to target"}
+        </p>
+      </div>
+
+      <OperationalBanner operational={operational} target={effectiveTarget} />
+
+      {notice && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-gold-primary/40 bg-gold-bg px-3 py-2 text-[13px] text-ink-primary">
+          <span>{notice}</span>
+          <button
+            onClick={() => setNotice(null)}
+            className="h-7 rounded border border-border-subtle px-2 text-[12px] text-ink-secondary hover:text-ink-primary"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {error && <ErrorState title="Onboarding state unavailable" message={error} onAction={refreshAll} />}
+      {isLoading && <LoadingState label="Deriving onboarding state from backend..." />}
+
+      {!isLoading && (
+        <div className="space-y-6">
+          <PhaseBlock label="Phase A · Platform" hint="Requires platform.tenant.admin">
+            {steps
+              .filter((step) => step.phase === "platform")
+              .map((step) => (
+                <StepCard key={step.id} step={step} index={stepIndex(step.id)}>
+                  {step.id === "create-tenant" && (
+                    <CreateTenantAction
+                      target={effectiveTarget}
+                      record={createdTenant}
+                      createdBy={principal?.principal_id ?? null}
+                      disabled={step.state !== "available"}
+                      onCreated={(message) => {
+                        setNotice(message);
+                        reload();
+                      }}
+                      onTargetChange={commitTarget}
+                    />
+                  )}
+                  {step.id === "grant-access" && (
+                    <GrantAccessAction
+                      target={effectiveTarget}
+                      scoped={scoped}
+                      currentScope={principal?.tenant_id ?? null}
+                      onRecheck={refreshAll}
+                    />
+                  )}
+                </StepCard>
+              ))}
+          </PhaseBlock>
+
+          <PhaseBlock
+            label="Phase B · Tenant-scoped"
+            hint="Requires a token scoped to the new tenant — and an approver for dual control"
+          >
+            {steps
+              .filter((step) => step.phase === "tenant")
+              .map((step) => (
+                <StepCard key={step.id} step={step} index={stepIndex(step.id)}>
+                  <PhaseBAction
+                    step={step}
+                    onOpenChannelModal={() => setChannelModalOpen(true)}
+                  />
+                </StepCard>
+              ))}
+          </PhaseBlock>
+
+          <ApproverLink />
+        </div>
+      )}
+
+      {channelModalOpen && (
+        <ChannelCreateModal
+          onClose={() => setChannelModalOpen(false)}
+          onProposed={() => {
+            setNotice("Channel create proposed (governed) — pending approval, then apply.");
+            setChannelModalOpen(false);
+            reload();
+          }}
+        />
+      )}
+
+      {activePolicy && (
+        <p className="mt-4 text-[12px] text-ink-tertiary">
+          Active action policy: v{activePolicy.version} · approved by {activePolicy.approved_by}
+        </p>
+      )}
+    </main>
+  );
+}
+
+// ─── Phase A actions ──────────────────────────────────────────────────────
+
+function CreateTenantAction({
+  target,
+  record,
+  createdBy,
+  disabled,
+  onCreated,
+  onTargetChange,
+}: {
+  target: string;
+  record: TenantLifecycleRecord | null;
+  createdBy: string | null;
+  disabled: boolean;
+  onCreated: (message: string) => void;
+  onTargetChange: (value: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (record) {
+    return (
+      <div className="rounded border border-border-subtle bg-surface-raised p-3 text-[13px] text-ink-secondary">
+        <p>
+          Tenant <strong className="text-ink-primary">{record.tenant_id}</strong> created{" "}
+          <strong>INERT</strong> (status: {record.status}). It cannot act until its
+          configuration is applied through the governed ledger.
+        </p>
+        <p className="mt-2 font-mono text-[11px] text-ink-tertiary">
+          Audit: created_by {createdBy ?? "unknown"} · created_at {record.created_at}
+        </p>
+      </div>
+    );
+  }
+
+  const create = async () => {
+    if (!target.trim()) {
+      setError("Enter the tenant id to create.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createTenantLifecycle(target.trim());
+      onTargetChange(created.tenant_id);
+      onCreated(`Tenant ${created.tenant_id} created inert (${created.status}).`);
+    } catch (caught: unknown) {
+      if (caught instanceof ApiError && caught.status === 409) {
+        setError("A tenant with this id already exists. Pick a different id or continue with it.");
+      } else {
+        setError(formatApiError(caught));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[13px] leading-relaxed text-ink-secondary">
+        Creates the tenant <strong>inert</strong> (fail-closed): it exists but cannot
+        act until configured. The create is platform-gated and audited.
+      </p>
+      {error && <FormError message={error} />}
+      <button
+        onClick={create}
+        disabled={busy || disabled}
+        className="inline-flex h-10 items-center gap-2 rounded bg-gold-primary px-4 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
+      >
+        {busy ? "Creating..." : "Create tenant (inert)"}
+      </button>
+    </div>
+  );
+}
+
+function GrantAccessAction({
+  target,
+  scoped,
+  currentScope,
+  onRecheck,
+}: {
+  target: string;
+  scoped: boolean;
+  currentScope: string | null;
+  onRecheck: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded border border-gold-primary/40 bg-gold-bg p-3 text-[13px] leading-relaxed text-ink-primary">
+        <p className="flex items-center gap-2 font-semibold">
+          <Lock className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
+          Tenant-isolation boundary (a strength, not an interruption)
+        </p>
+        <p className="mt-2">
+          A new tenant cannot be configured by any existing session. Configuration
+          requires an identity scoped to <strong>{target || "the new tenant"}</strong>.
+          There is no cross-tenant configuration path.
+        </p>
+        <ol className="mt-2 list-decimal space-y-1 pl-5">
+          <li>
+            Create/grant an Auth0 user with <code>tenant_id={target || "<new tenant>"}</code>{" "}
+            and config roles (TenantConnectorWriter / TenantPolicyWriter /
+            TenantChannelAdmin).
+          </li>
+          <li>
+            Grant a <strong>separate</strong> TenantApprover user for dual control.
+          </li>
+          <li>Log in as that user (or re-login if you updated your own claims).</li>
+        </ol>
+      </div>
+      <p className="text-[12px] text-ink-tertiary">
+        Current token scope: <strong className="text-ink-secondary">{currentScope ?? "unscoped"}</strong>
+        {scoped ? " — scoped to target, Phase B unlocked." : " — not yet scoped to target."}
+      </p>
+      <button
+        onClick={onRecheck}
+        className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+      >
+        Re-check token scope
+      </button>
+    </div>
+  );
+}
+
+// ─── Phase B action (compose the proven editors) ──────────────────────────
+
+function PhaseBAction({
+  step,
+  onOpenChannelModal,
+}: {
+  step: OnboardingStep;
+  onOpenChannelModal: () => void;
+}) {
+  const router = useRouter();
+  if (step.state === "blocked") {
+    return (
+      <p className="text-[12px] text-ink-tertiary">
+        Blocked — complete the prerequisite step first.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {step.pendingChange && (
+        <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] text-ink-secondary">
+          Governed change pending · status{" "}
+          <strong className="text-ink-primary">{step.pendingChange.status}</strong>. Approve and
+          apply it (as a different principal) in Config Approvals to complete this step.
+        </div>
+      )}
+      {step.id === "channel" && step.state !== "complete" && (
+        <button
+          onClick={onOpenChannelModal}
+          className="inline-flex h-9 items-center gap-2 rounded bg-gold-primary px-3 text-[12px] font-semibold text-white hover:bg-gold-muted"
+        >
+          Propose channel (governed) <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+      )}
+      {(step.id === "connector" || step.id === "connector-credential") &&
+        step.state !== "complete" && (
+          <button
+            onClick={() => router.push(dashboardRoutes.connectors)}
+            className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+          >
+            Open Connector editor <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </button>
+        )}
+      {step.id === "action-policy" && step.state !== "complete" && (
+        <button
+          onClick={() => router.push(dashboardRoutes["action-policy"])}
+          className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+        >
+          Open Action Policy editor <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+        </button>
+      )}
+      {step.state === "complete" && (
+        <p className="text-[12px] text-green-success">Applied — confirmed by backend read.</p>
+      )}
+    </div>
+  );
+}
+
+function ApproverLink() {
+  const router = useRouter();
+  return (
+    <div className="rounded-lg border border-border-subtle bg-surface p-4">
+      <p className="text-[13px] leading-relaxed text-ink-secondary">
+        Every Phase B step is a governed change request. A <strong>different principal</strong>{" "}
+        (the approver) must approve and apply it. No single user completes onboarding alone.
+      </p>
+      <button
+        onClick={() => router.push(dashboardRoutes["config-approvals"])}
+        className="mt-3 inline-flex h-9 items-center gap-2 rounded border border-gold-primary/40 px-3 text-[12px] text-gold-primary hover:bg-gold-primary/10"
+      >
+        Open Config Approvals (approver) <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
+      </button>
+    </div>
+  );
+}
+
+// ─── Governed channel create modal ────────────────────────────────────────
+
+function ChannelCreateModal({
+  onClose,
+  onProposed,
+}: {
+  onClose: () => void;
+  onProposed: () => void;
+}) {
+  const [channelType, setChannelType] = useState<string>(CONNECTOR_TYPE_OPTIONS[0]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const secret = CHANNEL_SECRET_KEYS[channelType] ?? { key: "secret", label: "Secret" };
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const form = new FormData(event.currentTarget);
+    try {
+      const body = buildChannelChangePayload({
+        channelType,
+        routingAddress: String(form.get("routing_address") || ""),
+        credentials: { [secret.key]: String(form.get(secret.key) || "") },
+        webhookSecret: String(form.get("webhook_secret") || ""),
+      });
+      await proposeConfigChangeRequest(body);
+      onProposed();
+    } catch (caught: unknown) {
+      setError(formatApiError(caught));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
+      <div className="max-h-[88dvh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border-subtle bg-surface p-4 shadow-elevated sm:p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-display text-[22px] font-semibold text-ink-primary">
+            Propose Channel (governed)
+          </h2>
+          <button
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded border border-border-subtle text-ink-tertiary hover:text-ink-primary"
+            aria-label="Close"
+          >
+            X
+          </button>
+        </div>
+        <p className="mb-4 text-[13px] leading-relaxed text-ink-secondary">
+          In production, direct channel create is disabled. This proposes a governed
+          channel change request (proposed → approved → applied). Credentials are
+          write-only.
+        </p>
+        <form onSubmit={submit} className="space-y-4">
+          {error && <FormError message={error} />}
+          <label className="block">
+            <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+              Channel type
+            </span>
+            <select
+              value={channelType}
+              onChange={(event) => setChannelType(event.target.value)}
+              className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+            >
+              {CONNECTOR_TYPE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <TextField name="routing_address" label="Routing address" required />
+          <SecretField name={secret.key} label={secret.label} />
+          <SecretField name="webhook_secret" label="Webhook secret (blank if unused)" />
+          <button
+            type="submit"
+            disabled={busy}
+            className="inline-flex h-11 items-center justify-center rounded bg-gold-primary px-4 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
+          >
+            {busy ? "Proposing..." : "Propose channel change"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Presentation primitives ──────────────────────────────────────────────
+
+function WizardHeader() {
+  return (
+    <>
+      <div className="eyebrow text-ink-tertiary mb-2">ONBOARDING · GOVERNED</div>
+      <h1 className="mb-2 font-display text-[32px] font-semibold text-ink-primary">
+        Tenant Onboarding
+      </h1>
+      <p className="mb-5 max-w-3xl text-[13px] leading-relaxed text-ink-secondary">
+        Onboard a tenant from inert to operational through a governed, isolation-respecting
+        flow. Step state is derived from real backend data — a step is complete only when its
+        change request is applied.
+      </p>
+    </>
+  );
+}
+
+function OperationalBanner({ operational, target }: { operational: boolean; target: string }) {
+  return (
+    <div
+      className={
+        operational
+          ? "mb-5 rounded-lg border border-green-success/40 bg-surface p-4 text-[13px] text-green-success"
+          : "mb-5 rounded-lg border border-border-subtle bg-surface p-4 text-[13px] text-ink-secondary"
+      }
+    >
+      {operational ? (
+        <span>
+          <strong>{target}</strong> is operational — an action policy is active, so the tenant
+          can act.
+        </span>
+      ) : (
+        <span>
+          <strong>{target || "Target tenant"}</strong> is inert / fail-closed — it cannot act
+          until an action policy is applied.
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PhaseBlock({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-3">
+        <h2 className="font-display text-[20px] font-semibold text-ink-primary">{label}</h2>
+        <p className="text-[12px] text-ink-tertiary">{hint}</p>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function StepCard({
+  step,
+  index,
+  children,
+}: {
+  step: OnboardingStep;
+  index: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <article className="rounded-lg border border-border-subtle bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border-subtle font-mono text-[12px] text-ink-tertiary">
+            {index}
+          </span>
+          <h3 className="text-[16px] font-semibold text-ink-primary">{step.title}</h3>
+        </div>
+        <StateBadge state={step.state} />
+      </div>
+      <div className="mt-3 pl-10">{children}</div>
+    </article>
+  );
+}
+
+function StateBadge({ state }: { state: OnboardingStepState }) {
+  const map: Record<OnboardingStepState, { label: string; cls: string; icon: React.ReactNode }> = {
+    blocked: {
+      label: "Blocked",
+      cls: "border-border-subtle text-ink-tertiary",
+      icon: <Lock className="h-3 w-3" strokeWidth={1.8} />,
+    },
+    available: {
+      label: "Available",
+      cls: "border-gold-primary/40 text-gold-primary",
+      icon: <ArrowRight className="h-3 w-3" strokeWidth={1.8} />,
+    },
+    "in-progress": {
+      label: "In progress",
+      cls: "border-gold-primary/40 text-gold-primary",
+      icon: <Clock className="h-3 w-3" strokeWidth={1.8} />,
+    },
+    complete: {
+      label: "Complete",
+      cls: "border-green-success/40 text-green-success",
+      icon: <Check className="h-3 w-3" strokeWidth={1.8} />,
+    },
+  };
+  const meta = map[state];
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded border bg-surface-raised px-2 py-1 font-technical text-[10px] uppercase tracking-[0.10em] ${meta.cls}`}
+    >
+      {meta.icon}
+      {meta.label}
+    </span>
+  );
+}
+
+function TextField({ name, label, required = false }: { name: string; label: string; required?: boolean }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+        {label}
+      </span>
+      <input
+        name={name}
+        required={required}
+        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+      />
+    </label>
+  );
+}
+
+function SecretField({ name, label }: { name: string; label: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+        {label}
+      </span>
+      <input
+        name={name}
+        type="password"
+        autoComplete="new-password"
+        placeholder="Write-only — never displayed"
+        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+      />
+    </label>
+  );
+}
+
+function FormError({ message }: { message: string }) {
+  return (
+    <div className="rounded border border-red-alert/30 bg-red-alert/10 px-3 py-2 text-[13px] text-red-alert">
+      {message}
+    </div>
+  );
+}
+
+function stepIndex(id: OnboardingStep["id"]): number {
+  const order: OnboardingStep["id"][] = [
+    "create-tenant",
+    "grant-access",
+    "channel",
+    "connector",
+    "connector-credential",
+    "action-policy",
+  ];
+  return order.indexOf(id) + 1;
+}
+
+function readStoredTarget(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(TARGET_STORAGE_KEY) ?? "";
+}

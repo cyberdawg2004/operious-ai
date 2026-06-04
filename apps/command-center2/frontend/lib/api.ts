@@ -443,6 +443,22 @@ export type TenantChannelUpdateRequest = {
   status?: TenantChannelConfiguration["status"];
 };
 
+// ─── Phase 2.5c/2.5d: tenant lifecycle (platform-gated) ──────────────────
+
+/** Mirrors backend TenantStatus (app/tenant/enums.py). */
+export type TenantStatus = "active" | "provisioning" | "disabled";
+
+/**
+ * A tenant lifecycle record. A freshly created tenant is INERT — it is
+ * `provisioning` and cannot act until its configuration (channel, connector,
+ * action policy) is applied through the governed ledger.
+ */
+export type TenantLifecycleRecord = {
+  tenant_id: string;
+  status: TenantStatus;
+  created_at: string;
+};
+
 // ─── Phase 2.5b: tenant connector reads + config-change ledger ───────────
 
 export type TenantConnectorConfiguration = {
@@ -1126,6 +1142,24 @@ export function verifyChannelConfiguration(configId: string) {
     `/tenant/channels/${encodeURIComponent(configId)}/verify`,
     { method: "POST" }
   );
+}
+
+// ─── Phase 2.5c/2.5d: tenant lifecycle (platform.tenant.admin) ───────────
+
+export function createTenantLifecycle(tenantId: string) {
+  return apiRequest<TenantLifecycleRecord>("/tenant/lifecycle/tenants", {
+    method: "POST",
+    body: JSON.stringify({ tenant_id: tenantId }),
+  });
+}
+
+export function listTenantLifecycle(query: { limit?: number; offset?: number } = {}) {
+  return apiRequest<ApiPage<TenantLifecycleRecord>>("/tenant/lifecycle/tenants", {
+    query: {
+      limit: query.limit ?? 100,
+      offset: query.offset ?? 0,
+    },
+  });
 }
 
 // ─── Phase 2.5b: connector reads (credential-free) ───────────────────────

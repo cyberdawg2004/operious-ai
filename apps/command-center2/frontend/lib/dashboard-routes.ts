@@ -16,6 +16,7 @@ export const dashboardRoutes = {
   connectors: "/dashboard/connectors",
   "action-policy": "/dashboard/action-policy",
   "config-approvals": "/dashboard/config-approvals",
+  onboarding: "/dashboard/onboarding",
   team: "/dashboard/team",
   audit: "/dashboard/audit",
   settings: "/dashboard/settings",

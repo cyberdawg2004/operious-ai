@@ -39,6 +39,8 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   group: "operations" | "intelligence" | "platform" | "system";
+  /** When set, the item is surfaced only to principals holding this capability. */
+  requiresCapability?: string;
 }
 
 const navItems: NavItem[] = [
@@ -59,6 +61,7 @@ const navItems: NavItem[] = [
   { id: "connectors", href: dashboardRoutes.connectors, label: "Connector Config", icon: Plug, group: "platform" },
   { id: "action-policy", href: dashboardRoutes["action-policy"], label: "Action Policy", icon: Gavel, group: "platform" },
   { id: "config-approvals", href: dashboardRoutes["config-approvals"], label: "Config Approvals", icon: Inbox, group: "platform" },
+  { id: "onboarding", href: dashboardRoutes.onboarding, label: "Tenant Onboarding", icon: Building2, group: "platform", requiresCapability: "platform.tenant.admin" },
   { id: "team", href: dashboardRoutes.team, label: "Team & Roles", icon: Users, group: "system" },
   { id: "audit", href: dashboardRoutes.audit, label: "Audit & Exports", icon: FileSearch, group: "system" },
   { id: "settings", href: dashboardRoutes.settings, label: "Settings", icon: Settings, group: "system" },
@@ -85,6 +88,7 @@ interface SidebarProps {
   approvalCount?: number | null;
   crisisActive?: boolean;
   fraudActive?: boolean;
+  capabilities?: string[] | null;
 }
 
 export function Sidebar({
@@ -99,6 +103,7 @@ export function Sidebar({
   approvalCount = null,
   crisisActive = false,
   fraudActive = false,
+  capabilities = null,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const pathname = usePathname();
@@ -188,7 +193,12 @@ export function Sidebar({
       {/* Navigation */}
       <nav className={cn("flex-1 overflow-y-auto px-3 py-3", collapsed && "lg:px-2")}>
         {groupOrder.map((groupKey, groupIdx) => {
-          const groupItems = navItems.filter((item) => item.group === groupKey);
+          const groupItems = navItems.filter(
+            (item) =>
+              item.group === groupKey &&
+              (!item.requiresCapability ||
+                (capabilities ?? []).includes(item.requiresCapability))
+          );
           if (groupItems.length === 0) return null;
           return (
             <div key={groupKey} className={cn(groupIdx > 0 && "mt-5")}>
