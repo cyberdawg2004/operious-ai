@@ -18,9 +18,7 @@ export function PlatformShell({
   children: ReactNode;
 }) {
   const signOut = () => {
-    const logoutUrl = new URL("/api/auth/logout", window.location.origin);
-    logoutUrl.searchParams.set("returnTo", window.location.origin);
-    window.location.href = logoutUrl.toString();
+    window.location.href = "/api/auth/logout-sign-in";
   };
 
   return (

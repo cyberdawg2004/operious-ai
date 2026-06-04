@@ -150,6 +150,23 @@ test('the gate component renders a refusal that names the missing capability', (
   ok(src.includes('PlatformShell'));
 });
 
+test('logout returnTo is absolute and lands on /sign-in', () => {
+  const gate = readText(join(PC, 'components', 'platform-console.tsx'));
+  const shell = readText(join(PC, 'components', 'platform-shell.tsx'));
+  for (const src of [gate, shell]) {
+    ok(src.includes('/api/auth/logout-sign-in'));
+    strictEqual(
+      src.includes('returnTo=/sign-in'),
+      false,
+      'logout must not pass a relative returnTo to Auth0'
+    );
+  }
+  const route = readText(join(PC, 'app', 'api', 'auth', 'logout-sign-in', 'route.ts'));
+  ok(route.includes('process.env.APP_BASE_URL'));
+  ok(route.includes('new URL("/api/auth/logout", appBaseUrl)'));
+  ok(route.includes('new URL("/sign-in", appBaseUrl).toString()'));
+});
+
 // ─── Lifecycle client methods ─────────────────────────────────────────────
 
 test('lifecycle client methods hit /tenant/lifecycle/tenants', () => {

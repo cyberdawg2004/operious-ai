@@ -14,6 +14,9 @@ import { PlatformShell } from "@/components/platform-shell";
 export function PlatformConsole({ children }: { children: ReactNode }) {
   const { principal, error, isLoading, reload } = useAuthSession();
   const access = resolvePlatformAccess({ principal, error, isLoading });
+  const signOutToSignIn = () => {
+    window.location.assign("/api/auth/logout-sign-in");
+  };
 
   if (access === "loading") {
     return (
@@ -75,12 +78,13 @@ export function PlatformConsole({ children }: { children: ReactNode }) {
           </code>{" "}
           capability. If you are a tenant operator, use the tenant Command Center instead.
         </p>
-        <a
-          href="/api/auth/logout?returnTo=/sign-in"
+        <button
+          type="button"
+          onClick={signOutToSignIn}
           className="mt-5 inline-flex h-10 items-center justify-center rounded border border-border-subtle px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
         >
           Sign out
-        </a>
+        </button>
       </CenteredCard>
     );
   }
