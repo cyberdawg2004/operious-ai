@@ -21,6 +21,12 @@ class TenantChannelType(StrEnum):
     LINEAR = "linear"
 
 
+class TenantStatus(StrEnum):
+    ACTIVE = "active"
+    PROVISIONING = "provisioning"
+    DISABLED = "disabled"
+
+
 class TenantChannelStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
@@ -82,5 +88,6 @@ __all__ = [
     "TenantKnowledgeDocumentStatus",
     "TenantKnowledgeDocumentType",
     "TenantKnowledgeReviewStatus",
+    "TenantStatus",
     "TenantTopologyStatus",
 ]

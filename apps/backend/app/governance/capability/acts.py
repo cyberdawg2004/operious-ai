@@ -76,6 +76,9 @@ class OperationalAct(StrEnum):
     TENANT_CONFIG_CHANGE_APPLY = "governance:tenant_config_change_apply"
     TENANT_CONFIG_CHANGE_REVOKE = "governance:tenant_config_change_revoke"
 
+    # ─── platform / hardening lifecycle ─────────────────────────────
+    TENANT_CREATE = "hardening:tenant_create"
+
     # ─── execution chronology projection ────────────────────────────
     EXECUTION_REQUEST = "execution:request"
     EXECUTION_OUTBOX_CREATE = "execution:outbox_create"

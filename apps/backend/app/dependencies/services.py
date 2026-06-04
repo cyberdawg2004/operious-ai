@@ -207,11 +207,13 @@ from app.services.tenant_configuration_service import (
 from app.services.tenant_config_change_request_service import (
     TenantConfigChangeRequestService,
 )
+from app.services.tenant_lifecycle_service import TenantLifecycleService
 from app.tenant.change_requests import (
     PostgresTenantConfigChangeRequestRepository,
 )
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelType
+from app.tenant.lifecycle import PostgresTenantLifecycleRepository
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
 from app.trainer.persistence import PostgresTrainingRecommendationRepository
@@ -734,6 +736,19 @@ def get_tenant_config_change_request_service(
     return TenantConfigChangeRequestService(
         repository=PostgresTenantConfigChangeRequestRepository(session),
         tenant_configuration_service=tenant_configuration_service,
+        event_appender=OperationalEventAppender(
+            persistence=PostgresOperationalEventPersistence(session)
+        ),
+        session=session,
+    )
+
+
+def get_tenant_lifecycle_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> TenantLifecycleService:
+    """Return the platform-gated tenant lifecycle service."""
+    return TenantLifecycleService(
+        repository=PostgresTenantLifecycleRepository(session),
         event_appender=OperationalEventAppender(
             persistence=PostgresOperationalEventPersistence(session)
         ),
@@ -1284,4 +1299,5 @@ __all__ = [
     "get_supervisor_repository",
     "get_tenant_config_change_request_service",
     "get_tenant_configuration_service",
+    "get_tenant_lifecycle_service",
 ]

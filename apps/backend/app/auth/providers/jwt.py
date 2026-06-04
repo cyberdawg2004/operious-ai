@@ -123,6 +123,7 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
         "tenant.connector.read",
         "tenant.config.read",
     ),
+    "admin:platform_tenants": "platform.tenant.admin",
     "admin:tenant_privacy": "tenant.privacy.admin",
     "approve:tenant_privacy": "tenant.privacy.approve",
 }
@@ -164,6 +165,7 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantTrainingWriter": "tenant.training.write",
     "TenantPrivacyAdmin": "tenant.privacy.admin",
     "TenantPrivacyApprover": "tenant.privacy.approve",
+    "PlatformAdmin": "platform.tenant.admin",
 }
 
 

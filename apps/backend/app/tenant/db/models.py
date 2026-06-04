@@ -43,9 +43,19 @@ class TenantRow(Base):
         nullable=False,
         server_default=func.now(),
     )
+    status: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        server_default=text("'active'"),
+        index=True,
+    )
 
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint(
+            "status IN ('active', 'provisioning', 'disabled')",
+            name="tenant_status_valid",
+        ),
     )
 
 

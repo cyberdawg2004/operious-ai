@@ -96,6 +96,12 @@ ERROR_CODE_TENANT_AXIS_MISSING: Final[str] = "tenant_axis_missing"
 ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED: Final[str] = "operator_authority_required"
 OPERATOR_CAPABILITY: Final[str] = "operator"
 
+#: Platform-level capability for tenant lifecycle administration. Deliberately
+#: above the tenant axis: callers holding this capability can create/list tenant
+#: anchors without carrying a tenant-scoped authority. It MUST NOT be included
+#: in tenant role bundles.
+PLATFORM_TENANT_ADMIN_CAPABILITY: Final[str] = "platform.tenant.admin"
+
 #: Stable error code for "authority present but lacks the capability
 #: a mutation route requires" (S-02). Distinct from
 #: ``tenant_axis_missing`` (which is a tenant-axis problem) and from
@@ -413,6 +419,26 @@ def require_operator_authority(request: Request) -> AuthorityContext:
     return authority
 
 
+def require_platform_tenant_admin(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require platform-level tenant administration.
+
+    Unlike :func:`require_tenant_scope`, this gate does not require a tenant
+    axis. Tenant lifecycle creation is a platform operation that happens before
+    a tenant can safely own scoped configuration.
+    """
+
+    authority = require_authority(request)
+    if PLATFORM_TENANT_ADMIN_CAPABILITY not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                "capability": PLATFORM_TENANT_ADMIN_CAPABILITY,
+            },
+        )
+    return authority
+
+
 def require_capability(
     capability: str,
 ) -> Callable[[Request], AuthorityContext]:
@@ -551,6 +577,7 @@ __all__ = [
     "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",
     "ERROR_CODE_TENANT_AXIS_MISSING",
     "OPERATOR_CAPABILITY",
+    "PLATFORM_TENANT_ADMIN_CAPABILITY",
     "TENANT_ACTIONS_APPROVE_CAPABILITY",
     "TENANT_ADMIN_CAPABILITY",
     "TENANT_AUDIT_EXPORT_CAPABILITY",
@@ -580,6 +607,7 @@ __all__ = [
     "require_config_apply_authorization",
     "require_config_apply_authorization_for",
     "require_operator_authority",
+    "require_platform_tenant_admin",
     "require_tenant_actions_approve",
     "require_tenant_admin",
     "require_tenant_audit_export",

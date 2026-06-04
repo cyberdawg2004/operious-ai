@@ -30,6 +30,9 @@ from app.api.v1.schemas.tenant import (
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentResponse,
     TenantKnowledgeUpdateRequest,
+    TenantLifecycleCreateRequest,
+    TenantLifecyclePage,
+    TenantLifecycleResponse,
     TenantTopologyConfigurationCreateRequest,
     TenantTopologyConfigurationPage,
     TenantTopologyConfigurationResponse,
@@ -48,12 +51,14 @@ from app.dependencies.authority import (
     require_authority,
     require_capability,
     require_config_apply_authorization_for,
+    require_platform_tenant_admin,
     require_tenant_connector_read,
     require_tenant_scope,
 )
 from app.dependencies.services import (
     get_tenant_config_change_request_service,
     get_tenant_configuration_service,
+    get_tenant_lifecycle_service,
 )
 from app.identity import AuthorityContext
 from app.services.tenant_config_change_request_service import (
@@ -62,6 +67,7 @@ from app.services.tenant_config_change_request_service import (
 from app.services.tenant_configuration_service import (
     TenantConfigurationService,
 )
+from app.services.tenant_lifecycle_service import TenantLifecycleService
 from app.tenant.change_requests import (
     TenantConfigChangeRequestError,
     TenantConfigChangeRequestLifecycleError,
@@ -90,8 +96,10 @@ from app.tenant.identity import (
     as_governance_policy_id,
     as_knowledge_document_id,
 )
+from app.tenant.lifecycle import TenantAlreadyExistsError, TenantLifecycleError
 
 router = APIRouter(tags=["tenant"])
+require_platform_lifecycle_admin = require_platform_tenant_admin
 require_tenant_config_read = require_capability(TENANT_CONFIG_READ_CAPABILITY)
 require_tenant_config_write = require_capability(TENANT_CONFIG_WRITE_CAPABILITY)
 require_tenant_config_approve = require_capability(TENANT_CONFIG_APPROVE_CAPABILITY)
@@ -128,6 +136,40 @@ _CHANGE_REQUEST_DOMAIN_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] = 
 _MIN_LIMIT = 1
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 25
+
+
+@router.post(
+    "/lifecycle/tenants",
+    response_model=TenantLifecycleResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_tenant_lifecycle(
+    request: TenantLifecycleCreateRequest,
+    authority: AuthorityContext = Depends(require_platform_lifecycle_admin),
+    service: TenantLifecycleService = Depends(get_tenant_lifecycle_service),
+) -> TenantLifecycleResponse:
+    try:
+        record = await service.create_tenant(
+            tenant_id=request.tenant_id,
+            created_by=_principal_or_400(authority),
+        )
+    except (TenantLifecycleError, ValueError) as exc:
+        raise _tenant_lifecycle_http_error(exc) from exc
+    return TenantLifecycleResponse.from_record(record)
+
+
+@router.get(
+    "/lifecycle/tenants",
+    response_model=TenantLifecyclePage,
+)
+async def list_tenant_lifecycle(
+    limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    _authority: AuthorityContext = Depends(require_platform_lifecycle_admin),
+    service: TenantLifecycleService = Depends(get_tenant_lifecycle_service),
+) -> TenantLifecyclePage:
+    page = await service.list_tenants(limit=limit, offset=offset)
+    return TenantLifecyclePage.from_page(page)
 
 
 @router.post(
@@ -815,6 +857,23 @@ def _change_request_http_error(exc: BaseException) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={"code": "tenant_config_change_request_failed"},
+    )
+
+
+def _tenant_lifecycle_http_error(exc: BaseException) -> HTTPException:
+    if isinstance(exc, TenantAlreadyExistsError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "tenant_already_exists"},
+        )
+    if isinstance(exc, ValueError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "tenant_lifecycle_invalid"},
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"code": "tenant_lifecycle_failed"},
     )
 
 

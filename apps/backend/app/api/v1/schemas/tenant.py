@@ -17,6 +17,7 @@ from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
+    TenantStatus,
     TenantTopologyStatus,
 )
 from app.tenant.change_requests import (
@@ -35,6 +36,10 @@ from app.tenant.persistence import (
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantTopologyConfigurationRecord,
+)
+from app.tenant.lifecycle import (
+    TenantLifecyclePage as LifecyclePage,
+    TenantLifecycleRecord,
 )
 
 
@@ -80,6 +85,53 @@ class TenantChannelCreateRequest(BaseModel):
     credentials: dict[str, Any]
     webhook_secret: str = Field(min_length=1)
     status: TenantChannelStatus = TenantChannelStatus.PENDING_VERIFICATION
+
+
+class TenantLifecycleCreateRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str = Field(min_length=1, max_length=255)
+
+
+class TenantLifecycleResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    status: TenantStatus
+    created_at: datetime
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantLifecycleRecord,
+    ) -> "TenantLifecycleResponse":
+        return cls(
+            tenant_id=record.tenant_id,
+            status=record.status,
+            created_at=record.created_at,
+        )
+
+
+class TenantLifecyclePage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    items: list[TenantLifecycleResponse] = []
+    total: int
+    offset: int
+
+    @classmethod
+    def from_page(
+        cls,
+        page: LifecyclePage,
+    ) -> "TenantLifecyclePage":
+        return cls(
+            items=[
+                TenantLifecycleResponse.from_record(record)
+                for record in page.items
+            ],
+            total=page.total,
+            offset=page.offset,
+        )
 
 
 class TenantChannelUpdateRequest(BaseModel):
@@ -587,6 +639,9 @@ __all__ = [
     "TenantKnowledgeDocumentPage",
     "TenantKnowledgeDocumentResponse",
     "TenantKnowledgeUpdateRequest",
+    "TenantLifecycleCreateRequest",
+    "TenantLifecyclePage",
+    "TenantLifecycleResponse",
     "TenantTopologyConfigurationCreateRequest",
     "TenantTopologyConfigurationPage",
     "TenantTopologyConfigurationResponse",
