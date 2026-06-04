@@ -443,6 +443,74 @@ export type TenantChannelUpdateRequest = {
   status?: TenantChannelConfiguration["status"];
 };
 
+// ─── Phase 2.5b: tenant connector reads + config-change ledger ───────────
+
+export type TenantConnectorConfiguration = {
+  connector_type: string;
+  tool_name: string;
+  http_method: string;
+  endpoint_template: string;
+  endpoint_host: string;
+  field_mappings: Record<string, unknown>;
+  idempotency_header_name: string;
+  response_parse: Record<string, unknown>;
+  success_status_codes: number[];
+  status: string;
+  version: number;
+  configured_by: string;
+  source_approval_id: string;
+  content_sha256: string;
+  previous_version_sha256: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Mirrors backend TenantConfigChangeType (app/tenant/change_requests.py). */
+export type TenantConfigChangeType =
+  | "knowledge"
+  | "policy"
+  | "execution_governance"
+  | "topology"
+  | "channel"
+  | "connector";
+
+/** Mirrors backend TenantConfigChangeRequestStatus. */
+export type TenantConfigChangeRequestStatus =
+  | "PROPOSED"
+  | "APPROVED"
+  | "REJECTED"
+  | "APPLIED"
+  | "REVOKED";
+
+/**
+ * Governed config-change request. `proposed_payload` and `outcome_payload`
+ * are credential-redacted server-side; the UI never reconstructs a secret.
+ */
+export type TenantConfigChangeRequest = {
+  change_request_id: string;
+  tenant_id: string;
+  change_type: TenantConfigChangeType;
+  proposed_payload: Record<string, unknown>;
+  status: TenantConfigChangeRequestStatus;
+  proposed_by: string;
+  proposed_at: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  applied_at: string | null;
+  applied_by: string | null;
+  revoked_by: string | null;
+  revoked_at: string | null;
+  rejection_reason: string | null;
+  outcome_payload: Record<string, unknown> | null;
+};
+
+export type TenantConfigChangeRequestCreate = {
+  change_type: TenantConfigChangeType;
+  payload: Record<string, unknown>;
+};
+
 export type OperationalAlert = {
   alert_id: string;
   tenant_id: string;
@@ -1056,6 +1124,102 @@ export function updateChannelConfiguration(
 export function verifyChannelConfiguration(configId: string) {
   return apiRequest<TenantChannelConfiguration>(
     `/tenant/channels/${encodeURIComponent(configId)}/verify`,
+    { method: "POST" }
+  );
+}
+
+// ─── Phase 2.5b: connector reads (credential-free) ───────────────────────
+
+export function listConnectorConfigurations(query: {
+  connector_type?: string;
+  tool_name?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}) {
+  return apiRequest<ApiPage<TenantConnectorConfiguration>>("/tenant/connectors", {
+    query: {
+      connector_type: query.connector_type,
+      tool_name: query.tool_name,
+      status: query.status ?? "active",
+      limit: query.limit ?? 100,
+      offset: query.offset ?? 0,
+    },
+  });
+}
+
+export function listConnectorConfigurationHistory(
+  toolName: string,
+  query: { connector_type?: string; status?: string; limit?: number; offset?: number } = {}
+) {
+  return apiRequest<ApiPage<TenantConnectorConfiguration>>(
+    `/tenant/connectors/${encodeURIComponent(toolName)}`,
+    {
+      query: {
+        connector_type: query.connector_type,
+        status: query.status,
+        limit: query.limit ?? 100,
+        offset: query.offset ?? 0,
+      },
+    }
+  );
+}
+
+// ─── Phase 2.5b: governed config-change ledger ───────────────────────────
+
+export function proposeConfigChangeRequest(request: TenantConfigChangeRequestCreate) {
+  return apiRequest<TenantConfigChangeRequest>("/tenant/config/change-requests", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function listConfigChangeRequests(query: {
+  status?: TenantConfigChangeRequestStatus;
+  limit?: number;
+  offset?: number;
+}) {
+  // The ledger list endpoint supports `status` only, not `change_type`.
+  // Callers filter by change_type client-side (see config-change-payloads.ts).
+  return apiRequest<ApiPage<TenantConfigChangeRequest>>(
+    "/tenant/config/change-requests",
+    {
+      query: {
+        status: query.status,
+        limit: query.limit ?? 100,
+        offset: query.offset ?? 0,
+      },
+    }
+  );
+}
+
+export function approveConfigChangeRequest(changeRequestId: string) {
+  return apiRequest<TenantConfigChangeRequest>(
+    `/tenant/config/change-requests/${encodeURIComponent(changeRequestId)}/approve`,
+    { method: "POST" }
+  );
+}
+
+export function rejectConfigChangeRequest(changeRequestId: string, reason: string) {
+  return apiRequest<TenantConfigChangeRequest>(
+    `/tenant/config/change-requests/${encodeURIComponent(changeRequestId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }
+  );
+}
+
+export function applyConfigChangeRequest(changeRequestId: string) {
+  return apiRequest<TenantConfigChangeRequest>(
+    `/tenant/config/change-requests/${encodeURIComponent(changeRequestId)}/apply`,
+    { method: "POST" }
+  );
+}
+
+export function revokeConfigChangeRequest(changeRequestId: string) {
+  return apiRequest<TenantConfigChangeRequest>(
+    `/tenant/config/change-requests/${encodeURIComponent(changeRequestId)}/revoke`,
     { method: "POST" }
   );
 }

@@ -95,6 +95,21 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Channels",
     description: "Ingress and response channel configuration returned by the tenant API.",
   },
+  connectors: {
+    eyebrow: "Boundary",
+    title: "Connector Config",
+    description: "Active connector configurations and governed config-change proposals.",
+  },
+  "action-policy": {
+    eyebrow: "Governance",
+    title: "Action Policy",
+    description: "Action-tools policy editor — refund, warranty, replacement, and warehouse rules.",
+  },
+  "config-approvals": {
+    eyebrow: "Governance",
+    title: "Config Change Approvals",
+    description: "Approve or reject proposed connector and action-policy changes (dual control).",
+  },
   team: {
     eyebrow: "Identity",
     title: "Team & Roles",

@@ -81,7 +81,7 @@ def _service(session: AsyncSession) -> TenantConfigChangeRequestService:
 
 
 def _tenant() -> str:
-    return str(uuid.uuid4())
+    return f"tenant-ledger-{uuid.uuid4().hex}"
 
 
 def _knowledge_payload(title: str = "Warranty FAQ") -> dict[str, Any]:
@@ -239,7 +239,7 @@ async def test_approve_by_same_principal_rejected_at_db_layer(
                     )
                     VALUES (
                         CAST(:change_request_id AS uuid),
-                        CAST(:tenant_id AS uuid),
+                        :tenant_id,
                         'knowledge',
                         CAST(:payload AS jsonb),
                         'APPROVED',
@@ -331,7 +331,7 @@ async def test_2_5a_1_connector_dual_control_app_and_db_check(
                     )
                     VALUES (
                         CAST(:change_request_id AS uuid),
-                        CAST(:tenant_id AS uuid),
+                        :tenant_id,
                         'connector',
                         CAST(:payload AS jsonb),
                         'APPROVED',
@@ -643,6 +643,88 @@ async def test_ledger_rls_isolation(pg_session: AsyncSession) -> None:
 
     assert visible_a == 1
     assert visible_b == 1
+
+
+@pytest.mark.asyncio
+async def test_0072_ledger_force_rls_remains_enabled(pg_session: AsyncSession) -> None:
+    force_enabled = (
+        await pg_session.execute(
+            text("""
+                SELECT relforcerowsecurity
+                FROM pg_class
+                WHERE oid = 'public.tenant_config_change_requests'::regclass
+                """)
+        )
+    ).scalar_one()
+
+    assert force_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_0072_ledger_rejects_empty_tenant_id(pg_session: AsyncSession) -> None:
+    await set_pg_rls_tenant(pg_session, "")
+
+    with pytest.raises(IntegrityError):
+        async with pg_session.begin_nested():
+            await pg_session.execute(
+                text("""
+                    INSERT INTO public.tenant_config_change_requests (
+                        change_request_id,
+                        tenant_id,
+                        change_type,
+                        proposed_payload,
+                        status,
+                        proposed_by,
+                        proposed_at
+                    )
+                    VALUES (
+                        CAST(:change_request_id AS uuid),
+                        '',
+                        'knowledge',
+                        CAST(:payload AS jsonb),
+                        'PROPOSED',
+                        'principal-a',
+                        now()
+                    )
+                    """),
+                {
+                    "change_request_id": str(uuid.uuid4()),
+                    "payload": json.dumps({"_schema_version": "1"}),
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_0072_slug_tenant_id_round_trips(pg_session: AsyncSession) -> None:
+    tenant_id = "anker-pilot"
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+
+    proposed = await service.propose(
+        tenant_id=tenant_id,
+        change_type="knowledge",
+        payload=_knowledge_payload("Anker Slug"),
+        proposed_by="principal-a",
+    )
+    fetched = await PostgresTenantConfigChangeRequestRepository(pg_session).get(
+        change_request_id=proposed.change_request_id,
+        expected_tenant_id=tenant_id,
+    )
+    stored_tenant_id = (
+        await pg_session.execute(
+            text("""
+                SELECT tenant_id
+                FROM public.tenant_config_change_requests
+                WHERE change_request_id = CAST(:change_request_id AS uuid)
+                """),
+            {"change_request_id": str(proposed.change_request_id)},
+        )
+    ).scalar_one()
+
+    assert proposed.tenant_id == "anker-pilot"
+    assert fetched is not None
+    assert fetched.tenant_id == "anker-pilot"
+    assert stored_tenant_id == "anker-pilot"
 
 
 def test_change_request_id_deterministic_uuid5() -> None:

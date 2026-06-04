@@ -567,8 +567,8 @@ class TenantConfigChangeRequestRow(Base):
     change_request_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True
     )
-    tenant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH), nullable=False, index=True
     )
     change_type: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
@@ -612,6 +612,10 @@ class TenantConfigChangeRequestRow(Base):
     outcome_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
+        CheckConstraint(
+            "length(tenant_id) > 0",
+            name="tenant_id_nonempty",
+        ),
         CheckConstraint(
             "change_type IN ("
             "'knowledge', 'policy', 'execution_governance', "

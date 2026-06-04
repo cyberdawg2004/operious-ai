@@ -152,10 +152,9 @@ class PostgresTenantConfigChangeRequestRepository(
         *,
         expected_tenant_id: str,
     ) -> TenantConfigChangeRequestRecord | None:
-        tenant_uuid = _tenant_uuid(expected_tenant_id)
         stmt = select(TenantConfigChangeRequestRow).where(
             TenantConfigChangeRequestRow.change_request_id == change_request_id,
-            TenantConfigChangeRequestRow.tenant_id == tenant_uuid,
+            TenantConfigChangeRequestRow.tenant_id == expected_tenant_id,
         )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else _row_to_record(row)
@@ -168,9 +167,8 @@ class PostgresTenantConfigChangeRequestRepository(
         limit: int = 50,
         offset: int = 0,
     ) -> TenantConfigChangeRequestPage:
-        tenant_uuid = _tenant_uuid(expected_tenant_id)
         stmt = select(TenantConfigChangeRequestRow).where(
-            TenantConfigChangeRequestRow.tenant_id == tenant_uuid
+            TenantConfigChangeRequestRow.tenant_id == expected_tenant_id
         )
         if status is not None:
             stmt = stmt.where(TenantConfigChangeRequestRow.status == status.value)
@@ -221,10 +219,9 @@ class PostgresTenantConfigChangeRequestRepository(
         *,
         expected_tenant_id: str,
     ) -> TenantConfigChangeRequestRow | None:
-        tenant_uuid = _tenant_uuid(expected_tenant_id)
         stmt = select(TenantConfigChangeRequestRow).where(
             TenantConfigChangeRequestRow.change_request_id == change_request_id,
-            TenantConfigChangeRequestRow.tenant_id == tenant_uuid,
+            TenantConfigChangeRequestRow.tenant_id == expected_tenant_id,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -243,7 +240,7 @@ def derive_tenant_config_change_request_id(
     )
     material_hash = canonical_sha256(
         {
-            "tenant_id": str(_tenant_uuid(tenant_id)),
+            "tenant_id": tenant_id,
             "change_type": change.value,
             "proposed_payload": dict(proposed_payload),
             "proposed_by": proposed_by,
@@ -260,7 +257,7 @@ def _record_to_row(
 ) -> TenantConfigChangeRequestRow:
     return TenantConfigChangeRequestRow(
         change_request_id=record.change_request_id,
-        tenant_id=_tenant_uuid(record.tenant_id),
+        tenant_id=record.tenant_id,
         change_type=record.change_type.value,
         proposed_payload=dict(record.proposed_payload),
         status=record.status.value,
@@ -343,19 +340,10 @@ def _same_request(
 
 
 def _assert_tenant(actual: str, expected: str) -> None:
-    if _tenant_uuid(actual) != _tenant_uuid(expected):
+    if actual != expected:
         raise TenantConfigChangeRequestPersistenceError(
             "change request tenant does not match expected tenant"
         )
-
-
-def _tenant_uuid(tenant_id: str) -> uuid.UUID:
-    try:
-        return uuid.UUID(str(tenant_id))
-    except ValueError as exc:
-        raise TenantConfigChangeRequestPersistenceError(
-            "tenant config change requests require a UUID tenant_id"
-        ) from exc
 
 
 __all__ = [
