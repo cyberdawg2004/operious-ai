@@ -1322,5 +1322,4 @@ __all__ = [
     "get_tenant_config_change_request_service",
     "get_tenant_configuration_service",
     "get_tenant_lifecycle_service",
-    "get_work_order_fulfillment_receipt_service",
 ]

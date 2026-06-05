@@ -97,7 +97,7 @@ class PostgresWorkOrderRepository(BaseRepository):
             .order_by(WorkOrderRow.created_at, WorkOrderRow.work_order_id)
             .limit(2)
         )
-        rows = (await self.session.execute(stmt)).scalars().all()
+        rows = (await self.session.execute(stmt)).scalars().all()  # bounded-load-ok
         if len(rows) > 1:
             raise WorkOrderPersistenceError(
                 "ambiguous provider_work_order_id for tenant: "

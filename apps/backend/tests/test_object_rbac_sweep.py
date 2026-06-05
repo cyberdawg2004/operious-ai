@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.routing import APIRoute
 from starlette.testclient import TestClient
 
 from app.agents.tools.approvals import ActionApprovalRecord
-from app.auth import VerifiedIdentity
+from app.auth import AuthProvider, VerifiedIdentity
 from app.auth.providers import StaticTokenProvider
 from app.core.config import get_settings
 from app.dependencies.authority import (
@@ -51,10 +51,14 @@ from app.trainer.records import TrainingRecommendationRecord
 _TENANT_ID = "tenant-acme"
 _NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
-# Intentionally empty: genuinely public/infrastructure endpoints, such as
-# health checks, do not depend on require_tenant_scope and therefore sit
-# outside this tenant-scoped invariant.
-_TENANT_SCOPE_ONLY_ALLOWLIST: dict[tuple[str, str], str] = {}
+# Tenant-scoped routes listed here are non-operator ingress surfaces where
+# tenant scope is the object boundary; adding a row requires doctrine review.
+_TENANT_SCOPE_ONLY_ALLOWLIST: dict[tuple[str, str], str] = {
+    (
+        "POST",
+        "/api/v1/boundary/work-orders/fulfillment",
+    ): "tenant-owned inbound status callback; tenant scope is the object bound",
+}
 
 _SWEEP_ROUTER_MODULES = {
     "app.api.v1.routers.action_approvals",
@@ -95,7 +99,9 @@ _CAPABILITY_DEP_NAMES = {
 
 
 @pytest.fixture(autouse=True)
-def _test_settings(monkeypatch: pytest.MonkeyPatch):
+def _test_settings(  # pyright: ignore[reportUnusedFunction]
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     get_settings.cache_clear()
@@ -320,8 +326,9 @@ def _request(
     capabilities: tuple[str, ...],
 ) -> Any:
     token = "with-capability" if capabilities else "without-capability"
-    app = create_app(
-        auth_provider=StaticTokenProvider(
+    auth_provider = cast(
+        AuthProvider,
+        StaticTokenProvider(
             tokens={
                 token: VerifiedIdentity(
                     tenant_id=_TENANT_ID,
@@ -329,8 +336,9 @@ def _request(
                     capabilities=frozenset(capabilities),
                 )
             }
-        )
+        ),
     )
+    app = create_app(auth_provider=auth_provider)
     spec.overrides(app)
     with TestClient(app, raise_server_exceptions=False) as client:
         return client.request(
