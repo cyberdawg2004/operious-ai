@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.data_protection.crypto import DataProtectionService
 from app.db.session import get_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.knowledge import (
@@ -106,10 +107,15 @@ async def reindex_knowledge_document_runtime(
 
 def _knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
     settings = get_settings()
+    data_protection = _data_protection_service(session)
     return KnowledgeRuntime(
-        repository=PostgresKnowledgeRepository(session),
+        repository=PostgresKnowledgeRepository(
+            session,
+            data_protection=data_protection,
+        ),
         tenant_configuration_repository=PostgresTenantConfigurationRepository(
-            session
+            session,
+            data_protection=data_protection,
         ),
         embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
@@ -120,6 +126,16 @@ def _knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
         vector_index_name=settings.VECTOR_DEFAULT_INDEX,
         default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
     )
+
+
+def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
+    settings = get_settings()
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        return None
+    return DataProtectionService.from_settings(session, settings)
 
 
 async def _set_db_tenant_context(session: AsyncSession, tenant_id: str) -> None:

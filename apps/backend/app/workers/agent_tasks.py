@@ -1252,6 +1252,7 @@ async def _append_resolution_proposal_after_diagnostic(
 ) -> _ResolutionAppendResult:
     try:
         async with session.begin_nested():
+            data_protection = _data_protection_service(session)
             resolution_persistence = PostgresResolutionProposalPersistence(session)
             proposal = await ResolutionRuntime(
                 persistence=resolution_persistence,
@@ -1262,7 +1263,10 @@ async def _append_resolution_proposal_after_diagnostic(
                         persistence=PostgresGovernanceRepository(session),
                         grounding_checker=CitationCoverageGroundingChecker(
                             document_repository=(
-                                PostgresTenantConfigurationRepository(session)
+                                PostgresTenantConfigurationRepository(
+                                    session,
+                                    data_protection=data_protection,
+                                )
                             )
                         ),
                     )
@@ -2052,9 +2056,16 @@ def _diagnostic_cognition_runtime(
     session: AsyncSession,
 ) -> DiagnosticCognitionRuntime:
     settings = get_settings()
-    tenant_repository = PostgresTenantConfigurationRepository(session)
+    data_protection = _data_protection_service(session)
+    tenant_repository = PostgresTenantConfigurationRepository(
+        session,
+        data_protection=data_protection,
+    )
     knowledge_runtime = KnowledgeRuntime(
-        repository=PostgresKnowledgeRepository(session),
+        repository=PostgresKnowledgeRepository(
+            session,
+            data_protection=data_protection,
+        ),
         tenant_configuration_repository=tenant_repository,
         embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
@@ -2072,7 +2083,7 @@ def _diagnostic_cognition_runtime(
         usage_persistence=PostgresCognitionUsagePersistence(
             session,
             audit_encryptor=_cognition_audit_encryptor(),
-            data_protection=_data_protection_service(session),
+            data_protection=data_protection,
         ),
         governance_repository=PostgresGovernanceRepository(session),
         redis_client=get_redis_client(),
