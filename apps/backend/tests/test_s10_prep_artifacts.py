@@ -26,6 +26,7 @@ from app.workers.s10_probe_tasks import (
     s10_dead_letter_probe,
     s10_probe_dead_letter_id,
 )
+import scripts.s10_prep.live_verification_probes as live_probes
 from scripts.s10_prep.live_verification_probes import (
     HttpResponse,
     normalize_api_base_url,
@@ -243,6 +244,109 @@ def test_s10_probe_task_routes_to_dead_letter_queue() -> None:
     assert routes["s10_dead_letter_probe"]["queue"] == QUEUE_DEAD_LETTER
     assert getattr(s10_dead_letter_probe, "ignore_result") is True
     assert getattr(s10_dead_letter_probe, "max_retries") == 0
+
+
+@pytest.mark.asyncio
+async def test_workers_dlq_probe_seeds_execution_and_passes_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    probe_execution = {
+        "execution_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "s10-execution")),
+        "session_id": "s10-probe-session:probe-1",
+        "dispatch_id": "s10-probe-dispatch:probe-1",
+    }
+    sent: dict[str, Any] = {}
+
+    async def fake_ensure_probe_execution_row(
+        *,
+        database_url: str,
+        tenant_id: str,
+        probe_id: str,
+    ) -> dict[str, str]:
+        sent["ensure"] = {
+            "database_url": database_url,
+            "tenant_id": tenant_id,
+            "probe_id": probe_id,
+        }
+        return probe_execution
+
+    async def fake_read_dead_letter_row(
+        *,
+        database_url: str,
+        tenant_id: str,
+        dead_letter_task_id: str,
+    ) -> dict[str, Any]:
+        sent["read"] = {
+            "database_url": database_url,
+            "tenant_id": tenant_id,
+            "dead_letter_task_id": dead_letter_task_id,
+        }
+        return {
+            "dead_letter_task_id": dead_letter_task_id,
+            "execution_id": probe_execution["execution_id"],
+            "metadata": {"purpose": "s10_live_production_worker_dlq_proof"},
+        }
+
+    class _AsyncResult:
+        id = "celery-task-id"
+
+    def fake_send_task(
+        name: str,
+        *,
+        kwargs: dict[str, Any],
+        queue: str,
+    ) -> _AsyncResult:
+        sent["task"] = {"name": name, "kwargs": kwargs, "queue": queue}
+        return _AsyncResult()
+
+    monkeypatch.setattr(
+        live_probes,
+        "_ensure_probe_execution_row",
+        fake_ensure_probe_execution_row,
+    )
+    monkeypatch.setattr(
+        live_probes,
+        "_read_dead_letter_row",
+        fake_read_dead_letter_row,
+    )
+    monkeypatch.setattr(live_probes.celery_app, "send_task", fake_send_task)
+
+    result = await live_probes.run_workers_dlq_probe(
+        database_url="postgresql+asyncpg://test:test@localhost/test",
+        tenant_id="anker-pilot",
+        probe_id="probe-1",
+        timeout_seconds=0.1,
+        poll_interval_seconds=0.01,
+    )
+
+    expected_dlq_id = s10_probe_dead_letter_id(
+        tenant_id="anker-pilot",
+        probe_id="probe-1",
+    )
+    assert result["passed"] is True
+    assert sent["ensure"] == {
+        "database_url": "postgresql+asyncpg://test:test@localhost/test",
+        "tenant_id": "anker-pilot",
+        "probe_id": "probe-1",
+    }
+    assert sent["task"] == {
+        "name": "s10_dead_letter_probe",
+        "queue": QUEUE_DEAD_LETTER,
+        "kwargs": {
+            "tenant_id": "anker-pilot",
+            "probe_id": "probe-1",
+            "enqueued_at": sent["task"]["kwargs"]["enqueued_at"],
+            "execution_id": probe_execution["execution_id"],
+            "session_id": probe_execution["session_id"],
+        },
+    }
+    assert sent["read"] == {
+        "database_url": "postgresql+asyncpg://test:test@localhost/test",
+        "tenant_id": "anker-pilot",
+        "dead_letter_task_id": str(expected_dlq_id),
+    }
+    assert "PASS workers_dlq" in capsys.readouterr().out
 
 
 async def _seed_legacy_knowledge(

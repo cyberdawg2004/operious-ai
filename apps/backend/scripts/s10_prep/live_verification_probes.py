@@ -24,6 +24,7 @@ from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -32,9 +33,15 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.core.config import get_settings  # noqa: E402
 from app.db.url import build_database_engine_config  # noqa: E402
+from app.execution.db.models import ExecutionRow  # noqa: E402
+from app.execution.enums import ExecutionKind, ExecutionState  # noqa: E402
 from app.queues import QUEUE_DEAD_LETTER  # noqa: E402
 from app.workers.celery_app import celery_app  # noqa: E402
-from app.workers.s10_probe_tasks import s10_probe_dead_letter_id  # noqa: E402
+from app.workers.s10_probe_tasks import (  # noqa: E402
+    s10_probe_dead_letter_id,
+    s10_probe_execution_id,
+    s10_probe_session_id,
+)
 
 JSON_HEADERS: Final[dict[str, str]] = {"Content-Type": "application/json"}
 TENANT_RLS_TABLES: Final[dict[str, str]] = {
@@ -222,6 +229,11 @@ async def run_workers_dlq_probe(
     poll_interval_seconds: float,
 ) -> dict[str, Any]:
     enqueued_at = datetime.now(timezone.utc).isoformat()
+    probe_execution = await _ensure_probe_execution_row(
+        database_url=database_url,
+        tenant_id=tenant_id,
+        probe_id=probe_id,
+    )
     expected_dlq_id = s10_probe_dead_letter_id(
         tenant_id=tenant_id,
         probe_id=probe_id,
@@ -232,6 +244,8 @@ async def run_workers_dlq_probe(
             "tenant_id": tenant_id,
             "probe_id": probe_id,
             "enqueued_at": enqueued_at,
+            "execution_id": probe_execution["execution_id"],
+            "session_id": probe_execution["session_id"],
         },
         queue=QUEUE_DEAD_LETTER,
     )
@@ -249,6 +263,9 @@ async def run_workers_dlq_probe(
     evidence = {
         "tenant_id": tenant_id,
         "probe_id": probe_id,
+        "execution_id": probe_execution["execution_id"],
+        "session_id": probe_execution["session_id"],
+        "dispatch_id": probe_execution["dispatch_id"],
         "celery_task_id": str(getattr(async_result, "id", "")),
         "expected_dead_letter_task_id": str(expected_dlq_id),
         "queue": QUEUE_DEAD_LETTER,
@@ -256,6 +273,86 @@ async def run_workers_dlq_probe(
     }
     _print_probe_result("workers_dlq", passed=row is not None, evidence=evidence)
     return evidence | {"passed": row is not None}
+
+
+async def _ensure_probe_execution_row(
+    *,
+    database_url: str,
+    tenant_id: str,
+    probe_id: str,
+) -> dict[str, str]:
+    settings = get_settings()
+    engine_config = build_database_engine_config(
+        database_url,
+        connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
+    )
+    engine = create_async_engine(
+        engine_config.async_url,
+        connect_args=engine_config.connect_args,
+    )
+    execution_id = s10_probe_execution_id(
+        tenant_id=tenant_id,
+        probe_id=probe_id,
+    )
+    session_id = s10_probe_session_id(probe_id=probe_id)
+    dispatch_id = f"s10-probe-dispatch:{probe_id}"
+    now = datetime.now(timezone.utc)
+    metadata = {
+        "probe_id": probe_id,
+        "purpose": "s10_live_production_worker_dlq_proof",
+        "dispatch_id": dispatch_id,
+        "session_id": session_id,
+        "tenant_id": tenant_id,
+    }
+    stmt = (
+        pg_insert(ExecutionRow)
+        .values(
+            execution_id=execution_id,
+            kind=ExecutionKind.DIAGNOSTIC_AGENT.value,
+            dispatch_id=dispatch_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            state=ExecutionState.DEAD_LETTERED.value,
+            attempt_count=0,
+            requested_at=now,
+            failed_at=now,
+            result={
+                "status": "dead_lettered",
+                "reason": "s10_probe_deliberate_failure",
+            },
+            error="s10_probe_deliberate_failure",
+            metadata_json=metadata,
+        )
+        .on_conflict_do_update(
+            index_elements=[ExecutionRow.execution_id],
+            set_={
+                ExecutionRow.state: ExecutionState.DEAD_LETTERED.value,
+                ExecutionRow.failed_at: now,
+                ExecutionRow.result: {
+                    "status": "dead_lettered",
+                    "reason": "s10_probe_deliberate_failure",
+                },
+                ExecutionRow.error: "s10_probe_deliberate_failure",
+                ExecutionRow.metadata_json: metadata,
+            },
+        )
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text("SELECT set_config('app.current_tenant_id', :tenant, true)"),
+                    {"tenant": tenant_id},
+                )
+                await session.execute(stmt)
+    finally:
+        await engine.dispose()
+    return {
+        "execution_id": str(execution_id),
+        "session_id": session_id,
+        "dispatch_id": dispatch_id,
+    }
 
 
 def run_smoke_probe(
@@ -433,6 +530,7 @@ async def _read_dead_letter_row(
                         SELECT dead_letter_task_id::text AS dead_letter_task_id,
                                task_name,
                                task_id,
+                               execution_id::text AS execution_id,
                                queue,
                                reason,
                                retry_count,

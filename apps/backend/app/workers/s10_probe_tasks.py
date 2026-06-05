@@ -48,6 +48,8 @@ def s10_dead_letter_probe(
     tenant_id: str,
     probe_id: str,
     enqueued_at: str | None = None,
+    execution_id: str | None = None,
+    session_id: str | None = None,
 ) -> None:
     """Consume the dead-letter queue, persist a DLQ row, then fail loudly."""
 
@@ -61,6 +63,12 @@ def s10_dead_letter_probe(
                 probe_id=probe_id,
                 task_id=task_id,
                 enqueued_at=enqueued_at,
+                execution_id=_probe_execution_id(
+                    tenant_id=tenant_id,
+                    probe_id=probe_id,
+                    execution_id=execution_id,
+                ),
+                session_id=session_id or s10_probe_session_id(probe_id=probe_id),
             )
         )
     finally:
@@ -74,9 +82,9 @@ async def _record_probe_dead_letter(
     probe_id: str,
     task_id: str,
     enqueued_at: str | None,
+    execution_id: uuid.UUID,
+    session_id: str,
 ) -> str:
-    execution_id = s10_probe_execution_id(tenant_id=tenant_id, probe_id=probe_id)
-    session_id = s10_probe_session_id(probe_id=probe_id)
     session_factory = get_session_factory()
     async with session_factory() as session:
         await record_dead_letter_task(
@@ -124,6 +132,17 @@ def s10_probe_dead_letter_id(*, tenant_id: str, probe_id: str) -> uuid.UUID:
         session_id=s10_probe_session_id(probe_id=probe_id),
         attempt_count=0,
     )
+
+
+def _probe_execution_id(
+    *,
+    tenant_id: str,
+    probe_id: str,
+    execution_id: str | None,
+) -> uuid.UUID:
+    if execution_id:
+        return uuid.UUID(execution_id)
+    return s10_probe_execution_id(tenant_id=tenant_id, probe_id=probe_id)
 
 
 def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
