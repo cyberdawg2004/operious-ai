@@ -40,6 +40,13 @@ _REQUIRED_TOOL_RULES = frozenset(
         "warehouse.repair.report",
     }
 )
+_DISPATCH_TOOL_NAMES = frozenset(
+    {
+        "repair.dispatch",
+        "replacement.dispatch",
+        "warranty.dispatch",
+    }
+)
 _POLICY_METADATA_KEYS = (
     "action_policy.policy_id",
     "action_policy.policy_type",
@@ -86,12 +93,18 @@ class WarehouseRule:
 
 
 @dataclass(frozen=True, slots=True)
+class DispatchRule:
+    always: Decision
+
+
+@dataclass(frozen=True, slots=True)
 class ParsedActionPolicy:
     binding: ActionPolicyBinding
     warranty: WarrantyRule
     replacement: ReplacementRule
     refund: RefundRule
     warehouse: WarehouseRule
+    dispatch: Mapping[str, DispatchRule]
 
 
 class TenantActionPolicy(BaseGovernancePolicy):
@@ -154,6 +167,13 @@ class TenantActionPolicy(BaseGovernancePolicy):
             )
         metadata = dict(context.subject.metadata)
         tool_name = _metadata_str(metadata, "tool_name")
+        if tool_name is None:
+            return (
+                _deny(
+                    "action tool name is required",
+                    binding=policy.binding,
+                ),
+            )
         if tool_name == "warranty.claim":
             return (_warranty_decision(metadata, policy),)
         if tool_name == "replacement.order":
@@ -162,6 +182,15 @@ class TenantActionPolicy(BaseGovernancePolicy):
             return (_refund_decision(metadata, policy),)
         if tool_name == "warehouse.repair.report":
             return (_warehouse_decision(metadata, policy),)
+        if tool_name in policy.dispatch:
+            return (_dispatch_decision(tool_name, policy),)
+        if tool_name in _DISPATCH_TOOL_NAMES:
+            return (
+                _deny(
+                    f"dispatch action tool {tool_name!r} is not configured",
+                    binding=policy.binding,
+                ),
+            )
         return (
             _deny(
                 f"unknown action tool {tool_name!r}",
@@ -291,6 +320,24 @@ def _warehouse_decision(
     )
 
 
+def _dispatch_decision(
+    tool_name: str,
+    policy: ParsedActionPolicy,
+) -> PolicyEvaluationResult:
+    rule = policy.dispatch[tool_name]
+    if rule.always is Decision.ALLOW:
+        return _allow(
+            f"{tool_name} is allowed by tenant policy",
+            binding=policy.binding,
+        )
+    if rule.always is Decision.REQUIRE_APPROVAL:
+        return _require_approval(
+            f"{tool_name} requires manager approval",
+            binding=policy.binding,
+        )
+    return _deny(f"{tool_name} denied by tenant policy", binding=policy.binding)
+
+
 def _allow(
     reason: str,
     *,
@@ -384,6 +431,7 @@ def _parse_action_tools_parameters(
         warehouse=_parse_warehouse_rule(
             _tool_rule(tools, "warehouse.repair.report")
         ),
+        dispatch=_parse_dispatch_rules(tools),
     )
 
 
@@ -463,6 +511,34 @@ def _parse_warehouse_rule(rule: Mapping[str, object]) -> WarehouseRule:
             require_approval.get("severity_in"),
             "warehouse.repair.report.require_approval.severity_in",
         ),
+    )
+
+
+def _parse_dispatch_rules(
+    tools: Mapping[str, object],
+) -> Mapping[str, DispatchRule]:
+    parsed: dict[str, DispatchRule] = {}
+    for tool_name in sorted(_DISPATCH_TOOL_NAMES):
+        if tool_name in tools:
+            parsed[tool_name] = _parse_dispatch_rule(
+                tool_name,
+                _tool_rule(tools, tool_name),
+            )
+    return parsed
+
+
+def _parse_dispatch_rule(
+    tool_name: str,
+    rule: Mapping[str, object],
+) -> DispatchRule:
+    return DispatchRule(
+        always=_require_policy_decision(
+            rule.get("always"),
+            f"{tool_name}.always",
+            allowed=frozenset(
+                {Decision.ALLOW, Decision.REQUIRE_APPROVAL, Decision.DENY}
+            ),
+        )
     )
 
 
