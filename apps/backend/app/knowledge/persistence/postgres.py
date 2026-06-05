@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.data_protection.crypto import DataProtectionService
 from app.knowledge.db.models import KnowledgeChunkRow, KnowledgeVectorRow
+from app.knowledge.embeddings import DEFAULT_EMBEDDING_DIMENSIONS
 from app.knowledge.exceptions import KnowledgePersistenceError
 from app.knowledge.identity import KnowledgeChunkId, KnowledgeVectorId
 from app.knowledge.persistence.models import (
@@ -26,6 +27,8 @@ from app.repositories.pagination import fetch_row_page, normalize_page_bounds
 from app.tenant.db.models import TenantKnowledgeDocumentRow, TenantRow
 from app.tenant.enums import TenantKnowledgeDocumentStatus, TenantKnowledgeReviewStatus
 from app.tenant.identity import TenantKnowledgeDocumentId
+
+_NATIVE_EMBEDDING_DIMENSIONS = DEFAULT_EMBEDDING_DIMENSIONS
 
 
 class PostgresKnowledgeRepository(BaseRepository):
@@ -348,6 +351,7 @@ class PostgresKnowledgeRepository(BaseRepository):
               AND tkd.review_status = 'approved'
               AND tkv.provider = :provider
               AND tkv.model = :model
+              AND tkv.dimensions = :query_dimensions
               AND tkv.embedding IS NOT NULL
             ORDER BY tkv.embedding <=> CAST(:query_vector AS vector) ASC
             LIMIT :limit
@@ -366,6 +370,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                 ),
                 "provider": query.provider,
                 "model": query.model,
+                "query_dimensions": len(query_embedding),
                 "query_vector": query_vector,
                 "limit": page_limit,
                 "offset": page_offset,
@@ -418,13 +423,13 @@ class PostgresKnowledgeRepository(BaseRepository):
     ) -> None:
         await self.session.execute(
             text(
-                """
+                f"""
                 UPDATE tenant_knowledge_vectors
-                SET embedding = CAST(vector AS text)::vector(32)
+                SET embedding = CAST(vector AS text)::vector({_NATIVE_EMBEDDING_DIMENSIONS})
                 WHERE tenant_id = :expected_tenant_id
                   AND document_id = :document_id
                   AND vector_index_name = :vector_index_name
-                  AND dimensions = 32
+                  AND dimensions = :native_dimensions
                   AND vector IS NOT NULL
                 """
             ),
@@ -432,6 +437,7 @@ class PostgresKnowledgeRepository(BaseRepository):
                 "expected_tenant_id": expected_tenant_id,
                 "document_id": document_id,
                 "vector_index_name": vector_index_name,
+                "native_dimensions": _NATIVE_EMBEDDING_DIMENSIONS,
             },
         )
 

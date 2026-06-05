@@ -14,11 +14,11 @@ from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.knowledge import (
-    DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
     KnowledgeIngestionResult,
     KnowledgeRuntime,
     as_document_id,
+    build_embedding_provider,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.queues import QUEUE_KNOWLEDGE_INDEXING
@@ -111,7 +111,7 @@ def _knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
         tenant_configuration_repository=PostgresTenantConfigurationRepository(
             session
         ),
-        embedding_provider=DeterministicHashEmbeddingProvider(),
+        embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
             overlap=settings.CHUNK_OVERLAP,

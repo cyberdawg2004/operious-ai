@@ -6,10 +6,11 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.config import get_settings
 from app.knowledge.chunking import DeterministicKnowledgeChunker
 from app.knowledge.embeddings import (
-    DeterministicHashEmbeddingProvider,
     KnowledgeEmbeddingProvider,
+    build_embedding_provider,
 )
 from app.knowledge.exceptions import (
     KnowledgeDocumentNotFoundError,
@@ -66,7 +67,7 @@ class KnowledgeRuntime:
         self._repository = repository
         self._tenant_configuration_repository = tenant_configuration_repository
         self._embedding_provider = (
-            embedding_provider or DeterministicHashEmbeddingProvider()
+            embedding_provider or build_embedding_provider(get_settings())
         )
         self._chunker = chunker or DeterministicKnowledgeChunker()
         self._injection_scanner = (

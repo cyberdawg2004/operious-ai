@@ -102,9 +102,9 @@ from app.execution import (
 from app.governance.persistence import PostgresGovernanceRepository
 from app.governance.capability.runtime import build_capability_governance_runtime
 from app.knowledge import (
-    DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
     KnowledgeRuntime,
+    build_embedding_provider,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.resolution.persistence import PostgresResolutionProposalPersistence
@@ -2056,7 +2056,7 @@ def _diagnostic_cognition_runtime(
     knowledge_runtime = KnowledgeRuntime(
         repository=PostgresKnowledgeRepository(session),
         tenant_configuration_repository=tenant_repository,
-        embedding_provider=DeterministicHashEmbeddingProvider(),
+        embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
             overlap=settings.CHUNK_OVERLAP,

@@ -307,9 +307,8 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str | None = None
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    # Optional; lets us reduce dimensions for `text-embedding-3-*` models.
-    # When None the provider returns the model's native dimensionality.
-    OPENAI_EMBEDDING_DIMENSIONS: int | None = None
+    # Native pgvector storage is currently migrated to one coherent dimension.
+    OPENAI_EMBEDDING_DIMENSIONS: int | None = 1536
 
     # ─── Anthropic provider ──────────────────────────────────────────
     # Used by Phase 5-C diagnostic cognition. The key is platform-owned

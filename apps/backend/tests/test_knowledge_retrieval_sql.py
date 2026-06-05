@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.knowledge import KnowledgeRuntime, derive_chunk_id, derive_vector_id
+from app.knowledge.embeddings import DEFAULT_EMBEDDING_DIMENSIONS
 from app.knowledge.persistence import (
     KnowledgeChunkRecord,
     KnowledgeVectorQuery,
@@ -31,15 +33,17 @@ from tests.conftest import requires_postgres
 _TENANT_A = "tenant-sql-native-a"
 _TENANT_B = "tenant-sql-native-b"
 _INDEX = "pr_t13_sql_native"
-_PROVIDER = "deterministic_hash"
-_MODEL = "operious-hash-embedding-v1"
+_PROVIDER = "openai"
+_MODEL = "text-embedding-3-small"
+_DIMENSIONS = DEFAULT_EMBEDDING_DIMENSIONS
 _NOW = datetime(2026, 5, 26, 12, tzinfo=timezone.utc)
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _StaticEmbeddingProvider:
     provider_name = _PROVIDER
     model_name = _MODEL
-    dimensions = 32
+    dimensions = _DIMENSIONS
 
     def __init__(self, embedding: tuple[float, ...]) -> None:
         self._embedding = embedding
@@ -56,7 +60,7 @@ class _StaticEmbeddingProvider:
 
 
 def _embedding(*, x: float = 0.0, y: float = 0.0) -> tuple[float, ...]:
-    values = [0.0 for _ in range(32)]
+    values = [0.0 for _ in range(_DIMENSIONS)]
     values[0] = x
     values[1] = y
     return tuple(values)
@@ -137,7 +141,7 @@ async def _seed_vectors(
                 document_version=1,
                 provider=_PROVIDER,
                 model=_MODEL,
-                dimensions=32,
+                dimensions=_DIMENSIONS,
                 vector_index_name=_INDEX,
                 vector=embedding,
                 is_current=True,
@@ -323,3 +327,42 @@ async def test_hnsw_index_exists(pg_session: AsyncSession) -> None:
     assert indexdef is not None
     assert "USING hnsw" in indexdef
     assert "vector_cosine_ops" in indexdef
+
+    column_type = (
+        await pg_session.execute(
+            text(
+                """
+                SELECT format_type(att.atttypid, att.atttypmod)
+                FROM pg_attribute att
+                JOIN pg_class cls ON cls.oid = att.attrelid
+                JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace
+                WHERE nsp.nspname = 'public'
+                  AND cls.relname = 'tenant_knowledge_vectors'
+                  AND att.attname = 'embedding'
+                  AND NOT att.attisdropped
+                """
+            )
+        )
+    ).scalar_one()
+    assert column_type == f"vector({_DIMENSIONS})"
+
+
+def test_sql_native_retrieval_source_uses_native_embedding_column() -> None:
+    source = (_BACKEND_ROOT / "app/knowledge/persistence/postgres.py").read_text(
+        encoding="utf-8"
+    )
+    function_source = source[
+        source.index("async def _list_vector_entries_by_embedding") :
+        source.index("    async def _ensure_tenant")
+    ]
+
+    assert (
+        "(1 - (tkv.embedding <=> CAST(:query_vector AS vector)))"
+        in function_source
+    )
+    assert "AND tkv.embedding IS NOT NULL" in function_source
+    assert (
+        "ORDER BY tkv.embedding <=> CAST(:query_vector AS vector) ASC"
+        in function_source
+    )
+    assert "CAST(tkv.vector::text AS vector) <=>" not in function_source

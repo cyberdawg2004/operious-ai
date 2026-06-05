@@ -73,6 +73,12 @@ def test_missing_embedding_key_blocks_boot() -> None:
         validate_production_config(_production(OPENAI_API_KEY=None))
 
 
+def test_embedding_dimension_mismatch_blocks_boot() -> None:
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(_production(OPENAI_EMBEDDING_DIMENSIONS=512))
+    assert any("pgvector dimension" in problem for problem in exc.value.problems)
+
+
 def test_missing_credential_master_key_blocks_boot() -> None:
     with pytest.raises(ProductionReadinessError):
         validate_production_config(_production(TENANT_CREDENTIAL_MASTER_KEY=""))

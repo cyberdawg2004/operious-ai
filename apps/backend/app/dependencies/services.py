@@ -120,9 +120,9 @@ from app.governance.persistence import (
 )
 from app.governance.policies.chain import PolicyChain
 from app.knowledge import (
-    DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
     KnowledgeRuntime,
+    build_embedding_provider,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.knowledge.reindex_publisher import CeleryKnowledgeReindexPublisher
@@ -910,7 +910,7 @@ def get_knowledge_service(
             session,
             data_protection=data_protection,
         ),
-        embedding_provider=DeterministicHashEmbeddingProvider(),
+        embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
             overlap=settings.CHUNK_OVERLAP,

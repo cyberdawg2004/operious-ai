@@ -26,7 +26,7 @@ from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.events.persistence import OperationalEventPersistenceProtocol
 from app.governance.persistence import PostgresGovernanceRepository
 from app.knowledge.chunking import DeterministicKnowledgeChunker
-from app.knowledge.embeddings import DeterministicHashEmbeddingProvider
+from app.knowledge.embeddings import build_embedding_provider
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.knowledge.runtime import KnowledgeRuntime
 from app.qa.persistence import PostgresQAPersistence
@@ -356,7 +356,7 @@ def _sop_knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
         tenant_configuration_repository=PostgresTenantConfigurationRepository(
             session
         ),
-        embedding_provider=DeterministicHashEmbeddingProvider(),
+        embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
             overlap=settings.CHUNK_OVERLAP,

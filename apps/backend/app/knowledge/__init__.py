@@ -2,8 +2,11 @@
 
 from app.knowledge.chunking import DeterministicKnowledgeChunker, KnowledgeChunk
 from app.knowledge.embeddings import (
+    DEFAULT_EMBEDDING_DIMENSIONS,
     DeterministicHashEmbeddingProvider,
     KnowledgeEmbeddingProvider,
+    OpenAIEmbeddingProvider,
+    build_embedding_provider,
 )
 from app.knowledge.exceptions import (
     KnowledgeDocumentNotFoundError,
@@ -38,6 +41,7 @@ from app.knowledge.poisoning import (
 from app.knowledge.runtime import KnowledgeRuntime
 
 __all__ = [
+    "DEFAULT_EMBEDDING_DIMENSIONS",
     "DeterministicHashEmbeddingProvider",
     "DeterministicKnowledgeChunker",
     "KnowledgeBudgetDecision",
@@ -59,10 +63,12 @@ __all__ = [
     "KnowledgeRetrievalResult",
     "KnowledgeRuntime",
     "KnowledgeVectorId",
+    "OpenAIEmbeddingProvider",
     "PatternKnowledgeInjectionScanner",
     "as_chunk_id",
     "as_document_id",
     "as_vector_id",
+    "build_embedding_provider",
     "derive_chunk_id",
     "derive_vector_id",
 ]

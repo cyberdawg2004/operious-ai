@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.core.config import Settings
 
+_KNOWLEDGE_NATIVE_EMBEDDING_DIMENSIONS = 1536
+
 
 class ProductionReadinessError(RuntimeError):
     """Raised at boot when production configuration is not READY."""
@@ -73,6 +75,22 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "EMBEDDING_DEFAULT_PROVIDER=openai but OPENAI_API_KEY is empty -> "
             "embeddings fall back to a deterministic hash (set "
             "ALLOW_STUB_EMBEDDINGS=true to allow)."
+        )
+    configured_embedding_dimensions = (
+        settings.OPENAI_EMBEDDING_DIMENSIONS
+        if settings.OPENAI_EMBEDDING_DIMENSIONS is not None
+        else _KNOWLEDGE_NATIVE_EMBEDDING_DIMENSIONS
+    )
+    if (
+        settings.EMBEDDING_DEFAULT_PROVIDER.strip().casefold() == "openai"
+        and configured_embedding_dimensions
+        != _KNOWLEDGE_NATIVE_EMBEDDING_DIMENSIONS
+    ):
+        problems.append(
+            "OPENAI_EMBEDDING_DIMENSIONS="
+            f"{configured_embedding_dimensions} does not match native "
+            f"pgvector dimension {_KNOWLEDGE_NATIVE_EMBEDDING_DIMENSIONS}; "
+            "run a matching embedding-dimension migration before changing it."
         )
 
     # ── Required security secrets (no opt-out) ───────────────────────
