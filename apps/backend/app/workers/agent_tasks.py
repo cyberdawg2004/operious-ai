@@ -1381,6 +1381,7 @@ async def _action_orchestration_runtime(
                 config_repository=PostgresConnectorConfigRepository(session),
                 credential_runtime=tenant_runtime,
                 work_order_repository=PostgresWorkOrderRepository(session),
+                allow_stub_actions=settings.allow_stub_actions_effective,
             ),
             # Per-task runtime construction bounds policy staleness to the
             # current task; new tasks pick up new composition.

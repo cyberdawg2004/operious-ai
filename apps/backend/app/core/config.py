@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     ALLOW_STUB_VECTOR: bool = False
     ALLOW_STUB_EMBEDDINGS: bool = False
     ALLOW_STUB_VOICE: bool = False
+    # Commerce action tools (refund/warranty/replacement/warehouse) with no
+    # configured connector. None = derive from environment (fail-closed in
+    # production, stub allowed elsewhere). Explicit true/false overrides — true
+    # is the deliberate pilot opt-in to the fake-success stub behaviour.
+    ALLOW_STUB_ACTIONS: bool | None = None
 
     # Legacy direct tenant configuration application (S-03).
     # The durable tenant-config ledger is the production path. This flag
@@ -453,6 +458,19 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def allow_stub_actions_effective(self) -> bool:
+        """Whether fake-success commerce action stubs may be registered.
+
+        Fail-closed in production by default (an unconfigured action returns a
+        governed error, not a fake success); allowed in non-production so dev /
+        CI exercise the tools. An explicit ``ALLOW_STUB_ACTIONS`` overrides —
+        ``true`` is the deliberate pilot opt-in.
+        """
+        if self.ALLOW_STUB_ACTIONS is not None:
+            return self.ALLOW_STUB_ACTIONS
+        return not self.is_production
 
     @property
     def is_local(self) -> bool:
