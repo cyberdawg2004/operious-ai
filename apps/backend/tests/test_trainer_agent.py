@@ -155,6 +155,7 @@ def _recommendation(
     qa_score_id: str = _QA_SCORE_ID,
     category: str = "diagnostic_accuracy",
     seed: str,
+    created_at: datetime = _NOW,
 ) -> TrainingRecommendationRecord:
     return TrainingRecommendationRecord(
         recommendation_id=str(
@@ -173,7 +174,7 @@ def _recommendation(
         recommendation="Review SOP classification criteria.",
         priority="medium",
         status="pending",
-        created_at=_NOW,
+        created_at=created_at,
         metadata={"seed": seed},
     )
 
@@ -331,12 +332,14 @@ async def test_repeated_failures_trigger_sop_proposal(
         expected_tenant_id=_TENANT_ID,
     )
     trainer_repo = PostgresTrainingRecommendationRepository(pg_session)
+    created_at = datetime.now(timezone.utc)
     for index in range(3):
         await trainer_repo.write(
             _recommendation(
                 session_id=_uuid(f"session:{index}"),
                 qa_score_id=_uuid(f"score:{index}"),
                 seed=str(index),
+                created_at=created_at,
             ),
             expected_tenant_id=_TENANT_ID,
         )
