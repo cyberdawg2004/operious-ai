@@ -1,13 +1,17 @@
 /**
- * Onboarding state machine (Phase 2.5d).
+ * Onboarding state machine (Phase 2.5d) — Command Center, PHASE B ONLY.
  *
- * Step state is DERIVED FROM REAL BACKEND DATA, never from local click
- * tracking. A step is `complete` only when its backend state confirms it —
- * e.g. a connector is complete only once its change request is APPLIED (it
- * shows up in the connectors read), not merely proposed. This makes it
- * impossible to falsely show "done".
+ * Creating a tenant (Phase A) is a PLATFORM operation and lives in the Platform
+ * Console. A tenant operator must never see "create tenant" in the tenant
+ * surface. The Command Center onboarding guide therefore starts at Phase B:
+ * "you are scoped to a tenant — here is how to configure it" (channel →
+ * connector → credential → action policy).
  *
- * This module is React-free so the transitions are unit-testable in isolation.
+ * Step state is DERIVED FROM REAL BACKEND DATA — a step is `complete` only when
+ * its change request is APPLIED (reflected in a read), never from click
+ * tracking. The tenant being configured is the one the acting token is scoped
+ * to (principal.tenant_id); there is no cross-tenant target. React-free so the
+ * transitions are unit-testable.
  */
 
 import type {
@@ -16,10 +20,7 @@ import type {
   TenantConfigChangeRequest,
   TenantConnectorConfiguration,
   TenantGovernancePolicy,
-  TenantLifecycleRecord,
 } from "@/lib/api";
-
-export const PLATFORM_TENANT_ADMIN_CAPABILITY = "platform.tenant.admin";
 
 // Mirrors ACTION_TOOLS_POLICY_TYPE in config-change-payloads.ts. Inlined so
 // this state module carries no runtime cross-module import (keeps it directly
@@ -33,14 +34,10 @@ export type OnboardingStepState =
   | "complete";
 
 export type OnboardingStepId =
-  | "create-tenant"
-  | "grant-access"
   | "channel"
   | "connector"
   | "connector-credential"
   | "action-policy";
-
-export type OnboardingPhase = "platform" | "tenant";
 
 export type PendingChange = {
   change_request_id: string;
@@ -49,7 +46,6 @@ export type PendingChange = {
 
 export type OnboardingStep = {
   id: OnboardingStepId;
-  phase: OnboardingPhase;
   title: string;
   state: OnboardingStepState;
   /** A governed change awaiting approval/apply for this step, if any. */
@@ -57,38 +53,21 @@ export type OnboardingStep = {
 };
 
 export type OnboardingSnapshot = {
-  targetTenantId: string | null;
   principal: AuthPrincipal | null;
-  tenants: TenantLifecycleRecord[];
   channels: TenantChannelConfiguration[];
   connectors: TenantConnectorConfiguration[];
   policies: TenantGovernancePolicy[];
   changeRequests: TenantConfigChangeRequest[];
 };
 
-export function hasPlatformAdmin(principal: AuthPrincipal | null): boolean {
-  return Boolean(
-    principal?.capabilities?.includes(PLATFORM_TENANT_ADMIN_CAPABILITY)
-  );
-}
-
-export function tenantExists(snapshot: OnboardingSnapshot): boolean {
-  if (!snapshot.targetTenantId) return false;
-  return snapshot.tenants.some(
-    (tenant) => tenant.tenant_id === snapshot.targetTenantId
-  );
-}
-
 /**
- * The Auth0 re-auth boundary. Phase B (tenant-scoped config) is unlocked only
- * when the ACTING token is scoped to the target tenant. There is no
- * cross-tenant configuration path — this is a tenant-isolation strength, not
- * an inconvenience. Attempting tenant-scoped reads before this holds 400s with
- * tenant_axis_missing, so the wizard must gate on it.
+ * Phase B requires a tenant-scoped session. The acting token's tenant defines
+ * what is being configured — there is no cross-tenant target. If the session is
+ * not tenant-scoped, every step is blocked (tenant-scoped reads would 400 with
+ * tenant_axis_missing). This is the residual re-auth guard on the tenant side.
  */
-export function tokenScopedToTarget(snapshot: OnboardingSnapshot): boolean {
-  if (!snapshot.targetTenantId) return false;
-  return snapshot.principal?.tenant_id === snapshot.targetTenantId;
+export function isTenantScoped(principal: AuthPrincipal | null): boolean {
+  return Boolean(principal?.tenant_id);
 }
 
 export function findActiveActionPolicy(
@@ -122,7 +101,9 @@ function pendingChange(
 
 /**
  * The tenant is operational (no longer inert/fail-closed) once an action_tools
- * policy is active — that is what lets it act. Before that it cannot.
+ * policy is active — that is what lets it act. The backend creates a tenant with
+ * status `active`; "inert" means it has no action policy yet, not that its
+ * status is provisioning.
  */
 export function tenantIsOperational(snapshot: OnboardingSnapshot): boolean {
   return findActiveActionPolicy(snapshot.policies) !== null;
@@ -131,9 +112,7 @@ export function tenantIsOperational(snapshot: OnboardingSnapshot): boolean {
 export function computeOnboardingSteps(
   snapshot: OnboardingSnapshot
 ): OnboardingStep[] {
-  const isAdmin = hasPlatformAdmin(snapshot.principal);
-  const created = tenantExists(snapshot);
-  const scoped = tokenScopedToTarget(snapshot);
+  const scoped = isTenantScoped(snapshot.principal);
   const hasChannel = snapshot.channels.length > 0;
   const hasConnector = snapshot.connectors.length > 0;
   const credentialRotated = snapshot.channels.some(
@@ -155,32 +134,11 @@ export function computeOnboardingSteps(
       cr.proposed_payload.policy_type === ACTION_TOOLS_POLICY_TYPE
   );
 
-  // Step 1 — create tenant (platform gate, direct inert create).
-  const createTenant: OnboardingStep = {
-    id: "create-tenant",
-    phase: "platform",
-    title: "Create tenant",
-    state: created ? "complete" : isAdmin ? "available" : "blocked",
-    pendingChange: null,
-  };
-
-  // Step 2 — security gate: re-auth boundary into the new tenant.
-  const grantAccess: OnboardingStep = {
-    id: "grant-access",
-    phase: "platform",
-    title: "Grant tenant access (re-auth boundary)",
-    state: !created ? "blocked" : scoped ? "complete" : "available",
-    pendingChange: null,
-  };
-
-  const phaseBBlocked = !scoped;
-
-  // Step 3 — governed channel create.
+  // Step 1 — governed channel create.
   const channel: OnboardingStep = {
     id: "channel",
-    phase: "tenant",
     title: "Configure channel (governed)",
-    state: phaseBBlocked
+    state: !scoped
       ? "blocked"
       : hasChannel
         ? "complete"
@@ -190,11 +148,10 @@ export function computeOnboardingSteps(
     pendingChange: pendingChange(pendingChannelCreate),
   };
 
-  // Step 4 — connector, gated on a matching channel existing.
-  const connectorBlocked = phaseBBlocked || !hasChannel;
+  // Step 2 — connector, gated on a matching channel existing.
+  const connectorBlocked = !scoped || !hasChannel;
   const connector: OnboardingStep = {
     id: "connector",
-    phase: "tenant",
     title: "Configure connector",
     state: connectorBlocked
       ? "blocked"
@@ -206,10 +163,9 @@ export function computeOnboardingSteps(
     pendingChange: pendingChange(pendingConnector),
   };
 
-  // Step 5 — connector credential via the channel credential path.
+  // Step 3 — connector credential via the channel credential path.
   const credential: OnboardingStep = {
     id: "connector-credential",
-    phase: "tenant",
     title: "Set connector credential",
     state: connectorBlocked
       ? "blocked"
@@ -221,12 +177,11 @@ export function computeOnboardingSteps(
     pendingChange: pendingChange(pendingChannelCredential),
   };
 
-  // Step 6 — action policy; applying it is what makes the tenant operational.
+  // Step 4 — action policy; applying it is what makes the tenant operational.
   const actionPolicy: OnboardingStep = {
     id: "action-policy",
-    phase: "tenant",
     title: "Configure action policy",
-    state: phaseBBlocked
+    state: !scoped
       ? "blocked"
       : activePolicy
         ? "complete"
@@ -236,12 +191,5 @@ export function computeOnboardingSteps(
     pendingChange: pendingChange(pendingPolicy),
   };
 
-  return [
-    createTenant,
-    grantAccess,
-    channel,
-    connector,
-    credential,
-    actionPolicy,
-  ];
+  return [channel, connector, credential, actionPolicy];
 }

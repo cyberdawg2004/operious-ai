@@ -10,16 +10,12 @@ import {
   ExternalLink,
 } from "lucide-react";
 import {
-  ApiError,
-  createTenantLifecycle,
   formatApiError,
   listChannelConfigurations,
   listConfigChangeRequests,
   listConnectorConfigurations,
   listGovernancePolicies,
-  listTenantLifecycle,
   proposeConfigChangeRequest,
-  type TenantLifecycleRecord,
 } from "@/lib/api";
 import {
   buildChannelChangePayload,
@@ -28,7 +24,6 @@ import {
 import {
   computeOnboardingSteps,
   findActiveActionPolicy,
-  hasPlatformAdmin,
   tenantIsOperational,
   type OnboardingSnapshot,
   type OnboardingStep,
@@ -51,31 +46,23 @@ const CHANNEL_SECRET_KEYS: Record<string, { key: string; label: string }> = {
   lark: { key: "app_secret", label: "App Secret" },
 };
 
-const TARGET_STORAGE_KEY = "operious_onboarding_target";
-
 export function OnboardingWizard() {
   const authSession = useAuthSession();
   const principal = authSession.principal;
-  const isAdmin = hasPlatformAdmin(principal);
-
-  const [target, setTarget] = useState<string>(() => readStoredTarget());
-  const effectiveTarget = target.trim() || principal?.tenant_id || "";
-  const scoped = Boolean(
-    effectiveTarget && principal?.tenant_id === effectiveTarget
-  );
+  const tenantId = principal?.tenant_id ?? null;
+  const scoped = Boolean(tenantId);
 
   const [channelModalOpen, setChannelModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Phase B reads (channels/connectors/policies/change-requests) are
-  // tenant-scoped and 400 with tenant_axis_missing if the token is not scoped
-  // to the target tenant. Fetch them ONLY when scoped (the re-auth boundary).
+  // tenant-scoped and 400 with tenant_axis_missing if the session is not scoped
+  // to a tenant. Fetch them ONLY when scoped (the residual re-auth guard).
   const loadSnapshot = useCallback(async (): Promise<
-    Omit<OnboardingSnapshot, "principal" | "targetTenantId">
+    Omit<OnboardingSnapshot, "principal">
   > => {
-    const tenants = isAdmin ? (await listTenantLifecycle()).items : [];
     if (!scoped) {
-      return { tenants, channels: [], connectors: [], policies: [], changeRequests: [] };
+      return { channels: [], connectors: [], policies: [], changeRequests: [] };
     }
     const [channels, connectors, policies, proposed, approved] = await Promise.all([
       listChannelConfigurations(),
@@ -85,34 +72,27 @@ export function OnboardingWizard() {
       listConfigChangeRequests({ status: "APPROVED" }),
     ]);
     return {
-      tenants,
       channels: channels.items,
       connectors: connectors.items,
       policies: policies.items,
       changeRequests: [...proposed.items, ...approved.items],
     };
-  }, [isAdmin, scoped]);
+  }, [scoped]);
 
   const { data, error, isLoading, reload } = useApiResource(loadSnapshot);
 
   const snapshot: OnboardingSnapshot = useMemo(
     () => ({
-      targetTenantId: effectiveTarget || null,
       principal,
-      tenants: data?.tenants ?? [],
       channels: data?.channels ?? [],
       connectors: data?.connectors ?? [],
       policies: data?.policies ?? [],
       changeRequests: data?.changeRequests ?? [],
     }),
-    [effectiveTarget, principal, data]
+    [principal, data]
   );
 
   const steps = useMemo(() => computeOnboardingSteps(snapshot), [snapshot]);
-  const createdTenant = useMemo(
-    () => snapshot.tenants.find((tenant) => tenant.tenant_id === effectiveTarget) ?? null,
-    [snapshot.tenants, effectiveTarget]
-  );
   const operational = tenantIsOperational(snapshot);
   const activePolicy = findActiveActionPolicy(snapshot.policies);
 
@@ -121,20 +101,13 @@ export function OnboardingWizard() {
     reload();
   };
 
-  const commitTarget = (value: string) => {
-    setTarget(value);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(TARGET_STORAGE_KEY, value);
-    }
-  };
-
-  if (!isAdmin && !scoped) {
+  if (!scoped) {
     return (
       <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
         <WizardHeader />
         <EmptyState
-          title="Onboarding requires platform or tenant authority"
-          message="Phase A (create tenant) requires the platform.tenant.admin capability. Phase B requires a token scoped to the tenant being onboarded. Your current token has neither."
+          title="A tenant-scoped session is required"
+          message="Command Center onboarding configures the tenant your session is scoped to. Your current session is not scoped to a tenant. Creating a tenant is a platform operation — it is done in the Platform Console, not here."
         />
       </main>
     );
@@ -144,28 +117,14 @@ export function OnboardingWizard() {
     <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
       <WizardHeader />
 
-      <div className="mb-5 rounded-lg border border-border-subtle bg-surface-raised p-4">
-        <label className="block">
-          <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Tenant being onboarded
-          </span>
-          <input
-            value={target}
-            onChange={(event) => commitTarget(event.target.value)}
-            placeholder={principal?.tenant_id ?? "tenant-2"}
-            className="h-11 w-full max-w-md rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
-          />
-        </label>
-        <p className="mt-2 text-[12px] leading-relaxed text-ink-tertiary">
-          Acting token scope:{" "}
-          <strong className="text-ink-secondary">
-            {principal?.tenant_id ?? "unscoped"}
-          </strong>
-          {scoped ? " · scoped to target (Phase B unlocked)" : " · not scoped to target"}
-        </p>
+      <div className="mb-5 rounded-lg border border-border-subtle bg-surface-raised p-4 text-[13px] text-ink-secondary">
+        Configuring the tenant your session is scoped to:{" "}
+        <strong className="text-ink-primary">{tenantId}</strong>. Each step is a
+        governed change — proposed here, then approved and applied by a different
+        principal.
       </div>
 
-      <OperationalBanner operational={operational} target={effectiveTarget} />
+      <OperationalBanner operational={operational} target={tenantId ?? ""} />
 
       {notice && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-gold-primary/40 bg-gold-bg px-3 py-2 text-[13px] text-ink-primary">
@@ -184,50 +143,18 @@ export function OnboardingWizard() {
 
       {!isLoading && (
         <div className="space-y-6">
-          <PhaseBlock label="Phase A · Platform" hint="Requires platform.tenant.admin">
-            {steps
-              .filter((step) => step.phase === "platform")
-              .map((step) => (
-                <StepCard key={step.id} step={step} index={stepIndex(step.id)}>
-                  {step.id === "create-tenant" && (
-                    <CreateTenantAction
-                      target={effectiveTarget}
-                      record={createdTenant}
-                      createdBy={principal?.principal_id ?? null}
-                      disabled={step.state !== "available"}
-                      onCreated={(message) => {
-                        setNotice(message);
-                        reload();
-                      }}
-                      onTargetChange={commitTarget}
-                    />
-                  )}
-                  {step.id === "grant-access" && (
-                    <GrantAccessAction
-                      target={effectiveTarget}
-                      scoped={scoped}
-                      currentScope={principal?.tenant_id ?? null}
-                      onRecheck={refreshAll}
-                    />
-                  )}
-                </StepCard>
-              ))}
-          </PhaseBlock>
-
           <PhaseBlock
-            label="Phase B · Tenant-scoped"
-            hint="Requires a token scoped to the new tenant — and an approver for dual control"
+            label="Configure this tenant"
+            hint="Governed dual-control — each step is proposed, then approved and applied by a different principal"
           >
-            {steps
-              .filter((step) => step.phase === "tenant")
-              .map((step) => (
-                <StepCard key={step.id} step={step} index={stepIndex(step.id)}>
-                  <PhaseBAction
-                    step={step}
-                    onOpenChannelModal={() => setChannelModalOpen(true)}
-                  />
-                </StepCard>
-              ))}
+            {steps.map((step) => (
+              <StepCard key={step.id} step={step} index={stepIndex(step.id)}>
+                <PhaseBAction
+                  step={step}
+                  onOpenChannelModal={() => setChannelModalOpen(true)}
+                />
+              </StepCard>
+            ))}
           </PhaseBlock>
 
           <ApproverLink />
@@ -251,130 +178,6 @@ export function OnboardingWizard() {
         </p>
       )}
     </main>
-  );
-}
-
-// ─── Phase A actions ──────────────────────────────────────────────────────
-
-function CreateTenantAction({
-  target,
-  record,
-  createdBy,
-  disabled,
-  onCreated,
-  onTargetChange,
-}: {
-  target: string;
-  record: TenantLifecycleRecord | null;
-  createdBy: string | null;
-  disabled: boolean;
-  onCreated: (message: string) => void;
-  onTargetChange: (value: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (record) {
-    return (
-      <div className="rounded border border-border-subtle bg-surface-raised p-3 text-[13px] text-ink-secondary">
-        <p>
-          Tenant <strong className="text-ink-primary">{record.tenant_id}</strong> created{" "}
-          <strong>INERT</strong> (status: {record.status}). It cannot act until its
-          configuration is applied through the governed ledger.
-        </p>
-        <p className="mt-2 font-mono text-[11px] text-ink-tertiary">
-          Audit: created_by {createdBy ?? "unknown"} · created_at {record.created_at}
-        </p>
-      </div>
-    );
-  }
-
-  const create = async () => {
-    if (!target.trim()) {
-      setError("Enter the tenant id to create.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createTenantLifecycle(target.trim());
-      onTargetChange(created.tenant_id);
-      onCreated(`Tenant ${created.tenant_id} created inert (${created.status}).`);
-    } catch (caught: unknown) {
-      if (caught instanceof ApiError && caught.status === 409) {
-        setError("A tenant with this id already exists. Pick a different id or continue with it.");
-      } else {
-        setError(formatApiError(caught));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      <p className="text-[13px] leading-relaxed text-ink-secondary">
-        Creates the tenant <strong>inert</strong> (fail-closed): it exists but cannot
-        act until configured. The create is platform-gated and audited.
-      </p>
-      {error && <FormError message={error} />}
-      <button
-        onClick={create}
-        disabled={busy || disabled}
-        className="inline-flex h-10 items-center gap-2 rounded bg-gold-primary px-4 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
-      >
-        {busy ? "Creating..." : "Create tenant (inert)"}
-      </button>
-    </div>
-  );
-}
-
-function GrantAccessAction({
-  target,
-  scoped,
-  currentScope,
-  onRecheck,
-}: {
-  target: string;
-  scoped: boolean;
-  currentScope: string | null;
-  onRecheck: () => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="rounded border border-gold-primary/40 bg-gold-bg p-3 text-[13px] leading-relaxed text-ink-primary">
-        <p className="flex items-center gap-2 font-semibold">
-          <Lock className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
-          Tenant-isolation boundary (a strength, not an interruption)
-        </p>
-        <p className="mt-2">
-          A new tenant cannot be configured by any existing session. Configuration
-          requires an identity scoped to <strong>{target || "the new tenant"}</strong>.
-          There is no cross-tenant configuration path.
-        </p>
-        <ol className="mt-2 list-decimal space-y-1 pl-5">
-          <li>
-            Create/grant an Auth0 user with <code>tenant_id={target || "<new tenant>"}</code>{" "}
-            and config roles (TenantConnectorWriter / TenantPolicyWriter /
-            TenantChannelAdmin).
-          </li>
-          <li>
-            Grant a <strong>separate</strong> TenantApprover user for dual control.
-          </li>
-          <li>Log in as that user (or re-login if you updated your own claims).</li>
-        </ol>
-      </div>
-      <p className="text-[12px] text-ink-tertiary">
-        Current token scope: <strong className="text-ink-secondary">{currentScope ?? "unscoped"}</strong>
-        {scoped ? " — scoped to target, Phase B unlocked." : " — not yet scoped to target."}
-      </p>
-      <button
-        onClick={onRecheck}
-        className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
-      >
-        Re-check token scope
-      </button>
-    </div>
   );
 }
 
@@ -548,14 +351,15 @@ function ChannelCreateModal({
 function WizardHeader() {
   return (
     <>
-      <div className="eyebrow text-ink-tertiary mb-2">ONBOARDING · GOVERNED</div>
+      <div className="eyebrow text-ink-tertiary mb-2">ONBOARDING · CONFIGURE TENANT</div>
       <h1 className="mb-2 font-display text-[32px] font-semibold text-ink-primary">
-        Tenant Onboarding
+        Configure This Tenant
       </h1>
       <p className="mb-5 max-w-3xl text-[13px] leading-relaxed text-ink-secondary">
-        Onboard a tenant from inert to operational through a governed, isolation-respecting
-        flow. Step state is derived from real backend data — a step is complete only when its
-        change request is applied.
+        Take the tenant your session is scoped to from inert to operational through the
+        governed config flow (channel → connector → credential → action policy). Step state
+        is derived from real backend data — a step is complete only when its change request is
+        applied. (Creating a tenant is a platform operation, done in the Platform Console.)
       </p>
     </>
   );
@@ -706,17 +510,10 @@ function FormError({ message }: { message: string }) {
 
 function stepIndex(id: OnboardingStep["id"]): number {
   const order: OnboardingStep["id"][] = [
-    "create-tenant",
-    "grant-access",
     "channel",
     "connector",
     "connector-credential",
     "action-policy",
   ];
   return order.indexOf(id) + 1;
-}
-
-function readStoredTarget(): string {
-  if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(TARGET_STORAGE_KEY) ?? "";
 }

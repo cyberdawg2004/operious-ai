@@ -61,7 +61,7 @@ const navItems: NavItem[] = [
   { id: "connectors", href: dashboardRoutes.connectors, label: "Connector Config", icon: Plug, group: "platform" },
   { id: "action-policy", href: dashboardRoutes["action-policy"], label: "Action Policy", icon: Gavel, group: "platform" },
   { id: "config-approvals", href: dashboardRoutes["config-approvals"], label: "Config Approvals", icon: Inbox, group: "platform" },
-  { id: "onboarding", href: dashboardRoutes.onboarding, label: "Tenant Onboarding", icon: Building2, group: "platform", requiresCapability: "platform.tenant.admin" },
+  { id: "onboarding", href: dashboardRoutes.onboarding, label: "Configure Tenant", icon: Building2, group: "platform" },
   { id: "team", href: dashboardRoutes.team, label: "Team & Roles", icon: Users, group: "system" },
   { id: "audit", href: dashboardRoutes.audit, label: "Audit & Exports", icon: FileSearch, group: "system" },
   { id: "settings", href: dashboardRoutes.settings, label: "Settings", icon: Settings, group: "system" },

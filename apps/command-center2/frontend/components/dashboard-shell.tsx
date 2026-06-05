@@ -111,9 +111,9 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     description: "Approve or reject proposed connector and action-policy changes (dual control).",
   },
   onboarding: {
-    eyebrow: "Platform",
-    title: "Tenant Onboarding",
-    description: "Governed, state-driven onboarding from inert tenant to operational across the re-auth boundary.",
+    eyebrow: "Tenant",
+    title: "Configure Tenant",
+    description: "Governed, state-driven configuration of the tenant your session is scoped to — inert to operational (channel → connector → credential → policy).",
   },
   team: {
     eyebrow: "Identity",

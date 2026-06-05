@@ -449,9 +449,11 @@ export type TenantChannelUpdateRequest = {
 export type TenantStatus = "active" | "provisioning" | "disabled";
 
 /**
- * A tenant lifecycle record. A freshly created tenant is INERT — it is
- * `provisioning` and cannot act until its configuration (channel, connector,
- * action policy) is applied through the governed ledger.
+ * A tenant lifecycle record. The backend creates a tenant with status `active`
+ * (not `provisioning`). It is nonetheless INERT — fail-closed via the *absence*
+ * of an action policy, not via its status — and cannot act until its
+ * configuration (channel, connector, action policy) is applied through the
+ * governed ledger.
  */
 export type TenantLifecycleRecord = {
   tenant_id: string;

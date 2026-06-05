@@ -5,12 +5,15 @@ import { pathToFileURL } from 'node:url';
 import { ROOT, readText } from './util.js';
 
 /**
- * Phase 2.5d invariants: the governed onboarding orchestration surface.
+ * Phase 2.5d-platform-onboarding · Part 2 invariants: the Command Center
+ * onboarding guide is PHASE B ONLY.
  *
- * The sophistication being guarded is the STATE MACHINE — step state is
- * derived from real backend data, a step is `complete` only when its change
- * request is APPLIED (reflected in a read), and Phase B is gated on the
- * acting token being scoped to the target tenant (the re-auth boundary).
+ * Tenant creation (Phase A) is a platform operation and lives in the Platform
+ * Console — a tenant operator must never see "create tenant" in the tenant
+ * surface. The CC state machine therefore exposes only the four Phase B config
+ * steps, gated on the session being tenant-scoped. Step state is still derived
+ * from real backend data: a step is `complete` only when its change request is
+ * APPLIED (reflected in a read).
  */
 
 const CC2 = join(ROOT, 'apps', 'command-center2', 'frontend');
@@ -28,12 +31,9 @@ type PayloadsModule = typeof import(
 const sm = (await import(STATE)) as StateModule;
 const payloads = (await import(PAYLOADS)) as PayloadsModule;
 
-// Minimal snapshot factory — only the fields the state machine reads.
 type AnySnapshot = Parameters<typeof sm.computeOnboardingSteps>[0];
-const emptySnapshot = (over: Partial<AnySnapshot>): AnySnapshot => ({
-  targetTenantId: 'tenant-2',
+const snapshot = (over: Partial<AnySnapshot>): AnySnapshot => ({
   principal: null,
-  tenants: [],
   channels: [],
   connectors: [],
   policies: [],
@@ -44,73 +44,50 @@ const emptySnapshot = (over: Partial<AnySnapshot>): AnySnapshot => ({
 const stateOf = (steps: ReturnType<typeof sm.computeOnboardingSteps>, id: string) =>
   steps.find((step) => step.id === id)?.state;
 
-// ─── Phase A: platform gate + inert create ────────────────────────────────
+// ─── Phase A is gone from the Command Center ───────────────────────────────
 
-test('create-tenant is blocked without platform.tenant.admin', () => {
+test('the CC state machine exposes ONLY the four Phase B steps (no create-tenant)', () => {
   const steps = sm.computeOnboardingSteps(
-    emptySnapshot({ principal: { capabilities: [] } as never })
+    snapshot({ principal: { tenant_id: 'tenant-2', capabilities: [] } as never })
   );
-  strictEqual(stateOf(steps, 'create-tenant'), 'blocked');
+  const ids = steps.map((step) => step.id).sort();
+  deepStrictEqual(ids, [
+    'action-policy',
+    'channel',
+    'connector',
+    'connector-credential',
+  ]);
+  // The platform-only steps must not exist.
+  strictEqual(stateOf(steps, 'create-tenant'), undefined);
+  strictEqual(stateOf(steps, 'grant-access'), undefined);
 });
 
-test('create-tenant is available for a platform admin, complete once the tenant exists', () => {
-  const principal = { capabilities: ['platform.tenant.admin'] } as never;
-  const available = sm.computeOnboardingSteps(emptySnapshot({ principal }));
-  strictEqual(stateOf(available, 'create-tenant'), 'available');
+// ─── Phase B requires a tenant-scoped session ──────────────────────────────
 
-  const created = sm.computeOnboardingSteps(
-    emptySnapshot({
-      principal,
-      tenants: [{ tenant_id: 'tenant-2', status: 'provisioning', created_at: 'x' }] as never,
-    })
+test('an unscoped session blocks every Phase B step', () => {
+  const steps = sm.computeOnboardingSteps(
+    snapshot({ principal: { tenant_id: null, capabilities: [] } as never })
   );
-  strictEqual(stateOf(created, 'create-tenant'), 'complete');
+  for (const id of ['channel', 'connector', 'connector-credential', 'action-policy']) {
+    strictEqual(stateOf(steps, id), 'blocked', `${id} must be blocked when unscoped`);
+  }
+  strictEqual(sm.isTenantScoped({ tenant_id: null } as never), false);
+  strictEqual(sm.isTenantScoped({ tenant_id: 'tenant-2' } as never), true);
 });
 
-// ─── Phase A → B: the re-auth boundary ────────────────────────────────────
+// ─── Phase B: dependency + governed-lifecycle transitions ──────────────────
 
-test('grant-access (re-auth boundary) gates Phase B until the token is scoped to the target tenant', () => {
-  const principal = {
-    capabilities: ['platform.tenant.admin'],
-    tenant_id: 'tenant-1', // still scoped to the OLD tenant
-  } as never;
-  const tenants = [{ tenant_id: 'tenant-2', status: 'provisioning', created_at: 'x' }] as never;
+test('a tenant-scoped session unlocks channel; connector waits on a channel', () => {
+  const principal = { tenant_id: 'tenant-2', capabilities: ['tenant.config.write'] } as never;
 
-  const beforeReauth = sm.computeOnboardingSteps(emptySnapshot({ principal, tenants }));
-  strictEqual(stateOf(beforeReauth, 'grant-access'), 'available');
-  // Every Phase B step is blocked while the token is not scoped to tenant-2.
-  strictEqual(stateOf(beforeReauth, 'channel'), 'blocked');
-  strictEqual(stateOf(beforeReauth, 'connector'), 'blocked');
-  strictEqual(stateOf(beforeReauth, 'connector-credential'), 'blocked');
-  strictEqual(stateOf(beforeReauth, 'action-policy'), 'blocked');
-  strictEqual(sm.tokenScopedToTarget(emptySnapshot({ principal, tenants })), false);
-
-  const scopedPrincipal = {
-    capabilities: ['tenant.config.write'],
-    tenant_id: 'tenant-2',
-  } as never;
-  const afterReauth = sm.computeOnboardingSteps(
-    emptySnapshot({ principal: scopedPrincipal, tenants })
-  );
-  strictEqual(stateOf(afterReauth, 'grant-access'), 'complete');
-  strictEqual(stateOf(afterReauth, 'channel'), 'available');
-});
-
-// ─── Phase B: dependency + governed-lifecycle transitions ─────────────────
-
-test('connector and credential steps are blocked until a matching channel exists', () => {
-  const principal = { capabilities: [], tenant_id: 'tenant-2' } as never;
-  const tenants = [{ tenant_id: 'tenant-2', status: 'provisioning', created_at: 'x' }] as never;
-
-  const noChannel = sm.computeOnboardingSteps(emptySnapshot({ principal, tenants }));
+  const noChannel = sm.computeOnboardingSteps(snapshot({ principal }));
   strictEqual(stateOf(noChannel, 'channel'), 'available');
   strictEqual(stateOf(noChannel, 'connector'), 'blocked');
   strictEqual(stateOf(noChannel, 'connector-credential'), 'blocked');
 
   const withChannel = sm.computeOnboardingSteps(
-    emptySnapshot({
+    snapshot({
       principal,
-      tenants,
       channels: [{ channel_type: 'shopify', credential_rotated_at: null }] as never,
     })
   );
@@ -119,13 +96,11 @@ test('connector and credential steps are blocked until a matching channel exists
 });
 
 test('a proposed change keeps its step in-progress (not complete) until applied', () => {
-  const principal = { capabilities: [], tenant_id: 'tenant-2' } as never;
-  const tenants = [{ tenant_id: 'tenant-2', status: 'provisioning', created_at: 'x' }] as never;
+  const principal = { tenant_id: 'tenant-2', capabilities: [] } as never;
 
   const proposed = sm.computeOnboardingSteps(
-    emptySnapshot({
+    snapshot({
       principal,
-      tenants,
       changeRequests: [
         {
           change_request_id: 'cr-1',
@@ -140,11 +115,10 @@ test('a proposed change keeps its step in-progress (not complete) until applied'
   strictEqual(channel?.state, 'in-progress');
   strictEqual(channel?.pendingChange?.status, 'PROPOSED');
 
-  // Once APPLIED, it shows up in the channels read and the step is complete.
+  // Once APPLIED it shows up in the channels read and the step is complete.
   const applied = sm.computeOnboardingSteps(
-    emptySnapshot({
+    snapshot({
       principal,
-      tenants,
       channels: [{ channel_type: 'shopify', credential_rotated_at: null }] as never,
     })
   );
@@ -152,15 +126,13 @@ test('a proposed change keeps its step in-progress (not complete) until applied'
 });
 
 test('tenant is operational only once an active action_tools policy exists', () => {
-  const principal = { capabilities: [], tenant_id: 'tenant-2' } as never;
-  const tenants = [{ tenant_id: 'tenant-2', status: 'provisioning', created_at: 'x' }] as never;
+  const principal = { tenant_id: 'tenant-2', capabilities: [] } as never;
 
-  const inert = emptySnapshot({ principal, tenants });
+  const inert = snapshot({ principal });
   strictEqual(sm.tenantIsOperational(inert), false);
 
-  const operational = emptySnapshot({
+  const operational = snapshot({
     principal,
-    tenants,
     policies: [{ policy_type: 'action_tools', status: 'active' }] as never,
   });
   strictEqual(sm.tenantIsOperational(operational), true);
@@ -170,7 +142,7 @@ test('tenant is operational only once an active action_tools policy exists', () 
   );
 });
 
-// ─── Net-new governed channel-create payload ──────────────────────────────
+// ─── Governed channel-create payload (unchanged, stays in the CC) ──────────
 
 test('governed channel-create payload is a channel change request with credentials', () => {
   const { change_type, payload } = payloads.buildChannelChangePayload({
@@ -183,34 +155,49 @@ test('governed channel-create payload is a channel change request with credentia
   strictEqual(payload._schema_version, '1');
   strictEqual(payload.operation, 'configure');
   strictEqual(payload.channel_type, 'shopify');
-  // Blank credential values are dropped; provided ones survive.
   deepStrictEqual(payload.credentials, { access_token: 'shpat_x' });
   strictEqual(payload.webhook_secret, 'wh');
 });
 
-// ─── API surface + routing registration ───────────────────────────────────
+// ─── The wizard: no create-tenant, composes the proven editors ─────────────
 
-test('api client exposes the tenant lifecycle reads/writes', () => {
-  const api = readText(join(CC2, 'lib', 'api.ts'));
-  ok(api.includes('export function createTenantLifecycle'));
-  ok(api.includes('export function listTenantLifecycle'));
-  ok(api.includes('"/tenant/lifecycle/tenants"'));
+test('the CC onboarding wizard offers NO tenant creation', () => {
+  const src = readText(join(CC2, 'components', 'onboarding-wizard.tsx'));
+  // The platform-only create path must be gone from the tenant surface.
+  strictEqual(src.includes('createTenantLifecycle'), false, 'must not create tenants');
+  strictEqual(src.includes('Create tenant'), false, 'must not offer a create-tenant button');
 });
 
-test('onboarding route is registered and capability-gated in the nav', () => {
-  ok(readText(join(CC2, 'lib', 'dashboard-routes.ts')).includes('"/dashboard/onboarding"'));
-  ok(readText(join(CC2, 'app', 'dashboard', 'onboarding', 'page.tsx')).length > 0);
-  const sidebar = readText(join(CC2, 'components', 'sidebar.tsx'));
-  // The wizard entry is surfaced only to platform.tenant.admin principals.
-  ok(sidebar.includes('platform.tenant.admin'));
-});
-
-test('onboarding wizard composes the proven editors, not duplicate config paths', () => {
+test('the CC onboarding wizard composes the proven editors, not duplicate config paths', () => {
   const src = readText(join(CC2, 'components', 'onboarding-wizard.tsx'));
   ok(src.includes('computeOnboardingSteps'), 'wizard must drive the state machine');
   ok(src.includes('buildChannelChangePayload'), 'governed channel create');
-  // Reuse the 2.5b editors for connector/policy rather than re-implementing.
   ok(src.includes('dashboardRoutes.connectors'));
   ok(src.includes('dashboardRoutes["action-policy"]'));
   ok(src.includes('dashboardRoutes["config-approvals"]'));
+});
+
+// ─── Routing + nav (no longer platform-gated — it's a tenant guide now) ────
+
+test('onboarding route is registered and the nav entry is not platform-gated', () => {
+  ok(readText(join(CC2, 'lib', 'dashboard-routes.ts')).includes('"/dashboard/onboarding"'));
+  ok(readText(join(CC2, 'app', 'dashboard', 'onboarding', 'page.tsx')).length > 0);
+  const sidebar = readText(join(CC2, 'components', 'sidebar.tsx'));
+  const onboardingLine =
+    sidebar.split('\n').find((line) => line.includes('dashboardRoutes.onboarding')) ?? '';
+  ok(onboardingLine.length > 0, 'onboarding nav entry must exist');
+  strictEqual(
+    onboardingLine.includes('platform.tenant.admin'),
+    false,
+    'CC onboarding is a tenant-config guide — it must not require platform.tenant.admin'
+  );
+});
+
+// ─── Status copy: created tenants are active-but-inert, not provisioning ───
+
+test('CC status copy no longer claims a created tenant is provisioning', () => {
+  const api = readText(join(CC2, 'lib', 'api.ts'));
+  // The TenantLifecycleRecord doc must not assert tenants are created provisioning.
+  ok(/creates a tenant with status `active`/i.test(api) || /status `active`/i.test(api));
+  ok(!/is INERT — it is\s*\n?\s*\*?`?provisioning`?/i.test(api), 'must not call new tenants provisioning');
 });
