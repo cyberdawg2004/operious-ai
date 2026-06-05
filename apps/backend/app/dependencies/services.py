@@ -221,6 +221,9 @@ from app.work_orders.persistence import PostgresWorkOrderRepository
 
 if TYPE_CHECKING:
     from app.services.batch_ingest_service import BatchIngestService
+    from app.services.work_order_fulfillment_receipt_service import (
+        WorkOrderFulfillmentReceiptService,
+    )
 
 
 async def get_health_service() -> HealthService:
@@ -325,6 +328,23 @@ def get_boundary_repository(
     return PostgresBoundaryPersistence(
         session,
         data_protection=_data_protection_service(session),
+    )
+
+
+def get_work_order_fulfillment_receipt_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> WorkOrderFulfillmentReceiptService:
+    """Return the receipt-only fulfillment callback service."""
+    from app.services.work_order_fulfillment_receipt_service import (
+        WorkOrderFulfillmentReceiptService,
+    )
+
+    return WorkOrderFulfillmentReceiptService(
+        session=session,
+        boundary_repository=PostgresBoundaryPersistence(
+            session,
+            data_protection=_data_protection_service(session),
+        ),
     )
 
 
@@ -1302,4 +1322,5 @@ __all__ = [
     "get_tenant_config_change_request_service",
     "get_tenant_configuration_service",
     "get_tenant_lifecycle_service",
+    "get_work_order_fulfillment_receipt_service",
 ]

@@ -36,6 +36,13 @@ class WorkOrderRepositoryProtocol(Protocol):
         expected_tenant_id: str,
     ) -> WorkOrderRecord | None: ...
 
+    async def get_work_order_by_provider_work_order_id(
+        self,
+        *,
+        provider_work_order_id: str,
+        expected_tenant_id: str,
+    ) -> WorkOrderRecord | None: ...
+
     async def list_work_orders(
         self,
         *,

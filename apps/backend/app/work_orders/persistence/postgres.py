@@ -80,6 +80,31 @@ class PostgresWorkOrderRepository(BaseRepository):
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else _row_to_record(row)
 
+    async def get_work_order_by_provider_work_order_id(
+        self,
+        *,
+        provider_work_order_id: str,
+        expected_tenant_id: str,
+    ) -> WorkOrderRecord | None:
+        _required_text("provider_work_order_id", provider_work_order_id)
+        await self._scope(expected_tenant_id)
+        stmt = (
+            select(WorkOrderRow)
+            .where(
+                WorkOrderRow.tenant_id == expected_tenant_id,
+                WorkOrderRow.provider_work_order_id == provider_work_order_id,
+            )
+            .order_by(WorkOrderRow.created_at, WorkOrderRow.work_order_id)
+            .limit(2)
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        if len(rows) > 1:
+            raise WorkOrderPersistenceError(
+                "ambiguous provider_work_order_id for tenant: "
+                f"{provider_work_order_id}"
+            )
+        return None if not rows else _row_to_record(rows[0])
+
     async def list_work_orders(
         self,
         *,

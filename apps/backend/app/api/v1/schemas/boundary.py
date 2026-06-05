@@ -7,7 +7,8 @@ projections.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -177,9 +178,34 @@ class BoundaryEgressPage(BaseModel):
     total: int
 
 
+class WorkOrderFulfillmentCallbackRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provider_work_order_id: str = Field(min_length=1)
+    status: Literal["fulfilled", "failed"]
+    callback_id: str | None = Field(default=None, min_length=1)
+    provider_status: str | None = Field(default=None, min_length=1)
+    provider_error: str | None = None
+    reported_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkOrderFulfillmentReceiptResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    ingress_id: str
+    event_id: str | None = None
+    normalization_status: str
+    message_type: str
+    replay_disposition: str
+    provider_work_order_id: str | None = None
+
+
 __all__ = [
     "BoundaryEgressPage",
     "BoundaryEgressResponse",
     "BoundaryIngressPage",
     "BoundaryIngressResponse",
+    "WorkOrderFulfillmentCallbackRequest",
+    "WorkOrderFulfillmentReceiptResponse",
 ]

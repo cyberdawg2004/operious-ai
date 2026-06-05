@@ -12,13 +12,15 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.v1.schemas.boundary import (
     BoundaryEgressPage,
     BoundaryEgressResponse,
     BoundaryIngressPage,
     BoundaryIngressResponse,
+    WorkOrderFulfillmentCallbackRequest,
+    WorkOrderFulfillmentReceiptResponse,
 )
 from app.boundary.identity import (
     BoundaryEgressId,
@@ -34,12 +36,55 @@ from app.dependencies.authority import (
     require_tenant_scope,
 )
 from app.dependencies.services import get_boundary_repository
+from app.dependencies.services import get_work_order_fulfillment_receipt_service
+from app.services.work_order_fulfillment_receipt_service import (
+    WorkOrderFulfillmentReceiptError,
+    WorkOrderFulfillmentReceiptService,
+)
 
 router = APIRouter(tags=["boundary"])
 
 _MIN_LIMIT = 1
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 25
+
+
+@router.post(
+    "/work-orders/fulfillment",
+    response_model=WorkOrderFulfillmentReceiptResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def record_work_order_fulfillment(
+    payload: WorkOrderFulfillmentCallbackRequest,
+    request: Request,
+    service: WorkOrderFulfillmentReceiptService = Depends(
+        get_work_order_fulfillment_receipt_service
+    ),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+) -> WorkOrderFulfillmentReceiptResponse:
+    try:
+        receipt = await service.record_callback(
+            expected_tenant_id=expected_tenant_id,
+            payload=payload.model_dump(mode="json"),
+            headers={str(k): str(v) for k, v in request.headers.items()},
+            request_path=str(request.url.path),
+        )
+    except WorkOrderFulfillmentReceiptError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "work_order_fulfillment_callback_rejected",
+                "reason": str(exc),
+            },
+        ) from exc
+    return WorkOrderFulfillmentReceiptResponse(
+        ingress_id=receipt.ingress_id,
+        event_id=receipt.event_id,
+        normalization_status=receipt.normalization_status,
+        message_type=receipt.message_type,
+        replay_disposition=receipt.replay_disposition,
+        provider_work_order_id=receipt.provider_work_order_id,
+    )
 
 
 def _parse_uuid_or_404(raw: str, *, kind: str) -> UUID:
