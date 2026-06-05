@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Building2, LogOut, ShieldCheck } from "lucide-react";
+import { Building2, LogOut, ShieldCheck, UserPlus } from "lucide-react";
 import type { AuthPrincipal } from "@/lib/api";
 
 /**
@@ -51,6 +51,15 @@ export function PlatformShell({
               >
                 <Building2 className="h-4 w-4" strokeWidth={1.8} />
                 Tenants
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/onboarding"
+                className="flex items-center gap-2 rounded-md px-2 py-2 text-[13px] text-ink-secondary hover:bg-surface-raised hover:text-ink-primary"
+              >
+                <UserPlus className="h-4 w-4" strokeWidth={1.8} />
+                Onboard Tenant
               </Link>
             </li>
           </ul>

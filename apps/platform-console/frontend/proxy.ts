@@ -5,7 +5,11 @@ import { NextResponse, type NextRequest } from "next/server";
 function isProtectedPath(pathname: string) {
   // The entire platform surface is protected. Only /sign-in and the Auth0
   // routes are reachable without a session.
-  return pathname === "/" || pathname.startsWith("/tenants");
+  return (
+    pathname === "/" ||
+    pathname.startsWith("/tenants") ||
+    pathname.startsWith("/onboarding")
+  );
 }
 
 export async function proxy(request: NextRequest) {
@@ -34,6 +38,7 @@ export const config = {
   matcher: [
     "/api/auth/:path*",
     "/tenants/:path*",
+    "/onboarding/:path*",
     "/((?!sign-in|api/auth|_next|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
