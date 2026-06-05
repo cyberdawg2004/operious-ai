@@ -136,6 +136,7 @@ from app.runtime.provider_circuit_breaker import (
 from app.workers.execution_completion_events import (
     WorkerExecutionCompletionEventSink,
 )
+from app.work_orders.persistence import PostgresWorkOrderRepository
 from app.session.contracts.requests import AppendEventRequest
 from app.session.contracts.results import AppendEventResult
 from app.session.conversation import (
@@ -1379,6 +1380,7 @@ async def _action_orchestration_runtime(
                 tenant_id=tenant_id,
                 config_repository=PostgresConnectorConfigRepository(session),
                 credential_runtime=tenant_runtime,
+                work_order_repository=PostgresWorkOrderRepository(session),
             ),
             # Per-task runtime construction bounds policy staleness to the
             # current task; new tasks pick up new composition.

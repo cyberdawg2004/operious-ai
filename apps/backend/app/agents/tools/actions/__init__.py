@@ -10,11 +10,13 @@ from app.agents.tools.actions.warehouse_repair import WarehouseRepairReportTool
 from app.agents.tools.actions.warranty_claim import WarrantyClaimTool
 from app.agents.tools.connectors import (
     ConnectorConfigRepository,
+    GenericRestRepairDispatchConnector,
     GenericRestRefundConnector,
     SSRFValidator,
     TenantCredentialRuntime,
 )
 from app.agents.tools.registry import ToolRegistry
+from app.work_orders.persistence.repository import WorkOrderRepositoryProtocol
 
 
 def build_action_tool_registry() -> ToolRegistry:
@@ -34,6 +36,7 @@ async def build_tenant_action_tool_registry(
     tenant_id: str,
     config_repository: ConnectorConfigRepository,
     credential_runtime: TenantCredentialRuntime,
+    work_order_repository: WorkOrderRepositoryProtocol | None = None,
     ssl_context: ssl.SSLContext | None = None,
     ssrf_validator: SSRFValidator | None = None,
 ) -> ToolRegistry:
@@ -57,6 +60,20 @@ async def build_tenant_action_tool_registry(
         )
     else:
         registry.register(RefundRequestTool())
+    if work_order_repository is not None and await config_repository.get_active_config(
+        tenant_id=tenant_id,
+        tool_name=GenericRestRepairDispatchConnector.name,
+        expected_tenant_id=tenant_id,
+    ):
+        registry.register(
+            GenericRestRepairDispatchConnector(
+                config_repository=config_repository,
+                credential_runtime=credential_runtime,
+                work_order_repository=work_order_repository,
+                ssl_context=ssl_context,
+                ssrf_validator=ssrf_validator,
+            )
+        )
     registry.register(WarehouseRepairReportTool())
     return registry
 

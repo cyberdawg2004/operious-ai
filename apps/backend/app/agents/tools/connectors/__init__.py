@@ -16,6 +16,9 @@ from app.agents.tools.connectors.config import (
     InMemoryConnectorConfigRepository,
     PostgresConnectorConfigRepository,
 )
+from app.agents.tools.connectors.repair_dispatch import (
+    GenericRestRepairDispatchConnector,
+)
 from app.agents.tools.connectors.refund import GenericRestRefundConnector
 
 __all__ = [
@@ -27,6 +30,7 @@ __all__ = [
     "ConnectorHTTPRequest",
     "ConnectorProviderFields",
     "ConnectorTool",
+    "GenericRestRepairDispatchConnector",
     "GenericRestRefundConnector",
     "InMemoryConnectorConfigRepository",
     "PostgresConnectorConfigRepository",

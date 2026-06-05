@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository
@@ -17,6 +17,10 @@ from app.work_orders.exceptions import WorkOrderPersistenceError
 from app.work_orders.identity import WorkOrderId, as_work_order_id
 from app.work_orders.persistence.records import WorkOrderRecord
 from app.work_orders.state_machine import assert_transition
+
+_SESSION_SCOPE_SQL = text(
+    "SELECT set_config('app.current_tenant_id', :tenant_id, true)"
+)
 
 
 class PostgresWorkOrderRepository(BaseRepository):
@@ -29,6 +33,7 @@ class PostgresWorkOrderRepository(BaseRepository):
         expected_tenant_id: str,
     ) -> WorkOrderRecord:
         _assert_tenant(record.tenant_id, expected_tenant_id)
+        await self._scope(expected_tenant_id)
         row = _record_to_row(record)
         try:
             async with self.session.begin_nested():
@@ -53,6 +58,7 @@ class PostgresWorkOrderRepository(BaseRepository):
         *,
         expected_tenant_id: str,
     ) -> WorkOrderRecord | None:
+        await self._scope(expected_tenant_id)
         row = await self._work_order_row(
             work_order_id,
             expected_tenant_id=expected_tenant_id,
@@ -66,6 +72,7 @@ class PostgresWorkOrderRepository(BaseRepository):
         expected_tenant_id: str,
     ) -> WorkOrderRecord | None:
         _required_text("idempotency_key", idempotency_key)
+        await self._scope(expected_tenant_id)
         stmt = select(WorkOrderRow).where(
             WorkOrderRow.tenant_id == expected_tenant_id,
             WorkOrderRow.idempotency_key == idempotency_key,
@@ -79,6 +86,7 @@ class PostgresWorkOrderRepository(BaseRepository):
         expected_tenant_id: str,
         state: WorkOrderState | None = None,
     ) -> tuple[WorkOrderRecord, ...]:
+        await self._scope(expected_tenant_id)
         stmt = select(WorkOrderRow).where(
             WorkOrderRow.tenant_id == expected_tenant_id
         )
@@ -99,6 +107,7 @@ class PostgresWorkOrderRepository(BaseRepository):
         provider_status: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> WorkOrderRecord:
+        await self._scope(expected_tenant_id)
         row = await self._work_order_row(
             work_order_id,
             expected_tenant_id=expected_tenant_id,
@@ -139,6 +148,9 @@ class PostgresWorkOrderRepository(BaseRepository):
             WorkOrderRow.tenant_id == expected_tenant_id,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def _scope(self, tenant_id: str) -> None:
+        await self.session.execute(_SESSION_SCOPE_SQL, {"tenant_id": tenant_id})
 
 
 def _record_to_row(record: WorkOrderRecord) -> WorkOrderRow:

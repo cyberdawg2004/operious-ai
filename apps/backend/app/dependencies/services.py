@@ -217,6 +217,7 @@ from app.tenant.lifecycle import PostgresTenantLifecycleRepository
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
 from app.trainer.persistence import PostgresTrainingRecommendationRepository
+from app.work_orders.persistence import PostgresWorkOrderRepository
 
 if TYPE_CHECKING:
     from app.services.batch_ingest_service import BatchIngestService
@@ -819,6 +820,7 @@ def get_action_approval_service(
                     tenant_id=tenant_id,
                     config_repository=PostgresConnectorConfigRepository(session),
                     credential_runtime=tenant_runtime,
+                    work_order_repository=PostgresWorkOrderRepository(session),
                 ),
                 governance_runtime=build_action_tool_governance_runtime(
                     persistence=governance_repository,
