@@ -17,6 +17,7 @@ from app.cognition.llm import DiagnosticLLMMessage
 from app.cognition.models import DiagnosticLLMCompletion, DiagnosticLLMUsage
 from app.cognition.persistence import InMemoryCognitionUsagePersistence
 from app.knowledge import (
+    DEFAULT_EMBEDDING_DIMENSIONS,
     DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
     KnowledgeRuntime,
@@ -339,7 +340,8 @@ async def test_only_active_documents_retrievable(
             limit=10,
         ),
         expected_tenant_id=tenant_id,
-        query_embedding=[1.0] + [0.0 for _ in range(31)],
+        query_embedding=[1.0]
+        + [0.0 for _ in range(DEFAULT_EMBEDDING_DIMENSIONS - 1)],
     )
 
     assert [entry.vector.document_id for entry in page.items] == [
@@ -412,9 +414,10 @@ async def _seed_vector_document(
         document_version=document.version,
         provider=_PROVIDER,
         model=_MODEL,
-        dimensions=32,
+        dimensions=DEFAULT_EMBEDDING_DIMENSIONS,
         vector_index_name=_INDEX,
-        vector=(1.0,) + tuple(0.0 for _ in range(31)),
+        vector=(1.0,)
+        + tuple(0.0 for _ in range(DEFAULT_EMBEDDING_DIMENSIONS - 1)),
         is_current=True,
         indexed_at=_NOW,
         metadata={

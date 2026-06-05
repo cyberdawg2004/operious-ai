@@ -96,9 +96,9 @@ def _tokens(text: str) -> tuple[str, ...]:
 class OpenAIEmbeddingProvider:
     """Real OpenAI embeddings adapter over HTTP (no vendor SDK).
 
-    Mirrors the substrate's :class:`AnthropicMessagesClient` convention: a thin
-    httpx adapter that can take an injected client for testing. Produces real
-    semantic embeddings, replacing deterministic hash embeddings in production.
+    Thin httpx adapter that can take an injected client for testing. Produces
+    real semantic embeddings, replacing deterministic hash embeddings in
+    production.
     """
 
     provider_name = "openai"
