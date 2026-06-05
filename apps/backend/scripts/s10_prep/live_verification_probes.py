@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
@@ -62,7 +62,7 @@ class HttpResponse:
         if not self.body:
             return {}
         value = json.loads(self.body.decode("utf-8"))
-        return value if isinstance(value, dict) else {"value": value}
+        return cast(dict[str, Any], value) if isinstance(value, dict) else {"value": value}
 
 
 HttpRequest = Callable[
@@ -156,7 +156,11 @@ async def run_rls_probe(
     require_control_row: bool,
 ) -> dict[str, Any]:
     tenant_column = _require_rls_table(table)
-    engine_config = build_database_engine_config(database_url)
+    settings = get_settings()
+    engine_config = build_database_engine_config(
+        database_url,
+        connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
+    )
     engine = create_async_engine(
         engine_config.async_url,
         connect_args=engine_config.connect_args,
@@ -222,7 +226,7 @@ async def run_workers_dlq_probe(
         tenant_id=tenant_id,
         probe_id=probe_id,
     )
-    async_result = celery_app.send_task(
+    async_result = cast(Any, celery_app).send_task(
         "s10_dead_letter_probe",
         kwargs={
             "tenant_id": tenant_id,
@@ -245,7 +249,7 @@ async def run_workers_dlq_probe(
     evidence = {
         "tenant_id": tenant_id,
         "probe_id": probe_id,
-        "celery_task_id": str(async_result.id),
+        "celery_task_id": str(getattr(async_result, "id", "")),
         "expected_dead_letter_task_id": str(expected_dlq_id),
         "queue": QUEUE_DEAD_LETTER,
         "row": row,
@@ -381,9 +385,10 @@ def _authority_headers(
 
 def _extract_grounding_trace(events: list[dict[str, Any]]) -> dict[str, Any]:
     for event in events:
-        payload = event.get("payload")
-        if not isinstance(payload, dict):
+        payload_value = event.get("payload")
+        if not isinstance(payload_value, dict):
             continue
+        payload = cast(Mapping[str, Any], payload_value)
         citations = payload.get("retrieved_citations")
         evidence = payload.get("evidence")
         if citations:
@@ -405,7 +410,11 @@ async def _read_dead_letter_row(
     tenant_id: str,
     dead_letter_task_id: str,
 ) -> dict[str, Any] | None:
-    engine_config = build_database_engine_config(database_url)
+    settings = get_settings()
+    engine_config = build_database_engine_config(
+        database_url,
+        connect_timeout=settings.DB_CONNECT_TIMEOUT_SECONDS,
+    )
     engine = create_async_engine(
         engine_config.async_url,
         connect_args=engine_config.connect_args,
@@ -483,6 +492,7 @@ def _extract_error_code(body: Mapping[str, Any]) -> str | None:
         return error
     detail = body.get("detail")
     if isinstance(detail, Mapping):
+        detail = cast(Mapping[str, Any], detail)
         code = detail.get("code") or detail.get("error")
         return code if isinstance(code, str) else None
     return None
@@ -498,7 +508,8 @@ def _require_str(body: Mapping[str, Any], key: str) -> str:
 def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    return [dict(item) for item in value if isinstance(item, dict)]
+    items = cast(list[Any], value)
+    return [cast(dict[str, Any], item) for item in items if isinstance(item, dict)]
 
 
 def _print_probe_result(
