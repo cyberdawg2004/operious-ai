@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "evidence_id": "s10-rollback-reference-2026-06-06",
+  "capture_status": "pending_population_from_session_output",
+  "requirement": "rollback evidence",
+  "captured_against": {
+    "fly_app": "operious-ai-imad",
+    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_machine_version": "122",
+    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "git_branch": "phase-2-2-stabilized"
+  },
+  "rollback_runbook": "../runbooks/neon-migration-rollback.md",
+  "expected_result": {
+    "neon_snapshot_reference": "present",
+    "rollback_runbook_reviewed": true
+  },
+  "evidence": {
+    "neon_snapshot_reference": null,
+    "notes": "Paste the Neon snapshot identifier/name and timestamp captured before the production migration."
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "evidence_id": "s10-rls-pass-2026-06-06",
+  "capture_status": "pending_population_from_session_output",
+  "requirement": "live production-role RLS tenant isolation",
+  "captured_against": {
+    "fly_app": "operious-ai-imad",
+    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_machine_version": "122",
+    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "git_branch": "phase-2-2-stabilized"
+  },
+  "source_command_template": "python scripts/s10_prep/live_verification_probes.py rls --database-url \"$DATABASE_URL\" --table <table> --tenant-a anker-pilot --tenant-b tenant-2 --role operious_app",
+  "expected_result": {
+    "probe_status": "PASS rls",
+    "tenant_a": "anker-pilot",
+    "tenant_b": "tenant-2",
+    "role": "operious_app",
+    "cross_tenant_visible_rows": 0
+  },
+  "tables": [
+    "operational_sessions",
+    "boundary_ingress",
+    "coordination_envelopes",
+    "dead_letter_tasks",
+    "governance_decisions",
+    "tenant_knowledge_documents"
+  ],
+  "evidence": {
+    "runs": []
+  }
+}

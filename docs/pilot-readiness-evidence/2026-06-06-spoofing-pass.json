@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "evidence_id": "s10-spoofing-pass-2026-06-06",
+  "capture_status": "pending_population_from_session_output",
+  "requirement": "live direct spoofed authority-header rejection",
+  "captured_against": {
+    "fly_app": "operious-ai-imad",
+    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_machine_version": "122",
+    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "git_branch": "phase-2-2-stabilized"
+  },
+  "source_command": "python scripts/s10_prep/live_verification_probes.py spoofing --base-url https://operious-ai-imad.fly.dev --forged-tenant-id forged-tenant",
+  "expected_result": {
+    "probe_status": "PASS spoofing",
+    "http_status_code": 401,
+    "error": "unauthorized",
+    "note": "Production coarsens the detailed spoof rejection into unauthorized."
+  },
+  "evidence": null
+}

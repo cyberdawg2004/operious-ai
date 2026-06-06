@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "evidence_id": "s10-readiness-ready-2026-06-06",
+  "capture_status": "pending_population_from_session_output",
+  "requirement": "live production secrets/provider/readiness output",
+  "captured_against": {
+    "fly_app": "operious-ai-imad",
+    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_machine_version": "122",
+    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "git_branch": "phase-2-2-stabilized"
+  },
+  "source_command": "python -m scripts.check_production_readiness",
+  "expected_result": {
+    "stdout": "production readiness: READY",
+    "exit_code": 0
+  },
+  "evidence": null
+}

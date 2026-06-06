@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "evidence_id": "s10-live-workflow-recovered-smoke-2026-06-06",
+  "capture_status": "pending_population_from_session_output",
+  "requirement": "live workflow proof from recovered smoke trace",
+  "captured_against": {
+    "fly_app": "operious-ai-imad",
+    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_machine_version": "122",
+    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "git_branch": "phase-2-2-stabilized"
+  },
+  "source": "Recovered production trace after live smoke timeout",
+  "why_recovered_trace_not_clean_probe_pass": {
+    "smoke_probe_timeout": "The live probe did not emit a clean PASS line before timeout.",
+    "governance_behavior": "Intermittent semantic rejection is terminal governance enforcement, not a reason to force green.",
+    "latency_behavior": "Upstash latency stretched the live timing budget."
+  },
+  "expected_result": {
+    "real_anthropic_usage": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "prompt_tokens": "nonzero",
+      "completion_tokens": "nonzero"
+    },
+    "grounding": {
+      "tenant_id": "anker-pilot",
+      "expected_document": "Charging Issue Policy",
+      "decrypted_not_ciphertext": true,
+      "citation_score": "present"
+    },
+    "workflow_ids": [
+      "session_id",
+      "ingress_id",
+      "dispatch_id",
+      "execution_id",
+      "governance_decision_id"
+    ]
+  },
+  "evidence": null
+}

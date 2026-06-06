@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "evidence_id": "s10-bearer-auth0-verified-claims-2026-06-06",
+  "capture_status": "pending_population_from_session_output",
+  "requirement": "live bearer/Auth0 success with namespaced claims",
+  "captured_against": {
+    "fly_app": "operious-ai-imad",
+    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
+    "fly_machine_version": "122",
+    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "git_branch": "phase-2-2-stabilized"
+  },
+  "source_command": "curl -s -H \"Authorization: Bearer $OPERIOUS_API_TOKEN\" https://operious-ai-imad.fly.dev/api/v1/auth/me",
+  "expected_result": {
+    "authority_source": "verified",
+    "tenant_id": "anker-pilot",
+    "capabilities_include": [
+      "operator",
+      "tenant.config.read",
+      "tenant.connector.read",
+      "tenant.observability.read",
+      "tenant.operations.read",
+      "tenant.supervisor.read"
+    ]
+  },
+  "evidence": null
+}
