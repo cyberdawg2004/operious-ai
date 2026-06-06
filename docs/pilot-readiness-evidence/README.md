@@ -69,10 +69,24 @@ raw probe output in its `evidence` block, and `manifest.json` is `captured`.
 
 ## Tracked items (not blockers)
 
-- Upstash latency can stretch live smoke timing; the smoke probe is retry- and
-  timeout-aware.
-- Tighten the IPv4 portion of production `TRUSTED_PROXIES` from `172.16.0.0/12`
-  to the exact Fly peer range once documented.
+- Upstash latency adds inherent cross-region Redis RTT to the diagnostic path.
+  The smoke probe is timeout/retry-aware (300s). This is not a code defect (the
+  Redis client is a pooled singleton); the optional optimization is to co-locate
+  Redis in/near the Fly app region (`sin`).
+
+### Resolved since capture
+
+- Semantic-validation rejecting borderline LLM wording (ungrounded
+  `credit`/`rma`) → dead-letter — resolved by the authorized-remediation
+  allowlist (`2a691e9`), bounded self-correction (`e92e886`), and
+  escalate-not-dead-letter (`3a3d7fc`); verified by the clean `PASS smoke`.
+- The `TRUSTED_PROXIES` IPv4 item was investigated: Fly publishes no narrower
+  peer CIDR and recommends `Fly-Client-IP`. So `172.16.0.0/12` is retained as
+  the correct private-peer boundary, and the real fix — keying edge per-IP rate
+  limiting on the real client via `Fly-Client-IP` (instead of the proxy peer) —
+  shipped in `cb85557` (pending redeploy to go live). `uvicorn --proxy-headers`
+  was deliberately not used, as it would break the S-01 trusted-ingress peer
+  check.
 
 ## Evidence Files
 

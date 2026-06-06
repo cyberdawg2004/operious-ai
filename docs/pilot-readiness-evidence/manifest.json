@@ -59,10 +59,17 @@
     }
   ],
   "tracked_pilot_items": [
-    "Upstash latency can stretch live smoke timing",
-    "semantic-validation calibration can reject borderline LLM wording"
+    "Upstash latency adds inherent cross-region Redis RTT to the diagnostic path; the smoke probe is timeout/retry-aware (300s). Optional infra optimization (not a code fix): co-locate Redis in/near the Fly app region (sin) to reduce latency."
   ],
-  "tracked_hardening_items": [
-    "tighten TRUSTED_PROXIES IPv4 from 172.16.0.0/12 to the exact Fly peer range once proven"
-  ]
+  "resolved_items": [
+    {
+      "item": "semantic-validation calibration rejecting borderline LLM wording (e.g. ungrounded credit/rma) -> dead-letter",
+      "resolution": "authorized-remediation allowlist (2a691e9) + bounded self-correction (e92e886) + escalate-not-dead-letter for terminal blocks (3a3d7fc); verified live by the clean PASS smoke"
+    },
+    {
+      "item": "edge per-IP rate limiting keyed on the fly-proxy peer (one global bucket) instead of the real client",
+      "resolution": "resolve_client_ip derives the client from Fly-Client-IP for trusted-proxy peers, anti-spoofing for untrusted peers (cb85557); TRUSTED_PROXIES retained at 172.16.0.0/12 because Fly publishes no narrower peer CIDR and recommends Fly-Client-IP. Pending redeploy to go live."
+    }
+  ],
+  "tracked_hardening_items": []
 }
