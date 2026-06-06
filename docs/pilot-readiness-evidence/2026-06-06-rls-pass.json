@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
   "evidence_id": "s10-rls-pass-2026-06-06",
-  "capture_status": "pending_population_from_session_output",
+  "capture_status": "captured",
   "requirement": "live production-role RLS tenant isolation",
   "captured_against": {
     "fly_app": "operious-ai-imad",
-    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
-    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
-    "fly_machine_version": "122",
-    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "fly_release": "v125",
+    "fly_image": "operious-ai-imad:deployment-01KTEZ2QESEC8AK3PWQ686GZ5E",
+    "fly_machine_id": "6e8207e3b215e8",
+    "fly_region": "sin",
+    "git_commit": "3a3d7fc",
     "git_branch": "phase-2-2-stabilized"
   },
   "source_command_template": "python scripts/s10_prep/live_verification_probes.py rls --database-url \"$DATABASE_URL\" --table <table> --tenant-a anker-pilot --tenant-b tenant-2 --role operious_app",
@@ -28,6 +29,89 @@
     "tenant_knowledge_documents"
   ],
   "evidence": {
-    "runs": []
-  }
+    "passed": true,
+    "tables_verified": 6,
+    "role": "operious_app",
+    "runs": [
+      {
+        "control_count_as_row_tenant": 73,
+        "cross_count_as_other_tenant": 0,
+        "current_user": "operious_app",
+        "effective_role": "operious_app",
+        "initial_role": "operious_app",
+        "require_control_row": true,
+        "role_requested": "operious_app",
+        "row_tenant": "anker-pilot",
+        "session_tenant": "rls-probe-other",
+        "table": "operational_sessions",
+        "passed": true
+      },
+      {
+        "control_count_as_row_tenant": 51,
+        "cross_count_as_other_tenant": 0,
+        "current_user": "operious_app",
+        "effective_role": "operious_app",
+        "initial_role": "operious_app",
+        "require_control_row": true,
+        "role_requested": "operious_app",
+        "row_tenant": "anker-pilot",
+        "session_tenant": "rls-probe-other",
+        "table": "boundary_ingress",
+        "passed": true
+      },
+      {
+        "control_count_as_row_tenant": 73,
+        "cross_count_as_other_tenant": 0,
+        "current_user": "operious_app",
+        "effective_role": "operious_app",
+        "initial_role": "operious_app",
+        "require_control_row": true,
+        "role_requested": "operious_app",
+        "row_tenant": "anker-pilot",
+        "session_tenant": "rls-probe-other",
+        "table": "coordination_envelopes",
+        "passed": true
+      },
+      {
+        "control_count_as_row_tenant": 11,
+        "cross_count_as_other_tenant": 0,
+        "current_user": "operious_app",
+        "effective_role": "operious_app",
+        "initial_role": "operious_app",
+        "require_control_row": true,
+        "role_requested": "operious_app",
+        "row_tenant": "anker-pilot",
+        "session_tenant": "rls-probe-other",
+        "table": "dead_letter_tasks",
+        "passed": true
+      },
+      {
+        "control_count_as_row_tenant": 84,
+        "cross_count_as_other_tenant": 0,
+        "current_user": "operious_app",
+        "effective_role": "operious_app",
+        "initial_role": "operious_app",
+        "require_control_row": true,
+        "role_requested": "operious_app",
+        "row_tenant": "anker-pilot",
+        "session_tenant": "rls-probe-other",
+        "table": "governance_decisions",
+        "passed": true
+      },
+      {
+        "control_count_as_row_tenant": 5,
+        "cross_count_as_other_tenant": 0,
+        "current_user": "operious_app",
+        "effective_role": "operious_app",
+        "initial_role": "operious_app",
+        "require_control_row": true,
+        "role_requested": "operious_app",
+        "row_tenant": "anker-pilot",
+        "session_tenant": "rls-probe-other",
+        "table": "tenant_knowledge_documents",
+        "passed": true
+      }
+    ]
+  },
+  "captured_at": "2026-06-06T18:44:48Z"
 }

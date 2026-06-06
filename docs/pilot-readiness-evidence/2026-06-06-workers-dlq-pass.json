@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
   "evidence_id": "s10-workers-dlq-pass-2026-06-06",
-  "capture_status": "pending_population_from_session_output",
+  "capture_status": "captured",
   "requirement": "live workers + DLQ smoke/replay proof",
   "captured_against": {
     "fly_app": "operious-ai-imad",
-    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
-    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
-    "fly_machine_version": "122",
-    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "fly_release": "v125",
+    "fly_image": "operious-ai-imad:deployment-01KTEZ2QESEC8AK3PWQ686GZ5E",
+    "fly_machine_id": "6e8207e3b215e8",
+    "fly_region": "sin",
+    "git_commit": "3a3d7fc",
     "git_branch": "phase-2-2-stabilized"
   },
   "source_command": "python scripts/s10_prep/live_verification_probes.py workers-dlq --tenant-id anker-pilot --probe-id <s10-dlq-proof-id>",
@@ -18,5 +19,34 @@
     "row_scope": "tenant anker-pilot",
     "labeling": "probe_id starts with s10-dlq-proof"
   },
-  "evidence": null
+  "evidence": {
+    "celery_task_id": "9ca1e066-dede-4710-8839-a7bbfdc47478",
+    "dispatch_id": "s10-probe-dispatch:s10-dfc114ca2f3540c78e8c5a747543f8d4",
+    "execution_id": "997df4f8-c233-547d-8bb6-adb636b67d17",
+    "expected_dead_letter_task_id": "d96cd4d3-8338-58c6-a288-1a1f92569347",
+    "probe_id": "s10-dfc114ca2f3540c78e8c5a747543f8d4",
+    "queue": "dead_letter",
+    "row": {
+      "dead_letter_task_id": "d96cd4d3-8338-58c6-a288-1a1f92569347",
+      "execution_id": "997df4f8-c233-547d-8bb6-adb636b67d17",
+      "metadata": {
+        "attempt_count": 0,
+        "enqueued_at": "2026-06-06T18:45:27.267784+00:00",
+        "execution_id": "997df4f8-c233-547d-8bb6-adb636b67d17",
+        "probe_id": "s10-dfc114ca2f3540c78e8c5a747543f8d4",
+        "purpose": "s10_live_production_worker_dlq_proof",
+        "session_id": "s10-probe-session:s10-dfc114ca2f3540c78e8c5a747543f8d4",
+        "tenant_id": "anker-pilot"
+      },
+      "queue": "dead_letter",
+      "reason": "s10_probe_deliberate_failure",
+      "retry_count": 0,
+      "task_id": "9ca1e066-dede-4710-8839-a7bbfdc47478",
+      "task_name": "s10_dead_letter_probe"
+    },
+    "session_id": "s10-probe-session:s10-dfc114ca2f3540c78e8c5a747543f8d4",
+    "tenant_id": "anker-pilot",
+    "passed": true
+  },
+  "captured_at": "2026-06-06T18:46:17Z"
 }

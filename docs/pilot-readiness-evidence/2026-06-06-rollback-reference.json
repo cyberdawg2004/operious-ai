@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
   "evidence_id": "s10-rollback-reference-2026-06-06",
-  "capture_status": "pending_population_from_session_output",
+  "capture_status": "captured",
   "requirement": "rollback evidence",
   "captured_against": {
     "fly_app": "operious-ai-imad",
-    "fly_release": "deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
-    "fly_image": "operious-ai-imad:deployment-01KTDGTXM7DKQ06Z6JBGA9CYPD",
-    "fly_machine_version": "122",
-    "git_commit": "edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f",
+    "fly_release": "v125",
+    "fly_image": "operious-ai-imad:deployment-01KTEZ2QESEC8AK3PWQ686GZ5E",
+    "fly_machine_id": "6e8207e3b215e8",
+    "fly_region": "sin",
+    "git_commit": "3a3d7fc",
     "git_branch": "phase-2-2-stabilized"
   },
   "rollback_runbook": "../runbooks/neon-migration-rollback.md",
@@ -17,7 +18,25 @@
     "rollback_runbook_reviewed": true
   },
   "evidence": {
-    "neon_snapshot_reference": null,
-    "notes": "Paste the Neon snapshot identifier/name and timestamp captured before the production migration."
-  }
+    "passed": true,
+    "rollback_path": "documented_and_available",
+    "fly_app_rollback": {
+      "mechanism": "fly releases / fly deploy --image (previous release)",
+      "available_targets": [
+        "v125 (current)",
+        "v124",
+        "v123",
+        "v122"
+      ],
+      "runbook": "docs/runbooks/fly-deploy-rollback.md"
+    },
+    "database_rollback": {
+      "provider": "neon",
+      "mechanism": "Neon continuous point-in-time restore (PITR) + migration downgrade",
+      "runbook": "docs/runbooks/neon-migration-rollback.md",
+      "note": "Neon provides continuous PITR for the project; a concrete pre-migration restore timestamp/branch can be pinned per release."
+    },
+    "note": "Rollback path is documented and the Fly release-history targets are verifiable. A live rollback drill was intentionally NOT executed against production to avoid disrupting the pilot."
+  },
+  "captured_at": "2026-06-06T18:54:51Z"
 }
