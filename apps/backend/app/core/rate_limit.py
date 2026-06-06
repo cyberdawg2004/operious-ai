@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from ipaddress import IPv4Network, IPv6Network, ip_address
 from typing import Any, Final, Protocol
 
 from starlette.responses import Response
+from starlette.types import Scope
 
 from app.survivability import PROBLEM_DETAILS_MEDIA_TYPE
 
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_FLY_CLIENT_IP_HEADER = b"fly-client-ip"
 _INCREMENT_AND_BOUND_WINDOW_SCRIPT: Final[str] = """
 local count = redis.call("INCR", KEYS[1])
 local ttl = redis.call("TTL", KEYS[1])
@@ -79,6 +82,41 @@ class FixedWindowLimiter:
         )
 
 
+def resolve_client_ip(
+    scope: Scope,
+    trusted_proxies: tuple[IPv4Network | IPv6Network, ...] = (),
+) -> str:
+    """Resolve the real client IP for per-IP rate limiting.
+
+    On Fly (and any reverse proxy) the immediate TCP peer is the proxy, so keying
+    the limiter on the peer collapses every client into one bucket. Fly forwards
+    the real client in ``Fly-Client-IP``. That header is honoured ONLY when the
+    immediate peer is in ``trusted_proxies`` — a header from an untrusted peer is
+    attacker-controlled and is ignored (anti-spoofing). Falls back to the peer
+    when there is no trusted-proxy allowlist, the peer is untrusted, or the
+    header is missing/malformed.
+    """
+    client = scope.get("client")
+    peer = str(client[0]) if client else "unknown"
+    if not trusted_proxies:
+        return peer
+    try:
+        peer_ip = ip_address(peer)
+    except ValueError:
+        return peer
+    if not any(peer_ip in network for network in trusted_proxies):
+        return peer
+    for name, value in scope.get("headers") or ():
+        if name == _FLY_CLIENT_IP_HEADER:
+            candidate = value.decode("latin-1").strip()
+            try:
+                ip_address(candidate)
+            except ValueError:
+                return peer
+            return candidate
+    return peer
+
+
 def fail_open_allowed(method: str) -> bool:
     """When the limiter backend is unavailable, idempotent reads degrade open
     (allow + alert) while state-changing writes fail closed."""
@@ -128,6 +166,7 @@ __all__ = [
     "FixedWindowLimiter",
     "RateLimitDecision",
     "fail_open_allowed",
+    "resolve_client_ip",
     "service_unavailable_response",
     "too_many_requests_response",
 ]

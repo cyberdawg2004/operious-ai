@@ -9,6 +9,7 @@ fail closed) — never a silent fail-open.
 from __future__ import annotations
 
 import logging
+from ipaddress import IPv4Network, IPv6Network
 from typing import Protocol
 
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -16,6 +17,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.core.rate_limit import (
     RateLimitDecision,
     fail_open_allowed,
+    resolve_client_ip,
     service_unavailable_response,
     too_many_requests_response,
 )
@@ -40,6 +42,7 @@ class EdgeRateLimitMiddleware:
         exempt_suffixes: tuple[str, ...],
         enabled: bool,
         production: bool = False,
+        trusted_proxies: tuple[IPv4Network | IPv6Network, ...] = (),
     ) -> None:
         self.app = app
         self._limiter = limiter
@@ -51,6 +54,9 @@ class EdgeRateLimitMiddleware:
         # outside production a Redis outage degrades open so dev / CI without
         # Redis is not 503'd on every write.
         self._production = production
+        # When set, the real client IP is taken from Fly-Client-IP for peers in
+        # this allowlist (so per-IP limiting is per-client, not per-proxy).
+        self._trusted_proxies = tuple(trusted_proxies)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not self._enabled:
@@ -61,7 +67,7 @@ class EdgeRateLimitMiddleware:
             await self.app(scope, receive, send)
             return
         method = scope.get("method", "GET")
-        ip = _client_ip(scope)
+        ip = resolve_client_ip(scope, self._trusted_proxies)
         decision = await self._limiter.consume(
             key=f"rl:ip:{ip}", limit=self._limit, window_seconds=self._window
         )
@@ -79,13 +85,6 @@ class EdgeRateLimitMiddleware:
             )(scope, receive, send)
             return
         await self.app(scope, receive, send)
-
-
-def _client_ip(scope: Scope) -> str:
-    client = scope.get("client")
-    if client:
-        return str(client[0])
-    return "unknown"
 
 
 __all__ = ["EdgeRateLimitMiddleware"]

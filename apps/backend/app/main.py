@@ -689,6 +689,9 @@ def create_app(
         exempt_suffixes=settings.rate_limit_exempt_suffixes,
         enabled=settings.rate_limit_enabled_effective,
         production=settings.is_production,
+        # Per-client (not per-proxy) IP keying: trust Fly-Client-IP only from the
+        # configured trusted-proxy peers. Empty/None => key on the raw peer.
+        trusted_proxies=trusted_proxies or (),
     )
     logger.info("middleware_edge_rate_limit_register_complete")
     logger.info("middleware_request_context_register_begin")
