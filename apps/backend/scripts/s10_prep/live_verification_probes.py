@@ -60,6 +60,34 @@ SMOKE_COMPLETION_EVENTS: Final[set[str]] = {
 }
 SMOKE_FAILURE_EVENTS: Final[set[str]] = {"diagnostic_execution_failed"}
 SMOKE_RETRY_BOUND_ERROR_CLASS: Final[str] = "PERSISTENCE_FAILURE"
+HTTP_REQUEST_TIMEOUT_SECONDS: Final[float] = 30.0
+
+
+class ProbeFailure(RuntimeError):
+    """Probe failed before it could collect a normal evidence record."""
+
+
+class HttpRequestFailure(ProbeFailure):
+    """HTTP client failure with fields suitable for probe evidence."""
+
+    error: str
+    url: str
+    reason: str
+    request_timeout_seconds: float | None
+
+    def __init__(
+        self,
+        *,
+        error: str,
+        url: str,
+        reason: str,
+        request_timeout_seconds: float | None = None,
+    ) -> None:
+        self.error = error
+        self.url = url
+        self.reason = reason
+        self.request_timeout_seconds = request_timeout_seconds
+        super().__init__(f"{error} url={url} reason={reason}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +149,7 @@ def default_http_request(
         method=method.upper(),
     )
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=HTTP_REQUEST_TIMEOUT_SECONDS) as response:
             return HttpResponse(
                 status_code=response.status,
                 headers=dict(response.headers),
@@ -133,8 +161,26 @@ def default_http_request(
             headers=dict(exc.headers),
             body=exc.read(),
         )
+    except TimeoutError as exc:
+        raise HttpRequestFailure(
+            error="http_request_timeout",
+            url=url,
+            reason=str(exc) or "timeout",
+            request_timeout_seconds=HTTP_REQUEST_TIMEOUT_SECONDS,
+        ) from exc
     except URLError as exc:
-        raise ProbeFailure(f"http_request_failed url={url} reason={exc.reason}") from exc
+        if isinstance(exc.reason, TimeoutError):
+            raise HttpRequestFailure(
+                error="http_request_timeout",
+                url=url,
+                reason=str(exc.reason) or "timeout",
+                request_timeout_seconds=HTTP_REQUEST_TIMEOUT_SECONDS,
+            ) from exc
+        raise HttpRequestFailure(
+            error="http_request_failed",
+            url=url,
+            reason=str(exc.reason),
+        ) from exc
 
 
 def run_spoofing_probe(
@@ -389,20 +435,25 @@ def run_smoke_probe(
         bearer_token=bearer_token,
         allow_legacy_headers=allow_legacy_headers,
     )
-    ingress = http_request(
-        "POST",
-        urljoin(api_base, "boundary/translation/ingress"),
-        headers,
-        {
-            "external_id": external_id,
-            "channel": "email",
-            "raw_content": (
-                "S-10 live smoke: Anker PowerCore stopped charging and "
-                "the customer requests next steps."
-            ),
-            "language_code": "en",
-        },
-    )
+    try:
+        ingress = http_request(
+            "POST",
+            urljoin(api_base, "boundary/translation/ingress"),
+            headers,
+            {
+                "external_id": external_id,
+                "channel": "email",
+                "raw_content": (
+                    "S-10 live smoke: Anker PowerCore stopped charging and "
+                    "the customer requests next steps."
+                ),
+                "language_code": "en",
+            },
+        )
+    except (ProbeFailure, TimeoutError, URLError) as exc:
+        evidence = _smoke_request_failure_evidence("ingress", exc)
+        _print_probe_result("smoke", passed=False, evidence=evidence)
+        return evidence | {"passed": False}
     ingress_body = ingress.json()
     if ingress.status_code != 202:
         evidence = {
@@ -414,12 +465,21 @@ def run_smoke_probe(
         return evidence | {"passed": False}
     ingress_id = _require_str(ingress_body, "ingress_id")
     canonical_envelope_id = ingress_body.get("canonical_envelope_id")
-    dispatch = http_request(
-        "POST",
-        urljoin(api_base, "coordination/dispatch"),
-        headers,
-        {"ingress_id": ingress_id},
-    )
+    try:
+        dispatch = http_request(
+            "POST",
+            urljoin(api_base, "coordination/dispatch"),
+            headers,
+            {"ingress_id": ingress_id},
+        )
+    except (ProbeFailure, TimeoutError, URLError) as exc:
+        evidence = _smoke_request_failure_evidence(
+            "dispatch",
+            exc,
+            ingress_id=ingress_id,
+        )
+        _print_probe_result("smoke", passed=False, evidence=evidence)
+        return evidence | {"passed": False}
     dispatch_body = dispatch.json()
     if dispatch.status_code != 200:
         evidence = {
@@ -446,12 +506,30 @@ def run_smoke_probe(
     poll_count = 0
     while time.monotonic() < deadline:
         poll_count += 1
-        timeline = http_request(
-            "GET",
-            urljoin(api_base, f"session/{session_id}/timeline"),
-            headers,
-            None,
-        )
+        try:
+            timeline = http_request(
+                "GET",
+                urljoin(api_base, f"session/{session_id}/timeline"),
+                headers,
+                None,
+            )
+        except (ProbeFailure, TimeoutError, URLError) as exc:
+            outcome = SmokeTimelineOutcome(
+                terminal=True,
+                passed=False,
+                status="timeline_read_failed",
+                completion_events=[],
+                retry_failure_events=outcome.retry_failure_events,
+                terminal_failure_events=outcome.terminal_failure_events,
+                grounding_trace=outcome.grounding_trace,
+                failure_reason=_smoke_request_failure_evidence(
+                    "timeline",
+                    exc,
+                    session_id=session_id,
+                    poll_count=poll_count,
+                ),
+            )
+            break
         timeline_body = timeline.json()
         if timeline.status_code != 200:
             outcome = SmokeTimelineOutcome(
@@ -520,6 +598,46 @@ def run_smoke_probe(
     }
     _print_probe_result("smoke", passed=outcome.passed, evidence=evidence)
     return evidence | {"passed": outcome.passed}
+
+
+def _smoke_request_failure_evidence(
+    stage: str,
+    exc: ProbeFailure | TimeoutError | URLError,
+    **context: Any,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {"stage": stage, **context}
+    if isinstance(exc, HttpRequestFailure):
+        evidence.update(
+            {
+                "error": exc.error,
+                "url": exc.url,
+                "reason": exc.reason,
+            }
+        )
+        if exc.request_timeout_seconds is not None:
+            evidence["request_timeout_seconds"] = exc.request_timeout_seconds
+        return evidence
+    if isinstance(exc, TimeoutError):
+        evidence.update(
+            {
+                "error": "http_request_timeout",
+                "reason": str(exc) or "timeout",
+                "request_timeout_seconds": HTTP_REQUEST_TIMEOUT_SECONDS,
+            }
+        )
+        return evidence
+    if isinstance(exc, URLError) and isinstance(exc.reason, TimeoutError):
+        evidence.update(
+            {
+                "error": "http_request_timeout",
+                "reason": str(exc.reason) or "timeout",
+                "request_timeout_seconds": HTTP_REQUEST_TIMEOUT_SECONDS,
+            }
+        )
+        return evidence
+    reason = str(exc.reason) if isinstance(exc, URLError) else str(exc)
+    evidence.update({"error": "http_request_failed", "reason": reason})
+    return evidence
 
 
 def _authority_headers(
@@ -815,10 +933,6 @@ def _database_url_arg(value: str | None) -> str:
     if env_value:
         return env_value
     return get_settings().database_url
-
-
-class ProbeFailure(RuntimeError):
-    """Probe failed before it could collect a normal evidence record."""
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

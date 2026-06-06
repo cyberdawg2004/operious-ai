@@ -312,6 +312,45 @@ def test_smoke_probe_waits_through_retry_before_completion(
     assert "PASS smoke" in capsys.readouterr().out
 
 
+def test_smoke_probe_reports_dispatch_http_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_http_request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None,
+        json_body: Mapping[str, Any] | None,
+    ) -> HttpResponse:
+        del method, headers, json_body
+        if url.endswith("/boundary/translation/ingress"):
+            return _json_response(
+                202,
+                {"ingress_id": "ingress-smoke"},
+            )
+        if url.endswith("/coordination/dispatch"):
+            raise TimeoutError("the read operation timed out")
+        return _json_response(404, {"detail": {"code": "not_found"}})
+
+    result = run_smoke_probe(
+        base_url="https://example.test/api/v1",
+        tenant_id="anker-pilot",
+        principal_id="operator",
+        bearer_token="token",
+        allow_legacy_headers=False,
+        external_id="s10-smoke-test",
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+        http_request=fake_http_request,
+    )
+
+    assert result["passed"] is False
+    assert result["stage"] == "dispatch"
+    assert result["ingress_id"] == "ingress-smoke"
+    assert result["error"] == "http_request_timeout"
+    assert result["request_timeout_seconds"] == live_probes.HTTP_REQUEST_TIMEOUT_SECONDS
+    assert "FAIL smoke" in capsys.readouterr().out
+
+
 def test_smoke_probe_reports_terminal_failure(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -372,6 +411,54 @@ def test_smoke_probe_reports_terminal_failure(
     assert result["terminal_status"] == "terminal_failure"
     assert result["terminal_failure_event_count"] == 1
     assert result["failure_reason"]["error_class"] == "SEMANTIC_REJECTION"
+    assert "FAIL smoke" in capsys.readouterr().out
+
+
+def test_smoke_probe_reports_timeline_http_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_http_request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None,
+        json_body: Mapping[str, Any] | None,
+    ) -> HttpResponse:
+        del method, headers, json_body
+        if url.endswith("/boundary/translation/ingress"):
+            return _json_response(
+                202,
+                {"ingress_id": "ingress-smoke"},
+            )
+        if url.endswith("/coordination/dispatch"):
+            return _json_response(
+                200,
+                {
+                    "dispatch_id": "dispatch-smoke",
+                    "session_id": "11111111-1111-1111-1111-111111111111",
+                    "execution_id": "execution-smoke",
+                },
+            )
+        if url.endswith("/session/11111111-1111-1111-1111-111111111111/timeline"):
+            raise TimeoutError("the read operation timed out")
+        return _json_response(404, {"detail": {"code": "not_found"}})
+
+    result = run_smoke_probe(
+        base_url="https://example.test/api/v1",
+        tenant_id="anker-pilot",
+        principal_id="operator",
+        bearer_token="token",
+        allow_legacy_headers=False,
+        external_id="s10-smoke-test",
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+        http_request=fake_http_request,
+    )
+
+    assert result["passed"] is False
+    assert result["terminal_status"] == "timeline_read_failed"
+    assert result["failure_reason"]["stage"] == "timeline"
+    assert result["failure_reason"]["error"] == "http_request_timeout"
+    assert result["failure_reason"]["poll_count"] == 1
     assert "FAIL smoke" in capsys.readouterr().out
 
 
