@@ -347,7 +347,9 @@ def test_smoke_probe_reports_dispatch_http_timeout(
     assert result["stage"] == "dispatch"
     assert result["ingress_id"] == "ingress-smoke"
     assert result["error"] == "http_request_timeout"
-    assert result["request_timeout_seconds"] == live_probes.HTTP_REQUEST_TIMEOUT_SECONDS
+    assert result["request_timeout_seconds"] == (
+        live_probes.SMOKE_HTTP_REQUEST_TIMEOUT_SECONDS
+    )
     assert "FAIL smoke" in capsys.readouterr().out
 
 

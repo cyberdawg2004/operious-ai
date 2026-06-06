@@ -61,6 +61,7 @@ SMOKE_COMPLETION_EVENTS: Final[set[str]] = {
 SMOKE_FAILURE_EVENTS: Final[set[str]] = {"diagnostic_execution_failed"}
 SMOKE_RETRY_BOUND_ERROR_CLASS: Final[str] = "PERSISTENCE_FAILURE"
 HTTP_REQUEST_TIMEOUT_SECONDS: Final[float] = 30.0
+SMOKE_HTTP_REQUEST_TIMEOUT_SECONDS: Final[float] = 90.0
 
 
 class ProbeFailure(RuntimeError):
@@ -134,6 +135,23 @@ def default_http_request(
     headers: Mapping[str, str] | None = None,
     json_body: Mapping[str, Any] | None = None,
 ) -> HttpResponse:
+    return _http_request(
+        method,
+        url,
+        headers,
+        json_body,
+        timeout_seconds=HTTP_REQUEST_TIMEOUT_SECONDS,
+    )
+
+
+def _http_request(
+    method: str,
+    url: str,
+    headers: Mapping[str, str] | None,
+    json_body: Mapping[str, Any] | None,
+    *,
+    timeout_seconds: float,
+) -> HttpResponse:
     payload = (
         None
         if json_body is None
@@ -149,7 +167,7 @@ def default_http_request(
         method=method.upper(),
     )
     try:
-        with urlopen(request, timeout=HTTP_REQUEST_TIMEOUT_SECONDS) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             return HttpResponse(
                 status_code=response.status,
                 headers=dict(response.headers),
@@ -166,7 +184,7 @@ def default_http_request(
             error="http_request_timeout",
             url=url,
             reason=str(exc) or "timeout",
-            request_timeout_seconds=HTTP_REQUEST_TIMEOUT_SECONDS,
+            request_timeout_seconds=timeout_seconds,
         ) from exc
     except URLError as exc:
         if isinstance(exc.reason, TimeoutError):
@@ -174,13 +192,31 @@ def default_http_request(
                 error="http_request_timeout",
                 url=url,
                 reason=str(exc.reason) or "timeout",
-                request_timeout_seconds=HTTP_REQUEST_TIMEOUT_SECONDS,
+                request_timeout_seconds=timeout_seconds,
             ) from exc
         raise HttpRequestFailure(
             error="http_request_failed",
             url=url,
             reason=str(exc.reason),
         ) from exc
+
+
+def _http_request_with_timeout(timeout_seconds: float) -> HttpRequest:
+    def request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None = None,
+        json_body: Mapping[str, Any] | None = None,
+    ) -> HttpResponse:
+        return _http_request(
+            method,
+            url,
+            headers,
+            json_body,
+            timeout_seconds=timeout_seconds,
+        )
+
+    return request
 
 
 def run_spoofing_probe(
@@ -426,9 +462,15 @@ def run_smoke_probe(
     external_id: str,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    request_timeout_seconds: float = SMOKE_HTTP_REQUEST_TIMEOUT_SECONDS,
     http_request: HttpRequest = default_http_request,
 ) -> dict[str, Any]:
     api_base = normalize_api_base_url(base_url)
+    effective_http_request = (
+        _http_request_with_timeout(request_timeout_seconds)
+        if http_request is default_http_request
+        else http_request
+    )
     headers = _authority_headers(
         tenant_id=tenant_id,
         principal_id=principal_id,
@@ -436,7 +478,7 @@ def run_smoke_probe(
         allow_legacy_headers=allow_legacy_headers,
     )
     try:
-        ingress = http_request(
+        ingress = effective_http_request(
             "POST",
             urljoin(api_base, "boundary/translation/ingress"),
             headers,
@@ -451,7 +493,11 @@ def run_smoke_probe(
             },
         )
     except (ProbeFailure, TimeoutError, URLError) as exc:
-        evidence = _smoke_request_failure_evidence("ingress", exc)
+        evidence = _smoke_request_failure_evidence(
+            "ingress",
+            exc,
+            request_timeout_seconds=request_timeout_seconds,
+        )
         _print_probe_result("smoke", passed=False, evidence=evidence)
         return evidence | {"passed": False}
     ingress_body = ingress.json()
@@ -466,7 +512,7 @@ def run_smoke_probe(
     ingress_id = _require_str(ingress_body, "ingress_id")
     canonical_envelope_id = ingress_body.get("canonical_envelope_id")
     try:
-        dispatch = http_request(
+        dispatch = effective_http_request(
             "POST",
             urljoin(api_base, "coordination/dispatch"),
             headers,
@@ -477,6 +523,7 @@ def run_smoke_probe(
             "dispatch",
             exc,
             ingress_id=ingress_id,
+            request_timeout_seconds=request_timeout_seconds,
         )
         _print_probe_result("smoke", passed=False, evidence=evidence)
         return evidence | {"passed": False}
@@ -507,7 +554,7 @@ def run_smoke_probe(
     while time.monotonic() < deadline:
         poll_count += 1
         try:
-            timeline = http_request(
+            timeline = effective_http_request(
                 "GET",
                 urljoin(api_base, f"session/{session_id}/timeline"),
                 headers,
@@ -527,6 +574,7 @@ def run_smoke_probe(
                     exc,
                     session_id=session_id,
                     poll_count=poll_count,
+                    request_timeout_seconds=request_timeout_seconds,
                 ),
             )
             break
@@ -583,6 +631,7 @@ def run_smoke_probe(
         "terminal_status": outcome.status,
         "timeout_seconds": timeout_seconds,
         "poll_interval_seconds": poll_interval_seconds,
+        "request_timeout_seconds": request_timeout_seconds,
         "retry_wait_bound_seconds": retry_bound_seconds,
         "retry_wait_bound_source": (
             f"{SMOKE_RETRY_BOUND_ERROR_CLASS} policy retry countdowns plus "
@@ -622,7 +671,10 @@ def _smoke_request_failure_evidence(
             {
                 "error": "http_request_timeout",
                 "reason": str(exc) or "timeout",
-                "request_timeout_seconds": HTTP_REQUEST_TIMEOUT_SECONDS,
+                "request_timeout_seconds": evidence.get(
+                    "request_timeout_seconds",
+                    HTTP_REQUEST_TIMEOUT_SECONDS,
+                ),
             }
         )
         return evidence
@@ -631,7 +683,10 @@ def _smoke_request_failure_evidence(
             {
                 "error": "http_request_timeout",
                 "reason": str(exc.reason) or "timeout",
-                "request_timeout_seconds": HTTP_REQUEST_TIMEOUT_SECONDS,
+                "request_timeout_seconds": evidence.get(
+                    "request_timeout_seconds",
+                    HTTP_REQUEST_TIMEOUT_SECONDS,
+                ),
             }
         )
         return evidence
@@ -973,6 +1028,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=_smoke_retry_wait_bound_seconds(),
     )
     smoke.add_argument("--poll-interval-seconds", type=float, default=3.0)
+    smoke.add_argument(
+        "--request-timeout-seconds",
+        type=float,
+        default=SMOKE_HTTP_REQUEST_TIMEOUT_SECONDS,
+        help=(
+            "Per-HTTP-request timeout for the smoke ingress, dispatch, and "
+            "timeline calls."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1011,6 +1075,7 @@ async def _main_async(args: argparse.Namespace) -> int:
                 external_id=args.external_id,
                 timeout_seconds=args.timeout_seconds,
                 poll_interval_seconds=args.poll_interval_seconds,
+                request_timeout_seconds=args.request_timeout_seconds,
             )
         else:  # pragma: no cover - argparse prevents this.
             raise ProbeFailure(f"unknown probe command {args.command!r}")
