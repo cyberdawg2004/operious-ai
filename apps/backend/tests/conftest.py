@@ -64,6 +64,16 @@ if TYPE_CHECKING:
 # a developer's root `.env` contains SENTRY_DSN.
 os.environ.setdefault("SENTRY_DSN", "")
 
+# Hermetic embeddings: the suite MUST NOT make live OpenAI calls just because a
+# developer's root `.env` carries a real OPENAI_API_KEY / EMBEDDING_DEFAULT_PROVIDER
+# (set for live Phase 2 / S-10 work). Force the deterministic provider so the
+# `build_embedding_provider` factory never selects the network provider during
+# tests. These are OVERRIDES (not setdefault) so an ambient key cannot leak in.
+# Tests that specifically exercise the OpenAI provider construct ``Settings(...)``
+# with explicit kwargs, which take precedence over these process env values.
+os.environ["EMBEDDING_DEFAULT_PROVIDER"] = "deterministic_hash"
+os.environ["OPENAI_API_KEY"] = ""
+
 
 # ─── Postgres availability gate ───────────────────────────────────────────
 
