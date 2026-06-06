@@ -16,14 +16,18 @@ Default capture target:
 - Git commit: `edc1a2c5f1cb60ccd71097e00d20d813ef4e3b5f`
 - Branch: `phase-2-2-stabilized`
 
-If an individual proof was captured against a different Fly release or git
+If an individual proof is captured against a different Fly release or git
 commit, update that proof file's `captured_against` block before treating the
-bundle as final.
+bundle as final. Use `capture-populate-runbook.md` to capture and populate the
+proof files.
 
 ## Honest Summary
 
-The 2026-06-06 live session produced proof for every S-10 requirement. This
-bundle preserves those proofs as dated files:
+This bundle is the dated archive target for the 2026-06-06 S-10 live proofs.
+It is not final until each proof file's `capture_status` is changed to
+`captured`, the evidence blocks contain the raw captured output, and
+`manifest.json` is changed to `captured`. The archive covers these S-10 proof
+requirements:
 
 - Direct spoofed authority-header rejection.
 - Bearer/Auth0 success with verified namespaced tenant claims.
@@ -70,6 +74,7 @@ One hardening item remains tracked:
 | `2026-06-06-readiness-ready.json` | Readiness | Module-form production readiness command output. |
 | `2026-06-06-rollback-reference.json` | Rollback | Neon snapshot reference and rollback runbook link. |
 | `manifest.json` | Bundle index | Machine-readable list of the proof files and tracked residuals. |
+| `capture-populate-runbook.md` | Operator runbook | Exact commands and finalization steps for populating the evidence files. |
 
 ## Population Rule
 
@@ -80,3 +85,11 @@ recovered trace evidence instead of a forced `PASS smoke` line, because the
 live smoke probe timed out under real Upstash latency and intermittent
 semantic rejection. The trace is the proof: execution IDs, nonzero Anthropic
 tokens, and a decrypted Charging Issue Policy citation with score.
+
+Finalization requires:
+
+- Every dated proof file has `capture_status: "captured"`.
+- `manifest.json` has `capture_status: "captured"`.
+- Every proof file has the exact Fly release and git commit it ran against.
+- The live workflow file honestly records recovered trace evidence if the
+  smoke probe times out; do not convert that trace into a fake probe pass.

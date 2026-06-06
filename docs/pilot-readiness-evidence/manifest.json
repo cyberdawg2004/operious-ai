@@ -3,6 +3,7 @@
   "bundle": "s10-pilot-readiness-evidence",
   "capture_date": "2026-06-06",
   "capture_status": "pending_population_from_session_outputs",
+  "capture_runbook": "capture-populate-runbook.md",
   "captured_against": {
     "fly_app": "operious-ai-imad",
     "fly_hostname": "https://operious-ai-imad.fly.dev",
