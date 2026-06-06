@@ -62,6 +62,7 @@ SMOKE_FAILURE_EVENTS: Final[set[str]] = {"diagnostic_execution_failed"}
 SMOKE_RETRY_BOUND_ERROR_CLASS: Final[str] = "PERSISTENCE_FAILURE"
 HTTP_REQUEST_TIMEOUT_SECONDS: Final[float] = 30.0
 SMOKE_HTTP_REQUEST_TIMEOUT_SECONDS: Final[float] = 90.0
+SMOKE_LIVE_TERMINAL_TIMEOUT_SECONDS: Final[float] = 300.0
 
 
 class ProbeFailure(RuntimeError):
@@ -630,6 +631,7 @@ def run_smoke_probe(
         "poll_count": poll_count,
         "terminal_status": outcome.status,
         "timeout_seconds": timeout_seconds,
+        "timeout_source": "live end-to-end smoke terminal wait",
         "poll_interval_seconds": poll_interval_seconds,
         "request_timeout_seconds": request_timeout_seconds,
         "retry_wait_bound_seconds": retry_bound_seconds,
@@ -1025,7 +1027,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     smoke.add_argument(
         "--timeout-seconds",
         type=float,
-        default=_smoke_retry_wait_bound_seconds(),
+        default=SMOKE_LIVE_TERMINAL_TIMEOUT_SECONDS,
     )
     smoke.add_argument("--poll-interval-seconds", type=float, default=3.0)
     smoke.add_argument(

@@ -543,6 +543,20 @@ def test_probe_helpers_are_stable() -> None:
     assert normalize_api_base_url("https://example.test/api/v1") == (
         "https://example.test/api/v1/"
     )
+    smoke_retry_policy = live_probes.RETRY_POLICIES[
+        live_probes.SMOKE_RETRY_BOUND_ERROR_CLASS
+    ]
+    retry_wait_bound = sum(
+        int(
+            smoke_retry_policy.base_delay_seconds
+            * (smoke_retry_policy.backoff_multiplier ** retry_count)
+        )
+        for retry_count in range(smoke_retry_policy.max_retries)
+    ) + live_probes.get_settings().AI_TIMEOUT_SECONDS
+    assert live_probes.SMOKE_LIVE_TERMINAL_TIMEOUT_SECONDS >= retry_wait_bound
+    assert live_probes.SMOKE_HTTP_REQUEST_TIMEOUT_SECONDS >= (
+        live_probes.HTTP_REQUEST_TIMEOUT_SECONDS
+    )
 
 
 def test_s10_probe_task_routes_to_dead_letter_queue() -> None:
