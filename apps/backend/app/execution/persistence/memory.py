@@ -231,9 +231,11 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
                 record,
                 state=ExecutionState.COMPLETED,
                 completed_at=completed_at,
+                failed_at=None,
                 diagnostic_category=category,
                 diagnostic_confidence=confidence,
                 result=result_envelope,
+                error=None,
             )
             self._executions[execution_id] = updated
             return updated

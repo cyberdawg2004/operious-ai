@@ -605,6 +605,106 @@ async def test_retryable_failure_reopens_execution_with_attempt_lineage() -> Non
 
 
 @pytest.mark.asyncio
+async def test_completion_after_retry_clears_top_level_failure_fields() -> None:
+    store = InMemoryExecutionPersistence()
+    runtime = ExecutionRuntime(persistence=store)
+    request = await runtime.request_diagnostic_execution(
+        dispatch_id="dispatch-9-clear",
+        session_id="session-9-clear",
+        tenant_id="tenant-a",
+        requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
+    )
+    first = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-a",
+        claimed_at=_NOW,
+    )
+    assert first.attempt is not None
+    failed_at = _NOW + timedelta(seconds=1)
+    reopened = await runtime.fail_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=first.attempt.attempt_id,
+        worker_id="worker-a",
+        error="transient provider failure",
+        failed_at=failed_at,
+        retry_requested=True,
+    )
+    assert reopened.state is ExecutionState.REQUESTED
+    assert reopened.error == "transient provider failure"
+    assert reopened.failed_at == failed_at
+    second = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-b",
+        claimed_at=_NOW + timedelta(seconds=2),
+    )
+    assert second.attempt is not None
+
+    completed_at = _NOW + timedelta(seconds=3)
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=second.attempt.attempt_id,
+        worker_id="worker-b",
+        result={"summary": "done"},
+        completed_at=completed_at,
+    )
+    attempts = await store.list_attempts(
+        ExecutionAttemptQuery(execution_id=request.execution.execution_id)
+    )
+
+    assert completed.state is ExecutionState.COMPLETED
+    assert completed.completed_at == completed_at
+    assert completed.error is None
+    assert completed.failed_at is None
+    assert attempts.total == 2
+    assert attempts.attempts[0].state is ExecutionAttemptState.FAILED
+    assert attempts.attempts[0].error == "transient provider failure"
+    assert attempts.attempts[0].failed_at == failed_at
+    assert attempts.attempts[0].retry_requested is True
+    assert attempts.attempts[1].state is ExecutionAttemptState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_terminal_failure_keeps_top_level_failure_fields() -> None:
+    store = InMemoryExecutionPersistence()
+    runtime = ExecutionRuntime(persistence=store)
+    request = await runtime.request_diagnostic_execution(
+        dispatch_id="dispatch-9-terminal",
+        session_id="session-9-terminal",
+        tenant_id="tenant-a",
+        requested_at=_NOW,
+        admission_token=execution_admission_token(tenant_id="tenant-a", admitted_at=_NOW),
+    )
+    claimed = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-a",
+        claimed_at=_NOW,
+    )
+    assert claimed.attempt is not None
+
+    failed_at = _NOW + timedelta(seconds=1)
+    failed = await runtime.fail_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=claimed.attempt.attempt_id,
+        worker_id="worker-a",
+        error="terminal semantic rejection",
+        failed_at=failed_at,
+        retry_requested=False,
+    )
+    attempts = await store.list_attempts(
+        ExecutionAttemptQuery(execution_id=request.execution.execution_id)
+    )
+
+    assert failed.state is ExecutionState.FAILED
+    assert failed.error == "terminal semantic rejection"
+    assert failed.failed_at == failed_at
+    assert attempts.total == 1
+    assert attempts.attempts[0].state is ExecutionAttemptState.FAILED
+    assert attempts.attempts[0].error == "terminal semantic rejection"
+    assert attempts.attempts[0].failed_at == failed_at
+
+
+@pytest.mark.asyncio
 async def test_dead_lettered_execution_cannot_be_reclaimed() -> None:
     store = InMemoryExecutionPersistence()
     runtime = ExecutionRuntime(persistence=store)

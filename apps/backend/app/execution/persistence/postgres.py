@@ -229,9 +229,11 @@ class PostgresExecutionPersistence(BaseRepository):
                 .values(
                     state=ExecutionState.COMPLETED.value,
                     completed_at=completed_at,
+                    failed_at=None,
                     diagnostic_category=category,
                     diagnostic_confidence=confidence,
                     result=result_payload,
+                    error=None,
                 )
             )
             execution_result = cast(

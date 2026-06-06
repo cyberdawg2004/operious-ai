@@ -8,8 +8,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.execution import (
+    ExecutionAttemptQuery,
+    ExecutionAttemptState,
     ExecutionRuntime,
     ExecutionQuery,
+    ExecutionState,
     OutboxQuery,
 )
 from app.execution.enums import ExecutionOutboxState
@@ -74,6 +77,73 @@ async def test_postgres_request_execution_persists_parent_before_outbox(
     assert executions.total == 1
     assert outbox.total == 1
     assert outbox.records[0].execution_id == first.execution.execution_id
+
+
+@pytest.mark.asyncio
+@requires_postgres
+async def test_postgres_completion_after_retry_clears_parent_failure_fields(
+    pg_session: AsyncSession,
+) -> None:
+    runtime = ExecutionRuntime(
+        persistence=PostgresExecutionPersistence(pg_session)
+    )
+    request = await runtime.request_diagnostic_execution(
+        dispatch_id="dispatch-postgres-clear-prior-failure",
+        session_id="session-postgres-clear-prior-failure",
+        tenant_id="tenant-acme",
+        requested_at=_NOW,
+        admission_token=execution_admission_token(
+            tenant_id="tenant-acme",
+            admitted_at=_NOW,
+        ),
+    )
+    first = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-a",
+        claimed_at=_NOW + timedelta(seconds=1),
+    )
+    assert first.attempt is not None
+    failed_at = _NOW + timedelta(seconds=2)
+    failed = await runtime.fail_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=first.attempt.attempt_id,
+        worker_id="worker-a",
+        error="transient provider failure",
+        failed_at=failed_at,
+        retry_requested=True,
+    )
+    assert failed.state is ExecutionState.REQUESTED
+    assert failed.error == "transient provider failure"
+    assert failed.failed_at == failed_at
+    second = await runtime.claim_execution(
+        execution_id=request.execution.execution_id,
+        worker_id="worker-b",
+        claimed_at=_NOW + timedelta(seconds=3),
+    )
+    assert second.attempt is not None
+
+    completed_at = _NOW + timedelta(seconds=4)
+    completed = await runtime.complete_execution(
+        execution_id=request.execution.execution_id,
+        attempt_id=second.attempt.attempt_id,
+        worker_id="worker-b",
+        result={"summary": "done"},
+        completed_at=completed_at,
+    )
+    attempts = await runtime.list_attempts(
+        ExecutionAttemptQuery(execution_id=request.execution.execution_id),
+        expected_tenant_id="tenant-acme",
+    )
+
+    assert completed.state is ExecutionState.COMPLETED
+    assert completed.completed_at == completed_at
+    assert completed.error is None
+    assert completed.failed_at is None
+    assert attempts.total == 2
+    assert attempts.attempts[0].state is ExecutionAttemptState.FAILED
+    assert attempts.attempts[0].error == "transient provider failure"
+    assert attempts.attempts[0].failed_at == failed_at
+    assert attempts.attempts[1].state is ExecutionAttemptState.COMPLETED
 
 
 @pytest.mark.asyncio
