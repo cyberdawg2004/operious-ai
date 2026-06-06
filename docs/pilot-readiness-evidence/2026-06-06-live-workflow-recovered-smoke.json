@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "evidence_id": "s10-live-workflow-recovered-smoke-2026-06-06",
-  "capture_status": "pending_population_from_session_output",
+  "capture_status": "captured_not_passing",
   "requirement": "live workflow proof from recovered smoke trace",
   "captured_against": {
     "fly_app": "operious-ai-imad",
@@ -38,5 +38,23 @@
       "governance_decision_id"
     ]
   },
-  "evidence": null
+  "evidence": {
+    "passed": false,
+    "probe_status": "FAIL smoke",
+    "terminal_status": "timeout",
+    "timeline_event_types": [
+      "session_opened",
+      "diagnostic_execution_started",
+      "diagnostic_execution_failed"
+    ],
+    "dead_letter": {
+      "execution_id": "77837a05-472c-5c87-83cb-e774e9df9016",
+      "state": "dead_lettered",
+      "attempt_count": 2,
+      "error": "model output drifted governance-significant terms",
+      "failed_at": "2026-06-06T05:02:55Z"
+    },
+    "interpretation": "Semantic-validation governance correctly rejected drifted model output (fail-closed), but the end-to-end diagnostic happy-path did NOT reach a completed resolution: it dead-lettered. S-10 live-workflow proof is NOT satisfied; this is a real pilot-readiness issue (diagnostic output is being governance-rejected rather than resolving the ticket)."
+  },
+  "captured_at": "2026-06-06T05:08:56Z"
 }

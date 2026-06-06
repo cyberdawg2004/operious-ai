@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "evidence_id": "s10-bearer-auth0-verified-claims-2026-06-06",
-  "capture_status": "pending_population_from_session_output",
+  "capture_status": "captured",
   "requirement": "live bearer/Auth0 success with namespaced claims",
   "captured_against": {
     "fly_app": "operious-ai-imad",
@@ -24,5 +24,26 @@
       "tenant.supervisor.read"
     ]
   },
-  "evidence": null
+  "evidence": {
+    "passed": true,
+    "http_status_code": 200,
+    "endpoint": "/api/v1/auth/me",
+    "response": {
+      "principal_id": "auth0|6a167a0a3fa85d05cd87dab2",
+      "tenant_id": "anker-pilot",
+      "organization_id": null,
+      "environment_id": null,
+      "capabilities": [
+        "operator",
+        "tenant.config.approve",
+        "tenant.config.read",
+        "tenant.connector.read",
+        "tenant.observability.read",
+        "tenant.operations.read",
+        "tenant.supervisor.read"
+      ],
+      "authority_source": "verified"
+    }
+  },
+  "captured_at": "2026-06-06T04:58:14Z"
 }
