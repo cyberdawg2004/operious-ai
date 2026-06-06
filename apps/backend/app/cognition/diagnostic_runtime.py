@@ -37,6 +37,7 @@ from app.cognition.semantic import (
     DEFAULT_AUTHORIZED_GOVERNANCE_TERMS,
     SemanticPreservationResult,
     inspect_governance_terms,
+    validate_governance_terms,
 )
 from app.governance.context import GovernanceContext
 from app.governance.crisis import publish_crisis_intercept_event
@@ -983,21 +984,53 @@ def _evaluate_semantic_candidate(
     authorized_terms: frozenset[str],
 ) -> _DiagnosticSemanticCandidate:
     parsed = _parse_output(completion.text)
-    semantic = inspect_governance_terms(
-        canonical_text=snapshot.content,
-        allowed_text=(
-            f"{snapshot.content}\n\n{_context_text(snapshot.retrieval)}"
-        ),
-        output_text=(
-            f"{parsed.summary}\n{parsed.category.value}\n{parsed.reasoning}"
-        ),
-        authorized_terms=authorized_terms,
+    allowed_text = f"{snapshot.content}\n\n{_context_text(snapshot.retrieval)}"
+    output_text = (
+        f"{parsed.summary}\n{parsed.category.value}\n{parsed.reasoning}"
     )
+    try:
+        semantic = _validate_governance_candidate(
+            canonical_text=snapshot.content,
+            allowed_text=allowed_text,
+            output_text=output_text,
+            authorized_terms=authorized_terms,
+        )
+    except CognitionSemanticValidationError:
+        semantic = inspect_governance_terms(
+            canonical_text=snapshot.content,
+            allowed_text=allowed_text,
+            output_text=output_text,
+            authorized_terms=authorized_terms,
+        )
     return _DiagnosticSemanticCandidate(
         completion=completion,
         parsed=parsed,
         semantic=semantic,
     )
+
+
+def _validate_governance_candidate(
+    *,
+    canonical_text: str,
+    allowed_text: str,
+    output_text: str,
+    authorized_terms: frozenset[str],
+) -> SemanticPreservationResult:
+    try:
+        return validate_governance_terms(
+            canonical_text=canonical_text,
+            allowed_text=allowed_text,
+            output_text=output_text,
+            authorized_terms=authorized_terms,
+        )
+    except TypeError as exc:
+        if "authorized_terms" not in str(exc):
+            raise
+        return validate_governance_terms(
+            canonical_text=canonical_text,
+            allowed_text=allowed_text,
+            output_text=output_text,
+        )
 
 
 def _raise_semantic_drift_if_invalid(
