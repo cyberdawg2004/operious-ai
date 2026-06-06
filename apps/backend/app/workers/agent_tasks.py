@@ -84,7 +84,10 @@ from app.cognition.identity import (
 )
 from app.data_protection.crypto import DataProtectionService
 from app.cognition.models import DiagnosticLLMCompletion
-from app.cognition.semantic import inspect_governance_terms
+from app.cognition.semantic import (
+    DEFAULT_AUTHORIZED_GOVERNANCE_TERMS,
+    inspect_governance_terms,
+)
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     CoordinationRecord,
@@ -602,6 +605,7 @@ def _semantic_rejection_forensic_record(
             f"{diagnostic_retrieval_context_text(snapshot.retrieval)}"
         ),
         output_text=output_text,
+        authorized_terms=DEFAULT_AUTHORIZED_GOVERNANCE_TERMS,
     )
     completion_sha256 = _sha256_text(completion.text)
     completion_excerpt = _semantic_completion_excerpt(completion.text)

@@ -33,7 +33,10 @@ from app.cognition.models import (
     DiagnosticReasoningResult,
 )
 from app.cognition.persistence import CognitionUsagePersistenceProtocol
-from app.cognition.semantic import validate_governance_terms
+from app.cognition.semantic import (
+    DEFAULT_AUTHORIZED_GOVERNANCE_TERMS,
+    validate_governance_terms,
+)
 from app.governance.context import GovernanceContext
 from app.governance.crisis import publish_crisis_intercept_event
 from app.governance.enums import Decision, EnforcementStage
@@ -108,6 +111,11 @@ class DiagnosticCognitionRuntimeConfig:
     require_citations: bool = False
     input_token_micro_usd: int = 3
     output_token_micro_usd: int = 15
+    # Standard remediation vocabulary the agent is authorized to name even when
+    # a cited SOP does not spell it out verbatim (grounding-as-governance still
+    # blocks higher-stakes ungrounded terms: approve/deny/fraud/legal/
+    # chargeback/compliance/reject).
+    authorized_governance_terms: frozenset[str] = DEFAULT_AUTHORIZED_GOVERNANCE_TERMS
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +345,7 @@ class DiagnosticCognitionRuntime:
                     f"{parsed.summary}\n{parsed.category.value}\n"
                     f"{parsed.reasoning}"
                 ),
+                authorized_terms=self._config.authorized_governance_terms,
             )
             governance_decision_id = await self._govern_output(
                 tenant_id=snapshot.tenant_id,
