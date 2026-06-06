@@ -6,6 +6,7 @@ from app.cognition.exceptions import (
     CognitionLLMProviderError,
     CognitionPersistenceFailureError,
     CognitionSemanticRejectionError,
+    CognitionSemanticValidationError,
     GovernanceDenyError,
     ProviderQuotaExceededError,
     ProviderRateLimitError,
@@ -15,6 +16,7 @@ from app.queues import QUEUE_DEAD_LETTER, QUEUE_DIAGNOSTIC_RETRY
 from app.workers.agent_tasks import (
     _classify_diagnostic_exception,
     _diagnostic_retry_decision,
+    _success_persistence_failure_exception,
 )
 
 
@@ -60,6 +62,52 @@ def test_semantic_rejection_goes_directly_to_dlq() -> None:
     assert decision.queue == QUEUE_DEAD_LETTER
 
 
+def test_success_persistence_semantic_validation_error_stays_terminal() -> None:
+    semantic_error = CognitionSemanticValidationError(
+        "model output drifted governance-significant terms"
+    )
+
+    normalized = _success_persistence_failure_exception(semantic_error)
+    decision = _diagnostic_retry_decision(normalized, retry_count=0)
+
+    assert normalized is semantic_error
+    assert decision.error_class == "SEMANTIC_REJECTION"
+    assert decision.retry_requested is False
+    assert decision.terminal is True
+    assert decision.queue == QUEUE_DEAD_LETTER
+
+
+def test_success_persistence_semantic_cause_stays_terminal() -> None:
+    semantic_error = CognitionSemanticValidationError(
+        "model output drifted governance-significant terms"
+    )
+    wrapped = RuntimeError("outer persistence wrapper")
+    wrapped.__cause__ = semantic_error
+
+    normalized = _success_persistence_failure_exception(wrapped)
+    decision = _diagnostic_retry_decision(normalized, retry_count=0)
+
+    assert normalized is semantic_error
+    assert decision.error_class == "SEMANTIC_REJECTION"
+    assert decision.retry_requested is False
+    assert decision.queue == QUEUE_DEAD_LETTER
+
+
+def test_semantic_validation_rejection_uses_dead_letter_escalation_route() -> None:
+    decision = _diagnostic_retry_decision(
+        CognitionSemanticValidationError(
+            "model output drifted governance-significant terms"
+        ),
+        retry_count=0,
+    )
+
+    assert decision.error_class == "SEMANTIC_REJECTION"
+    assert decision.retry_requested is False
+    assert decision.terminal is True
+    assert decision.queue == QUEUE_DEAD_LETTER
+    assert decision.countdown_seconds == 0
+
+
 def test_governance_deny_goes_directly_to_dlq() -> None:
     for exc in (
         GovernanceDenyError("governance denied"),
@@ -82,6 +130,20 @@ def test_persistence_failure_retries_on_retry_queue() -> None:
     assert decision.error_class == "PERSISTENCE_FAILURE"
     assert decision.policy.max_retries == 3
     assert decision.retry_requested is True
+    assert decision.queue == QUEUE_DIAGNOSTIC_RETRY
+    assert decision.countdown_seconds == 15
+
+
+def test_success_persistence_non_semantic_failure_still_retries() -> None:
+    normalized = _success_persistence_failure_exception(
+        RuntimeError("database write failed")
+    )
+    decision = _diagnostic_retry_decision(normalized, retry_count=0)
+
+    assert isinstance(normalized, CognitionPersistenceFailureError)
+    assert decision.error_class == "PERSISTENCE_FAILURE"
+    assert decision.retry_requested is True
+    assert decision.terminal is False
     assert decision.queue == QUEUE_DIAGNOSTIC_RETRY
     assert decision.countdown_seconds == 15
 

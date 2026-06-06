@@ -304,10 +304,7 @@ async def execute_diagnostic_agent_runtime(
                 task_name=task_name,
                 task_id=task_id,
                 retry_count=retry_count,
-                exc=CognitionPersistenceFailureError(
-                    "diagnostic success persistence failed: "
-                    f"{exc.__class__.__name__}: {_bounded_exception_message(exc)}"
-                ),
+                exc=_success_persistence_failure_exception(exc),
                 last_traceback=traceback.format_exc(),
             )
     finally:
@@ -2012,6 +2009,29 @@ def _diagnostic_failure_is_terminal(
         policy.terminal
         or attempt_number >= max(1, max_attempts)
     )
+
+
+def _success_persistence_failure_exception(exc: BaseException) -> BaseException:
+    semantic_rejection = _semantic_validation_error_from_chain(exc)
+    if semantic_rejection is not None:
+        return semantic_rejection
+    return CognitionPersistenceFailureError(
+        "diagnostic success persistence failed: "
+        f"{exc.__class__.__name__}: {_bounded_exception_message(exc)}"
+    )
+
+
+def _semantic_validation_error_from_chain(
+    exc: BaseException,
+) -> CognitionSemanticValidationError | None:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, CognitionSemanticValidationError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _is_retryable_diagnostic_error(exc: BaseException) -> bool:
