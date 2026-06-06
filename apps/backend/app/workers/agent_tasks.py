@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import sys
@@ -49,6 +50,8 @@ from app.agents.tools.orchestration import ActionOrchestrationRuntime
 from app.agents.value_objects import CausalityMetadata
 from app.cognition import (
     AnthropicMessagesClient,
+    CognitionSemanticRejectionDirection,
+    CognitionSemanticRejectionRecord,
     DeterministicDiagnosticLLMClient,
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
@@ -70,9 +73,18 @@ from app.cognition.exceptions import (
     ProviderRateLimitError,
     ProviderTransientError,
 )
+from app.cognition.diagnostic_runtime import (
+    diagnostic_retrieval_context_text,
+    parse_diagnostic_output,
+)
 from app.cognition.persistence import PostgresCognitionUsagePersistence
+from app.cognition.identity import (
+    derive_cognition_audit_id,
+    derive_semantic_rejection_id,
+)
 from app.data_protection.crypto import DataProtectionService
 from app.cognition.models import DiagnosticLLMCompletion
+from app.cognition.semantic import inspect_governance_terms
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
     CoordinationRecord,
@@ -191,6 +203,7 @@ _RESOLUTION_DRAFT_CREATED = "resolution_outbound_draft_created"
 _RESOLUTION_FAILED = "resolution_proposal_failed"
 _MAX_EXECUTION_ATTEMPTS = 5
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
+_SEMANTIC_REJECTION_EXCERPT_MAX_CHARS = 2000
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +309,12 @@ async def execute_diagnostic_agent_runtime(
                 result=result,
             )
         except Exception as exc:  # noqa: BLE001
+            await _persist_semantic_rejection_forensics_if_needed(
+                session_factory=session_factory,
+                work_item=prepared,
+                draft=result,
+                exc=exc,
+            )
             return await _persist_diagnostic_failure(
                 session_factory=session_factory,
                 work_item=prepared,
@@ -516,6 +535,150 @@ async def _generate_diagnostic_reasoning_for_work_item(
         snapshot=snapshot,
         completion=completion,
     )
+
+
+async def _persist_semantic_rejection_forensics_if_needed(
+    *,
+    session_factory: Any,
+    work_item: _DiagnosticExecutionWorkItem,
+    draft: _DiagnosticReasoningDraft,
+    exc: BaseException,
+) -> bool:
+    semantic_error = _semantic_validation_error_from_chain(exc)
+    if semantic_error is None:
+        return False
+    try:
+        record = _semantic_rejection_forensic_record(
+            work_item=work_item,
+            draft=draft,
+            error=semantic_error,
+        )
+        previous_tenant = get_current_tenant()
+        set_current_tenant(work_item.tenant_id)
+        try:
+            async with session_factory() as session:
+                await _set_transaction_tenant(session, work_item.tenant_id)
+                await PostgresCognitionUsagePersistence(
+                    session,
+                    audit_encryptor=_cognition_audit_encryptor(),
+                    data_protection=_data_protection_service(session),
+                ).save_semantic_rejection(
+                    record,
+                    expected_tenant_id=work_item.tenant_id,
+                )
+                await session.commit()
+        finally:
+            set_current_tenant(previous_tenant)
+        return True
+    except Exception:
+        logger.exception(
+            "semantic_rejection_forensics_persist_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+            },
+        )
+        return False
+
+
+def _semantic_rejection_forensic_record(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    draft: _DiagnosticReasoningDraft,
+    error: CognitionSemanticValidationError,
+) -> CognitionSemanticRejectionRecord:
+    snapshot = draft.snapshot
+    completion = draft.completion
+    parsed = parse_diagnostic_output(completion.text)
+    output_text = (
+        f"{parsed.summary}\n{parsed.category.value}\n"
+        f"{parsed.reasoning}"
+    )
+    semantic = inspect_governance_terms(
+        canonical_text=snapshot.content,
+        allowed_text=(
+            f"{snapshot.content}\n\n"
+            f"{diagnostic_retrieval_context_text(snapshot.retrieval)}"
+        ),
+        output_text=output_text,
+    )
+    completion_sha256 = _sha256_text(completion.text)
+    completion_excerpt = _semantic_completion_excerpt(completion.text)
+    return CognitionSemanticRejectionRecord(
+        rejection_id=derive_semantic_rejection_id(
+            tenant_id=snapshot.tenant_id,
+            execution_id=snapshot.execution_id,
+            model=completion.model,
+            completion_sha256=completion_sha256,
+            attempt_id=snapshot.attempt_id,
+        ),
+        tenant_id=snapshot.tenant_id,
+        execution_id=snapshot.execution_id,
+        dispatch_id=snapshot.dispatch_id,
+        session_id=snapshot.session_id,
+        attempt_id=snapshot.attempt_id,
+        attempt_number=snapshot.attempt_number,
+        usage_id=snapshot.usage_id,
+        audit_id=derive_cognition_audit_id(
+            tenant_id=snapshot.tenant_id,
+            execution_id=snapshot.execution_id,
+            model=completion.model,
+            prompt_sha256=snapshot.prompt_sha256,
+            completion_sha256=completion_sha256,
+            attempt_id=snapshot.attempt_id,
+        ),
+        provider=completion.provider,
+        model=completion.model,
+        canonical_terms=semantic.canonical_terms,
+        allowed_terms=semantic.allowed_terms,
+        output_terms=semantic.output_terms,
+        missing_terms=semantic.missing_terms,
+        introduced_terms=semantic.introduced_terms,
+        direction=_semantic_rejection_direction(
+            missing_terms=semantic.missing_terms,
+            introduced_terms=semantic.introduced_terms,
+        ),
+        completion_sha256=completion_sha256,
+        completion_excerpt=completion_excerpt,
+        completion_excerpt_sha256=_sha256_text(completion_excerpt),
+        created_at=datetime.now(timezone.utc),
+        metadata={
+            "error_type": error.__class__.__name__,
+            "message": _bounded_exception_message(error),
+            "dispatch_id": work_item.dispatch_id,
+            "source_language": work_item.source_language,
+            "citation_count": len(snapshot.retrieval.citations),
+            "retrieved_citations": [
+                dict(citation) for citation in snapshot.retrieved_citations
+            ],
+        },
+    )
+
+
+def _semantic_rejection_direction(
+    *,
+    missing_terms: tuple[str, ...],
+    introduced_terms: tuple[str, ...],
+) -> CognitionSemanticRejectionDirection:
+    if missing_terms and introduced_terms:
+        return CognitionSemanticRejectionDirection.DROP_AND_INTRODUCE
+    if missing_terms:
+        return CognitionSemanticRejectionDirection.DROP
+    if introduced_terms:
+        return CognitionSemanticRejectionDirection.INTRODUCE
+    return CognitionSemanticRejectionDirection.NONE
+
+
+def _semantic_completion_excerpt(text: str) -> str:
+    excerpt = " ".join(text.split())
+    if len(excerpt) <= _SEMANTIC_REJECTION_EXCERPT_MAX_CHARS:
+        return excerpt
+    return excerpt[:_SEMANTIC_REJECTION_EXCERPT_MAX_CHARS].rstrip()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 async def _load_diagnostic_reasoning_snapshot(

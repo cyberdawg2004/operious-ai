@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.cognition import (
+    CognitionSemanticRejectionDirection,
+    CognitionSemanticRejectionRecord,
     DiagnosticCognitionRuntime,
     DiagnosticCognitionRuntimeConfig,
 )
-from app.cognition.db.models import CognitionAuditRecordRow
+from app.cognition.db.models import (
+    CognitionAuditRecordRow,
+    CognitionSemanticRejectionRow,
+)
 from app.cognition.identity import (
     as_cognition_audit_id,
     derive_cognition_audit_id,
+    derive_semantic_rejection_id,
 )
 from app.cognition.llm import DiagnosticLLMMessage
 from app.cognition.models import (
@@ -31,6 +38,7 @@ from app.cognition.persistence import (
     InMemoryCognitionUsagePersistence,
     PostgresCognitionUsagePersistence,
 )
+from app.data_protection.crypto import DataProtectionService, MasterKeyRing
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
@@ -61,12 +69,13 @@ from app.tenant.enums import (
     TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
 )
+from app.tenant.db.models import TenantRow
 from app.tenant.identity import derive_knowledge_document_id
 from app.tenant.persistence import (
     InMemoryTenantConfigurationRepository,
     TenantKnowledgeDocumentRecord,
 )
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 _TENANT_ID = "tenant-phase-g"
 _NOW = datetime(2026, 5, 23, 9, tzinfo=timezone.utc)
@@ -203,6 +212,122 @@ async def test_cognition_audit_is_tenant_encrypted(
     assert stored.completion_full == completion
 
 
+@requires_postgres
+@pytest.mark.asyncio
+async def test_semantic_rejection_forensics_persist_term_diff_and_protect_text(
+    pg_session: AsyncSession,
+) -> None:
+    protection = _data_protection_service(pg_session)
+    repo = PostgresCognitionUsagePersistence(
+        pg_session,
+        data_protection=protection,
+    )
+    record = _semantic_rejection_record(seed="protected")
+
+    await repo.save_semantic_rejection(record, expected_tenant_id=_TENANT_ID)
+    await pg_session.flush()
+
+    row = (
+        await pg_session.execute(
+            select(CognitionSemanticRejectionRow).where(
+                CognitionSemanticRejectionRow.rejection_id == record.rejection_id
+            )
+        )
+    ).scalar_one()
+    assert row.canonical_terms == ["escalate"]
+    assert row.allowed_terms == ["escalate", "replacement"]
+    assert row.output_terms == ["deny"]
+    assert row.missing_terms == ["escalate"]
+    assert row.introduced_terms == ["deny"]
+    assert (
+        row.direction
+        == CognitionSemanticRejectionDirection.DROP_AND_INTRODUCE.value
+    )
+    assert row.completion_sha256 == record.completion_sha256
+    assert row.completion_excerpt.startswith("opdp:v1:")
+    assert record.completion_excerpt not in row.completion_excerpt
+    assert "private charging detail" not in json.dumps(row.metadata_json)
+
+    await pg_session.execute(text("SET LOCAL ROLE operious_app_test"))
+    try:
+        await set_pg_rls_tenant(pg_session, "tenant-phase-g-other")
+        hidden = (
+            await pg_session.execute(
+                select(CognitionSemanticRejectionRow).where(
+                    CognitionSemanticRejectionRow.rejection_id
+                    == record.rejection_id
+                )
+            )
+        ).scalar_one_or_none()
+        assert hidden is None
+    finally:
+        await pg_session.execute(text("RESET ROLE"))
+        await set_pg_rls_tenant(pg_session, _TENANT_ID)
+
+    stored = await repo.get_semantic_rejection(
+        record.rejection_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert stored is not None
+    assert stored.direction == record.direction
+    assert stored.missing_terms == ("escalate",)
+    assert stored.introduced_terms == ("deny",)
+    assert stored.completion_excerpt == record.completion_excerpt
+    assert stored.metadata["message"] == "private charging detail"
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_semantic_rejection_forensics_survives_failure_rollback(
+    pg_engine: AsyncEngine,
+) -> None:
+    session_factory = async_sessionmaker(pg_engine, expire_on_commit=False)
+    tenant_id = "tenant-phase-g-semantic-rollback"
+    record = _semantic_rejection_record(
+        tenant_id=tenant_id,
+        seed="rollback",
+    )
+    try:
+        async with session_factory() as failed_session:
+            await set_pg_rls_tenant(failed_session, tenant_id)
+            async with session_factory() as durable_session:
+                await set_pg_rls_tenant(durable_session, tenant_id)
+                await PostgresCognitionUsagePersistence(
+                    durable_session,
+                ).save_semantic_rejection(
+                    record,
+                    expected_tenant_id=tenant_id,
+                )
+                await durable_session.commit()
+            await failed_session.rollback()
+
+        async with session_factory() as verify_session:
+            await set_pg_rls_tenant(verify_session, tenant_id)
+            stored = await PostgresCognitionUsagePersistence(
+                verify_session,
+            ).get_semantic_rejection(
+                record.rejection_id,
+                expected_tenant_id=tenant_id,
+            )
+            assert stored is not None
+            assert stored.rejection_id == record.rejection_id
+            assert stored.direction == record.direction
+            assert stored.introduced_terms == ("deny",)
+    finally:
+        async with session_factory() as cleanup_session:
+            await set_pg_rls_tenant(cleanup_session, tenant_id)
+            await cleanup_session.execute(
+                delete(CognitionSemanticRejectionRow).where(
+                    CognitionSemanticRejectionRow.rejection_id
+                    == record.rejection_id
+                )
+            )
+            await cleanup_session.execute(
+                delete(TenantRow).where(TenantRow.tenant_id == tenant_id)
+            )
+            await cleanup_session.commit()
+
+
 def test_trace_inspector_event_links_to_cognition_audit() -> None:
     audit_id = "00000000-0000-0000-0000-00000000a111"
     session_id = SessionId(uuid.UUID("00000000-0000-0000-0000-00000000a001"))
@@ -276,6 +401,69 @@ async def _runtime(
             ),
         ),
         usage_repo,
+    )
+
+
+def _semantic_rejection_record(
+    *,
+    tenant_id: str = _TENANT_ID,
+    seed: str,
+) -> CognitionSemanticRejectionRecord:
+    completion = json.dumps(
+        {
+            "summary": "Customer reports private charging detail.",
+            "category": "charging_issue",
+            "confidence": 0.84,
+            "reasoning": "The classification says deny without allowed support.",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    completion_sha256 = hashlib.sha256(completion.encode("utf-8")).hexdigest()
+    execution_id = f"execution-semantic-{seed}"
+    attempt_id = f"attempt-semantic-{seed}"
+    return CognitionSemanticRejectionRecord(
+        rejection_id=derive_semantic_rejection_id(
+            tenant_id=tenant_id,
+            execution_id=execution_id,
+            model="claude-test",
+            completion_sha256=completion_sha256,
+            attempt_id=attempt_id,
+        ),
+        tenant_id=tenant_id,
+        execution_id=execution_id,
+        dispatch_id=f"dispatch-semantic-{seed}",
+        session_id=f"session-semantic-{seed}",
+        attempt_id=attempt_id,
+        attempt_number=1,
+        provider="anthropic",
+        model="claude-test",
+        canonical_terms=("escalate",),
+        allowed_terms=("escalate", "replacement"),
+        output_terms=("deny",),
+        missing_terms=("escalate",),
+        introduced_terms=("deny",),
+        direction=CognitionSemanticRejectionDirection.DROP_AND_INTRODUCE,
+        completion_sha256=completion_sha256,
+        completion_excerpt=completion,
+        completion_excerpt_sha256=hashlib.sha256(
+            completion.encode("utf-8")
+        ).hexdigest(),
+        created_at=_NOW,
+        metadata={
+            "message": "private charging detail",
+            "citation_count": 1,
+        },
+    )
+
+
+def _data_protection_service(session: AsyncSession) -> DataProtectionService:
+    return DataProtectionService(
+        session,
+        master_key_ring=MasterKeyRing(
+            keys={"v1": b"c" * 32},
+            active_version="v1",
+        ),
     )
 
 

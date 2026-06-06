@@ -883,6 +883,12 @@ def _parse_output(text: str) -> DiagnosticLLMOutput:
         raise _diagnostic_schema_error(exc) from exc
 
 
+def parse_diagnostic_output(text: str) -> DiagnosticLLMOutput:
+    """Parse a diagnostic completion using the runtime's schema rules."""
+
+    return _parse_output(text)
+
+
 def _diagnostic_schema_error(exc: ValidationError) -> CognitionLLMProviderError:
     return CognitionLLMProviderError(
         "diagnostic model output failed schema validation: "
@@ -1016,6 +1022,14 @@ def _context_text(retrieval: KnowledgeRetrievalResult) -> str:
         )
         for item in retrieval.items
     )
+
+
+def diagnostic_retrieval_context_text(
+    retrieval: KnowledgeRetrievalResult,
+) -> str:
+    """Render retrieved SOP context exactly as diagnostic validation sees it."""
+
+    return _context_text(retrieval)
 
 
 def _knowledge_chunk_payload(item: Any) -> str:

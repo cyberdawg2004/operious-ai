@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -145,4 +146,99 @@ class CognitionAuditRecordRow(Base):
     )
 
 
-__all__ = ["CognitionAuditRecordRow", "CognitionLLMUsageRow"]
+class CognitionSemanticRejectionRow(Base):
+    """Forensic term-diff record for rejected diagnostic output."""
+
+    __tablename__ = "cognition_semantic_rejection_records"
+
+    rejection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    execution_id: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    dispatch_id: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    attempt_id: Mapped[str | None] = mapped_column(String(_HANDLE_WIDTH), nullable=True)
+    attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    audit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    model: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    canonical_terms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    allowed_terms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    output_terms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    missing_terms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    introduced_terms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    direction: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    completion_sha256: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
+    completion_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
+    completion_excerpt_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint("length(execution_id) > 0", name="execution_id_nonempty"),
+        CheckConstraint("length(dispatch_id) > 0", name="dispatch_id_nonempty"),
+        CheckConstraint("length(session_id) > 0", name="session_id_nonempty"),
+        CheckConstraint("length(provider) > 0", name="provider_nonempty"),
+        CheckConstraint("length(model) > 0", name="model_nonempty"),
+        CheckConstraint(
+            "direction IN ('DROP', 'INTRODUCE', 'DROP_AND_INTRODUCE', 'NONE')",
+            name="semantic_rejection_direction_valid",
+        ),
+        CheckConstraint(
+            "length(completion_sha256) = 64",
+            name="semantic_rejection_completion_sha256_width",
+        ),
+        CheckConstraint(
+            "length(completion_excerpt_sha256) = 64",
+            name="semantic_rejection_completion_excerpt_sha256_width",
+        ),
+        Index(
+            "ix_cognition_semantic_rejection_tenant_execution",
+            "tenant_id",
+            "execution_id",
+        ),
+        Index(
+            "ix_cognition_semantic_rejection_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+    )
+
+
+__all__ = [
+    "CognitionAuditRecordRow",
+    "CognitionLLMUsageRow",
+    "CognitionSemanticRejectionRow",
+]

@@ -35,6 +35,8 @@ from app.cognition.models import (
     CognitionAuditRecord,
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
+    CognitionSemanticRejectionDirection,
+    CognitionSemanticRejectionRecord,
     DiagnosticReasoningResult,
     KnowledgeRollbackResult,
 )
@@ -59,6 +61,8 @@ __all__ = [
     "CognitionPersistenceFailureError",
     "CognitionRuntime",
     "CognitionSemanticRejectionError",
+    "CognitionSemanticRejectionDirection",
+    "CognitionSemanticRejectionRecord",
     "CognitionSemanticValidationError",
     "GovernanceDenyError",
     "ProviderQuotaExceededError",

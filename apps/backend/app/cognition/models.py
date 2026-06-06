@@ -9,7 +9,11 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.cognition.identity import CognitionAuditId, CognitionLLMUsageId
+from app.cognition.identity import (
+    CognitionAuditId,
+    CognitionLLMUsageId,
+    CognitionSemanticRejectionId,
+)
 from app.knowledge.models import KnowledgeRetrievalResult
 from app.sop_intelligence.persistence import ApprovalRecord
 from app.tenant.persistence import (
@@ -52,6 +56,13 @@ class CognitionLLMUsageStatus(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     FAILED = "failed"
+
+
+class CognitionSemanticRejectionDirection(StrEnum):
+    DROP = "DROP"
+    INTRODUCE = "INTRODUCE"
+    DROP_AND_INTRODUCE = "DROP_AND_INTRODUCE"
+    NONE = "NONE"
 
 
 class DiagnosticCategory(StrEnum):
@@ -139,6 +150,34 @@ class CognitionAuditRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class CognitionSemanticRejectionRecord:
+    """Durable forensic record for semantic validation rejection."""
+
+    rejection_id: CognitionSemanticRejectionId
+    tenant_id: str
+    execution_id: str
+    dispatch_id: str
+    session_id: str
+    provider: str
+    model: str
+    canonical_terms: tuple[str, ...]
+    allowed_terms: tuple[str, ...]
+    output_terms: tuple[str, ...]
+    missing_terms: tuple[str, ...]
+    introduced_terms: tuple[str, ...]
+    direction: CognitionSemanticRejectionDirection
+    completion_sha256: str
+    completion_excerpt: str
+    completion_excerpt_sha256: str
+    created_at: datetime
+    attempt_id: str | None = None
+    attempt_number: int | None = None
+    usage_id: CognitionLLMUsageId | None = None
+    audit_id: CognitionAuditId | None = None
+    metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
+
+
+@dataclass(frozen=True, slots=True)
 class DiagnosticLLMUsage:
     prompt_tokens: int
     completion_tokens: int
@@ -182,6 +221,8 @@ __all__ = [
     "CognitionAuditRecord",
     "CognitionLLMUsageRecord",
     "CognitionLLMUsageStatus",
+    "CognitionSemanticRejectionDirection",
+    "CognitionSemanticRejectionRecord",
     "DiagnosticCategory",
     "DiagnosticLLMCompletion",
     "DiagnosticLLMOutput",

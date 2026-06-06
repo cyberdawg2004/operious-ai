@@ -7,10 +7,16 @@ from typing import NewType
 
 CognitionLLMUsageId = NewType("CognitionLLMUsageId", uuid.UUID)
 CognitionAuditId = NewType("CognitionAuditId", uuid.UUID)
+CognitionSemanticRejectionId = NewType(
+    "CognitionSemanticRejectionId", uuid.UUID
+)
 
 _LLM_USAGE_NAMESPACE = uuid.UUID("7d7f91de-38e4-555c-bc45-7739d1185df6")
 _COGNITION_AUDIT_NAMESPACE = uuid.UUID(
     "7d7f91de-38e4-555c-bc45-7739d1185df7"
+)
+_SEMANTIC_REJECTION_NAMESPACE = uuid.UUID(
+    "7d7f91de-38e4-555c-bc45-7739d1185df8"
 )
 
 
@@ -68,6 +74,38 @@ def as_cognition_audit_id(value: str | uuid.UUID) -> CognitionAuditId:
     )
 
 
+def derive_semantic_rejection_id(
+    *,
+    tenant_id: str,
+    execution_id: str,
+    model: str,
+    completion_sha256: str,
+    attempt_id: str | None = None,
+) -> CognitionSemanticRejectionId:
+    """Derive a stable forensic id for one semantic rejection."""
+
+    parts = [
+        _normalize(tenant_id, "tenant_id"),
+        _normalize(execution_id, "execution_id"),
+        _normalize(model, "model"),
+        _normalize(completion_sha256, "completion_sha256"),
+    ]
+    if attempt_id is not None:
+        parts.append(_normalize(attempt_id, "attempt_id"))
+    seed = "|".join(parts)
+    return CognitionSemanticRejectionId(
+        uuid.uuid5(_SEMANTIC_REJECTION_NAMESPACE, seed)
+    )
+
+
+def as_semantic_rejection_id(
+    value: str | uuid.UUID,
+) -> CognitionSemanticRejectionId:
+    return CognitionSemanticRejectionId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
 def _normalize(value: str, field: str) -> str:
     normalized = value.strip().casefold()
     if not normalized:
@@ -78,8 +116,11 @@ def _normalize(value: str, field: str) -> str:
 __all__ = [
     "CognitionAuditId",
     "CognitionLLMUsageId",
+    "CognitionSemanticRejectionId",
     "as_cognition_audit_id",
     "as_llm_usage_id",
+    "as_semantic_rejection_id",
     "derive_cognition_audit_id",
     "derive_llm_usage_id",
+    "derive_semantic_rejection_id",
 ]
