@@ -446,6 +446,12 @@ class DiagnosticCognitionRuntime:
                 },
             )
         except CognitionSemanticValidationError as exc:
+            _attach_blocked_diagnostic_context(
+                exc,
+                snapshot=snapshot,
+                completion=active_completion,
+                metadata=semantic_correction_metadata,
+            )
             await self.persist_reasoning_failure(
                 snapshot=snapshot,
                 error=exc,
@@ -455,6 +461,12 @@ class DiagnosticCognitionRuntime:
             )
             raise
         except CognitionGovernanceRejectionError as exc:
+            _attach_blocked_diagnostic_context(
+                exc,
+                snapshot=snapshot,
+                completion=active_completion,
+                metadata=semantic_correction_metadata,
+            )
             await self.persist_reasoning_failure(
                 snapshot=snapshot,
                 error=exc,
@@ -704,9 +716,12 @@ class DiagnosticCognitionRuntime:
             or envelope.decision is None
             or envelope.decision.decision is not Decision.ALLOW
         ):
-            raise CognitionGovernanceRejectionError(
+            error = CognitionGovernanceRejectionError(
                 "governance rejected diagnostic model output"
             )
+            if decision_id is not None:
+                setattr(error, "governance_decision_id", decision_id)
+            raise error
         return decision_id
 
     async def _save_usage(
@@ -1139,6 +1154,36 @@ def _semantic_self_correction_metadata(
             }
         )
     return metadata
+
+
+def _attach_blocked_diagnostic_context(
+    error: BaseException,
+    *,
+    snapshot: DiagnosticReasoningSnapshot,
+    completion: DiagnosticLLMCompletion,
+    metadata: Mapping[str, Any],
+) -> None:
+    setattr(error, "diagnostic_blocked_completion_text", completion.text)
+    setattr(
+        error,
+        "diagnostic_blocked_completion_sha256",
+        _raw_completion_sha256(completion),
+    )
+    setattr(
+        error,
+        "diagnostic_retrieved_citations",
+        _citations_list(snapshot),
+    )
+    setattr(error, "diagnostic_session_id", snapshot.session_id)
+    setattr(error, "diagnostic_dispatch_id", snapshot.dispatch_id)
+    setattr(error, "diagnostic_execution_id", snapshot.execution_id)
+    setattr(error, "diagnostic_attempt_id", snapshot.attempt_id)
+    setattr(error, "diagnostic_source_language", snapshot.source_language)
+    setattr(
+        error,
+        "semantic_self_correction_metadata",
+        dict(metadata),
+    )
 
 
 def _diagnostic_schema_error(exc: ValidationError) -> CognitionLLMProviderError:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -114,7 +115,19 @@ from app.execution import (
     ExecutionRuntime,
     PostgresExecutionPersistence,
 )
-from app.governance.persistence import PostgresGovernanceRepository
+from app.escalation.celery_publisher import CeleryEscalationPublisher
+from app.escalation.persistence import PostgresEscalationPersistence
+from app.escalation.runtime import EscalationAgentRuntime
+from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
+from app.governance.identity import derive_decision_id
+from app.governance.persistence import (
+    GovernanceDecisionRecord,
+    GovernanceTraceRecord,
+    PolicyEvaluationResultRecord,
+    PolicyEvaluationTraceRecord,
+    PolicyViolationRecord,
+    PostgresGovernanceRepository,
+)
 from app.governance.capability.runtime import build_capability_governance_runtime
 from app.knowledge import (
     DeterministicKnowledgeChunker,
@@ -180,6 +193,7 @@ from app.queues import (
     QUEUE_DEAD_LETTER,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_DIAGNOSTIC_RETRY,
+    QUEUE_ESCALATION,
     QUEUE_SUPERVISOR,
 )
 from app.workers.supervisor_tasks import evaluate_session_supervisor
@@ -207,6 +221,12 @@ _RESOLUTION_FAILED = "resolution_proposal_failed"
 _MAX_EXECUTION_ATTEMPTS = 5
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 _SEMANTIC_REJECTION_EXCERPT_MAX_CHARS = 2000
+_DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS = frozenset(
+    {"SEMANTIC_REJECTION", "GOVERNANCE_DENY"}
+)
+_DIAGNOSTIC_TERMINAL_POLICY_NAME = "cognition.diagnostic_terminal_block"
+_DIAGNOSTIC_TERMINAL_POLICY_CHAIN_ID = "cognition.diagnostic.terminal_block"
+_DIAGNOSTIC_TERMINAL_GOVERNANCE_VERSION = "diagnostic-terminal-block.v1"
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +409,15 @@ class _DiagnosticRetryDecision:
     retry_requested: bool
     countdown_seconds: int
     queue: str
+
+
+@dataclass(frozen=True, slots=True)
+class _DiagnosticEscalationResult:
+    governance_decision_id: str
+    escalation_id: str | None
+    outbox_id: str | None
+    execution_failed: bool
+    escalation_published: bool
 
 
 async def _prepare_diagnostic_execution(
@@ -1179,8 +1208,17 @@ async def _persist_diagnostic_failure(
             attempt_number=work_item.attempt_number,
             max_attempts=max_attempts,
         )
+        escalate_terminal = terminal and _diagnostic_failure_should_escalate(
+            retry_decision.error_class
+        )
         retry_requested = retry_decision.retry_requested and not terminal
-        retry_queue = QUEUE_DEAD_LETTER if terminal else retry_decision.queue
+        retry_queue = (
+            QUEUE_ESCALATION
+            if escalate_terminal
+            else QUEUE_DEAD_LETTER
+            if terminal
+            else retry_decision.queue
+        )
         retry_countdown_seconds = 0 if terminal else retry_decision.countdown_seconds
         failure = _bounded_failure_metadata(
             exc,
@@ -1216,41 +1254,56 @@ async def _persist_diagnostic_failure(
             failure=failure,
         )
         if terminal:
-            execution_failed = await _dead_letter_execution_record(
-                execution_runtime=execution_runtime,
-                session=session,
-                execution_id=work_item.execution_id,
-                attempt_id=work_item.attempt_id,
-                worker_id=worker_id,
-                failure=failure,
-            )
-            dead_letter_task_recorded = await _record_dead_letter_task(
-                session=session,
-                tenant_id=work_item.tenant_id,
-                task_name=task_name,
-                task_id=(
-                    task_id
-                    or _fallback_task_id(
-                        task_name=task_name,
-                        execution_id=work_item.execution_id,
-                        attempt_id=work_item.attempt_id,
-                    )
-                ),
-                execution_id=work_item.execution_id,
-                attempt_id=work_item.attempt_id,
-                dispatch_id=work_item.dispatch_id,
-                session_id=work_item.session_id,
-                retry_count=retry_count,
-                queue=QUEUE_DIAGNOSTIC_NORMAL,
-                task_payload=_dead_letter_task_payload(work_item),
-                celery_kwargs={
-                    "execution_id": work_item.execution_id,
-                    "tenant_id": work_item.tenant_id,
-                },
-                failure=failure,
-            )
-            status = "dead_lettered"
+            escalation_result: _DiagnosticEscalationResult | None = None
+            if escalate_terminal:
+                escalation_result = await _escalate_terminal_diagnostic_block(
+                    session=session,
+                    execution_runtime=execution_runtime,
+                    work_item=work_item,
+                    worker_id=worker_id,
+                    failure=failure,
+                    exc=exc,
+                )
+                execution_failed = escalation_result.execution_failed
+                dead_letter_task_recorded = False
+                status = "escalated"
+            else:
+                execution_failed = await _dead_letter_execution_record(
+                    execution_runtime=execution_runtime,
+                    session=session,
+                    execution_id=work_item.execution_id,
+                    attempt_id=work_item.attempt_id,
+                    worker_id=worker_id,
+                    failure=failure,
+                )
+                dead_letter_task_recorded = await _record_dead_letter_task(
+                    session=session,
+                    tenant_id=work_item.tenant_id,
+                    task_name=task_name,
+                    task_id=(
+                        task_id
+                        or _fallback_task_id(
+                            task_name=task_name,
+                            execution_id=work_item.execution_id,
+                            attempt_id=work_item.attempt_id,
+                        )
+                    ),
+                    execution_id=work_item.execution_id,
+                    attempt_id=work_item.attempt_id,
+                    dispatch_id=work_item.dispatch_id,
+                    session_id=work_item.session_id,
+                    retry_count=retry_count,
+                    queue=QUEUE_DIAGNOSTIC_NORMAL,
+                    task_payload=_dead_letter_task_payload(work_item),
+                    celery_kwargs={
+                        "execution_id": work_item.execution_id,
+                        "tenant_id": work_item.tenant_id,
+                    },
+                    failure=failure,
+                )
+                status = "dead_lettered"
         else:
+            escalation_result = None
             execution_failed = await _fail_execution_record(
                 execution_runtime=execution_runtime,
                 session=session,
@@ -1275,6 +1328,7 @@ async def _persist_diagnostic_failure(
             "dead_letter_task_recorded": dead_letter_task_recorded,
             "retry_queue": retry_queue,
             "retry_countdown_seconds": retry_countdown_seconds,
+            **_diagnostic_escalation_result_payload(escalation_result),
             **failure,
         }
 
@@ -1978,6 +2032,418 @@ async def _record_dead_letter_task(
         return False
 
 
+async def _escalate_terminal_diagnostic_block(
+    *,
+    session: AsyncSession,
+    execution_runtime: ExecutionRuntime,
+    work_item: _DiagnosticExecutionWorkItem,
+    worker_id: str,
+    failure: Mapping[str, object],
+    exc: BaseException,
+) -> _DiagnosticEscalationResult:
+    await _set_transaction_tenant(session, work_item.tenant_id)
+    governance_repo = PostgresGovernanceRepository(session)
+    decision_id = await _ensure_diagnostic_block_governance_denial(
+        governance_repo=governance_repo,
+        work_item=work_item,
+        failure=failure,
+        exc=exc,
+    )
+    escalation_runtime = EscalationAgentRuntime(
+        escalation_persistence=PostgresEscalationPersistence(session),
+        governance_repository=governance_repo,
+        session_persistence=PostgresSessionPersistence(session),
+    )
+    prepared = await escalation_runtime.prepare_governance_denial_outbox(
+        governance_decision_id=decision_id,
+        expected_tenant_id=work_item.tenant_id,
+        session_id=work_item.session_id,
+        metadata=_diagnostic_escalation_outbox_metadata(
+            work_item=work_item,
+            failure=failure,
+        ),
+    )
+    await session.commit()
+
+    escalation_published = False
+    try:
+        await CeleryEscalationPublisher().publish_governance_denial(
+            governance_decision_id=decision_id,
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+        )
+        escalation_published = True
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "diagnostic_terminal_escalation_publish_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": decision_id,
+            },
+        )
+
+    execution_failed = await _fail_execution_record(
+        execution_runtime=execution_runtime,
+        session=session,
+        execution_id=work_item.execution_id,
+        attempt_id=work_item.attempt_id,
+        worker_id=worker_id,
+        failure={
+            **dict(failure),
+            "governance_decision_id": decision_id,
+            "escalation_id": prepared.escalation.escalation_id,
+            "escalation_outbox_id": prepared.outbox.outbox_id,
+            "escalation_published": escalation_published,
+        },
+        retry_requested=False,
+    )
+    return _DiagnosticEscalationResult(
+        governance_decision_id=decision_id,
+        escalation_id=prepared.escalation.escalation_id,
+        outbox_id=prepared.outbox.outbox_id,
+        execution_failed=execution_failed,
+        escalation_published=escalation_published,
+    )
+
+
+async def _ensure_diagnostic_block_governance_denial(
+    *,
+    governance_repo: PostgresGovernanceRepository,
+    work_item: _DiagnosticExecutionWorkItem,
+    failure: Mapping[str, object],
+    exc: BaseException,
+) -> str:
+    existing_decision_id = _diagnostic_existing_governance_decision_id(exc)
+    if existing_decision_id is not None:
+        existing = await governance_repo.get_decision(
+            existing_decision_id,
+            expected_tenant_id=work_item.tenant_id,
+        )
+        if existing is not None and existing.decision == Decision.DENY.value:
+            return existing.decision_id
+
+    decision_id = _diagnostic_terminal_block_decision_id(
+        work_item=work_item,
+        failure=failure,
+    )
+    existing = await governance_repo.get_decision(
+        decision_id,
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if existing is not None:
+        return existing.decision_id
+
+    decision, trace = _diagnostic_terminal_block_governance_records(
+        decision_id=decision_id,
+        work_item=work_item,
+        failure=failure,
+        exc=exc,
+        source_governance_decision_id=existing_decision_id,
+    )
+    try:
+        await governance_repo.record_decision(decision)
+        await governance_repo.record_trace(trace)
+    except ValueError:
+        existing = await governance_repo.get_decision(
+            decision_id,
+            expected_tenant_id=work_item.tenant_id,
+        )
+        if existing is not None:
+            return existing.decision_id
+        raise
+    return decision_id
+
+
+def _diagnostic_terminal_block_governance_records(
+    *,
+    decision_id: str,
+    work_item: _DiagnosticExecutionWorkItem,
+    failure: Mapping[str, object],
+    exc: BaseException,
+    source_governance_decision_id: str | None,
+) -> tuple[GovernanceDecisionRecord, GovernanceTraceRecord]:
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    metadata = _diagnostic_terminal_block_metadata(
+        work_item=work_item,
+        failure=failure,
+        exc=exc,
+        source_governance_decision_id=source_governance_decision_id,
+    )
+    rule_id = _diagnostic_terminal_block_rule_id(failure)
+    reason = _diagnostic_terminal_block_reason(failure)
+    evaluated = PolicyEvaluationResultRecord(
+        policy_name=_DIAGNOSTIC_TERMINAL_POLICY_NAME,
+        rule_id=rule_id,
+        decision=Decision.DENY.value,
+        severity=int(ViolationSeverity.HIGH),
+        reason=reason,
+        evaluated_at=now_iso,
+        metadata=metadata,
+        policy_version=_DIAGNOSTIC_TERMINAL_GOVERNANCE_VERSION,
+    )
+    violation = PolicyViolationRecord(
+        policy_name=_DIAGNOSTIC_TERMINAL_POLICY_NAME,
+        rule_id=rule_id,
+        decision=Decision.DENY.value,
+        severity=int(ViolationSeverity.HIGH),
+        detail=reason,
+        metadata=metadata,
+    )
+    policy_trace = PolicyEvaluationTraceRecord(
+        policy_name=_DIAGNOSTIC_TERMINAL_POLICY_NAME,
+        status="completed",
+        started_at=now_iso,
+        ended_at=now_iso,
+        latency_ms=0.0,
+        rule_count=1,
+        decision_counts={Decision.DENY.value: 1},
+        error=None,
+        metadata=metadata,
+    )
+    decision = GovernanceDecisionRecord(
+        decision_id=decision_id,
+        decision=Decision.DENY.value,
+        stage=EnforcementStage.PRE_EXECUTION.value,
+        policy_chain_id=_DIAGNOSTIC_TERMINAL_POLICY_CHAIN_ID,
+        reason=reason,
+        decided_at=now_iso,
+        correlation_id=work_item.dispatch_id,
+        request_id=work_item.dispatch_id,
+        tenant_id=work_item.tenant_id,
+        subject_kind="diagnostic_execution",
+        governance_version=_DIAGNOSTIC_TERMINAL_GOVERNANCE_VERSION,
+        violations=(violation,),
+        evaluated_rules=(evaluated,),
+        metadata={
+            "session_id": work_item.session_id,
+            "dispatch_id": work_item.dispatch_id,
+            "execution_id": work_item.execution_id,
+            "attempt_id": work_item.attempt_id,
+            "diagnostic_terminal_block": True,
+            "source_governance_decision_id": source_governance_decision_id,
+        },
+    )
+    trace = GovernanceTraceRecord(
+        decision_id=decision_id,
+        request_id=work_item.dispatch_id,
+        correlation_id=work_item.dispatch_id,
+        stage=EnforcementStage.PRE_EXECUTION.value,
+        action="ai.diagnostic_classification",
+        resource=f"execution:{work_item.execution_id}",
+        actor="agent:diagnostic",
+        tenant_id=work_item.tenant_id,
+        subject_kind="diagnostic_execution",
+        started_at=now_iso,
+        ended_at=now_iso,
+        latency_ms=0.0,
+        status="completed",
+        final_decision=Decision.DENY.value,
+        policy_chain_id=_DIAGNOSTIC_TERMINAL_POLICY_CHAIN_ID,
+        rule_count=1,
+        violation_count=1,
+        restriction_count=0,
+        enforcement_handler=None,
+        enforcement_status=None,
+        enforcement_latency_ms=None,
+        policy_traces=(policy_trace,),
+        error=None,
+        metadata=metadata,
+    )
+    return decision, trace
+
+
+def _diagnostic_terminal_block_metadata(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    failure: Mapping[str, object],
+    exc: BaseException,
+    source_governance_decision_id: str | None,
+) -> dict[str, Any]:
+    semantic_metadata = _exception_mapping_attr(
+        exc,
+        "semantic_self_correction_metadata",
+    )
+    retrieved_citations = _exception_citations_attr(
+        exc,
+        "diagnostic_retrieved_citations",
+    )
+    completion_excerpt = _exception_completion_excerpt(exc)
+    completion_sha256 = _metadata_text(
+        getattr(exc, "diagnostic_blocked_completion_sha256", None)
+    )
+    structured_handoff: dict[str, Any] = {
+        "handoff_type": "diagnostic_terminal_block",
+        "tenant_id": work_item.tenant_id,
+        "session_id": work_item.session_id,
+        "dispatch_id": work_item.dispatch_id,
+        "execution_id": work_item.execution_id,
+        "attempt_id": work_item.attempt_id,
+        "attempt_number": work_item.attempt_number,
+        "source_language": work_item.source_language,
+        "error_class": _metadata_text(failure.get("error_class")),
+        "error_type": _metadata_text(failure.get("error_type")),
+        "message": _metadata_text(failure.get("message")),
+        "source_governance_decision_id": source_governance_decision_id,
+        "retrieved_citations": retrieved_citations,
+        "recommendation": "human review required before diagnostic completion",
+    }
+    if completion_excerpt is not None:
+        structured_handoff["blocked_completion_excerpt"] = completion_excerpt
+
+    grounding_trace: dict[str, Any] = {
+        "status": "diagnostic_blocked",
+        "terminal_block": True,
+        "error_class": _metadata_text(failure.get("error_class")),
+        "retry_queue": _metadata_text(failure.get("retry_queue")),
+        "blocked_completion_sha256": completion_sha256,
+        "semantic_self_correction": semantic_metadata,
+        "source_governance_decision_id": source_governance_decision_id,
+    }
+    return {
+        "session_id": work_item.session_id,
+        "dispatch_id": work_item.dispatch_id,
+        "execution_id": work_item.execution_id,
+        "attempt_id": work_item.attempt_id,
+        "attempt_number": work_item.attempt_number,
+        "tenant_id": work_item.tenant_id,
+        "error_class": _metadata_text(failure.get("error_class")),
+        "error_type": _metadata_text(failure.get("error_type")),
+        "semantic_self_correction": semantic_metadata,
+        "structured_handoff": structured_handoff,
+        "grounding_trace": grounding_trace,
+    }
+
+
+def _diagnostic_terminal_block_decision_id(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    failure: Mapping[str, object],
+) -> str:
+    seed_payload = {
+        "attempt_id": work_item.attempt_id,
+        "error_class": str(failure.get("error_class") or ""),
+        "execution_id": work_item.execution_id,
+        "tenant_id": work_item.tenant_id,
+    }
+    seed = (
+        "cognition.diagnostic_terminal_block|"
+        + json.dumps(seed_payload, sort_keys=True, separators=(",", ":"))
+    )
+    return str(derive_decision_id(seed=seed))
+
+
+def _diagnostic_terminal_block_rule_id(
+    failure: Mapping[str, object],
+) -> str:
+    error_class = str(failure.get("error_class") or "terminal_block")
+    suffix = error_class.casefold().replace("_", ".")
+    return f"diagnostic_terminal_block.{suffix}"
+
+
+def _diagnostic_terminal_block_reason(
+    failure: Mapping[str, object],
+) -> str:
+    error_class = str(failure.get("error_class") or "terminal_block")
+    return f"deny: diagnostic terminal block ({error_class})"
+
+
+def _diagnostic_escalation_outbox_metadata(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    failure: Mapping[str, object],
+) -> dict[str, Any]:
+    return {
+        "source": "diagnostic_terminal_block",
+        "session_id": work_item.session_id,
+        "dispatch_id": work_item.dispatch_id,
+        "execution_id": work_item.execution_id,
+        "attempt_id": work_item.attempt_id,
+        "error_class": _metadata_text(failure.get("error_class")),
+    }
+
+
+def _diagnostic_escalation_result_payload(
+    result: _DiagnosticEscalationResult | None,
+) -> dict[str, object]:
+    if result is None:
+        return {}
+    payload: dict[str, object] = {
+        "governance_decision_id": result.governance_decision_id,
+        "execution_failed": result.execution_failed,
+        "escalation_published": result.escalation_published,
+    }
+    if result.escalation_id is not None:
+        payload["escalation_id"] = result.escalation_id
+    if result.outbox_id is not None:
+        payload["escalation_outbox_id"] = result.outbox_id
+    return payload
+
+
+def _diagnostic_failure_should_escalate(error_class: str) -> bool:
+    return error_class in _DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS
+
+
+def _diagnostic_existing_governance_decision_id(
+    exc: BaseException,
+) -> str | None:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        value = _coerce_uuid_text(
+            getattr(current, "governance_decision_id", None)
+        )
+        if value is not None:
+            return value
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _coerce_uuid_text(value: object) -> str | None:
+    if value is None:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _exception_mapping_attr(
+    exc: BaseException,
+    name: str,
+) -> dict[str, Any]:
+    value = getattr(exc, name, None)
+    if isinstance(value, Mapping):
+        return dict(cast(Mapping[str, Any], value))
+    return {}
+
+
+def _exception_citations_attr(
+    exc: BaseException,
+    name: str,
+) -> list[dict[str, Any]]:
+    value = getattr(exc, name, None)
+    if not isinstance(value, (list, tuple)):
+        return []
+    citations: list[dict[str, Any]] = []
+    for citation in cast(list[object] | tuple[object, ...], value):
+        if isinstance(citation, Mapping):
+            citations.append(dict(cast(Mapping[str, Any], citation)))
+        else:
+            citations.append({"value": str(citation)})
+    return citations
+
+
+def _exception_completion_excerpt(exc: BaseException) -> str | None:
+    value = getattr(exc, "diagnostic_blocked_completion_text", None)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return _semantic_completion_excerpt(value)
+
+
 def _bounded_failure_metadata(
     exc: BaseException,
     *,
@@ -2182,6 +2648,9 @@ def _success_persistence_failure_exception(exc: BaseException) -> BaseException:
     semantic_rejection = _semantic_validation_error_from_chain(exc)
     if semantic_rejection is not None:
         return semantic_rejection
+    governance_rejection = _governance_rejection_error_from_chain(exc)
+    if governance_rejection is not None:
+        return governance_rejection
     return CognitionPersistenceFailureError(
         "diagnostic success persistence failed: "
         f"{exc.__class__.__name__}: {_bounded_exception_message(exc)}"
@@ -2196,6 +2665,19 @@ def _semantic_validation_error_from_chain(
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if isinstance(current, CognitionSemanticValidationError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _governance_rejection_error_from_chain(
+    exc: BaseException,
+) -> CognitionGovernanceRejectionError | None:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, CognitionGovernanceRejectionError):
             return current
         current = current.__cause__ or current.__context__
     return None

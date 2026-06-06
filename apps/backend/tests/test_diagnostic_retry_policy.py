@@ -93,6 +93,22 @@ def test_success_persistence_semantic_cause_stays_terminal() -> None:
     assert decision.queue == QUEUE_DEAD_LETTER
 
 
+def test_success_persistence_governance_cause_stays_governance_deny() -> None:
+    governance_error = CognitionGovernanceRejectionError(
+        "governance rejected diagnostic model output"
+    )
+    wrapped = RuntimeError("outer persistence wrapper")
+    wrapped.__cause__ = governance_error
+
+    normalized = _success_persistence_failure_exception(wrapped)
+    decision = _diagnostic_retry_decision(normalized, retry_count=0)
+
+    assert normalized is governance_error
+    assert decision.error_class == "GOVERNANCE_DENY"
+    assert decision.retry_requested is False
+    assert decision.queue == QUEUE_DEAD_LETTER
+
+
 def test_semantic_validation_rejection_uses_dead_letter_escalation_route() -> None:
     decision = _diagnostic_retry_decision(
         CognitionSemanticValidationError(

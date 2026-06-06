@@ -479,7 +479,15 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
         {"t": tenant_id},
     )
     await session.execute(
+        text("DELETE FROM cognition_semantic_rejection_records WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
         text("DELETE FROM escalation_outbox WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
+        text("DELETE FROM escalation_records WHERE tenant_id = :t"),
         {"t": tenant_id},
     )
     await session.execute(
