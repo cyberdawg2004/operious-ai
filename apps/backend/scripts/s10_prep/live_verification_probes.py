@@ -31,11 +31,12 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from app.agents.runtime.retry_policy import RETRY_POLICIES, RetryPolicy  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.db.url import build_database_engine_config  # noqa: E402
 from app.execution.db.models import ExecutionRow  # noqa: E402
 from app.execution.enums import ExecutionKind, ExecutionState  # noqa: E402
-from app.queues import QUEUE_DEAD_LETTER  # noqa: E402
+from app.queues import QUEUE_DEAD_LETTER, QUEUE_DIAGNOSTIC_RETRY  # noqa: E402
 from app.workers.celery_app import celery_app  # noqa: E402
 from app.workers.s10_probe_tasks import (  # noqa: E402
     s10_probe_dead_letter_id,
@@ -57,6 +58,8 @@ SMOKE_COMPLETION_EVENTS: Final[set[str]] = {
     "resolution_proposal_created",
     "resolution_outbound_draft_created",
 }
+SMOKE_FAILURE_EVENTS: Final[set[str]] = {"diagnostic_execution_failed"}
+SMOKE_RETRY_BOUND_ERROR_CLASS: Final[str] = "PERSISTENCE_FAILURE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +79,18 @@ HttpRequest = Callable[
     [str, str, Mapping[str, str] | None, Mapping[str, Any] | None],
     HttpResponse,
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class SmokeTimelineOutcome:
+    terminal: bool
+    passed: bool
+    status: str
+    completion_events: list[dict[str, Any]]
+    retry_failure_events: list[dict[str, Any]]
+    terminal_failure_events: list[dict[str, Any]]
+    grounding_trace: dict[str, Any]
+    failure_reason: dict[str, Any] | None = None
 
 
 def normalize_api_base_url(raw_url: str) -> str:
@@ -418,8 +433,19 @@ def run_smoke_probe(
     session_id = _require_str(dispatch_body, "session_id")
     deadline = time.monotonic() + timeout_seconds
     timeline_body: dict[str, Any] = {}
-    completion_events: list[dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
+    outcome = SmokeTimelineOutcome(
+        terminal=False,
+        passed=False,
+        status="not_polled",
+        completion_events=[],
+        retry_failure_events=[],
+        terminal_failure_events=[],
+        grounding_trace={},
+    )
+    poll_count = 0
     while time.monotonic() < deadline:
+        poll_count += 1
         timeline = http_request(
             "GET",
             urljoin(api_base, f"session/{session_id}/timeline"),
@@ -428,22 +454,43 @@ def run_smoke_probe(
         )
         timeline_body = timeline.json()
         if timeline.status_code != 200:
+            outcome = SmokeTimelineOutcome(
+                terminal=True,
+                passed=False,
+                status="timeline_read_failed",
+                completion_events=[],
+                retry_failure_events=[],
+                terminal_failure_events=[],
+                grounding_trace={},
+                failure_reason={
+                    "status_code": timeline.status_code,
+                    "body": timeline_body,
+                },
+            )
             break
         events = _list_of_dicts(timeline_body.get("events"))
-        completion_events = [
-            event
-            for event in events
-            if str(event.get("event_type")) in SMOKE_COMPLETION_EVENTS
-        ]
-        if completion_events:
+        outcome = _classify_smoke_timeline_outcome(events)
+        if outcome.terminal:
             break
         time.sleep(poll_interval_seconds)
     event_types = [
         str(event.get("event_type"))
-        for event in _list_of_dicts(timeline_body.get("events"))
+        for event in events
     ]
-    grounding_trace = _extract_grounding_trace(completion_events)
-    passed = bool(completion_events) and bool(grounding_trace)
+    if not outcome.terminal:
+        outcome = SmokeTimelineOutcome(
+            terminal=True,
+            passed=False,
+            status="timeout",
+            completion_events=outcome.completion_events,
+            retry_failure_events=outcome.retry_failure_events,
+            terminal_failure_events=outcome.terminal_failure_events,
+            grounding_trace=outcome.grounding_trace,
+            failure_reason={
+                "message": f"did not reach terminal within {timeout_seconds}s"
+            },
+        )
+    retry_bound_seconds = _smoke_retry_wait_bound_seconds()
     evidence = {
         "external_id": external_id,
         "ingress_id": ingress_id,
@@ -454,13 +501,25 @@ def run_smoke_probe(
         "governance_decision_id": dispatch_body.get("governance_decision_id"),
         "timeline_event_count": len(event_types),
         "timeline_event_types": event_types,
+        "poll_count": poll_count,
+        "terminal_status": outcome.status,
+        "timeout_seconds": timeout_seconds,
+        "poll_interval_seconds": poll_interval_seconds,
+        "retry_wait_bound_seconds": retry_bound_seconds,
+        "retry_wait_bound_source": (
+            f"{SMOKE_RETRY_BOUND_ERROR_CLASS} policy retry countdowns plus "
+            "AI_TIMEOUT_SECONDS completion grace"
+        ),
         "completion_event_types": [
-            str(event.get("event_type")) for event in completion_events
+            str(event.get("event_type")) for event in outcome.completion_events
         ],
-        "grounding_trace": grounding_trace,
+        "retry_failure_event_count": len(outcome.retry_failure_events),
+        "terminal_failure_event_count": len(outcome.terminal_failure_events),
+        "failure_reason": outcome.failure_reason,
+        "grounding_trace": outcome.grounding_trace,
     }
-    _print_probe_result("smoke", passed=passed, evidence=evidence)
-    return evidence | {"passed": passed}
+    _print_probe_result("smoke", passed=outcome.passed, evidence=evidence)
+    return evidence | {"passed": outcome.passed}
 
 
 def _authority_headers(
@@ -499,6 +558,135 @@ def _extract_grounding_trace(events: list[dict[str, Any]]) -> dict[str, Any]:
                 "governance_decision_id": governance_decision_id,
             }
     return {}
+
+
+def _classify_smoke_timeline_outcome(
+    events: list[dict[str, Any]],
+) -> SmokeTimelineOutcome:
+    completion_events = [
+        event
+        for event in events
+        if str(event.get("event_type")) in SMOKE_COMPLETION_EVENTS
+    ]
+    grounding_trace = _extract_grounding_trace(completion_events)
+    if completion_events:
+        if grounding_trace:
+            return SmokeTimelineOutcome(
+                terminal=True,
+                passed=True,
+                status="completed",
+                completion_events=completion_events,
+                retry_failure_events=_smoke_retry_failure_events(events),
+                terminal_failure_events=[],
+                grounding_trace=grounding_trace,
+            )
+        return SmokeTimelineOutcome(
+            terminal=True,
+            passed=False,
+            status="completed_missing_grounding_trace",
+            completion_events=completion_events,
+            retry_failure_events=_smoke_retry_failure_events(events),
+            terminal_failure_events=[],
+            grounding_trace={},
+            failure_reason={
+                "message": (
+                    "observed diagnostic completion but no grounding trace "
+                    "was present in completion events"
+                )
+            },
+        )
+
+    terminal_failure_events = [
+        event
+        for event in events
+        if _is_terminal_smoke_failure_event(event)
+    ]
+    if terminal_failure_events:
+        return SmokeTimelineOutcome(
+            terminal=True,
+            passed=False,
+            status="terminal_failure",
+            completion_events=[],
+            retry_failure_events=_smoke_retry_failure_events(events),
+            terminal_failure_events=terminal_failure_events,
+            grounding_trace={},
+            failure_reason=_smoke_failure_reason(terminal_failure_events[-1]),
+        )
+
+    retry_failure_events = _smoke_retry_failure_events(events)
+    return SmokeTimelineOutcome(
+        terminal=False,
+        passed=False,
+        status="retrying" if retry_failure_events else "waiting",
+        completion_events=[],
+        retry_failure_events=retry_failure_events,
+        terminal_failure_events=[],
+        grounding_trace={},
+    )
+
+
+def _smoke_retry_failure_events(
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        event
+        for event in events
+        if str(event.get("event_type")) in SMOKE_FAILURE_EVENTS
+        and _is_retrying_smoke_failure_event(event)
+    ]
+
+
+def _is_retrying_smoke_failure_event(event: Mapping[str, Any]) -> bool:
+    payload = _event_payload(event)
+    return (
+        payload.get("retry_requested") is True
+        or payload.get("retry_queue") == QUEUE_DIAGNOSTIC_RETRY
+    )
+
+
+def _is_terminal_smoke_failure_event(event: Mapping[str, Any]) -> bool:
+    if str(event.get("event_type")) not in SMOKE_FAILURE_EVENTS:
+        return False
+    payload = _event_payload(event)
+    return (
+        payload.get("retry_requested") is False
+        or payload.get("retry_queue") == QUEUE_DEAD_LETTER
+    )
+
+
+def _smoke_failure_reason(event: Mapping[str, Any]) -> dict[str, Any]:
+    payload = _event_payload(event)
+    return {
+        "event_type": str(event.get("event_type")),
+        "error_class": payload.get("error_class"),
+        "error_message": payload.get("error_message"),
+        "retry_requested": payload.get("retry_requested"),
+        "retry_queue": payload.get("retry_queue"),
+        "retry_countdown_seconds": payload.get("retry_countdown_seconds"),
+    }
+
+
+def _event_payload(event: Mapping[str, Any]) -> Mapping[str, Any]:
+    payload = event.get("payload")
+    if isinstance(payload, Mapping):
+        return cast(Mapping[str, Any], payload)
+    return {}
+
+
+def _smoke_retry_wait_bound_seconds() -> float:
+    policy = RETRY_POLICIES[SMOKE_RETRY_BOUND_ERROR_CLASS]
+    settings = get_settings()
+    return float(
+        _retry_countdown_window_seconds(policy)
+        + settings.AI_TIMEOUT_SECONDS
+    )
+
+
+def _retry_countdown_window_seconds(policy: RetryPolicy) -> int:
+    return sum(
+        int(policy.base_delay_seconds * (policy.backoff_multiplier ** retry_count))
+        for retry_count in range(policy.max_retries)
+    )
 
 
 async def _read_dead_letter_row(
@@ -665,7 +853,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     smoke.add_argument("--bearer-token", default=os.environ.get("OPERIOUS_API_TOKEN"))
     smoke.add_argument("--allow-legacy-headers", action="store_true")
     smoke.add_argument("--external-id", default=f"s10-smoke-{uuid.uuid4().hex}")
-    smoke.add_argument("--timeout-seconds", type=float, default=90.0)
+    smoke.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=_smoke_retry_wait_bound_seconds(),
+    )
     smoke.add_argument("--poll-interval-seconds", type=float, default=3.0)
     return parser.parse_args(argv)
 

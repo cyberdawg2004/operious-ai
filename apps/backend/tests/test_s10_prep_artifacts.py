@@ -219,6 +219,224 @@ def test_smoke_probe_prints_reconstructible_grounding_trace(
     assert "PASS smoke" in capsys.readouterr().out
 
 
+def test_smoke_probe_waits_through_retry_before_completion(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    timeline_calls = 0
+
+    def fake_http_request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None,
+        json_body: Mapping[str, Any] | None,
+    ) -> HttpResponse:
+        del method, headers, json_body
+        nonlocal timeline_calls
+        if url.endswith("/boundary/translation/ingress"):
+            return _json_response(
+                202,
+                {
+                    "ingress_id": "ingress-smoke",
+                    "canonical_envelope_id": "envelope-smoke",
+                },
+            )
+        if url.endswith("/coordination/dispatch"):
+            return _json_response(
+                200,
+                {
+                    "dispatch_id": "dispatch-smoke",
+                    "session_id": "11111111-1111-1111-1111-111111111111",
+                    "execution_id": "execution-smoke",
+                },
+            )
+        if url.endswith("/session/11111111-1111-1111-1111-111111111111/timeline"):
+            timeline_calls += 1
+            if timeline_calls == 1:
+                return _json_response(
+                    200,
+                    {
+                        "events": [
+                            {
+                                "event_type": "diagnostic_execution_failed",
+                                "payload": {
+                                    "error_class": "PERSISTENCE_FAILURE",
+                                    "retry_requested": True,
+                                    "retry_queue": "diagnostic.retry",
+                                    "retry_countdown_seconds": 15,
+                                },
+                            }
+                        ]
+                    },
+                )
+            return _json_response(
+                200,
+                {
+                    "events": [
+                        {
+                            "event_type": "diagnostic_execution_failed",
+                            "payload": {
+                                "error_class": "PERSISTENCE_FAILURE",
+                                "retry_requested": True,
+                                "retry_queue": "diagnostic.retry",
+                                "retry_countdown_seconds": 15,
+                            },
+                        },
+                        {
+                            "event_type": "resolution_proposal_created",
+                            "payload": {
+                                "proposal_id": "proposal-smoke",
+                                "evidence": [{"document_id": "doc-1"}],
+                            },
+                        },
+                    ]
+                },
+            )
+        return _json_response(404, {"detail": {"code": "not_found"}})
+
+    result = run_smoke_probe(
+        base_url="https://example.test/api/v1",
+        tenant_id="anker-pilot",
+        principal_id="operator",
+        bearer_token="token",
+        allow_legacy_headers=False,
+        external_id="s10-smoke-test",
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+        http_request=fake_http_request,
+    )
+
+    assert result["passed"] is True
+    assert result["terminal_status"] == "completed"
+    assert result["retry_failure_event_count"] == 1
+    assert result["poll_count"] == 2
+    assert "PASS smoke" in capsys.readouterr().out
+
+
+def test_smoke_probe_reports_terminal_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_http_request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None,
+        json_body: Mapping[str, Any] | None,
+    ) -> HttpResponse:
+        del method, headers, json_body
+        if url.endswith("/boundary/translation/ingress"):
+            return _json_response(
+                202,
+                {"ingress_id": "ingress-smoke"},
+            )
+        if url.endswith("/coordination/dispatch"):
+            return _json_response(
+                200,
+                {
+                    "dispatch_id": "dispatch-smoke",
+                    "session_id": "11111111-1111-1111-1111-111111111111",
+                    "execution_id": "execution-smoke",
+                },
+            )
+        if url.endswith("/session/11111111-1111-1111-1111-111111111111/timeline"):
+            return _json_response(
+                200,
+                {
+                    "events": [
+                        {
+                            "event_type": "diagnostic_execution_failed",
+                            "payload": {
+                                "error_class": "SEMANTIC_REJECTION",
+                                "error_message": "semantic drift",
+                                "retry_requested": False,
+                                "retry_queue": "dead_letter",
+                                "retry_countdown_seconds": 0,
+                            },
+                        }
+                    ]
+                },
+            )
+        return _json_response(404, {"detail": {"code": "not_found"}})
+
+    result = run_smoke_probe(
+        base_url="https://example.test/api/v1",
+        tenant_id="anker-pilot",
+        principal_id="operator",
+        bearer_token="token",
+        allow_legacy_headers=False,
+        external_id="s10-smoke-test",
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+        http_request=fake_http_request,
+    )
+
+    assert result["passed"] is False
+    assert result["terminal_status"] == "terminal_failure"
+    assert result["terminal_failure_event_count"] == 1
+    assert result["failure_reason"]["error_class"] == "SEMANTIC_REJECTION"
+    assert "FAIL smoke" in capsys.readouterr().out
+
+
+def test_smoke_probe_timeout_reports_bounded_terminal_wait(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_http_request(
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None,
+        json_body: Mapping[str, Any] | None,
+    ) -> HttpResponse:
+        del method, headers, json_body
+        if url.endswith("/boundary/translation/ingress"):
+            return _json_response(
+                202,
+                {"ingress_id": "ingress-smoke"},
+            )
+        if url.endswith("/coordination/dispatch"):
+            return _json_response(
+                200,
+                {
+                    "dispatch_id": "dispatch-smoke",
+                    "session_id": "11111111-1111-1111-1111-111111111111",
+                    "execution_id": "execution-smoke",
+                },
+            )
+        if url.endswith("/session/11111111-1111-1111-1111-111111111111/timeline"):
+            return _json_response(
+                200,
+                {
+                    "events": [
+                        {
+                            "event_type": "diagnostic_execution_failed",
+                            "payload": {
+                                "error_class": "PERSISTENCE_FAILURE",
+                                "retry_requested": True,
+                                "retry_queue": "diagnostic.retry",
+                                "retry_countdown_seconds": 15,
+                            },
+                        }
+                    ]
+                },
+            )
+        return _json_response(404, {"detail": {"code": "not_found"}})
+
+    result = run_smoke_probe(
+        base_url="https://example.test/api/v1",
+        tenant_id="anker-pilot",
+        principal_id="operator",
+        bearer_token="token",
+        allow_legacy_headers=False,
+        external_id="s10-smoke-test",
+        timeout_seconds=0.01,
+        poll_interval_seconds=0.001,
+        http_request=fake_http_request,
+    )
+
+    assert result["passed"] is False
+    assert result["terminal_status"] == "timeout"
+    assert result["retry_failure_event_count"] >= 1
+    assert "did not reach terminal within 0.01s" in result["failure_reason"]["message"]
+    assert "FAIL smoke" in capsys.readouterr().out
+
+
 def test_probe_helpers_are_stable() -> None:
     first = s10_probe_dead_letter_id(
         tenant_id="anker-pilot",
