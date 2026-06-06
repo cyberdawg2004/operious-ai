@@ -35,6 +35,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Conversations",
     description: "Active customer sessions, live turns, and operator takeover.",
   },
+  escalations: {
+    eyebrow: "Governance",
+    title: "Escalation Queue",
+    description: "Cases the agent could not auto-resolve within governance, awaiting human review.",
+  },
   "queue-status": {
     eyebrow: "Operations",
     title: "Queue Status",
