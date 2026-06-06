@@ -487,8 +487,9 @@ def run_smoke_probe(
                 "external_id": external_id,
                 "channel": "email",
                 "raw_content": (
-                    "S-10 live smoke: Anker PowerCore stopped charging and "
-                    "the customer requests next steps."
+                    "My Anker PowerCore stopped charging. The LED stays off even after "
+                    "trying a different USB-C cable and wall outlet. Can you help me get "
+                    "it working or sorted out?"
                 ),
                 "language_code": "en",
             },
