@@ -1,9 +1,8 @@
 """Fixed-window inbound rate-limit primitive (spec 1b #39).
 
-A single atomic ``INCR`` per request, with ``EXPIRE`` set only on the first hit
-of a window, gives a fixed-window request budget keyed per IP / tenant /
-principal. Fixed-window is intentionally chosen over a token bucket: it needs no
-Lua (the dependency manifest forbids ``fakeredis[lua]``) and is exact enough for
+A single atomic Redis script increments the per-IP / tenant / principal request
+counter and ensures the key always has an expiry. Fixed-window is intentionally
+chosen over a token bucket: it needs no local state and is exact enough for
 inbound abuse control. Any Redis error yields a ``backend_available=False``
 decision so callers can apply a fail-closed / fail-degraded policy explicitly —
 the limiter never silently allows on backend failure.
@@ -13,18 +12,25 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Final, Protocol
 
 from starlette.responses import Response
 
 from app.survivability import PROBLEM_DETAILS_MEDIA_TYPE
 
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_INCREMENT_AND_BOUND_WINDOW_SCRIPT: Final[str] = """
+local count = redis.call("INCR", KEYS[1])
+local ttl = redis.call("TTL", KEYS[1])
+if ttl < 0 then
+    redis.call("EXPIRE", KEYS[1], tonumber(ARGV[1]))
+end
+return count
+"""
 
 
 class _AsyncRedis(Protocol):
-    async def incr(self, key: str) -> int: ...
-    async def expire(self, key: str, seconds: int) -> bool: ...
+    async def eval(self, script: str, numkeys: int, *keys_and_args: str) -> Any: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +43,7 @@ class RateLimitDecision:
 
 
 class FixedWindowLimiter:
-    """Per-key fixed-window counter backed by Redis ``INCR`` + ``EXPIRE``."""
+    """Per-key fixed-window counter backed by an atomic Redis script."""
 
     def __init__(self, redis: _AsyncRedis) -> None:
         self._redis = redis
@@ -50,9 +56,14 @@ class FixedWindowLimiter:
         window_seconds: int,
     ) -> RateLimitDecision:
         try:
-            count = await self._redis.incr(key)
-            if count == 1:
-                await self._redis.expire(key, window_seconds)
+            count = int(
+                await self._redis.eval(
+                    _INCREMENT_AND_BOUND_WINDOW_SCRIPT,
+                    1,
+                    key,
+                    str(int(window_seconds)),
+                )
+            )
         except Exception:  # noqa: BLE001 - any Redis error => backend unavailable.
             return RateLimitDecision(
                 allowed=False, retry_after_seconds=1, backend_available=False
