@@ -10,7 +10,7 @@ import os
 import sys
 import traceback
 import uuid
-from collections.abc import Callable, Coroutine, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Thread
@@ -1174,6 +1174,18 @@ async def _persist_diagnostic_success(
                     await _publish_resolution_safety_escalation_if_present(
                         work_item=work_item,
                         resolution_append=resolution_append,
+                        escalation_runtime=EscalationAgentRuntime(
+                            escalation_persistence=PostgresEscalationPersistence(
+                                session
+                            ),
+                            governance_repository=PostgresGovernanceRepository(
+                                session
+                            ),
+                            session_persistence=PostgresSessionPersistence(
+                                session
+                            ),
+                        ),
+                        commit=session.commit,
                     )
                 )
                 await _publish_conversation_phase_b(
@@ -1694,10 +1706,19 @@ async def _publish_resolution_safety_escalation_if_present(
     *,
     work_item: _DiagnosticExecutionWorkItem,
     resolution_append: _ResolutionAppendResult,
+    escalation_runtime: EscalationAgentRuntime | None = None,
+    commit: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
     decision_id = resolution_append.safety_escalation_governance_decision_id
     if decision_id is None:
         return False
+    if escalation_runtime is not None:
+        return await _publish_resolution_safety_escalation_with_outbox(
+            work_item=work_item,
+            governance_decision_id=decision_id,
+            escalation_runtime=escalation_runtime,
+            commit=commit,
+        )
     try:
         await CeleryEscalationPublisher().publish_governance_denial(
             governance_decision_id=decision_id,
@@ -1716,6 +1737,102 @@ async def _publish_resolution_safety_escalation_if_present(
             },
         )
         return False
+
+
+async def _publish_resolution_safety_escalation_with_outbox(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    governance_decision_id: str,
+    escalation_runtime: EscalationAgentRuntime,
+    commit: Callable[[], Awaitable[None]] | None,
+) -> bool:
+    prepared = await escalation_runtime.prepare_governance_denial_outbox(
+        governance_decision_id=governance_decision_id,
+        expected_tenant_id=work_item.tenant_id,
+        session_id=work_item.session_id,
+        metadata={
+            "source": "resolution_human_review_denial",
+            "source_decision": Decision.DENY.value,
+            "execution_id": work_item.execution_id,
+            "attempt_id": work_item.attempt_id,
+            "dispatch_id": work_item.dispatch_id,
+        },
+    )
+    claim = await escalation_runtime.claim_outbox_for_escalation(
+        escalation_id=prepared.escalation.escalation_id,
+        publisher_id="worker:resolution-human-review-denial",
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if not claim.claimed or claim.outbox is None:
+        if claim.reason == "outbox_not_publishable:published":
+            return True
+        logger.warning(
+            "resolution_safety_escalation_outbox_claim_refused",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": governance_decision_id,
+                "escalation_id": prepared.escalation.escalation_id,
+                "reason": claim.reason,
+            },
+        )
+        return False
+    claim_id = _require_resolution_escalation_outbox_claim_id(
+        claim.outbox.claim_id
+    )
+    if commit is not None:
+        await commit()
+    try:
+        await CeleryEscalationPublisher().publish_governance_denial(
+            governance_decision_id=governance_decision_id,
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await escalation_runtime.mark_outbox_failed(
+            outbox_id=claim.outbox.outbox_id,
+            claim_id=claim_id,
+            error=_bounded_resolution_escalation_publish_error(exc),
+            expected_tenant_id=work_item.tenant_id,
+        )
+        if commit is not None:
+            await commit()
+        logger.exception(
+            "resolution_safety_escalation_publish_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": governance_decision_id,
+                "escalation_id": prepared.escalation.escalation_id,
+                "outbox_id": claim.outbox.outbox_id,
+            },
+        )
+        return False
+    await escalation_runtime.mark_outbox_published(
+        outbox_id=claim.outbox.outbox_id,
+        claim_id=claim_id,
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if commit is not None:
+        await commit()
+    return True
+
+
+def _bounded_resolution_escalation_publish_error(exc: BaseException) -> str:
+    message = f"{exc.__class__.__name__}: {exc}"
+    if len(message) > 240:
+        return f"{message[:237]}..."
+    return message
+
+
+def _require_resolution_escalation_outbox_claim_id(claim_id: str | None) -> str:
+    if claim_id is None:
+        raise DiagnosticExecutionError(
+            "claimed resolution escalation outbox is missing claim_id"
+        )
+    return claim_id
 
 
 def _resolution_safety_escalation_result_payload(

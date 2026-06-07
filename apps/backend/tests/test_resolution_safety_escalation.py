@@ -149,6 +149,114 @@ async def test_resolution_human_review_escalation_publish_noops_without_denial(
     assert calls == []
 
 
+@pytest.mark.asyncio
+async def test_resolution_human_review_publish_claims_and_marks_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _Publisher:
+        async def publish_governance_denial(
+            self,
+            *,
+            governance_decision_id: str,
+            tenant_id: str,
+            session_id: str | None = None,
+        ) -> None:
+            calls.append(
+                {
+                    "governance_decision_id": governance_decision_id,
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                }
+            )
+
+    monkeypatch.setattr(agent_tasks, "CeleryEscalationPublisher", _Publisher)
+    runtime, escalations = await _runtime_for_resolution_decision()
+    commits = _CommitRecorder()
+
+    published = await agent_tasks._publish_resolution_safety_escalation_if_present(
+        work_item=_work_item(),
+        resolution_append=agent_tasks._ResolutionAppendResult(
+            success=True,
+            safety_escalation_governance_decision_id=_DENY_ID,
+        ),
+        escalation_runtime=runtime,
+        commit=commits.commit,
+    )
+
+    escalation = await escalations.get_escalation_for_governance_decision(
+        _DENY_ID,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert escalation is not None
+    outbox = await escalations.get_escalation_outbox_by_escalation(
+        escalation.escalation_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert outbox is not None
+    assert published is True
+    assert outbox.status is EscalationOutboxStatus.PUBLISHED
+    assert outbox.publisher_id == "worker:resolution-human-review-denial"
+    assert outbox.claim_id is not None
+    assert outbox.metadata["source"] == "resolution_human_review_denial"
+    assert calls == [
+        {
+            "governance_decision_id": _DENY_ID,
+            "tenant_id": _TENANT_ID,
+            "session_id": _SESSION_ID,
+        }
+    ]
+    assert commits.count == 2
+
+
+@pytest.mark.asyncio
+async def test_resolution_human_review_publish_failure_marks_outbox_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Publisher:
+        async def publish_governance_denial(
+            self,
+            *,
+            governance_decision_id: str,
+            tenant_id: str,
+            session_id: str | None = None,
+        ) -> None:
+            del governance_decision_id, tenant_id, session_id
+            raise RuntimeError("transport down")
+
+    monkeypatch.setattr(agent_tasks, "CeleryEscalationPublisher", _Publisher)
+    runtime, escalations = await _runtime_for_resolution_decision()
+    commits = _CommitRecorder()
+
+    published = await agent_tasks._publish_resolution_safety_escalation_if_present(
+        work_item=_work_item(),
+        resolution_append=agent_tasks._ResolutionAppendResult(
+            success=True,
+            safety_escalation_governance_decision_id=_DENY_ID,
+        ),
+        escalation_runtime=runtime,
+        commit=commits.commit,
+    )
+
+    escalation = await escalations.get_escalation_for_governance_decision(
+        _DENY_ID,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert escalation is not None
+    outbox = await escalations.get_escalation_outbox_by_escalation(
+        escalation.escalation_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert outbox is not None
+    assert published is False
+    assert outbox.status is EscalationOutboxStatus.FAILED
+    assert outbox.publisher_id == "worker:resolution-human-review-denial"
+    assert outbox.claim_id is not None
+    assert outbox.last_error == "RuntimeError: transport down"
+    assert commits.count == 2
+
+
 def test_resolution_human_review_handoff_uses_escalation_pipeline_not_crisis() -> None:
     source = inspect.getsource(
         agent_tasks._publish_resolution_safety_escalation_if_present
@@ -231,6 +339,33 @@ async def test_resolution_routine_denial_is_not_selected_for_handoff() -> None:
     )
 
     assert selected is None
+
+
+async def _runtime_for_resolution_decision() -> tuple[
+    EscalationAgentRuntime,
+    InMemoryEscalationPersistence,
+]:
+    escalations = InMemoryEscalationPersistence()
+    governance = InMemoryGovernanceRepository()
+    sessions = InMemorySessionPersistence()
+    await sessions.save_session(_session())
+    await governance.record_decision(_resolution_decision(flags=("safety_risk",)))
+    return (
+        EscalationAgentRuntime(
+            escalation_persistence=escalations,
+            governance_repository=governance,
+            session_persistence=sessions,
+        ),
+        escalations,
+    )
+
+
+class _CommitRecorder:
+    def __init__(self) -> None:
+        self.count = 0
+
+    async def commit(self) -> None:
+        self.count += 1
 
 
 def _work_item() -> agent_tasks._DiagnosticExecutionWorkItem:
