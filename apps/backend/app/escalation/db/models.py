@@ -60,6 +60,18 @@ class EscalationRecordRow(Base):
     status: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
+    handoff_kind: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        server_default=text("'denial'"),
+        index=True,
+    )
+    priority: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        server_default=text("'normal'"),
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -90,6 +102,20 @@ class EscalationRecordRow(Base):
         CheckConstraint(
             "status IN ('pending', 'reviewed', 'approved', 'rejected')",
             name="status_valid",
+        ),
+        CheckConstraint(
+            "handoff_kind IN ('denial', 'escalation', 'crisis')",
+            name="handoff_kind_valid",
+        ),
+        CheckConstraint(
+            "priority IN ('normal', 'high')",
+            name="priority_valid",
+        ),
+        Index(
+            "ix_escalation_records_tenant_status_priority",
+            "tenant_id",
+            "status",
+            "priority",
         ),
     )
 

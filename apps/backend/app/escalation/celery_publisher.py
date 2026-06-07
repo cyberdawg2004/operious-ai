@@ -65,6 +65,32 @@ class CeleryEscalationPublisher(EscalationPublisher):
         tenant_id: str,
         session_id: str | None = None,
     ) -> None:
+        await self._publish_governance_decision(
+            governance_decision_id=governance_decision_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
+
+    async def publish_governance_escalation(
+        self,
+        *,
+        governance_decision_id: str,
+        tenant_id: str,
+        session_id: str | None = None,
+    ) -> None:
+        await self._publish_governance_decision(
+            governance_decision_id=governance_decision_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
+
+    async def _publish_governance_decision(
+        self,
+        *,
+        governance_decision_id: str,
+        tenant_id: str,
+        session_id: str | None = None,
+    ) -> None:
         await self.check_backpressure(tenant_id=tenant_id)
         task = cast(Any, create_governance_escalation)
         if _running_under_pytest():

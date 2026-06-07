@@ -1,8 +1,8 @@
 """Escalation worker tasks.
 
-Celery is transport only. The task accepts governance denial lineage
-and composes the persistence-backed escalation runtime inside the
-worker boundary.
+Celery is transport only. The task accepts governance DENY/ESCALATE
+lineage and composes the persistence-backed escalation runtime inside
+the worker boundary.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def create_governance_escalation(
     session_id: str | None = None,
     _enqueued_at: str | None = None,
 ) -> dict[str, object]:
-    """Create a pending escalation for one governance DENY decision."""
+    """Create a pending escalation for one governance DENY/ESCALATE decision."""
     del _enqueued_at
 
     set_current_tenant(tenant_id)
@@ -76,7 +76,7 @@ async def create_governance_escalation_runtime(
                 governance_repository=PostgresGovernanceRepository(session),
                 session_persistence=PostgresSessionPersistence(session),
             )
-            prepared = await runtime.prepare_governance_denial_outbox(
+            prepared = await runtime.prepare_governance_decision_outbox(
                 governance_decision_id=governance_decision_id,
                 expected_tenant_id=tenant_id,
                 session_id=session_id,

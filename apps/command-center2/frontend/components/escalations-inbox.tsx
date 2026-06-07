@@ -18,6 +18,7 @@ const REFRESH_MS = 30_000;
 const APPROVE_CAPABILITY = "tenant.actions.approve";
 
 type ConfirmMode = "approve" | "reject" | null;
+type HandoffTone = "deny" | "escalate" | "crisis";
 
 /**
  * Escalation Operator Queue (Phase 3-ui) — closes the escalate-not-dead-letter
@@ -50,7 +51,16 @@ export function EscalationsInbox() {
     []
   );
   const { data, error, isLoading, reload } = useApiResource(load);
-  const escalations = useMemo(() => data?.items ?? [], [data]);
+  const escalations = useMemo(
+    () =>
+      [...(data?.items ?? [])].sort((left, right) => {
+        if (left.priority !== right.priority) {
+          return left.priority === "high" ? -1 : 1;
+        }
+        return Date.parse(left.created_at) - Date.parse(right.created_at);
+      }),
+    [data]
+  );
 
   useEffect(() => {
     const interval = window.setInterval(reload, REFRESH_MS);
@@ -77,6 +87,10 @@ export function EscalationsInbox() {
 
   const runResolution = async () => {
     if (!selectedId || !confirmMode) return;
+    if (selected && !isDenyOverrideEligible(selected)) {
+      setActionError("This handoff is read-only in the DENY override workflow.");
+      return;
+    }
     setBusy(true);
     setActionError(null);
     try {
@@ -120,7 +134,8 @@ export function EscalationsInbox() {
         Each escalation is a case the agent could not auto-resolve within
         governance. Approving one is a{" "}
         <strong>human override of a governance DENY</strong>; rejecting one
-        upholds the denial and preserves its lineage.
+        upholds the denial and preserves its lineage. Crisis handoffs are
+        high-priority read-only records in this view.
         {!canApprove && (
           <span className="mt-1 flex items-center gap-1.5 font-technical text-[11px] text-ink-tertiary">
             <Lock className="h-3 w-3" strokeWidth={1.8} />
@@ -206,6 +221,7 @@ function EscalationCard({
   active: boolean;
   onOpen: () => void;
 }) {
+  const tone = handoffTone(escalation);
   return (
     <button
       type="button"
@@ -218,9 +234,13 @@ function EscalationCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
+            {tone === "crisis" ? (
+              <AlertTriangle className="h-4 w-4 text-red-alert" strokeWidth={1.9} />
+            ) : (
+              <ShieldAlert className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
+            )}
             <span className="truncate text-[15px] font-semibold text-ink-primary">
-              Governance DENY — review
+              {handoffTitle(escalation)}
             </span>
           </div>
           <p className="mt-1 line-clamp-2 text-[13px] text-ink-secondary">{escalation.reason}</p>
@@ -228,7 +248,10 @@ function EscalationCard({
             session {shortId(escalation.session_id)} / {formatDate(escalation.created_at)}
           </p>
         </div>
-        <StatusBadge status={escalation.status} />
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <PriorityBadge escalation={escalation} />
+          <StatusBadge status={escalation.status} />
+        </div>
       </div>
     </button>
   );
@@ -260,7 +283,9 @@ function DetailPanel({
   onClose: () => void;
 }) {
   const isPending = escalation.status === "pending";
+  const denyOverrideEligible = isDenyOverrideEligible(escalation);
   const rejectDisabled = busy || (confirmMode === "reject" && !note.trim());
+  const canResolve = canApprove && isPending && denyOverrideEligible;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]">
@@ -297,13 +322,16 @@ function DetailPanel({
             </div>
           )}
 
-          <Section title="Why this was blocked (governance DENY)">
+          <Section title={reasonTitle(escalation)}>
             <p className="text-[13px] leading-relaxed text-ink-primary">{escalation.reason}</p>
           </Section>
 
           <Section title="Context">
             <Row label="Session" value={escalation.session_id} mono />
             <Row label="Governance decision" value={escalation.governance_decision_id} mono />
+            <Row label="Decision" value={escalation.source_decision ?? "—"} />
+            <Row label="Handoff" value={escalation.handoff_kind} />
+            <Row label="Priority" value={escalation.priority} />
             <Row label="Created" value={formatDate(escalation.created_at)} />
             <p className="pt-1 font-technical text-[11px] text-ink-tertiary">
               Full grounding (citations, blocked output) is on the originating
@@ -326,7 +354,7 @@ function DetailPanel({
           {/* AUTHORITY GATE: approve/reject are ABSENT (not disabled) unless the
               operator holds tenant.actions.approve. Without it, the panel is
               read-only evidence. */}
-          {canApprove && isPending && confirmMode === null && (
+          {canResolve && confirmMode === null && (
             <div className="flex flex-col gap-2 sm:flex-row">
               <button
                 type="button"
@@ -349,7 +377,7 @@ function DetailPanel({
             </div>
           )}
 
-          {canApprove && isPending && confirmMode === "approve" && (
+          {canResolve && confirmMode === "approve" && (
             <div className="rounded-lg border border-gold-primary/50 bg-surface-raised p-4">
               <div className="flex items-center gap-2 text-gold-primary">
                 <AlertTriangle className="h-4 w-4" strokeWidth={1.9} />
@@ -399,7 +427,7 @@ function DetailPanel({
             </div>
           )}
 
-          {canApprove && isPending && confirmMode === "reject" && (
+          {canResolve && confirmMode === "reject" && (
             <div className="rounded-lg border border-red-alert/40 bg-surface-raised p-4">
               <div className="flex items-center gap-2 text-red-alert">
                 <ShieldAlert className="h-4 w-4" strokeWidth={1.9} />
@@ -441,6 +469,14 @@ function DetailPanel({
                   Cancel
                 </button>
               </div>
+            </div>
+          )}
+
+          {canApprove && isPending && !denyOverrideEligible && (
+            <div className="flex items-center gap-2 rounded-md border border-red-alert/30 bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+              <AlertTriangle className="h-3.5 w-3.5 text-red-alert" strokeWidth={1.8} />
+              This crisis/ESCALATE handoff is visible here for human handling;
+              DENY override controls do not apply.
             </div>
           )}
 
@@ -499,6 +535,54 @@ function StatusBadge({ status }: { status: EscalationRecord["status"] }) {
       {status}
     </span>
   );
+}
+
+function PriorityBadge({ escalation }: { escalation: EscalationRecord }) {
+  const isHigh = escalation.priority === "high";
+  const tone =
+    escalation.handoff_kind === "crisis"
+      ? "border-red-alert/50 text-red-alert"
+      : isHigh
+        ? "border-gold-primary/50 text-gold-primary"
+        : "border-border-subtle text-ink-tertiary";
+  return (
+    <span
+      className={cn(
+        "rounded border bg-surface-raised px-2 py-1 font-technical text-[10px] uppercase tracking-[0.10em]",
+        tone
+      )}
+    >
+      {escalation.handoff_kind}
+      {isHigh ? " / high" : ""}
+    </span>
+  );
+}
+
+function isDenyOverrideEligible(escalation: EscalationRecord): boolean {
+  return (
+    escalation.handoff_kind === "denial" &&
+    (escalation.source_decision ?? "deny") === "deny"
+  );
+}
+
+function handoffTone(escalation: EscalationRecord): HandoffTone {
+  if (escalation.handoff_kind === "crisis") return "crisis";
+  if (escalation.source_decision === "escalate") return "escalate";
+  return "deny";
+}
+
+function handoffTitle(escalation: EscalationRecord): string {
+  const tone = handoffTone(escalation);
+  if (tone === "crisis") return "CRISIS handoff";
+  if (tone === "escalate") return "Governance ESCALATE";
+  return "Governance DENY — review";
+}
+
+function reasonTitle(escalation: EscalationRecord): string {
+  const tone = handoffTone(escalation);
+  if (tone === "crisis") return "Why this is crisis-handled";
+  if (tone === "escalate") return "Why this was escalated";
+  return "Why this was blocked (governance DENY)";
 }
 
 function shortId(value: string): string {

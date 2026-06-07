@@ -75,11 +75,13 @@ from app.agents.tools.grants import (
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
 from app.agents.identity import derive_tool_invocation_id
+from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.governance.context import GovernanceContext
 from app.governance.crisis import publish_crisis_intercept_event
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.envelopes import GovernanceEnvelope
 from app.governance.enums import Decision, EnforcementStage
+from app.governance.policies.crisis import crisis_policy_name_from_decision
 from app.governance.subjects.agent_actions import AgentActionGovernanceSubject
 from app.governance.identity.decision_ids import derive_decision_id
 from app.identity import TenantId
@@ -475,6 +477,24 @@ class ToolInvoker:
                         execution_id=str(context.execution.execution_id),
                         decision=decision,
                         category=_metadata_str(request.metadata, "issue_category"),
+                    )
+                try:
+                    await _publish_crisis_handoff_if_needed(
+                        decision=decision,
+                        tenant_id=context.tenant_id,
+                        session_id=_metadata_str(request.metadata, "session_id"),
+                    )
+                except Exception as exc:  # noqa: BLE001 - invoker never raises.
+                    return self._denied_envelope(
+                        invocation_id=invocation_id,
+                        request=request,
+                        context=context,
+                        started_at=started_at,
+                        loop_start=loop_start,
+                        error=exc,
+                        reason="crisis_handoff_publication_failed",
+                        governance_envelope=governance_envelope,
+                        governance_decision_id=governance_decision_id,
                     )
                 if requires_action_governance:
                     if decision.decision is not Decision.ALLOW:
@@ -1096,6 +1116,34 @@ def _metadata_str(metadata: Mapping[str, Any], key: str) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+async def _publish_crisis_handoff_if_needed(
+    *,
+    decision: Any,
+    tenant_id: str | None,
+    session_id: str | None,
+) -> bool:
+    if tenant_id is None or session_id is None:
+        return False
+    if crisis_policy_name_from_decision(decision) is None:
+        return False
+    publisher = CeleryEscalationPublisher()
+    if decision.decision is Decision.DENY:
+        await publisher.publish_governance_denial(
+            governance_decision_id=str(decision.decision_id),
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
+        return True
+    if decision.decision is Decision.ESCALATE:
+        await publisher.publish_governance_escalation(
+            governance_decision_id=str(decision.decision_id),
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
+        return True
+    return False
 
 
 def _seeded_governance_decision_id(

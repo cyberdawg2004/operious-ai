@@ -14,6 +14,21 @@ class EscalationStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class EscalationHandoffKind(StrEnum):
+    """Why an operator-visible escalation record exists."""
+
+    DENIAL = "denial"
+    ESCALATION = "escalation"
+    CRISIS = "crisis"
+
+
+class EscalationPriority(StrEnum):
+    """Operator queue priority for sorting and visual treatment."""
+
+    NORMAL = "normal"
+    HIGH = "high"
+
+
 class EscalationOutboxStatus(StrEnum):
     """Durable escalation publication lifecycle states."""
 
@@ -23,4 +38,9 @@ class EscalationOutboxStatus(StrEnum):
     FAILED = "failed"
 
 
-__all__ = ["EscalationOutboxStatus", "EscalationStatus"]
+__all__ = [
+    "EscalationHandoffKind",
+    "EscalationOutboxStatus",
+    "EscalationPriority",
+    "EscalationStatus",
+]

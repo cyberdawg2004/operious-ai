@@ -19,6 +19,8 @@ class EscalationQuery:
     governance_decision_id: str | None = None
     tenant_id: str | None = None
     status: str | None = None
+    handoff_kind: str | None = None
+    priority: str | None = None
     limit: int = 100
     offset: int = 0
 

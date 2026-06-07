@@ -6,12 +6,16 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import Select, update, select
+from sqlalchemy import Select, case, update, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 
 from app.escalation.db.models import EscalationOutboxRow, EscalationRecordRow
-from app.escalation.enums import EscalationOutboxStatus
+from app.escalation.enums import (
+    EscalationHandoffKind,
+    EscalationOutboxStatus,
+    EscalationPriority,
+)
 from app.escalation.exceptions import EscalationPersistenceError
 from app.escalation.persistence.models import (
     EscalationOutboxPage,
@@ -65,6 +69,8 @@ class PostgresEscalationPersistence(BaseRepository):
                 reason=record.reason,
                 governance_decision_id=UUID(record.governance_decision_id),
                 status=record.status,
+                handoff_kind=record.handoff_kind,
+                priority=record.priority,
                 created_at=datetime.fromisoformat(record.created_at),
                 resolved_at=(
                     datetime.fromisoformat(record.resolved_at)
@@ -126,6 +132,10 @@ class PostgresEscalationPersistence(BaseRepository):
             expected_tenant_id=expected_tenant_id,
         )
         stmt = stmt.order_by(
+            case(
+                (EscalationRecordRow.priority == EscalationPriority.HIGH.value, 0),
+                else_=1,
+            ),
             EscalationRecordRow.created_at,
             EscalationRecordRow.escalation_id,
         )
@@ -450,6 +460,10 @@ def _apply_filters(
         stmt = stmt.where(EscalationRecordRow.tenant_id == query.tenant_id)
     if query.status is not None:
         stmt = stmt.where(EscalationRecordRow.status == query.status)
+    if query.handoff_kind is not None:
+        stmt = stmt.where(EscalationRecordRow.handoff_kind == query.handoff_kind)
+    if query.priority is not None:
+        stmt = stmt.where(EscalationRecordRow.priority == query.priority)
     return stmt
 
 
@@ -487,6 +501,8 @@ def _record_to_row(record: EscalationRecord) -> EscalationRecordRow:
         reason=record.reason,
         governance_decision_id=UUID(record.governance_decision_id),
         status=record.status,
+        handoff_kind=record.handoff_kind,
+        priority=record.priority,
         created_at=datetime.fromisoformat(record.created_at),
         resolved_at=(
             datetime.fromisoformat(record.resolved_at)
@@ -507,6 +523,8 @@ def _row_to_record(row: EscalationRecordRow) -> EscalationRecord:
         reason=row.reason,
         governance_decision_id=str(row.governance_decision_id),
         status=row.status,
+        handoff_kind=row.handoff_kind or EscalationHandoffKind.DENIAL.value,
+        priority=row.priority or EscalationPriority.NORMAL.value,
         created_at=row.created_at.isoformat(),
         resolved_at=(
             row.resolved_at.isoformat()

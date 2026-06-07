@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from app.escalation.enums import EscalationOutboxStatus
+from app.escalation.enums import EscalationOutboxStatus, EscalationPriority
 from app.escalation.exceptions import EscalationPersistenceError
 from app.escalation.persistence.models import (
     EscalationOutboxPage,
@@ -110,7 +110,13 @@ class InMemoryEscalationPersistence:
                 expected_tenant_id=expected_tenant_id,
             )
         ]
-        records.sort(key=lambda r: (r.created_at, r.escalation_id))
+        records.sort(
+            key=lambda r: (
+                0 if r.priority == EscalationPriority.HIGH.value else 1,
+                r.created_at,
+                r.escalation_id,
+            )
+        )
         total = len(records)
         page = records[query.offset : query.offset + query.limit]
         return EscalationPage(items=tuple(page), total=total, offset=query.offset)
@@ -352,6 +358,10 @@ def _matches(
     if query.tenant_id is not None and record.tenant_id != query.tenant_id:
         return False
     if query.status is not None and record.status != query.status:
+        return False
+    if query.handoff_kind is not None and record.handoff_kind != query.handoff_kind:
+        return False
+    if query.priority is not None and record.priority != query.priority:
         return False
     return True
 

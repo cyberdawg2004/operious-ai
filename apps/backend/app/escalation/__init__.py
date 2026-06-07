@@ -1,6 +1,11 @@
 """Escalation substrate public surface."""
 
-from app.escalation.enums import EscalationOutboxStatus, EscalationStatus
+from app.escalation.enums import (
+    EscalationHandoffKind,
+    EscalationOutboxStatus,
+    EscalationPriority,
+    EscalationStatus,
+)
 from app.escalation.exceptions import (
     EscalationError,
     EscalationNotFoundError,
@@ -39,6 +44,7 @@ __all__ = [
     "EscalationAgentRuntime",
     "EscalationError",
     "EscalationId",
+    "EscalationHandoffKind",
     "EscalationNotFoundError",
     "EscalationOutboxClaimId",
     "EscalationOutboxId",
@@ -49,6 +55,7 @@ __all__ = [
     "EscalationPage",
     "EscalationPersistenceError",
     "EscalationPersistenceProtocol",
+    "EscalationPriority",
     "EscalationPublisher",
     "EscalationQuery",
     "EscalationRecord",

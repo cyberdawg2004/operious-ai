@@ -7,7 +7,12 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 
-from app.escalation.enums import EscalationOutboxStatus, EscalationStatus
+from app.escalation.enums import (
+    EscalationHandoffKind,
+    EscalationOutboxStatus,
+    EscalationPriority,
+    EscalationStatus,
+)
 from app.escalation.exceptions import (
     EscalationNotFoundError,
     EscalationResolutionError,
@@ -82,9 +87,10 @@ class EscalationOutboxPreparation:
 class EscalationAgentRuntime:
     """Creates and resolves human approval queue records.
 
-    The agent entrypoint creates pending escalation records only from
-    persisted governance DENY lineage. Manager approval/rejection is
-    a separate runtime method used by the Command Center service.
+    The agent entrypoint creates pending handoff records from persisted
+    governance DENY or ESCALATE lineage. Manager approval/rejection only
+    applies to ordinary DENY records; ESCALATE/crisis records are visible
+    queue handoffs for a separate human handling loop.
     """
 
     def __init__(
@@ -107,12 +113,76 @@ class EscalationAgentRuntime:
     ) -> EscalationRecord:
         """Create or return the pending escalation for one DENY decision."""
 
+        return await self._create_for_governance_decision(
+            governance_decision_id=governance_decision_id,
+            expected_tenant_id=expected_tenant_id,
+            session_id=session_id,
+            allowed_decisions=frozenset({Decision.DENY}),
+            decision_error=(
+                "escalation records can only be created from governance DENY"
+            ),
+            lineage_label="governance denial",
+        )
+
+    async def create_for_governance_escalation(
+        self,
+        *,
+        governance_decision_id: str,
+        expected_tenant_id: str,
+        session_id: str | None = None,
+    ) -> EscalationRecord:
+        """Create or return the pending escalation for one ESCALATE decision."""
+
+        return await self._create_for_governance_decision(
+            governance_decision_id=governance_decision_id,
+            expected_tenant_id=expected_tenant_id,
+            session_id=session_id,
+            allowed_decisions=frozenset({Decision.ESCALATE}),
+            decision_error=(
+                "escalation records can only be created from governance ESCALATE"
+            ),
+            lineage_label="governance escalation",
+        )
+
+    async def create_for_governance_decision(
+        self,
+        *,
+        governance_decision_id: str,
+        expected_tenant_id: str,
+        session_id: str | None = None,
+    ) -> EscalationRecord:
+        """Create or return the pending handoff for DENY or ESCALATE lineage."""
+
+        return await self._create_for_governance_decision(
+            governance_decision_id=governance_decision_id,
+            expected_tenant_id=expected_tenant_id,
+            session_id=session_id,
+            allowed_decisions=frozenset({Decision.DENY, Decision.ESCALATE}),
+            decision_error=(
+                "escalation records can only be created from governance "
+                "DENY or ESCALATE"
+            ),
+            lineage_label="governance handoff",
+        )
+
+    async def _create_for_governance_decision(
+        self,
+        *,
+        governance_decision_id: str,
+        expected_tenant_id: str,
+        session_id: str | None,
+        allowed_decisions: frozenset[Decision],
+        decision_error: str,
+        lineage_label: str,
+    ) -> EscalationRecord:
         _require_nonempty(expected_tenant_id, "expected_tenant_id")
         existing = await self._escalations.get_escalation_for_governance_decision(
             governance_decision_id,
             expected_tenant_id=expected_tenant_id,
         )
         if existing is not None:
+            if not _existing_record_matches_decisions(existing, allowed_decisions):
+                raise EscalationRuntimeError(decision_error)
             await self._append_grounding_handoff_event_if_present(
                 existing,
                 decision=None,
@@ -129,10 +199,8 @@ class EscalationAgentRuntime:
                 "unknown governance decision for escalation: "
                 f"{governance_decision_id}"
             )
-        if decision.decision != Decision.DENY.value:
-            raise EscalationRuntimeError(
-                "escalation records can only be created from governance DENY"
-            )
+        if decision.decision not in _decision_values(allowed_decisions):
+            raise EscalationRuntimeError(decision_error)
         if decision.tenant_id != expected_tenant_id:
             raise EscalationRuntimeError(
                 "governance decision tenant_id does not match expected_tenant_id"
@@ -143,7 +211,7 @@ class EscalationAgentRuntime:
         )
         if resolved_session_id is None:
             raise EscalationRuntimeError(
-                "governance denial lineage does not include a session_id"
+                f"{lineage_label} lineage does not include a session_id"
             )
         session = await self._sessions.get_session(
             as_session_id(resolved_session_id),
@@ -151,7 +219,7 @@ class EscalationAgentRuntime:
         )
         if session is None:
             raise EscalationRuntimeError(
-                "governance denial session is absent or tenant-invisible: "
+                f"{lineage_label} session is absent or tenant-invisible: "
                 f"{resolved_session_id}"
             )
 
@@ -162,6 +230,13 @@ class EscalationAgentRuntime:
             governance_decision_id=governance_decision_id,
         )
         grounding_metadata = _grounding_escalation_metadata(decision)
+        handoff_kind, priority, handoff_metadata = _handoff_classification(
+            decision
+        )
+        projection_source = _projection_source(
+            decision=decision,
+            handoff_kind=handoff_kind,
+        )
         record = EscalationRecord(
             escalation_id=str(escalation_id),
             session_id=str(resolved_session_id),
@@ -170,16 +245,22 @@ class EscalationAgentRuntime:
             governance_decision_id=decision.decision_id,
             status=EscalationStatus.PENDING.value,
             created_at=now.isoformat(),
+            handoff_kind=handoff_kind.value,
+            priority=priority.value,
             metadata={
-                "projection_source": "governance_denial",
+                "projection_source": projection_source,
                 "source_governance_decision_id": decision.decision_id,
+                "source_decision": decision.decision,
                 "source_policy_chain_id": decision.policy_chain_id,
                 "source_stage": decision.stage,
                 "source_subject_kind": decision.subject_kind,
                 "source_request_id": decision.request_id,
                 "source_correlation_id": decision.correlation_id,
                 "session_id": str(resolved_session_id),
+                "handoff_kind": handoff_kind.value,
+                "priority": priority.value,
                 "record_only_agent": True,
+                **handoff_metadata,
                 **grounding_metadata,
             },
         )
@@ -292,6 +373,9 @@ class EscalationAgentRuntime:
             metadata={
                 "governance_decision_id": record.governance_decision_id,
                 "session_id": record.session_id,
+                "source_decision": record.metadata.get("source_decision"),
+                "handoff_kind": record.handoff_kind,
+                "priority": record.priority,
                 **dict(metadata or {}),
             },
         )
@@ -311,6 +395,50 @@ class EscalationAgentRuntime:
         """Prepare the escalation publication row from denial lineage."""
 
         record = await self.create_for_governance_denial(
+            governance_decision_id=governance_decision_id,
+            expected_tenant_id=expected_tenant_id,
+            session_id=session_id,
+        )
+        outbox = await self.ensure_outbox_for_escalation(
+            record,
+            expected_tenant_id=expected_tenant_id,
+            metadata=metadata,
+        )
+        return EscalationOutboxPreparation(escalation=record, outbox=outbox)
+
+    async def prepare_governance_escalation_outbox(
+        self,
+        *,
+        governance_decision_id: str,
+        expected_tenant_id: str,
+        session_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> EscalationOutboxPreparation:
+        """Prepare the escalation publication row from ESCALATE lineage."""
+
+        record = await self.create_for_governance_escalation(
+            governance_decision_id=governance_decision_id,
+            expected_tenant_id=expected_tenant_id,
+            session_id=session_id,
+        )
+        outbox = await self.ensure_outbox_for_escalation(
+            record,
+            expected_tenant_id=expected_tenant_id,
+            metadata=metadata,
+        )
+        return EscalationOutboxPreparation(escalation=record, outbox=outbox)
+
+    async def prepare_governance_decision_outbox(
+        self,
+        *,
+        governance_decision_id: str,
+        expected_tenant_id: str,
+        session_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> EscalationOutboxPreparation:
+        """Prepare an escalation publication row from DENY or ESCALATE lineage."""
+
+        record = await self.create_for_governance_decision(
             governance_decision_id=governance_decision_id,
             expected_tenant_id=expected_tenant_id,
             session_id=session_id,
@@ -593,6 +721,14 @@ class EscalationAgentRuntime:
             record.governance_decision_id,
             expected_tenant_id=expected_tenant_id,
         )
+        if record.handoff_kind == EscalationHandoffKind.CRISIS.value:
+            raise EscalationRuntimeError(
+                "crisis handoffs cannot be resolved through DENY override"
+            )
+        if record.metadata.get("crisis") is True:
+            raise EscalationRuntimeError(
+                "crisis handoffs cannot be resolved through DENY override"
+            )
         if decision is None:
             raise EscalationRuntimeError(
                 "source governance denial is absent or tenant-invisible"
@@ -717,6 +853,102 @@ def _session_id_from_metadata(metadata: Mapping[str, Any]) -> str | None:
             if text:
                 return text
     return None
+
+
+def _decision_values(decisions: frozenset[Decision]) -> frozenset[str]:
+    return frozenset(decision.value for decision in decisions)
+
+
+def _existing_record_matches_decisions(
+    record: EscalationRecord,
+    decisions: frozenset[Decision],
+) -> bool:
+    source_decision = record.metadata.get("source_decision")
+    if source_decision is not None:
+        return str(source_decision) in _decision_values(decisions)
+    # Legacy rows were DENY-only before ESCALATE handoffs became durable.
+    return Decision.DENY in decisions
+
+
+def _handoff_classification(
+    decision: GovernanceDecisionRecord,
+) -> tuple[EscalationHandoffKind, EscalationPriority, dict[str, Any]]:
+    crisis_metadata = _crisis_handoff_metadata(decision)
+    if crisis_metadata:
+        return (
+            EscalationHandoffKind.CRISIS,
+            EscalationPriority.HIGH,
+            crisis_metadata,
+        )
+    if decision.decision == Decision.ESCALATE.value:
+        return (
+            EscalationHandoffKind.ESCALATION,
+            EscalationPriority.HIGH,
+            {},
+        )
+    return (EscalationHandoffKind.DENIAL, EscalationPriority.NORMAL, {})
+
+
+def _projection_source(
+    *,
+    decision: GovernanceDecisionRecord,
+    handoff_kind: EscalationHandoffKind,
+) -> str:
+    if handoff_kind is EscalationHandoffKind.CRISIS:
+        return "governance_crisis"
+    if decision.decision == Decision.ESCALATE.value:
+        return "governance_escalation"
+    return "governance_denial"
+
+
+def _crisis_handoff_metadata(
+    decision: GovernanceDecisionRecord,
+) -> dict[str, Any]:
+    for result in decision.evaluated_rules:
+        metadata = _crisis_metadata_from_rule(
+            policy_name=result.policy_name,
+            rule_id=result.rule_id,
+            decision=result.decision,
+            severity=result.severity,
+            metadata=result.metadata,
+        )
+        if metadata:
+            return metadata
+    for violation in decision.violations:
+        metadata = _crisis_metadata_from_rule(
+            policy_name=violation.policy_name,
+            rule_id=violation.rule_id,
+            decision=violation.decision,
+            severity=violation.severity,
+            metadata=violation.metadata,
+        )
+        if metadata:
+            return metadata
+    return {}
+
+
+def _crisis_metadata_from_rule(
+    *,
+    policy_name: str,
+    rule_id: str,
+    decision: str,
+    severity: int,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    if decision == Decision.ALLOW.value or not policy_name.startswith("crisis."):
+        return {}
+    extracted: dict[str, Any] = {
+        "crisis": True,
+        "crisis_policy": policy_name,
+        "crisis_rule_id": rule_id,
+        "crisis_decision": decision,
+        "crisis_severity": severity,
+    }
+    for key in ("template", "category", "sku", "redis_key"):
+        value = metadata.get(key)
+        if value is not None:
+            extracted[f"crisis_{key}"] = str(value)
+    return extracted
 
 
 def _grounding_escalation_metadata(

@@ -431,6 +431,12 @@ class _DiagnosticEscalationResult:
     escalation_published: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _DiagnosticGovernanceHandoff:
+    decision_id: str
+    source_decision: Decision
+
+
 async def _prepare_diagnostic_execution(
     *,
     session_factory: Any,
@@ -2182,7 +2188,7 @@ async def _escalate_terminal_diagnostic_block(
 ) -> _DiagnosticEscalationResult:
     await _set_transaction_tenant(session, work_item.tenant_id)
     governance_repo = PostgresGovernanceRepository(session)
-    decision_id = await _ensure_diagnostic_block_governance_denial(
+    handoff = await _ensure_diagnostic_block_governance_handoff(
         governance_repo=governance_repo,
         work_item=work_item,
         failure=failure,
@@ -2193,24 +2199,42 @@ async def _escalate_terminal_diagnostic_block(
         governance_repository=governance_repo,
         session_persistence=PostgresSessionPersistence(session),
     )
-    prepared = await escalation_runtime.prepare_governance_denial_outbox(
-        governance_decision_id=decision_id,
-        expected_tenant_id=work_item.tenant_id,
-        session_id=work_item.session_id,
-        metadata=_diagnostic_escalation_outbox_metadata(
-            work_item=work_item,
-            failure=failure,
-        ),
-    )
+    if handoff.source_decision is Decision.ESCALATE:
+        prepared = await escalation_runtime.prepare_governance_escalation_outbox(
+            governance_decision_id=handoff.decision_id,
+            expected_tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+            metadata=_diagnostic_escalation_outbox_metadata(
+                work_item=work_item,
+                failure=failure,
+            ),
+        )
+    else:
+        prepared = await escalation_runtime.prepare_governance_denial_outbox(
+            governance_decision_id=handoff.decision_id,
+            expected_tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+            metadata=_diagnostic_escalation_outbox_metadata(
+                work_item=work_item,
+                failure=failure,
+            ),
+        )
     await session.commit()
 
     escalation_published = False
     try:
-        await CeleryEscalationPublisher().publish_governance_denial(
-            governance_decision_id=decision_id,
-            tenant_id=work_item.tenant_id,
-            session_id=work_item.session_id,
-        )
+        if handoff.source_decision is Decision.ESCALATE:
+            await CeleryEscalationPublisher().publish_governance_escalation(
+                governance_decision_id=handoff.decision_id,
+                tenant_id=work_item.tenant_id,
+                session_id=work_item.session_id,
+            )
+        else:
+            await CeleryEscalationPublisher().publish_governance_denial(
+                governance_decision_id=handoff.decision_id,
+                tenant_id=work_item.tenant_id,
+                session_id=work_item.session_id,
+            )
         escalation_published = True
     except Exception:  # noqa: BLE001
         logger.exception(
@@ -2219,7 +2243,7 @@ async def _escalate_terminal_diagnostic_block(
                 "tenant_id": work_item.tenant_id,
                 "execution_id": work_item.execution_id,
                 "attempt_id": work_item.attempt_id,
-                "governance_decision_id": decision_id,
+                "governance_decision_id": handoff.decision_id,
             },
         )
 
@@ -2231,7 +2255,7 @@ async def _escalate_terminal_diagnostic_block(
         worker_id=worker_id,
         failure={
             **dict(failure),
-            "governance_decision_id": decision_id,
+            "governance_decision_id": handoff.decision_id,
             "escalation_id": prepared.escalation.escalation_id,
             "escalation_outbox_id": prepared.outbox.outbox_id,
             "escalation_published": escalation_published,
@@ -2239,7 +2263,7 @@ async def _escalate_terminal_diagnostic_block(
         retry_requested=False,
     )
     return _DiagnosticEscalationResult(
-        governance_decision_id=decision_id,
+        governance_decision_id=handoff.decision_id,
         escalation_id=prepared.escalation.escalation_id,
         outbox_id=prepared.outbox.outbox_id,
         execution_failed=execution_failed,
@@ -2247,21 +2271,27 @@ async def _escalate_terminal_diagnostic_block(
     )
 
 
-async def _ensure_diagnostic_block_governance_denial(
+async def _ensure_diagnostic_block_governance_handoff(
     *,
     governance_repo: PostgresGovernanceRepository,
     work_item: _DiagnosticExecutionWorkItem,
     failure: Mapping[str, object],
     exc: BaseException,
-) -> str:
+) -> _DiagnosticGovernanceHandoff:
     existing_decision_id = _diagnostic_existing_governance_decision_id(exc)
     if existing_decision_id is not None:
         existing = await governance_repo.get_decision(
             existing_decision_id,
             expected_tenant_id=work_item.tenant_id,
         )
-        if existing is not None and existing.decision == Decision.DENY.value:
-            return existing.decision_id
+        if existing is not None and existing.decision in {
+            Decision.DENY.value,
+            Decision.ESCALATE.value,
+        }:
+            return _DiagnosticGovernanceHandoff(
+                decision_id=existing.decision_id,
+                source_decision=Decision(existing.decision),
+            )
 
     decision_id = _diagnostic_terminal_block_decision_id(
         work_item=work_item,
@@ -2272,7 +2302,10 @@ async def _ensure_diagnostic_block_governance_denial(
         expected_tenant_id=work_item.tenant_id,
     )
     if existing is not None:
-        return existing.decision_id
+        return _DiagnosticGovernanceHandoff(
+            decision_id=existing.decision_id,
+            source_decision=Decision.DENY,
+        )
 
     decision, trace = _diagnostic_terminal_block_governance_records(
         decision_id=decision_id,
@@ -2290,9 +2323,15 @@ async def _ensure_diagnostic_block_governance_denial(
             expected_tenant_id=work_item.tenant_id,
         )
         if existing is not None:
-            return existing.decision_id
+            return _DiagnosticGovernanceHandoff(
+                decision_id=existing.decision_id,
+                source_decision=Decision.DENY,
+            )
         raise
-    return decision_id
+    return _DiagnosticGovernanceHandoff(
+        decision_id=decision_id,
+        source_decision=Decision.DENY,
+    )
 
 
 def _diagnostic_terminal_block_governance_records(

@@ -111,17 +111,34 @@ async def reconcile_stale_escalation_outbox_runtime(
                 continue
             await session.commit()
             try:
-                await publisher.publish_governance_denial(
-                    governance_decision_id=_metadata_str(
-                        claim.outbox.metadata,
-                        "governance_decision_id",
-                    ),
-                    tenant_id=claim.outbox.tenant_id,
-                    session_id=_metadata_optional_str(
-                        claim.outbox.metadata,
-                        "session_id",
-                    ),
+                source_decision = _metadata_optional_str(
+                    claim.outbox.metadata,
+                    "source_decision",
                 )
+                if source_decision == "escalate":
+                    await publisher.publish_governance_escalation(
+                        governance_decision_id=_metadata_str(
+                            claim.outbox.metadata,
+                            "governance_decision_id",
+                        ),
+                        tenant_id=claim.outbox.tenant_id,
+                        session_id=_metadata_optional_str(
+                            claim.outbox.metadata,
+                            "session_id",
+                        ),
+                    )
+                else:
+                    await publisher.publish_governance_denial(
+                        governance_decision_id=_metadata_str(
+                            claim.outbox.metadata,
+                            "governance_decision_id",
+                        ),
+                        tenant_id=claim.outbox.tenant_id,
+                        session_id=_metadata_optional_str(
+                            claim.outbox.metadata,
+                            "session_id",
+                        ),
+                    )
             except Exception as exc:
                 await runtime.mark_outbox_failed(
                     outbox_id=claim.outbox.outbox_id,

@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
 
-from app.escalation.enums import EscalationOutboxStatus
+from app.escalation.enums import (
+    EscalationHandoffKind,
+    EscalationOutboxStatus,
+    EscalationPriority,
+)
 
 
 def _empty_metadata() -> dict[str, Any]:
@@ -15,7 +19,7 @@ def _empty_metadata() -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class EscalationRecord:
-    """Durable human approval queue record for a governance denial."""
+    """Durable human handoff queue record for governance DENY/ESCALATE."""
 
     escalation_id: str
     session_id: str
@@ -24,6 +28,8 @@ class EscalationRecord:
     governance_decision_id: str
     status: str
     created_at: str
+    handoff_kind: str = EscalationHandoffKind.DENIAL.value
+    priority: str = EscalationPriority.NORMAL.value
     resolved_at: str | None = None
     resolution: str | None = None
     resolved_by: str | None = None
@@ -38,6 +44,8 @@ class EscalationRecord:
             "governance_decision_id": self.governance_decision_id,
             "status": self.status,
             "created_at": self.created_at,
+            "handoff_kind": self.handoff_kind,
+            "priority": self.priority,
             "resolved_at": self.resolved_at,
             "resolution": self.resolution,
             "resolved_by": self.resolved_by,
@@ -54,6 +62,10 @@ class EscalationRecord:
             governance_decision_id=str(data["governance_decision_id"]),
             status=str(data["status"]),
             created_at=str(data["created_at"]),
+            handoff_kind=str(
+                data.get("handoff_kind", EscalationHandoffKind.DENIAL.value)
+            ),
+            priority=str(data.get("priority", EscalationPriority.NORMAL.value)),
             resolved_at=(
                 str(data["resolved_at"])
                 if data.get("resolved_at") is not None

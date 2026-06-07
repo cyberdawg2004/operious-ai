@@ -14,6 +14,7 @@ from app.dependencies.services import (
 )
 from app.escalation import (
     EscalationAgentRuntime,
+    EscalationHandoffKind,
     EscalationOutboxStatus,
     EscalationPersistenceError,
     InMemoryEscalationPersistence,
@@ -29,6 +30,7 @@ from app.session.persistence import InMemorySessionPersistence, SessionRecord
 _TENANT = "tenant-phase-g"
 _SESSION_ID = "00000000-0000-0000-0000-00000000f001"
 _DENY_ID = "00000000-0000-0000-0000-00000000f002"
+_ESCALATE_ID = "00000000-0000-0000-0000-00000000f003"
 _NOW = datetime(2026, 5, 23, 8, tzinfo=timezone.utc)
 
 
@@ -225,6 +227,43 @@ async def test_deferred_escalation_publisher_claims_and_marks_published() -> Non
     assert outbox.claim_id is not None
     assert outbox.publisher_id == "test:deferred"
     assert delegate.calls == [(_DENY_ID, _TENANT, _SESSION_ID)]
+    assert delegate.escalation_calls == []
+    assert commits.count == 2
+
+
+@pytest.mark.asyncio
+async def test_deferred_escalation_publisher_claims_and_marks_escalate_published() -> None:
+    runtime, store = await _runtime()
+    delegate = _RecordingEscalationPublisher()
+    commits = _CommitRecorder()
+    deferred = _DeferredEscalationPublisher(
+        delegate=delegate,
+        escalation_runtime=runtime,
+        session=commits,  # type: ignore[arg-type]
+        publisher_id="test:deferred",
+    )
+
+    await deferred.publish_governance_escalation(
+        governance_decision_id=_ESCALATE_ID,
+        tenant_id=_TENANT,
+        session_id=_SESSION_ID,
+    )
+    await deferred.flush()
+
+    escalation = await store.get_escalation_for_governance_decision(
+        _ESCALATE_ID,
+        expected_tenant_id=_TENANT,
+    )
+    assert escalation is not None
+    assert escalation.handoff_kind == EscalationHandoffKind.ESCALATION.value
+    outbox = await store.get_escalation_outbox_by_escalation(
+        escalation.escalation_id,
+        expected_tenant_id=_TENANT,
+    )
+    assert outbox is not None
+    assert outbox.status is EscalationOutboxStatus.PUBLISHED
+    assert delegate.calls == []
+    assert delegate.escalation_calls == [(_ESCALATE_ID, _TENANT, _SESSION_ID)]
     assert commits.count == 2
 
 
@@ -306,6 +345,9 @@ async def _runtime() -> tuple[EscalationAgentRuntime, InMemoryEscalationPersiste
     sessions = InMemorySessionPersistence()
     await sessions.save_session(_session())
     await governance.record_decision(_decision())
+    await governance.record_decision(
+        _decision(decision_id=_ESCALATE_ID, decision="escalate")
+    )
     return (
         EscalationAgentRuntime(
             escalation_persistence=escalations,
@@ -319,6 +361,7 @@ async def _runtime() -> tuple[EscalationAgentRuntime, InMemoryEscalationPersiste
 class _RecordingEscalationPublisher:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str | None]] = []
+        self.escalation_calls: list[tuple[str, str, str | None]] = []
 
     async def publish_governance_denial(
         self,
@@ -329,9 +372,30 @@ class _RecordingEscalationPublisher:
     ) -> None:
         self.calls.append((governance_decision_id, tenant_id, session_id))
 
+    async def publish_governance_escalation(
+        self,
+        *,
+        governance_decision_id: str,
+        tenant_id: str,
+        session_id: str | None = None,
+    ) -> None:
+        self.escalation_calls.append(
+            (governance_decision_id, tenant_id, session_id)
+        )
+
 
 class _FailingEscalationPublisher:
     async def publish_governance_denial(
+        self,
+        *,
+        governance_decision_id: str,
+        tenant_id: str,
+        session_id: str | None = None,
+    ) -> None:
+        del governance_decision_id, tenant_id, session_id
+        raise RuntimeError("transport down")
+
+    async def publish_governance_escalation(
         self,
         *,
         governance_decision_id: str,
@@ -372,13 +436,17 @@ def _session() -> SessionRecord:
     )
 
 
-def _decision() -> GovernanceDecisionRecord:
+def _decision(
+    *,
+    decision_id: str = _DENY_ID,
+    decision: str = "deny",
+) -> GovernanceDecisionRecord:
     return GovernanceDecisionRecord(
-        decision_id=_DENY_ID,
-        decision="deny",
+        decision_id=decision_id,
+        decision=decision,
         stage="pre_execution",
         policy_chain_id="phase.g.test",
-        reason="deny: phase-g fixture",
+        reason=f"{decision}: phase-g fixture",
         decided_at=_NOW.isoformat(),
         correlation_id="corr-phase-g",
         request_id="req-phase-g",

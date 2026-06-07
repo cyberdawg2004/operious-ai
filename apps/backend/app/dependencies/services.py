@@ -112,7 +112,7 @@ from app.governance.enforcement.handlers import (
     RequireApprovalHandler,
 )
 from app.governance.enforcement.runtime import GovernanceRuntime
-from app.governance.enums import EnforcementStage
+from app.governance.enums import Decision, EnforcementStage
 from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.persistence import (
     BaseGovernanceRepository,
@@ -1083,6 +1083,7 @@ class _EscalationIntent:
     governance_decision_id: str
     tenant_id: str
     session_id: str | None
+    source_decision: Decision
 
 
 class _DeferredEscalationPublisher(EscalationPublisher):
@@ -1114,20 +1115,56 @@ class _DeferredEscalationPublisher(EscalationPublisher):
                 governance_decision_id=governance_decision_id,
                 tenant_id=tenant_id,
                 session_id=session_id,
+                source_decision=Decision.DENY,
+            )
+        )
+
+    async def publish_governance_escalation(
+        self,
+        *,
+        governance_decision_id: str,
+        tenant_id: str,
+        session_id: str | None = None,
+    ) -> None:
+        self._intents.append(
+            _EscalationIntent(
+                governance_decision_id=governance_decision_id,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                source_decision=Decision.ESCALATE,
             )
         )
 
     async def flush(self) -> None:
         for intent in self._intents:
-            prepared = await self._escalation_runtime.prepare_governance_denial_outbox(
-                governance_decision_id=intent.governance_decision_id,
-                expected_tenant_id=intent.tenant_id,
-                session_id=intent.session_id,
-                metadata={
-                    "source_governance_decision_id": intent.governance_decision_id,
-                    "source_session_id": intent.session_id,
-                },
-            )
+            if intent.source_decision is Decision.ESCALATE:
+                prepared = (
+                    await self._escalation_runtime.prepare_governance_escalation_outbox(
+                        governance_decision_id=intent.governance_decision_id,
+                        expected_tenant_id=intent.tenant_id,
+                        session_id=intent.session_id,
+                        metadata={
+                            "source_governance_decision_id": (
+                                intent.governance_decision_id
+                            ),
+                            "source_session_id": intent.session_id,
+                            "source_decision": intent.source_decision.value,
+                        },
+                    )
+                )
+            else:
+                prepared = await self._escalation_runtime.prepare_governance_denial_outbox(
+                    governance_decision_id=intent.governance_decision_id,
+                    expected_tenant_id=intent.tenant_id,
+                    session_id=intent.session_id,
+                    metadata={
+                        "source_governance_decision_id": (
+                            intent.governance_decision_id
+                        ),
+                        "source_session_id": intent.session_id,
+                        "source_decision": intent.source_decision.value,
+                    },
+                )
             claim = await self._escalation_runtime.claim_outbox_for_escalation(
                 escalation_id=prepared.escalation.escalation_id,
                 publisher_id=self._publisher_id,
@@ -1142,11 +1179,18 @@ class _DeferredEscalationPublisher(EscalationPublisher):
                 )
             await self._session.commit()
             try:
-                await self._delegate.publish_governance_denial(
-                    governance_decision_id=intent.governance_decision_id,
-                    tenant_id=intent.tenant_id,
-                    session_id=intent.session_id,
-                )
+                if intent.source_decision is Decision.ESCALATE:
+                    await self._delegate.publish_governance_escalation(
+                        governance_decision_id=intent.governance_decision_id,
+                        tenant_id=intent.tenant_id,
+                        session_id=intent.session_id,
+                    )
+                else:
+                    await self._delegate.publish_governance_denial(
+                        governance_decision_id=intent.governance_decision_id,
+                        tenant_id=intent.tenant_id,
+                        session_id=intent.session_id,
+                    )
             except Exception as exc:
                 await self._escalation_runtime.mark_outbox_failed(
                     outbox_id=claim.outbox.outbox_id,

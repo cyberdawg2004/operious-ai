@@ -11,6 +11,9 @@ import pytest
 
 from app.escalation import (
     EscalationAgentRuntime,
+    EscalationHandoffKind,
+    EscalationPriority,
+    EscalationQuery,
     EscalationRuntimeError,
     EscalationStatus,
     InMemoryEscalationPersistence,
@@ -39,6 +42,8 @@ _OTHER_TENANT = "tenant-other"
 _SESSION_ID = "00000000-0000-0000-0000-000000003c01"
 _DENY_ID = "00000000-0000-0000-0000-000000003c02"
 _ALLOW_ID = "00000000-0000-0000-0000-000000003c03"
+_ESCALATE_ID = "00000000-0000-0000-0000-000000003c04"
+_CRISIS_DENY_ID = "00000000-0000-0000-0000-000000003c05"
 _NOW = datetime(2026, 5, 22, 10, tzinfo=timezone.utc)
 
 
@@ -138,6 +143,43 @@ def _grounding_decision() -> GovernanceDecisionRecord:
     )
 
 
+def _crisis_decision(
+    *,
+    decision_id: str = _CRISIS_DENY_ID,
+    decision: str = "deny",
+    policy_name: str = "crisis.block_sku",
+    template: str = "block_sku",
+) -> GovernanceDecisionRecord:
+    return GovernanceDecisionRecord(
+        decision_id=decision_id,
+        decision=decision,
+        stage="pre_execution",
+        policy_chain_id="crisis.chain",
+        reason=f"crisis:{template} test handoff",
+        decided_at=_NOW.isoformat(),
+        correlation_id="corr-crisis",
+        request_id="req-crisis",
+        tenant_id=_TENANT,
+        subject_kind="execution",
+        metadata={"session_id": _SESSION_ID},
+        evaluated_rules=(
+            PolicyEvaluationResultRecord(
+                policy_name=policy_name,
+                rule_id=f"crisis_{template}",
+                decision=decision,
+                severity=40,
+                reason=f"crisis {template}",
+                evaluated_at=_NOW.isoformat(),
+                metadata={
+                    "template": template,
+                    "redis_key": f"crisis:{_TENANT}:{template}",
+                },
+                policy_version="test",
+            ),
+        ),
+    )
+
+
 async def _runtime() -> tuple[
     EscalationAgentRuntime,
     InMemoryEscalationPersistence,
@@ -188,6 +230,76 @@ async def test_escalation_agent_creates_pending_record_from_deny_only() -> None:
         DecisionQuery(tenant_id=_TENANT)
     )
     assert [d.decision_id for d in decisions.items] == [_DENY_ID]
+
+
+@pytest.mark.asyncio
+async def test_escalation_pipeline_accepts_escalate_and_marks_high_priority() -> None:
+    escalations = InMemoryEscalationPersistence()
+    governance = InMemoryGovernanceRepository()
+    sessions = InMemorySessionPersistence()
+    await sessions.save_session(_session())
+    await governance.record_decision(
+        _decision(decision_id=_ESCALATE_ID, decision="escalate")
+    )
+    runtime = EscalationAgentRuntime(
+        escalation_persistence=escalations,
+        governance_repository=governance,
+        session_persistence=sessions,
+    )
+
+    prepared = await runtime.prepare_governance_escalation_outbox(
+        governance_decision_id=_ESCALATE_ID,
+        expected_tenant_id=_TENANT,
+    )
+    second = await runtime.prepare_governance_escalation_outbox(
+        governance_decision_id=_ESCALATE_ID,
+        expected_tenant_id=_TENANT,
+    )
+
+    assert second.escalation == prepared.escalation
+    assert second.outbox == prepared.outbox
+    assert prepared.escalation.handoff_kind == EscalationHandoffKind.ESCALATION.value
+    assert prepared.escalation.priority == EscalationPriority.HIGH.value
+    assert prepared.escalation.metadata["source_decision"] == "escalate"
+    assert prepared.outbox.metadata["source_decision"] == "escalate"
+    assert prepared.outbox.metadata["priority"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_crisis_decision_is_high_priority_and_sorted_above_routine_denial() -> None:
+    escalations = InMemoryEscalationPersistence()
+    governance = InMemoryGovernanceRepository()
+    sessions = InMemorySessionPersistence()
+    await sessions.save_session(_session())
+    await governance.record_decision(_decision())
+    await governance.record_decision(_crisis_decision())
+    runtime = EscalationAgentRuntime(
+        escalation_persistence=escalations,
+        governance_repository=governance,
+        session_persistence=sessions,
+    )
+
+    routine = await runtime.create_for_governance_denial(
+        governance_decision_id=_DENY_ID,
+        expected_tenant_id=_TENANT,
+    )
+    crisis = await runtime.create_for_governance_denial(
+        governance_decision_id=_CRISIS_DENY_ID,
+        expected_tenant_id=_TENANT,
+    )
+    page = await runtime.list_escalations(
+        query=EscalationQuery(status=EscalationStatus.PENDING.value),
+        expected_tenant_id=_TENANT,
+    )
+
+    assert crisis.handoff_kind == EscalationHandoffKind.CRISIS.value
+    assert crisis.priority == EscalationPriority.HIGH.value
+    assert crisis.metadata["crisis"] is True
+    assert crisis.metadata["crisis_policy"] == "crisis.block_sku"
+    assert [item.escalation_id for item in page.items] == [
+        crisis.escalation_id,
+        routine.escalation_id,
+    ]
 
 
 @pytest.mark.asyncio
@@ -270,6 +382,47 @@ async def test_escalation_agent_rejects_non_deny_and_cross_tenant() -> None:
         await runtime.create_for_governance_denial(
             governance_decision_id=_ALLOW_ID,
             expected_tenant_id=_OTHER_TENANT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_deny_override_refuses_escalate_and_crisis_handoffs() -> None:
+    escalations = InMemoryEscalationPersistence()
+    governance = InMemoryGovernanceRepository()
+    sessions = InMemorySessionPersistence()
+    await sessions.save_session(_session())
+    await governance.record_decision(
+        _decision(decision_id=_ESCALATE_ID, decision="escalate")
+    )
+    await governance.record_decision(_crisis_decision())
+    runtime = EscalationAgentRuntime(
+        escalation_persistence=escalations,
+        governance_repository=governance,
+        session_persistence=sessions,
+    )
+
+    escalated = await runtime.create_for_governance_escalation(
+        governance_decision_id=_ESCALATE_ID,
+        expected_tenant_id=_TENANT,
+    )
+    crisis = await runtime.create_for_governance_denial(
+        governance_decision_id=_CRISIS_DENY_ID,
+        expected_tenant_id=_TENANT,
+    )
+
+    with pytest.raises(EscalationRuntimeError, match="DENY"):
+        await runtime.approve_escalation(
+            escalation_id=escalated.escalation_id,
+            expected_tenant_id=_TENANT,
+            resolution="incorrectly override escalate",
+            resolved_by="principal-manager",
+        )
+    with pytest.raises(EscalationRuntimeError, match="crisis"):
+        await runtime.reject_escalation(
+            escalation_id=crisis.escalation_id,
+            expected_tenant_id=_TENANT,
+            resolution="incorrectly reject crisis",
+            resolved_by="principal-manager",
         )
 
 

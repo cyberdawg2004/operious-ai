@@ -153,11 +153,14 @@ export type EscalationRecord = {
   reason: string;
   governance_decision_id: string;
   status: "pending" | "reviewed" | "approved" | "rejected";
+  handoff_kind: "denial" | "escalation" | "crisis";
+  priority: "normal" | "high";
   created_at: string;
   resolved_at: string | null;
   resolution: string | null;
   resolved_by: string | null;
   governance_override_decision_id: string | null;
+  source_decision: string | null;
 };
 
 export type ApprovalRecord = {
