@@ -126,6 +126,14 @@ class Settings(BaseSettings):
     AUTH0_ISSUER: str | None = None
     AUTH0_AUDIENCE: str | None = None
     AUTH0_JWKS_URL: str | None = None
+    # Auth0 Management API M2M settings for platform admin provisioning.
+    # Secrets are consumed only by the backend integration client and are
+    # never returned through API responses or operational event metadata.
+    AUTH0_MGMT_CLIENT_ID: str | None = None
+    AUTH0_MGMT_CLIENT_SECRET: str | None = None
+    AUTH0_MGMT_AUDIENCE: str | None = None
+    AUTH0_MGMT_CONNECTION: str | None = None
+    AUTH0_TENANT_CONFIG_ADMIN_ROLE_ID: str | None = None
     AUTH0_NAMESPACE: str = Field(
         default="https://operious.com",
         description=(

@@ -7,6 +7,8 @@ from typing import Final
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.tenant import (
+    TenantAdminProvisionRequest,
+    TenantAdminProvisionResponse,
     TenantConfigChangeRequestCreateRequest,
     TenantConfigChangeRequestPage,
     TenantConfigChangeRequestRejectRequest,
@@ -97,7 +99,13 @@ from app.tenant.identity import (
     as_governance_policy_id,
     as_knowledge_document_id,
 )
-from app.tenant.lifecycle import TenantAlreadyExistsError, TenantLifecycleError
+from app.tenant.lifecycle import (
+    TenantAdminProvisioningError,
+    TenantAdminProvisioningUnavailableError,
+    TenantAlreadyExistsError,
+    TenantLifecycleError,
+    TenantNotFoundError,
+)
 
 router = APIRouter(tags=["tenant"])
 require_platform_lifecycle_admin = require_platform_tenant_admin
@@ -173,6 +181,29 @@ async def list_tenant_lifecycle(
 ) -> TenantLifecyclePage:
     page = await service.list_tenants(limit=limit, offset=offset)
     return TenantLifecyclePage.from_page(page)
+
+
+@router.post(
+    "/lifecycle/tenants/{tenant_id}/admins",
+    response_model=TenantAdminProvisionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def provision_tenant_admin(
+    tenant_id: str,
+    request: TenantAdminProvisionRequest,
+    authority: AuthorityContext = Depends(require_platform_lifecycle_admin),
+    _tenant_scope: str | None = Depends(request_tenant_scope_opt),
+    service: TenantLifecycleService = Depends(get_tenant_lifecycle_service),
+) -> TenantAdminProvisionResponse:
+    try:
+        record = await service.provision_tenant_config_admin(
+            tenant_id=tenant_id,
+            email=request.email,
+            provisioned_by=_principal_or_400(authority),
+        )
+    except (TenantLifecycleError, ValueError) as exc:
+        raise _tenant_lifecycle_http_error(exc) from exc
+    return TenantAdminProvisionResponse.from_record(record)
 
 
 @router.post(
@@ -868,6 +899,21 @@ def _tenant_lifecycle_http_error(exc: BaseException) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "tenant_already_exists"},
+        )
+    if isinstance(exc, TenantNotFoundError):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_not_found"},
+        )
+    if isinstance(exc, TenantAdminProvisioningUnavailableError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "tenant_admin_provisioning_unavailable"},
+        )
+    if isinstance(exc, TenantAdminProvisioningError):
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "tenant_admin_provisioning_failed"},
         )
     if isinstance(exc, ValueError):
         return HTTPException(

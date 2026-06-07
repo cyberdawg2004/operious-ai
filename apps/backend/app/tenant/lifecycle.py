@@ -22,8 +22,20 @@ class TenantAlreadyExistsError(TenantLifecycleError):
     """Raised when a tenant create request targets an existing tenant."""
 
 
+class TenantNotFoundError(TenantLifecycleError):
+    """Raised when a tenant-scoped lifecycle operation targets no tenant."""
+
+
 class TenantLifecyclePersistenceError(TenantLifecycleError):
     """Raised when a tenant lifecycle write cannot be persisted."""
+
+
+class TenantAdminProvisioningUnavailableError(TenantLifecycleError):
+    """Raised when platform identity provisioning is not configured."""
+
+
+class TenantAdminProvisioningError(TenantLifecycleError):
+    """Raised when tenant admin provisioning cannot be completed safely."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +51,21 @@ class TenantLifecyclePage:
     total: int
     limit: int
     offset: int
+
+
+@dataclass(frozen=True, slots=True)
+class TenantAdminProvisioningRecord:
+    tenant_id: str
+    email: str
+    auth0_user_id: str
+    roles_granted: tuple[str, ...]
+    capabilities_granted: tuple[str, ...]
+    created_user: bool
+    updated_claims: bool
+    assigned_roles: bool
+    outcome: str
+    event_id: str
+    provisioned_at: datetime
 
 
 class PostgresTenantLifecycleRepository(BaseRepository):
@@ -106,9 +133,13 @@ def _row_to_record(row: TenantRow) -> TenantLifecycleRecord:
 
 __all__ = [
     "PostgresTenantLifecycleRepository",
+    "TenantAdminProvisioningError",
+    "TenantAdminProvisioningRecord",
+    "TenantAdminProvisioningUnavailableError",
     "TenantAlreadyExistsError",
     "TenantLifecycleError",
     "TenantLifecyclePage",
     "TenantLifecyclePersistenceError",
     "TenantLifecycleRecord",
+    "TenantNotFoundError",
 ]

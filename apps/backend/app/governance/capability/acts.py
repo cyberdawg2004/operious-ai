@@ -78,6 +78,7 @@ class OperationalAct(StrEnum):
 
     # ─── platform / hardening lifecycle ─────────────────────────────
     TENANT_CREATE = "hardening:tenant_create"
+    TENANT_ADMIN_PROVISION = "hardening:tenant_admin_provision"
 
     # ─── execution chronology projection ────────────────────────────
     EXECUTION_REQUEST = "execution:request"

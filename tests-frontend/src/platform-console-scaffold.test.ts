@@ -173,11 +173,22 @@ test('lifecycle client methods hit /tenant/lifecycle/tenants', () => {
   const api = readText(join(PC, 'lib', 'api.ts'));
   ok(api.includes('export function createTenantLifecycle'));
   ok(api.includes('export function listTenantLifecycle'));
+  ok(api.includes('export function provisionTenantAdmin'));
   ok(api.includes('export function readCurrentPrincipal'));
   ok(api.includes('"/tenant/lifecycle/tenants"'));
+  ok(api.includes('/tenant/lifecycle/tenants/${encodeURIComponent(tenantId)}/admins'));
   ok(api.includes('"/auth/me"'));
   // The landing page proves the read path end to end.
   const tenants = readText(join(PC, 'app', 'tenants', 'page.tsx'));
   ok(tenants.includes('listTenantLifecycle'));
   ok(tenants.includes('PlatformConsole'));
+});
+
+test('tenant onboarding provisions TenantConfigAdmin instead of manual Auth0 handoff', () => {
+  const onboarding = readText(join(PC, 'components', 'tenant-onboarding.tsx'));
+  ok(onboarding.includes('provisionTenantAdmin'));
+  ok(onboarding.includes('TenantConfigAdmin'));
+  ok(onboarding.includes('tenant.config.write'));
+  ok(onboarding.includes('Approver provisioning remains a separate dual-control step'));
+  strictEqual(onboarding.includes('In Auth0, create/grant'), false);
 });

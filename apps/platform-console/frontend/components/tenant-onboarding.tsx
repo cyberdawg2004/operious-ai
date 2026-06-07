@@ -1,12 +1,22 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ArrowRight, Building2, Check, ExternalLink, Lock } from "lucide-react";
+import {
+  ArrowRight,
+  Building2,
+  Check,
+  ExternalLink,
+  Lock,
+  ShieldCheck,
+  UserPlus,
+} from "lucide-react";
 import {
   ApiError,
   createTenantLifecycle,
   formatApiError,
   listTenantLifecycle,
+  provisionTenantAdmin,
+  type TenantAdminProvisioningRecord,
   type TenantLifecycleRecord,
 } from "@/lib/api";
 import { describeTenantStatus } from "@/lib/tenant-status";
@@ -14,6 +24,19 @@ import { useApiResource } from "@/lib/use-api-resource";
 
 const COMMAND_CENTER_URL =
   process.env.NEXT_PUBLIC_COMMAND_CENTER_URL || "https://app.operious.com";
+
+const TENANT_CONFIG_ADMIN_ROLE = "TenantConfigAdmin";
+const TENANT_CONFIG_ADMIN_CAPABILITIES = [
+  "tenant.channel.admin",
+  "tenant.knowledge.write",
+  "tenant.policy.write",
+  "tenant.topology.write",
+  "tenant.execution_governance.write",
+  "tenant.connector.write",
+  "tenant.connector.read",
+  "tenant.config.read",
+  "tenant.config.write",
+];
 
 /**
  * Phase A only. The Platform Console creates a tenant (a platform operation)
@@ -50,12 +73,12 @@ export function TenantOnboarding() {
         />
       </Step>
 
-      <Step index={2} title="Re-auth handoff (tenant-isolation boundary)">
+      <Step index={2} title="Provision tenant admin">
         {selected ? (
           <Handoff record={selected} />
         ) : (
           <p className="text-[13px] text-ink-tertiary">
-            Create or select a tenant above to see its configuration handoff.
+            Create or select a tenant above to provision its config admin.
           </p>
         )}
       </Step>
@@ -195,28 +218,16 @@ function Handoff({ record }: { record: TenantLifecycleRecord }) {
       <div className="rounded border border-gold-primary/40 bg-gold-bg p-3 text-[13px] leading-relaxed text-ink-primary">
         <p className="flex items-center gap-2 font-semibold">
           <Lock className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
-          This tenant cannot be configured from the Platform Console
+          Tenant configuration stays outside the Platform Console
         </p>
         <p className="mt-2">
-          That is the tenant-isolation boundary — there is no cross-tenant
-          configuration path. To configure{" "}
-          <strong>{record.tenant_id}</strong>:
+          This remains the tenant-isolation boundary: the Platform Console can
+          provision a tenant-scoped config admin, then that user re-authenticates
+          into the Command Center to configure <strong>{record.tenant_id}</strong>.
         </p>
-        <ol className="mt-2 list-decimal space-y-1 pl-5">
-          <li>
-            In Auth0, create/grant a user with{" "}
-            <code>tenant_id={record.tenant_id}</code> and the config roles
-            (connector / policy / channel write + read), and a{" "}
-            <strong>separate</strong> approver user with{" "}
-            <code>tenant.config.approve</code> (dual control).
-          </li>
-          <li>Log into the Command Center as that user.</li>
-          <li>
-            Complete configuration there: channels → connectors → credentials →
-            action policy.
-          </li>
-        </ol>
       </div>
+
+      <AdminProvisioning record={record} />
 
       <a
         href={COMMAND_CENTER_URL}
@@ -227,6 +238,137 @@ function Handoff({ record }: { record: TenantLifecycleRecord }) {
         Open Command Center <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
       </a>
     </div>
+  );
+}
+
+function AdminProvisioning({ record }: { record: TenantLifecycleRecord }) {
+  const [email, setEmail] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TenantAdminProvisioningRecord | null>(
+    null
+  );
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const targetEmail = email.trim();
+    if (!targetEmail) {
+      setError("Enter the admin email.");
+      return;
+    }
+    if (!confirmed) {
+      setError("Confirm the grant before provisioning.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const provisioned = await provisionTenantAdmin(
+        record.tenant_id,
+        targetEmail
+      );
+      setResult(provisioned);
+    } catch (caught: unknown) {
+      setError(formatApiError(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      className="rounded border border-border-subtle bg-surface-raised p-3"
+    >
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-primary">
+        <UserPlus className="h-4 w-4 text-ink-tertiary" strokeWidth={1.8} />
+        Provision config admin
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+        <div>
+          <label className="block">
+            <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+              Admin email
+            </span>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setResult(null);
+              }}
+              placeholder="admin@example.com"
+              className="h-11 w-full rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+            />
+          </label>
+          <label className="mt-3 flex items-start gap-2 text-[12px] leading-relaxed text-ink-secondary">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-border-subtle text-gold-primary"
+            />
+            <span>
+              Grant <strong>{TENANT_CONFIG_ADMIN_ROLE}</strong> for{" "}
+              <strong>{record.tenant_id}</strong>. This does not grant action
+              approval authority or <code>tenant.config.approve</code>; create
+              a separate approver user for dual control.
+            </span>
+          </label>
+        </div>
+
+        <div className="rounded border border-border-subtle bg-surface p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-ink-primary">
+            <ShieldCheck
+              className="h-4 w-4 text-green-success"
+              strokeWidth={1.8}
+            />
+            {TENANT_CONFIG_ADMIN_ROLE}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {TENANT_CONFIG_ADMIN_CAPABILITIES.map((capability) => (
+              <span
+                key={capability}
+                className="rounded border border-border-subtle px-2 py-1 font-mono text-[10px] text-ink-tertiary"
+              >
+                {capability}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-3 rounded border border-red-alert/30 bg-surface px-3 py-2 text-[13px] text-red-alert">
+          {error}
+        </div>
+      )}
+      {result && (
+        <div className="mt-3 rounded border border-green-success/30 bg-surface px-3 py-2 text-[13px] text-ink-secondary">
+          <span className="font-semibold text-ink-primary">
+            {result.email}
+          </span>{" "}
+          {result.outcome}. Audit event{" "}
+          <code className="font-mono text-[11px]">{result.event_id}</code>.
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="inline-flex h-10 items-center gap-2 rounded bg-gold-primary px-4 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
+        >
+          {busy ? "Provisioning…" : "Provision tenant admin"}
+        </button>
+        <span className="text-[12px] text-ink-tertiary">
+          Approver provisioning remains a separate dual-control step for{" "}
+          <code>tenant.config.approve</code>.
+        </span>
+      </div>
+    </form>
   );
 }
 

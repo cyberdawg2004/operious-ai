@@ -38,6 +38,7 @@ from app.tenant.persistence import (
     TenantTopologyConfigurationRecord,
 )
 from app.tenant.lifecycle import (
+    TenantAdminProvisioningRecord,
     TenantLifecyclePage as LifecyclePage,
     TenantLifecycleRecord,
 )
@@ -93,6 +94,12 @@ class TenantLifecycleCreateRequest(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=255)
 
 
+class TenantAdminProvisionRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    email: str = Field(min_length=3, max_length=320)
+
+
 class TenantLifecycleResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -131,6 +138,41 @@ class TenantLifecyclePage(BaseModel):
             ],
             total=page.total,
             offset=page.offset,
+        )
+
+
+class TenantAdminProvisionResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    email: str
+    auth0_user_id: str
+    roles_granted: list[str]
+    capabilities_granted: list[str]
+    created_user: bool
+    updated_claims: bool
+    assigned_roles: bool
+    outcome: str
+    event_id: str
+    provisioned_at: datetime
+
+    @classmethod
+    def from_record(
+        cls,
+        record: TenantAdminProvisioningRecord,
+    ) -> "TenantAdminProvisionResponse":
+        return cls(
+            tenant_id=record.tenant_id,
+            email=record.email,
+            auth0_user_id=record.auth0_user_id,
+            roles_granted=list(record.roles_granted),
+            capabilities_granted=list(record.capabilities_granted),
+            created_user=record.created_user,
+            updated_claims=record.updated_claims,
+            assigned_roles=record.assigned_roles,
+            outcome=record.outcome,
+            event_id=record.event_id,
+            provisioned_at=record.provisioned_at,
         )
 
 

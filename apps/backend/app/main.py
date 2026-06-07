@@ -92,6 +92,7 @@ from app.runtime.tenant_production_hardening import (
 from app.runtime.timeline_runtime import TimelineRuntime
 from app.semantic import SemanticCircuitBreaker, TextFingerprinter
 from app.session.persistence import PostgresSessionPersistence
+from app.services.auth0_management import build_auth0_management_client
 from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.survivability import (
     PROBLEM_DETAILS_MEDIA_TYPE,
@@ -312,7 +313,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "environment": settings.ENVIRONMENT,
         },
     )
-    init_shared_http_client()
+    http_client = init_shared_http_client()
+    app.state.auth0_management_client = build_auth0_management_client(
+        settings=settings,
+        http_client=http_client,
+    )
     redis_client = get_redis_client()
     app.state.redis_client = redis_client
     await verify_redis_memory_policy(

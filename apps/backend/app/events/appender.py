@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.events.event import OperationalEvent
+from app.events.identity import EventId
 from app.events.persistence import OperationalEventPersistenceProtocol
 from app.events.runtime import OperationalEventAppendResult, OperationalEventRuntime
 
@@ -25,6 +26,17 @@ class OperationalEventAppender:
     ) -> OperationalEventAppendResult:
         return await self._runtime.append_event(
             event,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    async def get_event(
+        self,
+        event_id: EventId,
+        *,
+        expected_tenant_id: str | None = None,
+    ) -> OperationalEvent | None:
+        return await self._runtime.get_event(
+            event_id,
             expected_tenant_id=expected_tenant_id,
         )
 

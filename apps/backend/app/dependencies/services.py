@@ -150,6 +150,7 @@ from app.semantic.quarantine_publisher import CelerySemanticQuarantinePublisher
 from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
 from app.services.cognition_service import CognitionService
+from app.services.auth0_management import Auth0ManagementClientProtocol
 from app.services.conversation_service import (
     ConversationService,
     build_conversation_service,
@@ -765,6 +766,7 @@ def get_tenant_config_change_request_service(
 
 
 def get_tenant_lifecycle_service(
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> TenantLifecycleService:
     """Return the platform-gated tenant lifecycle service."""
@@ -774,6 +776,10 @@ def get_tenant_lifecycle_service(
             persistence=PostgresOperationalEventPersistence(session)
         ),
         session=session,
+        auth0_management_client=cast(
+            Auth0ManagementClientProtocol | None,
+            getattr(request.app.state, "auth0_management_client", None),
+        ),
     )
 
 

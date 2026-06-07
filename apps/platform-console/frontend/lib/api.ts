@@ -62,6 +62,20 @@ export type TenantLifecycleRecord = {
   created_at: string;
 };
 
+export type TenantAdminProvisioningRecord = {
+  tenant_id: string;
+  email: string;
+  auth0_user_id: string;
+  roles_granted: string[];
+  capabilities_granted: string[];
+  created_user: boolean;
+  updated_claims: boolean;
+  assigned_roles: boolean;
+  outcome: string;
+  event_id: string;
+  provisioned_at: string;
+};
+
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   const url = new URL(`${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`);
   if (query) {
@@ -155,6 +169,16 @@ export function listTenantLifecycle(query: { limit?: number; offset?: number } =
       offset: query.offset ?? 0,
     },
   });
+}
+
+export function provisionTenantAdmin(tenantId: string, email: string) {
+  return apiRequest<TenantAdminProvisioningRecord>(
+    `/tenant/lifecycle/tenants/${encodeURIComponent(tenantId)}/admins`,
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }
+  );
 }
 
 export function formatApiError(error: unknown): string {
