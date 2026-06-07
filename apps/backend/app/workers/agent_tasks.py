@@ -236,7 +236,9 @@ _RESOLUTION_COMMUNICATION_POLICY_CHAIN_ID = (
     "resolution.communication.pre_execution"
 )
 _RESOLUTION_SEVERE_RISK_RULE_ID = "severe_resolution_risk"
-_RESOLUTION_SAFETY_FLAG = "safety_risk"
+_RESOLUTION_HUMAN_REVIEW_ESCALATION_FLAGS = frozenset(
+    {"safety_risk", "legal_or_chargeback_risk", "fraud_risk"}
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1656,7 +1658,10 @@ def _resolution_denial_should_escalate(
         return False
     if decision.policy_chain_id != _RESOLUTION_COMMUNICATION_POLICY_CHAIN_ID:
         return False
-    return _RESOLUTION_SAFETY_FLAG in _resolution_denial_flags(decision)
+    return bool(
+        _RESOLUTION_HUMAN_REVIEW_ESCALATION_FLAGS
+        & _resolution_denial_flags(decision)
+    )
 
 
 def _resolution_denial_flags(
