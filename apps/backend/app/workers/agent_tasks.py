@@ -10,7 +10,7 @@ import os
 import sys
 import traceback
 import uuid
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Thread
@@ -135,7 +135,12 @@ from app.knowledge import (
     build_embedding_provider,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
-from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.resolution.enums import ResolutionProposalStatus
+from app.resolution.persistence import (
+    PostgresResolutionProposalPersistence,
+    ResolutionOutboundDraftRecord,
+    ResolutionProposalRecord,
+)
 from app.runtime.resolution_governance_gate import (
     ResolutionGovernanceGate,
     build_resolution_governance_runtime,
@@ -227,6 +232,11 @@ _DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS = frozenset(
 _DIAGNOSTIC_TERMINAL_POLICY_NAME = "cognition.diagnostic_terminal_block"
 _DIAGNOSTIC_TERMINAL_POLICY_CHAIN_ID = "cognition.diagnostic.terminal_block"
 _DIAGNOSTIC_TERMINAL_GOVERNANCE_VERSION = "diagnostic-terminal-block.v1"
+_RESOLUTION_COMMUNICATION_POLICY_CHAIN_ID = (
+    "resolution.communication.pre_execution"
+)
+_RESOLUTION_SEVERE_RISK_RULE_ID = "severe_resolution_risk"
+_RESOLUTION_SAFETY_FLAG = "safety_risk"
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +395,7 @@ class _ResolutionAppendResult:
     governance_decision_id: str | None = None
     proposal_id: str | None = None
     draft_id: str | None = None
+    safety_escalation_governance_decision_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1151,6 +1162,12 @@ async def _persist_diagnostic_success(
                         await authority_tx.rollback()
                     raise
                 await session.commit()
+                resolution_escalation_published = (
+                    await _publish_resolution_safety_escalation_if_present(
+                        work_item=work_item,
+                        resolution_append=resolution_append,
+                    )
+                )
                 await _publish_conversation_phase_b(
                     work_item=work_item,
                     phase_b_event=phase_b_event,
@@ -1173,6 +1190,10 @@ async def _persist_diagnostic_success(
                     "summary": result_payload.summary,
                     "category": result_payload.category,
                     "confidence": result_payload.confidence,
+                    **_resolution_safety_escalation_result_payload(
+                        resolution_append,
+                        published=resolution_escalation_published,
+                    ),
                 }
             except Exception:
                 await session.rollback()
@@ -1472,13 +1493,14 @@ async def _append_resolution_proposal_after_diagnostic(
         async with session.begin_nested():
             data_protection = _data_protection_service(session)
             resolution_persistence = PostgresResolutionProposalPersistence(session)
+            governance_repo = PostgresGovernanceRepository(session)
             proposal = await ResolutionRuntime(
                 persistence=resolution_persistence,
                 governance_gate=ResolutionGovernanceGate(
                     # Per-task runtime construction bounds policy staleness
                     # to the current task; new tasks pick up new composition.
                     governance_runtime=build_resolution_governance_runtime(
-                        persistence=PostgresGovernanceRepository(session),
+                        persistence=governance_repo,
                         grounding_checker=CitationCoverageGroundingChecker(
                             document_repository=(
                                 PostgresTenantConfigurationRepository(
@@ -1539,6 +1561,14 @@ async def _append_resolution_proposal_after_diagnostic(
                     event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
             )
+            safety_escalation_governance_decision_id = (
+                await _resolution_safety_escalation_governance_decision_id(
+                    governance_repo=governance_repo,
+                    work_item=work_item,
+                    proposal=proposal,
+                    draft=draft,
+                )
+            )
             if resolution_proposal_is_send_eligible(proposal):
                 action_runtime = await _action_orchestration_runtime(
                     session=session,
@@ -1560,6 +1590,9 @@ async def _append_resolution_proposal_after_diagnostic(
                 governance_decision_id=str(proposal.governance_decision_id),
                 proposal_id=str(proposal.proposal_id),
                 draft_id=str(draft.draft_id),
+                safety_escalation_governance_decision_id=(
+                    safety_escalation_governance_decision_id
+                ),
             )
         return _ResolutionAppendResult(
             success=True,
@@ -1570,6 +1603,9 @@ async def _append_resolution_proposal_after_diagnostic(
             ),
             proposal_id=str(proposal.proposal_id),
             draft_id=str(draft.draft_id),
+            safety_escalation_governance_decision_id=(
+                safety_escalation_governance_decision_id
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         await _append_resolution_failure_event(
@@ -1580,6 +1616,109 @@ async def _append_resolution_proposal_after_diagnostic(
             exc=exc,
         )
         return _ResolutionAppendResult(success=False)
+
+
+async def _resolution_safety_escalation_governance_decision_id(
+    *,
+    governance_repo: PostgresGovernanceRepository,
+    work_item: _DiagnosticExecutionWorkItem,
+    proposal: ResolutionProposalRecord,
+    draft: ResolutionOutboundDraftRecord,
+) -> str | None:
+    del draft
+    if proposal.status is not ResolutionProposalStatus.DENIED:
+        return None
+    if proposal.governance_decision_id is None:
+        return None
+    decision = await governance_repo.get_decision(
+        str(proposal.governance_decision_id),
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if decision is None:
+        raise DiagnosticExecutionError(
+            "resolution safety denial has no persisted governance decision"
+        )
+    if not _resolution_denial_should_escalate(decision):
+        return None
+    return decision.decision_id
+
+
+def _resolution_denial_should_escalate(
+    decision: GovernanceDecisionRecord,
+) -> bool:
+    if decision.decision != Decision.DENY.value:
+        return False
+    if decision.policy_chain_id != _RESOLUTION_COMMUNICATION_POLICY_CHAIN_ID:
+        return False
+    return _RESOLUTION_SAFETY_FLAG in _resolution_denial_flags(decision)
+
+
+def _resolution_denial_flags(
+    decision: GovernanceDecisionRecord,
+) -> frozenset[str]:
+    flags: set[str] = set()
+    for record in (*decision.evaluated_rules, *decision.violations):
+        if record.rule_id != _RESOLUTION_SEVERE_RISK_RULE_ID:
+            continue
+        flags.update(_metadata_flags(record.metadata.get("flags")))
+    return frozenset(flags)
+
+
+def _metadata_flags(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        flags: list[str] = []
+        for item in cast(Iterable[object], value):
+            text = str(item)
+            if text:
+                flags.append(text)
+        return tuple(flags)
+    return ()
+
+
+async def _publish_resolution_safety_escalation_if_present(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    resolution_append: _ResolutionAppendResult,
+) -> bool:
+    decision_id = resolution_append.safety_escalation_governance_decision_id
+    if decision_id is None:
+        return False
+    try:
+        await CeleryEscalationPublisher().publish_governance_denial(
+            governance_decision_id=decision_id,
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "resolution_safety_escalation_publish_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": decision_id,
+            },
+        )
+        return False
+
+
+def _resolution_safety_escalation_result_payload(
+    result: _ResolutionAppendResult,
+    *,
+    published: bool,
+) -> dict[str, object]:
+    decision_id = result.safety_escalation_governance_decision_id
+    if decision_id is None:
+        return {}
+    return {
+        "resolution_safety_escalation_governance_decision_id": decision_id,
+        "resolution_safety_escalation_published": published,
+    }
 
 
 async def _action_orchestration_runtime(
