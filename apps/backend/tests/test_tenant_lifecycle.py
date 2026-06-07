@@ -380,10 +380,10 @@ async def test_gap6p2_tenant_admin_provisioning_is_audited_and_idempotent(
     assert first.event_id == second.event_id
     assert page.total == 1
     event = page.events[0]
-    assert event.operational_act is OperationalAct.TENANT_ADMIN_PROVISION
+    assert event.operational_act is OperationalAct.TENANT_CONFIG_ACCESS_PROVISION
     assert event.tenant_id == tenant_id
     assert event.principal_id == "platform-admin"
-    assert event.metadata["operation"] == "tenant_admin_provision"
+    assert event.metadata["operation"] == "tenant_config_access_provision"
     assert event.metadata["inviter"] == "platform-admin"
     assert event.metadata["target_email"] == email
     assert event.metadata["auth0_user_id"] == "auth0|tenant-config-admin"
@@ -505,7 +505,7 @@ async def _tenant_admin_provision_events(
     return await PostgresOperationalEventPersistence(session).list_events(
         OperationalEventQuery(
             tenant_id=tenant_id,
-            operational_act=OperationalAct.TENANT_ADMIN_PROVISION,
+            operational_act=OperationalAct.TENANT_CONFIG_ACCESS_PROVISION,
         ),
         expected_tenant_id=tenant_id,
     )

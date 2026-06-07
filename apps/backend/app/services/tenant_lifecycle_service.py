@@ -208,10 +208,10 @@ def _tenant_admin_provisioned_event(
     occurred_at = _aware_utc(result.provisioned_at)
     runtime_instance_id = uuid.uuid5(
         _TENANT_LIFECYCLE_NAMESPACE,
-        f"tenant_admin:provision|{result.tenant_id}|{result.email}",
+        f"tenant_config_access:provision|{result.tenant_id}|{result.email}",
     )
     event_id = derive_event_id(
-        operational_act=OperationalAct.TENANT_ADMIN_PROVISION.value,
+        operational_act=OperationalAct.TENANT_CONFIG_ACCESS_PROVISION.value,
         substrate=OperationalSubstrate.HARDENING.value,
         runtime_instance_id=runtime_instance_id,
         sequence=0,
@@ -220,7 +220,7 @@ def _tenant_admin_provisioned_event(
     )
     return OperationalEvent(
         event_id=EventId(event_id),
-        operational_act=OperationalAct.TENANT_ADMIN_PROVISION,
+        operational_act=OperationalAct.TENANT_CONFIG_ACCESS_PROVISION,
         substrate=OperationalSubstrate.HARDENING,
         causality=EventCausality(
             root_event_id=EventId(event_id),
@@ -236,7 +236,7 @@ def _tenant_admin_provisioned_event(
         principal_id=provisioned_by,
         metadata={
             "projection_source": "tenant_lifecycle",
-            "operation": "tenant_admin_provision",
+            "operation": "tenant_config_access_provision",
             "tenant_id": result.tenant_id,
             "inviter": provisioned_by,
             "provisioned_by": provisioned_by,
