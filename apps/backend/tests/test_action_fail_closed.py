@@ -10,6 +10,7 @@ pin the fail-closed behaviour: in production the registry registers a governed
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, cast
 
 from app.agents.tools.actions import build_tenant_action_tool_registry
@@ -18,6 +19,7 @@ from app.agents.tools.actions.refund_request import RefundRequestTool
 from app.agents.tools.actions.warranty_claim import WarrantyClaimTool
 from app.agents.tools.capability import ToolCapability
 from app.core.config import Settings
+from app.dependencies.services import get_action_approval_service
 
 
 class _NoConfigRepo:
@@ -86,3 +88,10 @@ def test_allow_stub_actions_effective_derivation() -> None:
         Settings(ENVIRONMENT="test", ALLOW_STUB_ACTIONS=False).allow_stub_actions_effective
         is False
     )
+
+
+def test_action_approval_service_threads_effective_stub_policy_into_registry() -> None:
+    source = inspect.getsource(get_action_approval_service)
+
+    assert "settings = get_settings()" in source
+    assert "allow_stub_actions=settings.allow_stub_actions_effective" in source

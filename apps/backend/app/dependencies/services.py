@@ -823,6 +823,7 @@ def get_action_approval_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> ActionApprovalService:
     """Return the manager action-approval service for this request."""
+    settings = get_settings()
     data_protection = _data_protection_service(session)
     governance_repository = PostgresGovernanceRepository(session)
     session_repository = PostgresSessionPersistence(
@@ -837,7 +838,7 @@ def get_action_approval_service(
                 data_protection=data_protection,
             ),
             credential_encryptor=TenantCredentialEncryptor(
-                platform_master_key=get_settings().TENANT_CREDENTIAL_MASTER_KEY,
+                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
             ),
         )
         return ActionOrchestrationRuntime(
@@ -847,6 +848,7 @@ def get_action_approval_service(
                     config_repository=PostgresConnectorConfigRepository(session),
                     credential_runtime=tenant_runtime,
                     work_order_repository=PostgresWorkOrderRepository(session),
+                    allow_stub_actions=settings.allow_stub_actions_effective,
                 ),
                 governance_runtime=build_action_tool_governance_runtime(
                     persistence=governance_repository,
@@ -864,7 +866,7 @@ def get_action_approval_service(
                 ),
                 redis_client=get_redis_client(),
                 pre_approved_decision_ttl_seconds=(
-                    get_settings().AGENT_PRE_APPROVED_DECISION_TTL_SECONDS
+                    settings.AGENT_PRE_APPROVED_DECISION_TTL_SECONDS
                 ),
             ),
             approval_repository=PostgresActionApprovalRepository(session),
