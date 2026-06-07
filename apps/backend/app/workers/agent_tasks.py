@@ -2292,6 +2292,14 @@ async def _ensure_diagnostic_block_governance_handoff(
                 decision_id=existing.decision_id,
                 source_decision=Decision(existing.decision),
             )
+    restored = await _restore_diagnostic_source_governance_handoff(
+        governance_repo=governance_repo,
+        work_item=work_item,
+        exc=exc,
+        expected_decision_id=existing_decision_id,
+    )
+    if restored is not None:
+        return restored
 
     decision_id = _diagnostic_terminal_block_decision_id(
         work_item=work_item,
@@ -2331,6 +2339,50 @@ async def _ensure_diagnostic_block_governance_handoff(
     return _DiagnosticGovernanceHandoff(
         decision_id=decision_id,
         source_decision=Decision.DENY,
+    )
+
+
+async def _restore_diagnostic_source_governance_handoff(
+    *,
+    governance_repo: PostgresGovernanceRepository,
+    work_item: _DiagnosticExecutionWorkItem,
+    exc: BaseException,
+    expected_decision_id: str | None,
+) -> _DiagnosticGovernanceHandoff | None:
+    decision = _diagnostic_existing_governance_decision_record(exc)
+    if decision is None:
+        return None
+    if expected_decision_id is not None and decision.decision_id != expected_decision_id:
+        return None
+    if decision.tenant_id != work_item.tenant_id:
+        return None
+    if decision.decision not in {Decision.DENY.value, Decision.ESCALATE.value}:
+        return None
+
+    trace = _diagnostic_existing_governance_trace_record(exc)
+    if trace is not None and (
+        trace.decision_id != decision.decision_id
+        or trace.tenant_id != work_item.tenant_id
+    ):
+        trace = None
+
+    try:
+        await governance_repo.record_decision(decision)
+    except ValueError:
+        existing = await governance_repo.get_decision(
+            decision.decision_id,
+            expected_tenant_id=work_item.tenant_id,
+        )
+        if existing is None:
+            raise
+    if trace is not None:
+        try:
+            await governance_repo.record_trace(trace)
+        except ValueError:
+            pass
+    return _DiagnosticGovernanceHandoff(
+        decision_id=decision.decision_id,
+        source_decision=Decision(decision.decision),
     )
 
 
@@ -2576,6 +2628,36 @@ def _diagnostic_existing_governance_decision_id(
         )
         if value is not None:
             return value
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _diagnostic_existing_governance_decision_record(
+    exc: BaseException,
+) -> GovernanceDecisionRecord | None:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        value = getattr(current, "governance_decision_record", None)
+        if isinstance(value, GovernanceDecisionRecord):
+            if _coerce_uuid_text(value.decision_id) is not None:
+                return value
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _diagnostic_existing_governance_trace_record(
+    exc: BaseException,
+) -> GovernanceTraceRecord | None:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        value = getattr(current, "governance_trace_record", None)
+        if isinstance(value, GovernanceTraceRecord):
+            if _coerce_uuid_text(value.decision_id) is not None:
+                return value
         current = current.__cause__ or current.__context__
     return None
 

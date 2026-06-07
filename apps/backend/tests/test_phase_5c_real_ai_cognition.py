@@ -35,6 +35,8 @@ from app.cognition.persistence import (
 from app.governance.identity import derive_decision_id
 from app.governance.persistence import (
     BaseGovernanceRepository,
+    GovernanceDecisionRecord,
+    GovernanceTraceRecord,
     InMemoryGovernanceRepository,
 )
 from app.core.config import Settings
@@ -411,7 +413,7 @@ async def test_governance_rejects_uncited_output_when_required() -> None:
         config=DiagnosticCognitionRuntimeConfig(require_citations=True),
     )
 
-    with pytest.raises(CognitionGovernanceRejectionError):
+    with pytest.raises(CognitionGovernanceRejectionError) as exc_info:
         await runtime.reason_about_ticket(
             tenant_id=_TENANT_ID,
             execution_id="execution-5c-uncited",
@@ -419,6 +421,17 @@ async def test_governance_rejects_uncited_output_when_required() -> None:
             session_id="session-5c-uncited",
             content="Customer says charging failed.",
         )
+    decision_record = getattr(
+        exc_info.value,
+        "governance_decision_record",
+        None,
+    )
+    trace_record = getattr(exc_info.value, "governance_trace_record", None)
+    assert isinstance(decision_record, GovernanceDecisionRecord)
+    assert isinstance(trace_record, GovernanceTraceRecord)
+    assert decision_record.decision_id == trace_record.decision_id
+    assert decision_record.tenant_id == _TENANT_ID
+    assert decision_record.decision == "deny"
 
 
 @pytest.mark.asyncio

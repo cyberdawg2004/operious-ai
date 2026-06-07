@@ -55,6 +55,7 @@ from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.identity import derive_decision_id
 from app.governance.persistence import BaseGovernanceRepository
+from app.governance.persistence.serializers import decision_to_record, trace_to_record
 from app.governance.policies.chain import PolicyChain
 from app.governance.policies.crisis import build_crisis_policies
 from app.governance.subjects.execution import ExecutionGovernanceSubject
@@ -721,6 +722,17 @@ class DiagnosticCognitionRuntime:
             )
             if decision_id is not None:
                 setattr(error, "governance_decision_id", decision_id)
+            if envelope.decision is not None:
+                setattr(
+                    error,
+                    "governance_decision_record",
+                    decision_to_record(envelope.decision),
+                )
+                setattr(
+                    error,
+                    "governance_trace_record",
+                    trace_to_record(envelope.trace),
+                )
             raise error
         return decision_id
 

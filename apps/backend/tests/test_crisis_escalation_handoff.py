@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import cast
 
 import pytest
 
 from app.agents.tools import invoker
+from app.cognition.exceptions import CognitionGovernanceRejectionError
 from app.governance.decisions import GovernanceDecision, PolicyEvaluationResult
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
+from app.governance.persistence import (
+    InMemoryGovernanceRepository,
+    PostgresGovernanceRepository,
+)
+from app.governance.persistence.serializers import decision_to_record, trace_to_record
+from app.governance.tracing import GovernanceTrace
+from app.workers import agent_tasks
 
 _TENANT = "tenant-crisis-handoff"
 _SESSION_ID = "00000000-0000-0000-0000-00000000c101"
@@ -85,6 +94,53 @@ async def test_crisis_require_approval_does_not_duplicate_action_approval(
     assert publisher.escalations == []
 
 
+@pytest.mark.asyncio
+async def test_diagnostic_terminal_handoff_restores_attached_crisis_source_decision() -> None:
+    repo = InMemoryGovernanceRepository()
+    decision = _decision(
+        decision=Decision.ESCALATE,
+        policy_name="crisis.escalate_all",
+        template="escalate_all",
+    )
+    error = CognitionGovernanceRejectionError(
+        "governance rejected diagnostic model output"
+    )
+    setattr(error, "governance_decision_id", str(decision.decision_id))
+    setattr(error, "governance_decision_record", decision_to_record(decision))
+    setattr(error, "governance_trace_record", trace_to_record(_trace(decision)))
+
+    handoff = await agent_tasks._ensure_diagnostic_block_governance_handoff(  # pyright: ignore[reportPrivateUsage]
+        governance_repo=cast(PostgresGovernanceRepository, repo),
+        work_item=agent_tasks._DiagnosticExecutionWorkItem(  # pyright: ignore[reportPrivateUsage]
+            execution_id="00000000-0000-0000-0000-00000000c103",
+            attempt_id="00000000-0000-0000-0000-00000000c104",
+            attempt_number=1,
+            dispatch_id="00000000-0000-0000-0000-00000000c105",
+            session_id=_SESSION_ID,
+            tenant_id=_TENANT,
+            content="Customer asks for charger troubleshooting during crisis mode.",
+        ),
+        failure={"error_class": "GOVERNANCE_DENY"},
+        exc=error,
+    )
+
+    assert handoff.decision_id == str(_DECISION_ID)
+    assert handoff.source_decision is Decision.ESCALATE
+    stored_decision = await repo.get_decision(
+        str(_DECISION_ID),
+        expected_tenant_id=_TENANT,
+    )
+    stored_trace = await repo.get_trace(
+        str(_DECISION_ID),
+        expected_tenant_id=_TENANT,
+    )
+    assert stored_decision is not None
+    assert stored_decision.decision == Decision.ESCALATE.value
+    assert stored_decision.evaluated_rules[0].policy_name == "crisis.escalate_all"
+    assert stored_trace is not None
+    assert stored_trace.final_decision == Decision.ESCALATE.value
+
+
 class _RecordingPublisher:
     def __init__(self) -> None:
         self.denials: list[tuple[str, str, str | None]] = []
@@ -136,5 +192,40 @@ def _decision(
         restrictions=(),
         reason=f"{decision.value}: crisis {template}",
         decided_at=_NOW,
-        metadata={"session_id": _SESSION_ID},
+        metadata={
+            "session_id": _SESSION_ID,
+            "tenant_id": _TENANT,
+            "subject_kind": "diagnostic_execution",
+        },
+    )
+
+
+def _trace(decision: GovernanceDecision) -> GovernanceTrace:
+    return GovernanceTrace(
+        decision_id=decision.decision_id,
+        request_id=None,
+        stage=EnforcementStage.PRE_EXECUTION,
+        action="ai.diagnostic_classification",
+        resource="execution:00000000-0000-0000-0000-00000000c103",
+        actor="agent:diagnostic",
+        tenant_id=_TENANT,
+        started_at=_NOW,
+        ended_at=_NOW,
+        latency_ms=1.0,
+        status="ok",
+        final_decision=decision.decision,
+        policy_chain_id=decision.policy_chain_id,
+        policy_traces=(),
+        rule_count=len(decision.evaluated_rules),
+        violation_count=len(decision.violations),
+        restriction_count=len(decision.restrictions),
+        subject_kind="diagnostic_execution",
+        enforcement_handler="escalate",
+        enforcement_status="ok",
+        enforcement_latency_ms=1.0,
+        metadata={
+            "session_id": _SESSION_ID,
+            "tenant_id": _TENANT,
+            "subject_kind": "diagnostic_execution",
+        },
     )
