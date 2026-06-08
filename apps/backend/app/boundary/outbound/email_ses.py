@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -14,9 +15,24 @@ from email.policy import SMTP
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
-from app.core.http import get_shared_http_client
+from app.core.config import get_settings
+from app.core.http import create_isolated_http_client
+from app.core.ssrf import (
+    PinnedIPAsyncHTTPTransport,
+    ValidatedPublicHTTPSURL,
+    validate_public_https_url,
+)
 
 _MAX_ERROR_BODY_CHARS = 2048
+
+
+class SesSSRFValidator(Protocol):
+    def __call__(
+        self,
+        url: str,
+        *,
+        allowed_hosts: Iterable[str] = (),
+    ) -> ValidatedPublicHTTPSURL: ...
 _SERVICE = "ses"
 _ALGORITHM = "AWS4-HMAC-SHA256"
 _DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -76,10 +92,35 @@ class SesV2SendError(RuntimeError):
 
 
 class SesV2EmailSender:
-    """Serialize and POST an already-authorized SES email reply."""
+    """Serialize and POST an already-authorized SES email reply.
 
-    def __init__(self, *, client: SesHTTPClientProtocol | None = None) -> None:
+    ``endpoint_url`` is tenant-configurable and the request is SigV4-signed
+    with AWS credentials, so the destination is SSRF-validated (HTTPS, public
+    address only), host-allowlisted to the regional AWS SES host
+    ``email.<region>.amazonaws.com`` (plus operator-approved extras), and
+    pinned to its resolved IP before connecting; redirects are never followed
+    (S-06 extension). An injected ``client`` is a test seam — the SSRF gate
+    still runs via ``ssrf_validator``.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: SesHTTPClientProtocol | None = None,
+        additional_allowed_hosts: tuple[str, ...] | None = None,
+        ssrf_validator: SesSSRFValidator | None = None,
+    ) -> None:
         self._client = client
+        self._additional_allowed_hosts = additional_allowed_hosts
+        self._ssrf_validator = ssrf_validator or validate_public_https_url
+
+    def _resolved_allowed_hosts(self, *, region: str) -> tuple[str, ...]:
+        extra = (
+            self._additional_allowed_hosts
+            if self._additional_allowed_hosts is not None
+            else get_settings().ses_additional_allowed_hosts
+        )
+        return (f"email.{region}.amazonaws.com", *extra)
 
     async def send_email(
         self,
@@ -95,18 +136,38 @@ class SesV2EmailSender:
             region=request.region,
             endpoint_url=request.endpoint_url,
         )
+        send_url = endpoint + "/v2/email/outbound-emails"
+        validated = await asyncio.to_thread(
+            self._ssrf_validator,
+            send_url,
+            allowed_hosts=self._resolved_allowed_hosts(region=request.region),
+        )
         headers = _sigv4_headers(
             request=request,
             endpoint=endpoint,
             payload=body,
         )
-        client = self._client or get_shared_http_client()
-        response = await client.post(
-            endpoint + "/v2/email/outbound-emails",
-            content=body,
-            headers=headers,
-            timeout=request.timeout_seconds,
-        )
+        if self._client is not None:
+            response = await self._client.post(
+                validated.url,
+                content=body,
+                headers=headers,
+                timeout=request.timeout_seconds,
+            )
+        else:
+            transport = PinnedIPAsyncHTTPTransport(pinned_ip=validated.pinned_ip)
+            async with create_isolated_http_client(
+                transport=transport,
+                timeout_seconds=request.timeout_seconds,
+                follow_redirects=False,
+            ) as client:
+                response = await client.post(
+                    validated.url,
+                    content=body,
+                    headers=headers,
+                    timeout=request.timeout_seconds,
+                    follow_redirects=False,
+                )
         if not 200 <= response.status_code < 300:
             raise SesV2SendError(
                 status_code=response.status_code,

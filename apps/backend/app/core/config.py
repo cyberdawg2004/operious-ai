@@ -419,6 +419,18 @@ class Settings(BaseSettings):
     # to require verified connector destinations.
     OUTBOUND_WEBHOOK_ALLOWED_HOSTS: str = ""
 
+    # ─── Channel send egress allowlists (S-06 extension) ─────────────
+    # Customer-facing channel senders POST to tenant-configurable provider
+    # endpoints with credentials attached. Every destination is SSRF-validated
+    # (HTTPS, public address only) and pinned to its resolved IP, AND the host
+    # must be in the provider allowlist below. Defaults are the official
+    # provider hosts; operators may add comma-separated hosts (never tenants).
+    WHATSAPP_GRAPH_ALLOWED_HOSTS: str = "graph.facebook.com"
+    # SES sends are additionally always allowed against the regional AWS host
+    # ``email.<region>.amazonaws.com`` derived from the request; this is for
+    # extra operator-approved hosts only.
+    SES_ADDITIONAL_ALLOWED_HOSTS: str = ""
+
     # ─── Execution recovery (Phase 1-F) ──────────────────────────────
     # Stale execution claim recovery remains owned by
     # ``ExecutionRuntime``. Worker/scheduler transports may invoke the
@@ -562,6 +574,24 @@ class Settings(BaseSettings):
         return tuple(
             host.strip().lower()
             for host in self.OUTBOUND_WEBHOOK_ALLOWED_HOSTS.split(",")
+            if host.strip()
+        )
+
+    @property
+    def whatsapp_graph_allowed_hosts(self) -> tuple[str, ...]:
+        """Provider host allowlist for WhatsApp Graph API sends (S-06 ext)."""
+        return tuple(
+            host.strip().lower()
+            for host in self.WHATSAPP_GRAPH_ALLOWED_HOSTS.split(",")
+            if host.strip()
+        )
+
+    @property
+    def ses_additional_allowed_hosts(self) -> tuple[str, ...]:
+        """Extra operator-approved SES hosts beyond the regional AWS host."""
+        return tuple(
+            host.strip().lower()
+            for host in self.SES_ADDITIONAL_ALLOWED_HOSTS.split(",")
             if host.strip()
         )
 
