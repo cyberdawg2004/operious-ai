@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal, cast
 from urllib.parse import parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -24,6 +25,12 @@ from app.services.ticket_ingress_service import (
     TicketIngressServiceError,
     WebhookDuplicateDeliveryResult,
 )
+
+WebhookResponseStatus = Literal[
+    "received",
+    "duplicate_delivery_acknowledged",
+    "subscription_confirmed",
+]
 
 router = APIRouter(tags=["ingress"])
 
@@ -142,6 +149,7 @@ async def create_channel_webhook_ingress(
     return TicketIngressWebhookResponse(
         ingress_id=result.ingress_id,
         canonical_envelope_id=result.canonical_envelope_id,
+        status=cast(WebhookResponseStatus, result.status),
     )
 
 

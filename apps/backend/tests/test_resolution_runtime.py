@@ -1021,6 +1021,19 @@ def test_governed_whatsapp_send_path_is_explicit_service() -> None:
     assert "send_text_message" in source
 
 
+def test_governed_email_send_path_is_explicit_service() -> None:
+    """Email sends follow the same governed service-only pattern."""
+
+    source = Path(
+        "apps/backend/app/services/email_customer_reply_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "EmailCustomerReplySendService" in source
+    assert "get_decision" in source
+    assert "Decision.ALLOW.value" in source
+    assert "send_email" in source
+
+
 def test_resolution_drafts_do_not_persist_delivery_fields() -> None:
     model_source = Path(
         "apps/backend/app/resolution/db/models.py"

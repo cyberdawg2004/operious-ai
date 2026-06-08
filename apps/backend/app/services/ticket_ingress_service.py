@@ -25,6 +25,17 @@ from app.boundary.adapters import (
     extract_routing_address,
     extract_webhook_security_context,
 )
+from app.boundary.adapters.email_ses import (
+    HttpSnsSubscriptionConfirmer,
+    SesEmailMimeError,
+    SesEmailWebhookAdapter,
+    SesRawEmailFetcher,
+    SnsConfirmationError,
+    SnsMessageVerifier,
+    SnsSubscriptionConfirmer,
+    SnsVerificationError,
+    ses_sns_message_to_email_payload,
+)
 from app.boundary.exceptions import WebhookFreshnessError, WebhookReplayError
 from app.boundary.adapters.builtin import (
     TwilioVoiceAdapter,
@@ -123,6 +134,9 @@ class TicketIngressService:
         webhook_queue_by_channel: (
             Mapping[TenantChannelType, Sequence[str]] | None
         ) = None,
+        sns_message_verifier: SnsMessageVerifier | None = None,
+        sns_subscription_confirmer: SnsSubscriptionConfirmer | None = None,
+        ses_raw_email_fetcher: SesRawEmailFetcher | None = None,
     ) -> None:
         self._persistence = persistence
         self._session = session
@@ -138,6 +152,11 @@ class TicketIngressService:
             channel_type: tuple(queue_names)
             for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
         }
+        self._sns_message_verifier = sns_message_verifier or SnsMessageVerifier()
+        self._sns_subscription_confirmer = (
+            sns_subscription_confirmer or HttpSnsSubscriptionConfirmer()
+        )
+        self._ses_raw_email_fetcher = ses_raw_email_fetcher
 
     async def process(
         self,
@@ -416,6 +435,17 @@ class TicketIngressService:
                 "tenant configuration runtime is not configured"
             )
         tenant_channel_type = _tenant_channel_type(channel_type)
+        if (
+            tenant_channel_type is TenantChannelType.EMAIL
+            and _is_sns_webhook_body(body)
+        ):
+            return await self._process_email_sns_webhook(
+                body=body,
+                raw_body=raw_body,
+                content_type=content_type,
+                tenant_hint=tenant_hint,
+                request_path=request_path,
+            )
         routing_address = _routing_address_for_webhook(
             channel_type=tenant_channel_type.value,
             body=body,
@@ -611,6 +641,202 @@ class TicketIngressService:
             canonical_envelope_id=str(result.event_id),
         )
 
+    async def _process_email_sns_webhook(
+        self,
+        *,
+        body: Any,
+        raw_body: bytes | None,
+        content_type: str | None,
+        tenant_hint: str | None,
+        request_path: str | None,
+    ) -> TicketIngressServiceResult | WebhookDuplicateDeliveryResult:
+        tenant_runtime = self._tenant_configuration_runtime
+        if tenant_runtime is None:
+            raise TicketIngressServiceError(
+                "tenant configuration runtime is not configured"
+            )
+        sns_body = _sns_body_mapping(body)
+        topic_arn = _first_text_value(sns_body.get("TopicArn"))
+        if topic_arn is None:
+            raise _uniform_webhook_rejection("sns_topic_missing")
+        routing_secret = await tenant_runtime.resolve_webhook_routing_secret_by_topic_arn(
+            channel_type=TenantChannelType.EMAIL,
+            topic_arn=topic_arn,
+        )
+        await _end_read_only_routing_transaction(self._session)
+        if routing_secret is None:
+            raise _uniform_webhook_rejection("unknown_sns_topic")
+        if tenant_hint is not None and tenant_hint != routing_secret.tenant_id:
+            raise _uniform_webhook_rejection("tenant_route_mismatch")
+        try:
+            verified = await self._sns_message_verifier.verify(
+                payload=sns_body,
+                expected_topic_arn=topic_arn,
+            )
+        except SnsVerificationError as exc:
+            raise _uniform_webhook_rejection("invalid_sns_signature") from exc
+        if verified.message_type == "SubscriptionConfirmation":
+            if verified.subscribe_url is None:
+                raise TicketIngressRejected(
+                    code="sns_subscription_confirmation_rejected",
+                    reason="SNS SubscribeURL is missing",
+                    status_code=400,
+                )
+            try:
+                await self._sns_subscription_confirmer.confirm_subscription(
+                    verified.subscribe_url
+                )
+            except SnsConfirmationError as exc:
+                raise TicketIngressRejected(
+                    code="sns_subscription_confirmation_failed",
+                    reason="SNS subscription confirmation failed",
+                    status_code=502,
+                ) from exc
+            return TicketIngressServiceResult(
+                ingress_id=None,
+                canonical_envelope_id=None,
+                status="subscription_confirmed",
+            )
+        set_current_tenant(routing_secret.tenant_id)
+        channel_config = await tenant_runtime.resolve_active_channel_for_routing_address(
+            channel_type=TenantChannelType.EMAIL,
+            routing_address=routing_secret.routing_address,
+            expected_tenant_id=routing_secret.tenant_id,
+        )
+        if channel_config is None:
+            raise _uniform_webhook_rejection("unknown_channel_route")
+        try:
+            email_payload = await ses_sns_message_to_email_payload(
+                sns_message=verified.message,
+                tenant_id=channel_config.tenant_id,
+                raw_email_fetcher=self._ses_raw_email_fetcher,
+            )
+        except SesEmailMimeError as exc:
+            raise TicketIngressRejected(
+                code="ses_email_mime_rejected",
+                reason=str(exc),
+            ) from exc
+        security_context = ChannelWebhookSecurityContext(
+            timestamp=verified.timestamp,
+            nonce=verified.message_id,
+        )
+        if await self._webhook_nonce_exists(
+            tenant_id=channel_config.tenant_id,
+            channel_type=TenantChannelType.EMAIL.value,
+            nonce=security_context.nonce,
+        ):
+            return WebhookDuplicateDeliveryResult()
+        nonce_recorded = await self._record_webhook_freshness_nonce(
+            tenant_id=channel_config.tenant_id,
+            channel_type=TenantChannelType.EMAIL.value,
+            body=sns_body,
+            headers={},
+            security_context=security_context,
+        )
+        if not nonce_recorded:
+            return WebhookDuplicateDeliveryResult()
+        source_language = "en"
+        fingerprint_metadata: dict[str, object] = {}
+        ticket_text = _extract_webhook_ticket_text(
+            channel_type=TenantChannelType.EMAIL,
+            body=email_payload,
+        )
+        canonical_body: Any = email_payload
+        webhook_request_id = _webhook_request_id(
+            channel=TenantChannelType.EMAIL.value,
+            routing_address=channel_config.routing_address,
+            body=sns_body,
+            raw_body=raw_body,
+        )
+        webhook_correlation_id = _webhook_correlation_id(
+            channel=TenantChannelType.EMAIL.value,
+            routing_address=channel_config.routing_address,
+            body=sns_body,
+            raw_body=raw_body,
+        )
+        if ticket_text:
+            canonical_text, source_language = await self._canonicalize_ticket_text(
+                raw_text=ticket_text,
+                tenant_id=channel_config.tenant_id,
+                correlation_id=webhook_correlation_id,
+                request_id=webhook_request_id,
+            )
+            canonical_body = _replace_webhook_ticket_text(
+                channel_type=TenantChannelType.EMAIL,
+                body=email_payload,
+                text=canonical_text,
+            )
+            fingerprint_metadata = self._fingerprint_metadata(canonical_text)
+        payload = IngressPayload(
+            body=canonical_body,
+            content_type=content_type,
+            headers={},
+            raw_bytes=raw_body,
+            request_path=request_path,
+        )
+        adapter = SesEmailWebhookAdapter(
+            routing_address=channel_config.routing_address,
+        )
+        runtime = BoundaryIngressRuntime(
+            adapters=BoundaryAdapterRegistry((adapter,)),
+            persistence=self._persistence,
+        )
+        envelope = await runtime.ingest(
+            BoundaryIngressRequest(
+                source=BoundarySource(
+                    source_type=BoundarySourceType.EMAIL,
+                    source_id=channel_config.routing_address,
+                    tenant_id=channel_config.tenant_id,
+                    display_name="tenant email",
+                    metadata={
+                        "tenant_channel.config_id": str(channel_config.config_id),
+                        "source_language": source_language,
+                    },
+                ),
+                adapter_name=adapter.name,
+                payload=payload,
+                correlation_id=webhook_correlation_id,
+                request_id=webhook_request_id,
+                ingress_id_override=derive_ingress_id(
+                    seed=_webhook_ingress_seed(
+                        tenant_id=channel_config.tenant_id,
+                        channel=TenantChannelType.EMAIL.value,
+                        routing_address=channel_config.routing_address,
+                        body=sns_body,
+                        raw_body=raw_body,
+                    )
+                ),
+                authority=AuthorityContext.from_raw(
+                    tenant_id=channel_config.tenant_id,
+                ),
+                metadata={
+                    "tenant_channel.config_id": str(channel_config.config_id),
+                    "tenant_channel.channel_type": TenantChannelType.EMAIL.value,
+                    "tenant_channel.routing_address": channel_config.routing_address,
+                    "source_language": source_language,
+                    **fingerprint_metadata,
+                },
+            )
+        )
+        await self._session.commit()
+        result = envelope.result
+        if result is None:
+            raise TicketIngressServiceError("SES email webhook ingress failed")
+        if not result.normalization.is_ok or result.event_id is None:
+            raise TicketIngressRejected(
+                code="ses_email_webhook_rejected",
+                reason=result.normalization.error or "normalization failed",
+            )
+        await self._record_processing_admission_after_capture(
+            tenant_id=channel_config.tenant_id,
+            channel_type=TenantChannelType.EMAIL,
+            request_correlation_id=webhook_request_id,
+        )
+        return TicketIngressServiceResult(
+            ingress_id=str(result.ingress_id),
+            canonical_envelope_id=str(result.event_id),
+        )
+
     async def verify_channel_webhook(
         self,
         *,
@@ -719,6 +945,11 @@ class TicketIngressService:
                     headers=headers,
                 )
             )
+            if security_context is not None:
+                _enforce_webhook_freshness(
+                    timestamp=context.timestamp,
+                    received_at=datetime.now(timezone.utc),
+                )
             received_at = datetime.now(timezone.utc)
             await self._persistence.record_webhook_nonce(
                 WebhookNonceRecord(
@@ -1209,6 +1440,27 @@ def _tenant_channel_type(channel_type: str) -> TenantChannelType:
             reason="channel type is not supported for webhooks",
         )
     return parsed
+
+
+def _is_sns_webhook_body(body: Any) -> bool:
+    if not isinstance(body, Mapping):
+        return False
+    typed = cast(Mapping[str, Any], body)
+    return _first_text_value(
+        typed.get("Type"),
+        typed.get("TopicArn"),
+        typed.get("SigningCertURL"),
+        typed.get("Signature"),
+    ) is not None and _first_text_value(typed.get("TopicArn")) is not None
+
+
+def _sns_body_mapping(body: Any) -> Mapping[str, Any]:
+    if not isinstance(body, Mapping):
+        raise TicketIngressRejected(
+            code="sns_webhook_body_malformed",
+            reason="SNS webhook body must be a JSON object",
+        )
+    return cast(Mapping[str, Any], body)
 
 
 def _admission_queues_for_channel(

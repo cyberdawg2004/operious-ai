@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import datetime, timezone
 
 from app.tenant.exceptions import (
     ChronologyImmutabilityError,
@@ -192,6 +193,42 @@ class InMemoryTenantConfigurationRepository:
             if r.channel_type.value == channel_type
             and r.routing_address == routing_address
             and r.status.value == "active"
+        ]
+        if len(matches) != 1:
+            return None
+        record = matches[0]
+        return TenantWebhookRoutingSecretRecord(
+            tenant_id=record.tenant_id,
+            config_id=record.config_id,
+            channel_type=record.channel_type,
+            routing_address=record.routing_address,
+            webhook_secret=record.webhook_secret,
+            previous_webhook_secret=record.previous_webhook_secret,
+            credential_rotation_expires_at=(
+                record.credential_rotation_expires_at
+            ),
+        )
+
+    async def resolve_webhook_routing_secret_by_topic_arn(
+        self,
+        *,
+        channel_type: str,
+        topic_arn: str,
+    ) -> TenantWebhookRoutingSecretRecord | None:
+        now = datetime.now(timezone.utc)
+        matches = [
+            r
+            for r in self._channels.values()
+            if r.channel_type.value == channel_type
+            and r.status.value == "active"
+            and (
+                r.webhook_secret == topic_arn
+                or (
+                    r.previous_webhook_secret == topic_arn
+                    and r.credential_rotation_expires_at is not None
+                    and r.credential_rotation_expires_at > now
+                )
+            )
         ]
         if len(matches) != 1:
             return None

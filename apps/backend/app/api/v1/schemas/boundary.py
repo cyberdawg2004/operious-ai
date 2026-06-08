@@ -218,11 +218,33 @@ class WhatsAppCustomerReplySendResponse(BaseModel):
     idempotent_replay: bool
 
 
+class EmailCustomerReplySendRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    recipient_email_address: str = Field(min_length=1)
+    subject: str = Field(min_length=1)
+    source_email_address: str | None = Field(default=None, min_length=1)
+    in_reply_to_message_id: str | None = Field(default=None, min_length=1)
+    references_header: str | None = Field(default=None, min_length=1)
+
+
+class EmailCustomerReplySendResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    delivery_id: str
+    status: Literal["sent", "already_sent", "pending"]
+    provider_message_id: str | None = None
+    transmitted: bool
+    idempotent_replay: bool
+
+
 __all__ = [
     "BoundaryEgressPage",
     "BoundaryEgressResponse",
     "BoundaryIngressPage",
     "BoundaryIngressResponse",
+    "EmailCustomerReplySendRequest",
+    "EmailCustomerReplySendResponse",
     "WorkOrderFulfillmentCallbackRequest",
     "WorkOrderFulfillmentReceiptResponse",
     "WhatsAppCustomerReplySendRequest",

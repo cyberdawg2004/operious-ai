@@ -311,6 +311,21 @@ class TenantConfigurationRuntime:
             routing_address=routing_address,
         )
 
+    async def resolve_webhook_routing_secret_by_topic_arn(
+        self,
+        *,
+        channel_type: TenantChannelType,
+        topic_arn: str,
+    ) -> TenantWebhookRoutingSecretRecord | None:
+        # PRIVILEGED_PATH: SES/SNS subscription confirmations have a
+        # TopicArn but no recipient address. This returns only routing scope
+        # and non-decrypted webhook topic metadata for immediate SNS
+        # signature validation.
+        return await self._repository.resolve_webhook_routing_secret_by_topic_arn(
+            channel_type=channel_type.value,
+            topic_arn=topic_arn,
+        )
+
     async def load_channel_credentials(
         self,
         *,

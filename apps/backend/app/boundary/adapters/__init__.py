@@ -24,6 +24,7 @@ from app.boundary.adapters.channel_webhooks import (
     extract_webhook_security_context,
     normalize_routing_address,
 )
+from app.boundary.adapters.email_ses import SesEmailWebhookAdapter
 from app.boundary.adapters.builtin import (
     TwilioVoiceAdapter,
     WhatsAppWebhookAdapter,
@@ -36,6 +37,7 @@ __all__ = [
     "ChannelWebhookSecurityContext",
     "EmailWebhookAdapter",
     "LarkWebhookAdapter",
+    "SesEmailWebhookAdapter",
     "ShulexWebhookAdapter",
     "TenantWhatsAppWebhookAdapter",
     "TwilioVoiceAdapter",

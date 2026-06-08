@@ -95,6 +95,13 @@ class TenantConfigurationRepository(Protocol):
         routing_address: str,
     ) -> TenantWebhookRoutingSecretRecord | None: ...
 
+    async def resolve_webhook_routing_secret_by_topic_arn(
+        self,
+        *,
+        channel_type: str,
+        topic_arn: str,
+    ) -> TenantWebhookRoutingSecretRecord | None: ...
+
     async def save_connector_configuration(
         self,
         record: TenantConnectorConfigurationRecord,

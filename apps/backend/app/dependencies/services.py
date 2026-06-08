@@ -73,6 +73,8 @@ from app.boundary.persistence import (
     PostgresBoundaryPersistence,
 )
 from app.boundary.outbound import (
+    PostgresEmailDeliveryRepository,
+    SesV2EmailSender,
     PostgresWhatsAppDeliveryRepository,
     WhatsAppGraphSender,
 )
@@ -171,6 +173,9 @@ from app.services.crisis_service import CrisisService
 from app.services.dispatch_service import (
     DispatchCommunicationPolicy,
     DispatchService,
+)
+from app.services.email_customer_reply_service import (
+    EmailCustomerReplySendService,
 )
 from app.session.continuity import CaseContinuityRuntime
 from app.services.escalation_service import EscalationService
@@ -454,6 +459,38 @@ def get_whatsapp_customer_reply_send_service(
         ),
         delivery_repository=PostgresWhatsAppDeliveryRepository(session),
         sender=WhatsAppGraphSender(),
+        session=session,
+    )
+
+
+def get_email_customer_reply_send_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> EmailCustomerReplySendService:
+    """Return the governed SES email customer-reply send service."""
+
+    settings = get_settings()
+    if not settings.TENANT_CREDENTIAL_MASTER_KEY.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "tenant_credentials_not_configured"},
+        )
+    data_protection = _data_protection_service(session)
+    resolution_repository = PostgresResolutionProposalPersistence(
+        session,
+        data_protection=data_protection,
+    )
+    return EmailCustomerReplySendService(
+        draft_repository=resolution_repository,
+        proposal_repository=resolution_repository,
+        governance_repository=PostgresGovernanceRepository(session),
+        tenant_runtime=TenantConfigurationRuntime(
+            repository=PostgresTenantConfigurationRepository(session),
+            credential_encryptor=TenantCredentialEncryptor(
+                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+            ),
+        ),
+        delivery_repository=PostgresEmailDeliveryRepository(session),
+        sender=SesV2EmailSender(),
         session=session,
     )
 
@@ -1530,6 +1567,7 @@ __all__ = [
     "get_conversation_service",
     "get_coordination_repository",
     "get_data_protection_service",
+    "get_email_customer_reply_send_service",
     "get_escalation_service",
     "get_governance_repository",
     "get_health_service",
@@ -1548,4 +1586,5 @@ __all__ = [
     "get_tenant_config_change_request_service",
     "get_tenant_configuration_service",
     "get_tenant_lifecycle_service",
+    "get_whatsapp_customer_reply_send_service",
 ]

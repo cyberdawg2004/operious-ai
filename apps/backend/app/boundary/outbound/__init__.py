@@ -15,6 +15,20 @@ from app.boundary.outbound.whatsapp import (
     WhatsAppTextMessageRequest,
     WhatsAppTextMessageResponse,
 )
+from app.boundary.outbound.email_ses import (
+    SesEmailSendRequest,
+    SesEmailSendResponse,
+    SesV2EmailSender,
+    SesV2SendError,
+)
+from app.boundary.outbound.email_delivery import (
+    EmailCustomerReplyDeliveryRecord,
+    EmailDeliveryRepository,
+    EmailDeliveryStatus,
+    InMemoryEmailDeliveryRepository,
+    PostgresEmailDeliveryRepository,
+    derive_email_customer_reply_delivery_id,
+)
 from app.boundary.outbound.whatsapp_delivery import (
     InMemoryWhatsAppDeliveryRepository,
     PostgresWhatsAppDeliveryRepository,
@@ -26,10 +40,19 @@ from app.boundary.outbound.whatsapp_delivery import (
 
 __all__ = [
     "InMemoryWhatsAppDeliveryRepository",
+    "EmailCustomerReplyDeliveryRecord",
+    "EmailDeliveryRepository",
+    "EmailDeliveryStatus",
+    "InMemoryEmailDeliveryRepository",
     "OutboundWebhookAdapter",
     "OutboundWebhookRequest",
     "OutboundWebhookResponse",
+    "PostgresEmailDeliveryRepository",
     "PostgresWhatsAppDeliveryRepository",
+    "SesEmailSendRequest",
+    "SesEmailSendResponse",
+    "SesV2EmailSender",
+    "SesV2SendError",
     "WhatsAppCustomerReplyDeliveryRecord",
     "WhatsAppDeliveryRepository",
     "WhatsAppDeliveryStatus",
@@ -38,6 +61,7 @@ __all__ = [
     "WhatsAppTextMessageRequest",
     "WhatsAppTextMessageResponse",
     "derive_whatsapp_customer_reply_delivery_id",
+    "derive_email_customer_reply_delivery_id",
     "format_jira_payload",
     "format_linear_payload",
 ]
