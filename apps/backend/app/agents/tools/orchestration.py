@@ -21,6 +21,11 @@ from app.agents.tools.grants import (
     compute_agent_execution_actor,
 )
 from app.agents.tools.invoker import ToolInvoker
+from app.approvals.ingress import ApprovalQueueIngressService
+from app.approvals.producers import (
+    CaseApprovalReviewer,
+    request_crisis_action_approval_case,
+)
 from app.governance.enums import Decision
 from app.resolution.persistence.records import ResolutionProposalRecord
 from app.types.json import JsonObject, JsonValue
@@ -92,6 +97,8 @@ class ActionOrchestrationRuntime:
         approval_repository: ActionApprovalRepository,
         timeline_runtime: ActionTimelineAppender | None = None,
         session_runtime: ActionTimelineAppender | None = None,
+        approval_queue_ingress: ApprovalQueueIngressService | None = None,
+        case_approval_reviewer: CaseApprovalReviewer | None = None,
     ) -> None:
         self._tool_invoker = tool_invoker
         self._approval_repository = approval_repository
@@ -101,6 +108,8 @@ class ActionOrchestrationRuntime:
                 "ActionOrchestrationRuntime requires a timeline appender"
             )
         self._timeline_runtime = runtime
+        self._approval_queue_ingress = approval_queue_ingress
+        self._case_approval_reviewer = case_approval_reviewer
 
     async def execute_proposal_actions(
         self,
@@ -342,6 +351,32 @@ class ActionOrchestrationRuntime:
                     ),
                     expected_tenant_id=expected_tenant_id,
                 )
+                crisis_policy = _text(
+                    envelope.trace.metadata.get("crisis_policy")
+                )
+                if crisis_policy is not None:
+                    await request_crisis_action_approval_case(
+                        ingress=self._approval_queue_ingress,
+                        reviewer=self._case_approval_reviewer,
+                        tenant_id=expected_tenant_id,
+                        session_id=session_id,
+                        execution_id=execution_id,
+                        dispatch_id=proposal.dispatch_id,
+                        action_approval_id=approval.approval_id,
+                        tool_name=tool_name,
+                        payload=payload,
+                        governance_decision_id=governance_decision_id,
+                        crisis_policy=crisis_policy,
+                        issue_summary=_text(
+                            envelope.trace.metadata.get("governance_reason")
+                        ),
+                        metadata={
+                            "proposal_id": str(proposal.proposal_id),
+                            "action_type": action_type,
+                            "target_resource": target_resource,
+                            "idempotency_key": str(idempotency_key),
+                        },
+                    )
                 await self._append_event(
                     proposal=proposal,
                     event_type=_ACTION_PENDING_APPROVAL,

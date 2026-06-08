@@ -188,6 +188,12 @@ TENANT_COGNITION_READ_CAPABILITY: Final[str] = "tenant.cognition.read"
 #: Domain capability required to approve/reject tenant operational actions.
 TENANT_ACTIONS_APPROVE_CAPABILITY: Final[str] = "tenant.actions.approve"
 
+#: Domain capability required to read SME-reviewed approval cases.
+TENANT_APPROVALS_READ_CAPABILITY: Final[str] = "tenant.approvals.read"
+
+#: Domain capability required to guide a resolution re-proposal.
+TENANT_RESOLUTION_GUIDE_CAPABILITY: Final[str] = "tenant.resolution.guide"
+
 #: Domain capability required to administer tenant privacy controls: legal
 #: holds, retention policies, and erasure proposals.
 TENANT_PRIVACY_ADMIN_CAPABILITY: Final[str] = "tenant.privacy.admin"
@@ -250,6 +256,24 @@ def require_tenant_actions_approve(request: Request) -> AuthorityContext:
     return _require_capability_from_request(
         request,
         capability=TENANT_ACTIONS_APPROVE_CAPABILITY,
+    )
+
+
+def require_tenant_approvals_read(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require tenant approval-case read access."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_APPROVALS_READ_CAPABILITY,
+    )
+
+
+def require_tenant_resolution_guide(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require resolution guidance authority."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_RESOLUTION_GUIDE_CAPABILITY,
     )
 
 
@@ -580,6 +604,7 @@ __all__ = [
     "PLATFORM_TENANT_ADMIN_CAPABILITY",
     "TENANT_ACTIONS_APPROVE_CAPABILITY",
     "TENANT_ADMIN_CAPABILITY",
+    "TENANT_APPROVALS_READ_CAPABILITY",
     "TENANT_AUDIT_EXPORT_CAPABILITY",
     "TENANT_CHANNEL_ADMIN_CAPABILITY",
     "TENANT_COGNITION_READ_CAPABILITY",
@@ -597,6 +622,7 @@ __all__ = [
     "TENANT_POLICY_WRITE_CAPABILITY",
     "TENANT_PRIVACY_ADMIN_CAPABILITY",
     "TENANT_PRIVACY_APPROVE_CAPABILITY",
+    "TENANT_RESOLUTION_GUIDE_CAPABILITY",
     "TENANT_SUPERVISOR_READ_CAPABILITY",
     "TENANT_TRAINING_WRITE_CAPABILITY",
     "TENANT_TOPOLOGY_WRITE_CAPABILITY",
@@ -610,6 +636,7 @@ __all__ = [
     "require_platform_tenant_admin",
     "require_tenant_actions_approve",
     "require_tenant_admin",
+    "require_tenant_approvals_read",
     "require_tenant_audit_export",
     "require_tenant_cognition_read",
     "require_tenant_connector_read",
@@ -619,6 +646,7 @@ __all__ = [
     "require_tenant_operations_read",
     "require_tenant_privacy_admin",
     "require_tenant_privacy_approve",
+    "require_tenant_resolution_guide",
     "require_tenant_scope",
     "require_tenant_supervisor_read",
     "require_tenant_training_write",

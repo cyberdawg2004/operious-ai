@@ -224,6 +224,7 @@ def test_module_exports_stable_contract() -> None:
         "PLATFORM_TENANT_ADMIN_CAPABILITY",       # spec 2.5c platform lifecycle
         "TENANT_ACTIONS_APPROVE_CAPABILITY",    # spec 1a-ext #26
         "TENANT_ADMIN_CAPABILITY",
+        "TENANT_APPROVALS_READ_CAPABILITY",      # spec Fix 1b approvals
         "TENANT_AUDIT_EXPORT_CAPABILITY",        # spec 1a #80
         "TENANT_CHANNEL_ADMIN_CAPABILITY",
         "TENANT_COGNITION_READ_CAPABILITY",      # spec 1a-ext #26
@@ -241,6 +242,7 @@ def test_module_exports_stable_contract() -> None:
         "TENANT_POLICY_WRITE_CAPABILITY",
         "TENANT_PRIVACY_ADMIN_CAPABILITY",        # spec 1c-ext
         "TENANT_PRIVACY_APPROVE_CAPABILITY",      # spec 1c-ext
+        "TENANT_RESOLUTION_GUIDE_CAPABILITY",     # spec Fix 1b guidance
         "TENANT_SUPERVISOR_READ_CAPABILITY",     # spec 1a-ext #26
         "TENANT_TOPOLOGY_WRITE_CAPABILITY",
         "TENANT_TRAINING_WRITE_CAPABILITY",       # spec 1a-ext #26
@@ -254,6 +256,7 @@ def test_module_exports_stable_contract() -> None:
         "require_platform_tenant_admin",         # spec 2.5c platform lifecycle
         "require_tenant_actions_approve",        # spec 1a-ext #26
         "require_tenant_admin",
+        "require_tenant_approvals_read",         # spec Fix 1b approvals
         "require_tenant_audit_export",           # spec 1a #80
         "require_tenant_cognition_read",         # spec 1a-ext #26
         "require_tenant_connector_read",          # spec 2.5b connector read
@@ -263,6 +266,7 @@ def test_module_exports_stable_contract() -> None:
         "require_tenant_operations_read",        # spec 1a-ext #26
         "require_tenant_privacy_admin",          # spec 1c-ext
         "require_tenant_privacy_approve",        # spec 1c-ext
+        "require_tenant_resolution_guide",       # spec Fix 1b guidance
         "require_tenant_scope",
         "require_tenant_supervisor_read",        # spec 1a-ext #26
         "require_tenant_training_write",         # spec 1a-ext #26

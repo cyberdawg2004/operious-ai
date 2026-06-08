@@ -54,6 +54,11 @@ from app.runtime import (
     DispatchArbitrationRuntime,
     ExecutionGovernanceRuntime,
 )
+from app.approvals.ingress import ApprovalQueueIngressService
+from app.approvals.producers import (
+    CaseApprovalReviewer,
+    request_coordination_human_review_case,
+)
 from app.session.continuity import (
     CaseContinuityResult,
     CaseContinuityRuntime,
@@ -116,6 +121,8 @@ class DispatchService:
         dispatch_arbitration_runtime: DispatchArbitrationRuntime | None = None,
         tenant_topology_runtime_provider: TenantTopologyRuntimeProvider | None = None,
         continuity_runtime: CaseContinuityRuntime | None = None,
+        approval_queue_ingress: ApprovalQueueIngressService | None = None,
+        case_approval_reviewer: CaseApprovalReviewer | None = None,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
@@ -129,6 +136,8 @@ class DispatchService:
         self._continuity_runtime = continuity_runtime or CaseContinuityRuntime(
             session_repository=session_repository,
         )
+        self._approval_queue_ingress = approval_queue_ingress
+        self._case_approval_reviewer = case_approval_reviewer
 
     async def dispatch(
         self,
@@ -153,6 +162,20 @@ class DispatchService:
         )
         governance_decision_id = coordination_result.trace.governance_decision_id
         if coordination_result.outcome is not CoordinationDispatchOutcome.ACCEPTED:
+            await request_coordination_human_review_case(
+                ingress=self._approval_queue_ingress,
+                reviewer=self._case_approval_reviewer,
+                coordination_result=coordination_result,
+                tenant_id=tenant_id,
+                ticket_ref=f"ingress:{ingress.ingress_id}",
+                issue_summary=coordination_result.error,
+                metadata={
+                    "boundary.ingress_id": str(ingress.ingress_id),
+                    "boundary.external_conversation_id": (
+                        ingress.external_conversation_id
+                    ),
+                },
+            )
             return DispatchResult(
                 dispatch_id=str(coordination_result.coordination_id),
                 session_id=None,

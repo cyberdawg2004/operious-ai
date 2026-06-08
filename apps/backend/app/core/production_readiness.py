@@ -5,10 +5,9 @@ without security-critical secrets. :func:`validate_production_config`
 collects EVERY such problem and raises once, so a single boot attempt
 surfaces the full remediation list rather than one error at a time.
 
-Each stub condition is gated by an explicit ``ALLOW_STUB_*`` flag so an
-operator can opt a pilot into a known-stub posture deliberately. The
-security secrets (tenant credential master key, audit export HMAC) have
-no opt-out — they are always required in production.
+Stub conditions have no production opt-out. The ``ALLOW_STUB_*`` settings are
+non-production escape hatches only. Security secrets (tenant credential master
+key, audit export HMAC) also have no opt-out.
 
 This is invoked from :func:`app.main.create_app` when
 ``settings.production_readiness_enforced`` is true.
@@ -43,38 +42,33 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
 
     problems: list[str] = []
 
-    # ── Stubbed providers (opt-out via ALLOW_STUB_*) ─────────────────
-    if not settings.ANTHROPIC_API_KEY.strip() and not settings.ALLOW_STUB_LLM:
+    # ── Stubbed providers (no production opt-out) ────────────────────
+    if not settings.ANTHROPIC_API_KEY.strip():
         problems.append(
             "ANTHROPIC_API_KEY is empty -> diagnostic cognition falls back "
-            "to a deterministic stub LLM (set ALLOW_STUB_LLM=true to allow)."
+            "to a deterministic stub LLM."
         )
     if (
         settings.TRANSLATION_PROVIDER.strip().casefold() != "anthropic"
-        and not settings.ALLOW_STUB_TRANSLATION
     ):
         problems.append(
             f"TRANSLATION_PROVIDER={settings.TRANSLATION_PROVIDER!r} is not a "
-            "real provider -> translation is identity/stub (set "
-            "ALLOW_STUB_TRANSLATION=true to allow)."
+            "real provider -> translation is identity/stub."
         )
     if (
         settings.VECTOR_DEFAULT_PROVIDER.strip().casefold() == "in_memory"
-        and not settings.ALLOW_STUB_VECTOR
     ):
         problems.append(
             "VECTOR_DEFAULT_PROVIDER=in_memory -> the vector store is "
-            "non-durable (set ALLOW_STUB_VECTOR=true to allow)."
+            "non-durable."
         )
     if (
         settings.EMBEDDING_DEFAULT_PROVIDER.strip().casefold() == "openai"
         and not (settings.OPENAI_API_KEY or "").strip()
-        and not settings.ALLOW_STUB_EMBEDDINGS
     ):
         problems.append(
             "EMBEDDING_DEFAULT_PROVIDER=openai but OPENAI_API_KEY is empty -> "
-            "embeddings fall back to a deterministic hash (set "
-            "ALLOW_STUB_EMBEDDINGS=true to allow)."
+            "embeddings fall back to a deterministic hash."
         )
     configured_embedding_dimensions = (
         settings.OPENAI_EMBEDDING_DIMENSIONS

@@ -39,6 +39,7 @@ EXPECTED_QUEUES = {
     "supervisor",
     "qa",
     "sop_intelligence",
+    "sme_approval",
     "knowledge_indexing",
     "webhook_maintenance",
     "dead_letter",

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 
+from app.core import http as shared_http
 from app.core.config import get_settings
 from app.dependencies.authority import (
     OPERATOR_CAPABILITY,
@@ -163,6 +164,7 @@ def _conversation_client(*, principal_id: str | None, capabilities: tuple[str, .
     ctx = AuthorityContext(
         tenant_id="t-1", principal_id=principal_id, capabilities=capabilities
     )
+    setattr(shared_http, "_shared_http_client", None)
     get_settings.cache_clear()
     try:
         with patch.dict(os.environ, {"ENVIRONMENT": "test", "RATE_LIMIT_ENABLED": "false"}):

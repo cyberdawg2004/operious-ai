@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, TypeGuard
+from datetime import datetime, timezone
+from typing import Any, TypeGuard, cast
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 
 from app.data_protection.crypto import DataProtectionService
@@ -110,6 +112,103 @@ class PostgresResolutionProposalPersistence(BaseRepository):
             offset=page.offset,
         )
 
+    async def update_resolution_proposal_status(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        status: ResolutionProposalStatus,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionProposalRecord:
+        values: dict[str, Any] = {
+            "status": status.value,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if governance_decision_id is not None:
+            values["governance_decision_id"] = governance_decision_id
+            if status is ResolutionProposalStatus.SEND_ELIGIBLE:
+                values["governance_verdict"] = ResolutionGovernanceVerdict.ALLOW.value
+        stmt = (
+            update(ResolutionProposalRow)
+            .where(
+                ResolutionProposalRow.proposal_id == UUID(proposal_id),
+                ResolutionProposalRow.tenant_id == expected_tenant_id,
+            )
+            .values(**values)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            raise ResolutionPersistenceError(
+                f"unknown resolution proposal {proposal_id!r}"
+            )
+        row = await self._proposal_row(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if row is None:
+            raise ResolutionPersistenceError(
+                f"unknown resolution proposal {proposal_id!r}"
+            )
+        return await self._row_to_record(row)
+
+    async def update_resolution_proposal_reply(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        proposed_customer_reply: str,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionProposalRecord:
+        existing = await self.get_resolution_proposal(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if existing is None:
+            raise ResolutionPersistenceError(
+                f"unknown resolution proposal {proposal_id!r}"
+            )
+        stored_reply = proposed_customer_reply
+        if self._data_protection is not None:
+            subject_id = (
+                existing.session_id
+                or existing.execution_id
+                or str(existing.proposal_id)
+            )
+            stored_reply = await self._data_protection.encrypt_text(
+                proposed_customer_reply,
+                tenant_id=expected_tenant_id,
+                subject_id=subject_id,
+                field="resolution_proposals.proposed_customer_reply",
+            )
+        values: dict[str, Any] = {
+            "proposed_customer_reply": stored_reply,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if governance_decision_id is not None:
+            values["governance_decision_id"] = governance_decision_id
+        stmt = (
+            update(ResolutionProposalRow)
+            .where(
+                ResolutionProposalRow.proposal_id == UUID(proposal_id),
+                ResolutionProposalRow.tenant_id == expected_tenant_id,
+            )
+            .values(**values)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            raise ResolutionPersistenceError(
+                f"unknown resolution proposal {proposal_id!r}"
+            )
+        row = await self._proposal_row(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if row is None:
+            raise ResolutionPersistenceError(
+                f"unknown resolution proposal {proposal_id!r}"
+            )
+        return await self._row_to_record(row)
+
     async def create_resolution_outbound_draft(
         self,
         record: ResolutionOutboundDraftRecord,
@@ -168,6 +267,86 @@ class PostgresResolutionProposalPersistence(BaseRepository):
             limit=page.limit,
             offset=page.offset,
         )
+
+    async def update_resolution_outbound_draft_status_for_proposal(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        status: ResolutionOutboundDraftStatus,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionOutboundDraftRecord | None:
+        values: dict[str, Any] = {
+            "status": status.value,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if governance_decision_id is not None:
+            values["governance_decision_id"] = governance_decision_id
+        stmt = (
+            update(ResolutionOutboundDraftRow)
+            .where(
+                ResolutionOutboundDraftRow.proposal_id == UUID(proposal_id),
+                ResolutionOutboundDraftRow.tenant_id == expected_tenant_id,
+            )
+            .values(**values)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount == 0:
+            return None
+        query = ResolutionOutboundDraftQuery(proposal_id=proposal_id, limit=1)
+        page = await self.list_resolution_outbound_drafts(
+            query,
+            expected_tenant_id=expected_tenant_id,
+        )
+        return page.items[0] if page.items else None
+
+    async def update_resolution_outbound_draft_body_for_proposal(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        draft_body: str,
+        draft_body_sha256: str,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionOutboundDraftRecord | None:
+        existing_page = await self.list_resolution_outbound_drafts(
+            ResolutionOutboundDraftQuery(proposal_id=proposal_id, limit=1),
+            expected_tenant_id=expected_tenant_id,
+        )
+        if not existing_page.items:
+            return None
+        existing = existing_page.items[0]
+        stored_body = draft_body
+        if self._data_protection is not None:
+            stored_body = await self._data_protection.encrypt_text(
+                draft_body,
+                tenant_id=expected_tenant_id,
+                subject_id=existing.session_id or existing.execution_id,
+                field="resolution_outbound_drafts.draft_body",
+            )
+        values: dict[str, Any] = {
+            "draft_body": stored_body,
+            "draft_body_sha256": draft_body_sha256,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if governance_decision_id is not None:
+            values["governance_decision_id"] = governance_decision_id
+        stmt = (
+            update(ResolutionOutboundDraftRow)
+            .where(
+                ResolutionOutboundDraftRow.proposal_id == UUID(proposal_id),
+                ResolutionOutboundDraftRow.tenant_id == expected_tenant_id,
+            )
+            .values(**values)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount == 0:
+            return None
+        page = await self.list_resolution_outbound_drafts(
+            ResolutionOutboundDraftQuery(proposal_id=proposal_id, limit=1),
+            expected_tenant_id=expected_tenant_id,
+        )
+        return page.items[0] if page.items else None
 
     async def _protect_proposal(
         self,

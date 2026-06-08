@@ -103,17 +103,18 @@ class Settings(BaseSettings):
     # enforces. Set explicitly to force either posture (e.g. ``false``
     # for a test harness that boots a production-env app).
     PRODUCTION_READINESS_ENFORCED: bool | None = None
-    # Explicit acknowledgements that a stub provider is acceptable in
-    # production (each defaults to fail-closed).
+    # Non-production escape hatches for local/test stub providers. Production
+    # readiness ignores these flags and still fails closed when a real provider
+    # or durable substrate is missing.
     ALLOW_STUB_LLM: bool = False
     ALLOW_STUB_TRANSLATION: bool = False
     ALLOW_STUB_VECTOR: bool = False
     ALLOW_STUB_EMBEDDINGS: bool = False
     ALLOW_STUB_VOICE: bool = False
     # Commerce action tools (refund/warranty/replacement/warehouse) with no
-    # configured connector. None = derive from environment (fail-closed in
-    # production, stub allowed elsewhere). Explicit true/false overrides — true
-    # is the deliberate pilot opt-in to the fake-success stub behaviour.
+    # configured connector. Production always fails closed. Non-production
+    # derives to stub-enabled by default, with an explicit false available for
+    # fail-closed tests/staging.
     ALLOW_STUB_ACTIONS: bool | None = None
 
     # Legacy direct tenant configuration application (S-03).
@@ -470,14 +471,15 @@ class Settings(BaseSettings):
     def allow_stub_actions_effective(self) -> bool:
         """Whether fake-success commerce action stubs may be registered.
 
-        Fail-closed in production by default (an unconfigured action returns a
-        governed error, not a fake success); allowed in non-production so dev /
-        CI exercise the tools. An explicit ``ALLOW_STUB_ACTIONS`` overrides —
-        ``true`` is the deliberate pilot opt-in.
+        Always fail-closed in production: an unconfigured action returns a
+        governed error, never fake success. Non-production allows stubs by
+        default so dev/CI can exercise the tools, unless explicitly disabled.
         """
+        if self.is_production:
+            return False
         if self.ALLOW_STUB_ACTIONS is not None:
             return self.ALLOW_STUB_ACTIONS
-        return not self.is_production
+        return True
 
     @property
     def is_local(self) -> bool:

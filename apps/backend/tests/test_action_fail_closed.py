@@ -19,11 +19,21 @@ from app.agents.tools.actions.refund_request import RefundRequestTool
 from app.agents.tools.actions.warranty_claim import WarrantyClaimTool
 from app.agents.tools.capability import ToolCapability
 from app.core.config import Settings
-from app.dependencies.services import get_action_approval_service
+from app.dependencies.services import (
+    build_action_approval_service,
+    get_action_approval_service,
+)
 
 
 class _NoConfigRepo:
-    async def get_active_config(self, *, tenant_id, tool_name, expected_tenant_id):  # noqa: ANN001
+    async def get_active_config(
+        self,
+        *,
+        tenant_id: str,
+        tool_name: str,
+        expected_tenant_id: str,
+    ) -> None:
+        del tenant_id, tool_name, expected_tenant_id
         return None
 
 
@@ -76,13 +86,13 @@ async def test_registry_uses_stubs_when_explicitly_allowed() -> None:
 
 
 def test_allow_stub_actions_effective_derivation() -> None:
-    # Production fails closed by default; non-production allows stubs; explicit wins.
+    # Production always fails closed; non-production allows stubs unless disabled.
     assert Settings(ENVIRONMENT="production").allow_stub_actions_effective is False
     assert Settings(ENVIRONMENT="test").allow_stub_actions_effective is True
     assert Settings(ENVIRONMENT="local").allow_stub_actions_effective is True
     assert (
         Settings(ENVIRONMENT="production", ALLOW_STUB_ACTIONS=True).allow_stub_actions_effective
-        is True
+        is False
     )
     assert (
         Settings(ENVIRONMENT="test", ALLOW_STUB_ACTIONS=False).allow_stub_actions_effective
@@ -91,7 +101,16 @@ def test_allow_stub_actions_effective_derivation() -> None:
 
 
 def test_action_approval_service_threads_effective_stub_policy_into_registry() -> None:
-    source = inspect.getsource(get_action_approval_service)
+    # The construction (and the fail-closed stub policy wiring) lives in the
+    # shared builder; the public dependency delegates to it. The case-approval
+    # service reuses the same builder so manager- and case-approved actions
+    # inherit the identical production stub policy.
+    builder_source = inspect.getsource(build_action_approval_service)
+    entrypoint_source = inspect.getsource(get_action_approval_service)
 
-    assert "settings = get_settings()" in source
-    assert "allow_stub_actions=settings.allow_stub_actions_effective" in source
+    assert "settings = get_settings()" in builder_source
+    assert (
+        "allow_stub_actions=settings.allow_stub_actions_effective"
+        in builder_source
+    )
+    assert "build_action_approval_service(session)" in entrypoint_source

@@ -96,6 +96,16 @@ TENANT_CONFIG_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.config.approve",
 )
 
+TENANT_CASE_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
+    "tenant.approvals.read",
+    "tenant.actions.approve",
+)
+
+TENANT_RESOLUTION_GUIDER_CAPABILITIES: Final[tuple[str, ...]] = (
+    "tenant.approvals.read",
+    "tenant.resolution.guide",
+)
+
 OPERATOR_BUNDLE_CAPABILITIES: Final[tuple[str, ...]] = (
     "operator",
     "tenant.operations.read",
@@ -117,6 +127,8 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "read:tenant_connector": "tenant.connector.read",
     "read:tenant_config": "tenant.config.read",
     "approve:tenant_actions": "tenant.actions.approve",
+    "read:tenant_approvals": "tenant.approvals.read",
+    "guide:tenant_resolution": "tenant.resolution.guide",
     "write:tenant_training": "tenant.training.write",
     "write:tenant_connector": (
         "tenant.connector.write",
@@ -162,6 +174,8 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantGovernanceViewer": "tenant.governance.read",
     "TenantCognitionViewer": "tenant.cognition.read",
     "TenantActionApprover": "tenant.actions.approve",
+    "TenantCaseApprover": TENANT_CASE_APPROVER_CAPABILITIES,
+    "TenantResolutionGuider": TENANT_RESOLUTION_GUIDER_CAPABILITIES,
     "TenantTrainingWriter": "tenant.training.write",
     "TenantPrivacyAdmin": "tenant.privacy.admin",
     "TenantPrivacyApprover": "tenant.privacy.approve",

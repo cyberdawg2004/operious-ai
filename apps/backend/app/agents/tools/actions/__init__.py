@@ -2,9 +2,9 @@
 
 Real connectors are registered when a tenant has configured one. For actions
 with no configured connector, the registry registers EITHER a fake-success stub
-(``allow_stub_actions=True``, e.g. non-production / pilot) OR a fail-closed
-governed-error tool (``allow_stub_actions=False``, the production default) so an
-agent never tells a customer an action happened when it did not.
+(``allow_stub_actions=True``, non-production only) OR a fail-closed governed
+error tool (``allow_stub_actions=False``, mandatory in production) so an agent
+never tells a customer an action happened when it did not.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def build_action_tool_registry() -> ToolRegistry:
 def _stub_or_fail_closed(
     stub_cls: type[BaseTool], *, allow_stub_actions: bool, reason: str
 ) -> BaseTool:
-    """Return the fake-success stub (pilot) or a fail-closed error tool (prod)."""
+    """Return a non-production stub or the production fail-closed error tool."""
     if allow_stub_actions:
         return stub_cls()
     return FailClosedActionTool(

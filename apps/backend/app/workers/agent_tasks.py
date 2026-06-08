@@ -118,6 +118,12 @@ from app.execution import (
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
 from app.escalation.runtime import EscalationAgentRuntime
+from app.approvals.enums import CaseApprovalEntryCategory, CaseApprovalStatus
+from app.approvals.ingress import (
+    ApprovalQueueIngressService,
+    CaseApprovalReviewRequest,
+)
+from app.approvals.persistence import PostgresCaseApprovalPersistence
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
 from app.governance.identity import derive_decision_id
 from app.governance.persistence import (
@@ -135,7 +141,11 @@ from app.knowledge import (
     build_embedding_provider,
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
-from app.resolution.enums import ResolutionProposalStatus
+from app.resolution.enums import (
+    ResolutionAutonomyDecision,
+    ResolutionGovernanceVerdict,
+    ResolutionProposalStatus,
+)
 from app.resolution.persistence import (
     PostgresResolutionProposalPersistence,
     ResolutionOutboundDraftRecord,
@@ -166,6 +176,8 @@ from app.runtime.provider_circuit_breaker import (
     ProviderCircuitBreaker,
     ProviderCircuitSnapshot,
 )
+from app.services.case_approval_service import CaseApprovalService
+from app.sme import build_sme_review_runtime
 from app.workers.execution_completion_events import (
     WorkerExecutionCompletionEventSink,
 )
@@ -224,6 +236,7 @@ _RESOLUTION_CREATED = "resolution_proposal_created"
 _RESOLUTION_DRAFT_CREATED = "resolution_outbound_draft_created"
 _RESOLUTION_FAILED = "resolution_proposal_failed"
 _MAX_EXECUTION_ATTEMPTS = 5
+_APPROVAL_CASE_CREATION_MAX_ATTEMPTS = 2
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 _SEMANTIC_REJECTION_EXCERPT_MAX_CHARS = 2000
 _DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS = frozenset(
@@ -1581,6 +1594,13 @@ async def _append_resolution_proposal_after_diagnostic(
                     event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
             )
+            await _request_resolution_approval_cases_with_retry(
+                session=session,
+                proposal=proposal,
+                work_item=work_item,
+                data_protection=data_protection,
+                governance_repository=governance_repo,
+            )
             safety_escalation_governance_decision_id = (
                 await _resolution_safety_escalation_governance_decision_id(
                     governance_repo=governance_repo,
@@ -1627,6 +1647,8 @@ async def _append_resolution_proposal_after_diagnostic(
                 safety_escalation_governance_decision_id
             ),
         )
+    except ResolutionApprovalCaseCreationError:
+        raise
     except Exception as exc:  # noqa: BLE001
         await _append_resolution_failure_event(
             session=session,
@@ -1636,6 +1658,142 @@ async def _append_resolution_proposal_after_diagnostic(
             exc=exc,
         )
         return _ResolutionAppendResult(success=False)
+
+
+async def _request_resolution_approval_cases_with_retry(
+    *,
+    session: AsyncSession,
+    proposal: ResolutionProposalRecord,
+    work_item: _DiagnosticExecutionWorkItem,
+    data_protection: DataProtectionService | None,
+    governance_repository: PostgresGovernanceRepository,
+) -> None:
+    if not _approval_categories_for_resolution(proposal):
+        return
+    last_error: Exception | None = None
+    for attempt in range(1, _APPROVAL_CASE_CREATION_MAX_ATTEMPTS + 1):
+        try:
+            async with session.begin_nested():
+                await _request_resolution_approval_cases(
+                    session=session,
+                    proposal=proposal,
+                    work_item=work_item,
+                    data_protection=data_protection,
+                    governance_repository=governance_repository,
+                )
+            return
+        except Exception as exc:  # noqa: BLE001 - logged then retried/raised
+            last_error = exc
+            logger.exception(
+                "resolution_approval_case_creation_failed",
+                extra={
+                    "tenant_id": work_item.tenant_id,
+                    "execution_id": work_item.execution_id,
+                    "proposal_id": str(proposal.proposal_id),
+                    "attempt": attempt,
+                    "max_attempts": _APPROVAL_CASE_CREATION_MAX_ATTEMPTS,
+                },
+            )
+    error = ResolutionApprovalCaseCreationError(
+        "resolution approval-case creation failed after "
+        f"{_APPROVAL_CASE_CREATION_MAX_ATTEMPTS} attempts"
+    )
+    if last_error is None:
+        raise error
+    raise error from last_error
+
+
+async def _request_resolution_approval_cases(
+    *,
+    session: AsyncSession,
+    proposal: ResolutionProposalRecord,
+    work_item: _DiagnosticExecutionWorkItem,
+    data_protection: DataProtectionService | None,
+    governance_repository: PostgresGovernanceRepository,
+) -> None:
+    categories = _approval_categories_for_resolution(proposal)
+    if not categories:
+        return
+    entry_category = categories[0]
+    persistence = PostgresCaseApprovalPersistence(
+        session,
+        data_protection=data_protection,
+    )
+    ingress = ApprovalQueueIngressService(persistence=persistence)
+    service = CaseApprovalService(
+        persistence=persistence,
+        sme_runtime=build_sme_review_runtime(),
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        governance_repository=governance_repository,
+        session=None,
+    )
+    record = await ingress.request_case_review(
+        CaseApprovalReviewRequest(
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+            execution_id=work_item.execution_id,
+            dispatch_id=work_item.dispatch_id,
+            resolution_proposal_id=str(proposal.proposal_id),
+            entry_category=entry_category,
+            ticket_ref=f"session:{work_item.session_id}",
+            issue_summary=proposal.resolution_category,
+            recommended_action=_first_resolution_action(proposal),
+            metadata={
+                "source": "resolution_runtime",
+                "proposal_status": proposal.status.value,
+                "governance_verdict": proposal.governance_verdict.value,
+                "autonomy_decision": proposal.autonomy_decision.value,
+                "confidence": proposal.confidence,
+                "approval_reasons": [category.value for category in categories],
+            },
+        ),
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if record.status is CaseApprovalStatus.PENDING_SME_REVIEW:
+        await service.review_case(
+            approval_case_id=record.approval_case_id,
+            tenant_id=work_item.tenant_id,
+        )
+
+
+def _approval_categories_for_resolution(
+    proposal: ResolutionProposalRecord,
+) -> tuple[CaseApprovalEntryCategory, ...]:
+    if proposal.status is not ResolutionProposalStatus.PENDING_HUMAN_APPROVAL:
+        return ()
+    categories: list[CaseApprovalEntryCategory] = []
+    if (
+        proposal.governance_verdict
+        is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    ):
+        categories.append(
+            CaseApprovalEntryCategory.RESOLUTION_REQUIRE_APPROVAL
+        )
+    if (
+        proposal.autonomy_decision
+        is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    ):
+        categories.append(
+            CaseApprovalEntryCategory.RESOLUTION_NEEDS_HUMAN_APPROVAL
+        )
+    category_text = proposal.resolution_category.lower()
+    if "refund" in category_text or "warranty" in category_text:
+        categories.append(CaseApprovalEntryCategory.REFUND_WARRANTY)
+    if proposal.confidence < 0.5:
+        categories.append(CaseApprovalEntryCategory.LOW_CONFIDENCE)
+    return tuple(dict.fromkeys(categories))
+
+
+def _first_resolution_action(
+    proposal: ResolutionProposalRecord,
+) -> Mapping[str, Any] | None:
+    for action in proposal.recommended_actions:
+        if action.get("requires_execution") is True:
+            return dict(action)
+    return None
 
 
 async def _resolution_safety_escalation_governance_decision_id(
@@ -1856,6 +2014,24 @@ async def _action_orchestration_runtime(
     tenant_id: str,
 ) -> ActionOrchestrationRuntime:
     settings = get_settings()
+    data_protection = _data_protection_service(session)
+    approval_persistence = PostgresCaseApprovalPersistence(
+        session,
+        data_protection=data_protection,
+    )
+    approval_ingress = ApprovalQueueIngressService(
+        persistence=approval_persistence
+    )
+    approval_reviewer = CaseApprovalService(
+        persistence=approval_persistence,
+        sme_runtime=build_sme_review_runtime(),
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        governance_repository=PostgresGovernanceRepository(session),
+        session=None,
+    )
     tenant_repository = PostgresTenantConfigurationRepository(session)
     tenant_runtime = TenantConfigurationRuntime(
         repository=tenant_repository,
@@ -1890,6 +2066,8 @@ async def _action_orchestration_runtime(
         ),
         approval_repository=PostgresActionApprovalRepository(session),
         timeline_runtime=timeline,
+        approval_queue_ingress=approval_ingress,
+        case_approval_reviewer=approval_reviewer,
     )
 
 
@@ -3027,6 +3205,8 @@ def _diagnostic_failure_is_terminal(
 
 
 def _success_persistence_failure_exception(exc: BaseException) -> BaseException:
+    if isinstance(exc, (DiagnosticExecutionError, DiagnosticNonRetryableError)):
+        return exc
     semantic_rejection = _semantic_validation_error_from_chain(exc)
     if semantic_rejection is not None:
         return semantic_rejection
@@ -3262,6 +3442,10 @@ class DiagnosticExecutionDeadLettered(RuntimeError):
 
 class DiagnosticNonRetryableError(RuntimeError):
     """Raised for diagnostic failures that should go straight to DLQ."""
+
+
+class ResolutionApprovalCaseCreationError(DiagnosticNonRetryableError):
+    """Raised when a pending approval proposal has no durable approval case."""
 
 
 __all__ = [

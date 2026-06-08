@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from datetime import datetime, timezone
+from uuid import UUID
 
 from app.resolution.exceptions import ResolutionPersistenceError
+from app.resolution.enums import (
+    ResolutionGovernanceVerdict,
+    ResolutionOutboundDraftStatus,
+    ResolutionProposalStatus,
+)
 from app.resolution.persistence.models import (
     ResolutionOutboundDraftPage,
     ResolutionOutboundDraftQuery,
@@ -77,6 +85,68 @@ class InMemoryResolutionProposalPersistence:
             offset=query.offset,
         )
 
+    async def update_resolution_proposal_status(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        status: ResolutionProposalStatus,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionProposalRecord:
+        async with self._lock:
+            record = self._records.get(proposal_id)
+            if record is None or record.tenant_id != expected_tenant_id:
+                raise ResolutionPersistenceError(
+                    f"unknown resolution proposal {proposal_id!r}"
+                )
+            updated = replace(
+                record,
+                status=status,
+                governance_verdict=(
+                    ResolutionGovernanceVerdict.ALLOW
+                    if (
+                        status is ResolutionProposalStatus.SEND_ELIGIBLE
+                        and governance_decision_id is not None
+                    )
+                    else record.governance_verdict
+                ),
+                governance_decision_id=(
+                    governance_decision_id
+                    if governance_decision_id is not None
+                    else record.governance_decision_id
+                ),
+                updated_at=datetime.now(timezone.utc),
+            )
+            self._records[proposal_id] = updated
+            return updated
+
+    async def update_resolution_proposal_reply(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        proposed_customer_reply: str,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionProposalRecord:
+        async with self._lock:
+            record = self._records.get(proposal_id)
+            if record is None or record.tenant_id != expected_tenant_id:
+                raise ResolutionPersistenceError(
+                    f"unknown resolution proposal {proposal_id!r}"
+                )
+            updated = replace(
+                record,
+                proposed_customer_reply=proposed_customer_reply,
+                governance_decision_id=(
+                    governance_decision_id
+                    if governance_decision_id is not None
+                    else record.governance_decision_id
+                ),
+                updated_at=datetime.now(timezone.utc),
+            )
+            self._records[proposal_id] = updated
+            return updated
+
     async def create_resolution_outbound_draft(
         self,
         record: ResolutionOutboundDraftRecord,
@@ -128,6 +198,74 @@ class InMemoryResolutionProposalPersistence:
             limit=query.limit,
             offset=query.offset,
         )
+
+    async def update_resolution_outbound_draft_status_for_proposal(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        status: ResolutionOutboundDraftStatus,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionOutboundDraftRecord | None:
+        async with self._lock:
+            draft = next(
+                (
+                    item
+                    for item in self._drafts.values()
+                    if str(item.proposal_id) == proposal_id
+                    and item.tenant_id == expected_tenant_id
+                ),
+                None,
+            )
+            if draft is None:
+                return None
+            updated = replace(
+                draft,
+                status=status,
+                governance_decision_id=(
+                    governance_decision_id
+                    if governance_decision_id is not None
+                    else draft.governance_decision_id
+                ),
+                updated_at=datetime.now(timezone.utc),
+            )
+            self._drafts[str(updated.draft_id)] = updated
+            return updated
+
+    async def update_resolution_outbound_draft_body_for_proposal(
+        self,
+        proposal_id: str,
+        *,
+        expected_tenant_id: str,
+        draft_body: str,
+        draft_body_sha256: str,
+        governance_decision_id: UUID | None = None,
+    ) -> ResolutionOutboundDraftRecord | None:
+        async with self._lock:
+            draft = next(
+                (
+                    item
+                    for item in self._drafts.values()
+                    if str(item.proposal_id) == proposal_id
+                    and item.tenant_id == expected_tenant_id
+                ),
+                None,
+            )
+            if draft is None:
+                return None
+            updated = replace(
+                draft,
+                draft_body=draft_body,
+                draft_body_sha256=draft_body_sha256,
+                governance_decision_id=(
+                    governance_decision_id
+                    if governance_decision_id is not None
+                    else draft.governance_decision_id
+                ),
+                updated_at=datetime.now(timezone.utc),
+            )
+            self._drafts[str(updated.draft_id)] = updated
+            return updated
 
 
 def _matches(

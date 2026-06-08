@@ -470,6 +470,7 @@ class ToolInvoker:
                     )
                 decision = governance_envelope.unwrap()
                 governance_decision_id = decision.decision_id
+                crisis_policy_name = crisis_policy_name_from_decision(decision)
                 if self._redis_client is not None and context.tenant_id is not None:
                     await publish_crisis_intercept_event(
                         redis_client=self._redis_client,
@@ -509,6 +510,7 @@ class ToolInvoker:
                             extra_metadata={
                                 "governance_decision": decision.decision.value,
                                 "governance_reason": decision.reason,
+                                "crisis_policy": crisis_policy_name,
                             },
                             governance_envelope=governance_envelope,
                             governance_decision_id=governance_decision_id,
@@ -529,6 +531,7 @@ class ToolInvoker:
                             extra_metadata={
                                 "governance_decision": decision.decision.value,
                                 "governance_reason": decision.reason,
+                                "crisis_policy": crisis_policy_name,
                             },
                             governance_envelope=governance_envelope,
                             governance_decision_id=governance_decision_id,
@@ -566,6 +569,7 @@ class ToolInvoker:
                         extra_metadata={
                             "governance_decision": decision.decision.value,
                             "governance_reason": decision.reason,
+                            "crisis_policy": crisis_policy_name,
                         },
                         governance_envelope=governance_envelope,
                         governance_decision_id=governance_decision_id,

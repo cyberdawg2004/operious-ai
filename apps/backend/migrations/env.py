@@ -52,6 +52,7 @@ from app.tenant.db import models as _tenant_models  # noqa: F401  # pyright: ign
 from app.knowledge.db import models as _knowledge_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.qa.db import models as _qa_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.escalation.db import models as _escalation_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.approvals.db import models as _approval_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.sop_intelligence.db import models as _sop_intelligence_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.trainer.db import models as _trainer_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.cognition.db import models as _cognition_models  # noqa: F401  # pyright: ignore[reportUnusedImport]

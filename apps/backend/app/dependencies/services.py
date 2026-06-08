@@ -61,6 +61,9 @@ from app.agents.tools.connector_invocations import (
 from app.agents.tools.grants import PostgresAgentActionGrantRepository
 from app.agents.tools.invoker import ToolInvoker
 from app.agents.tools.orchestration import ActionOrchestrationRuntime
+from app.approvals.celery_publisher import CeleryCaseApprovalReviewPublisher
+from app.approvals.ingress import ApprovalQueueIngressService
+from app.approvals.persistence import PostgresCaseApprovalPersistence
 from app.arbitration.persistence import (
     ArbitrationPersistenceProtocol,
     PostgresArbitrationPersistence,
@@ -133,9 +136,12 @@ from app.observability.runtime import OperationalObservabilityRuntime
 from app.runtime import (
     ExecutionGovernanceRuntime,
     ProviderCircuitBreaker,
+    ResolutionGovernanceGate,
     TenantCoordinationTopologyRuntimeProvider,
+    build_resolution_governance_runtime,
     make_postgres_dispatch_arbitration_runtime,
 )
+from app.runtime.grounding import CitationCoverageGroundingChecker
 from app.runtime.tenant_production_hardening import (
     TenantProductionHardeningRuntime,
 )
@@ -149,6 +155,7 @@ from app.semantic import (
 from app.semantic.quarantine_publisher import CelerySemanticQuarantinePublisher
 from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
+from app.services.case_approval_service import CaseApprovalService
 from app.services.cognition_service import CognitionService
 from app.services.auth0_management import Auth0ManagementClientProtocol
 from app.services.conversation_service import (
@@ -196,6 +203,7 @@ from app.session.persistence import (
     SessionPersistenceProtocol,
 )
 from app.session.runtime import SessionRuntime
+from app.sme import build_sme_review_runtime
 from app.sop_intelligence.persistence import PostgresSOPApprovalPersistence
 from app.sop_intelligence.runtime import SOPIntelligenceRuntime
 from app.supervisor.persistence import (
@@ -521,6 +529,31 @@ def get_execution_publisher() -> ExecutionPublisher:
     return CeleryExecutionPublisher()
 
 
+def _case_approval_producer_dependencies(
+    session: AsyncSession,
+    *,
+    data_protection: DataProtectionService | None,
+) -> tuple[ApprovalQueueIngressService, CaseApprovalService]:
+    governance_repository = PostgresGovernanceRepository(session)
+    persistence = PostgresCaseApprovalPersistence(
+        session,
+        data_protection=data_protection,
+    )
+    return (
+        ApprovalQueueIngressService(persistence=persistence),
+        CaseApprovalService(
+            persistence=persistence,
+            sme_runtime=build_sme_review_runtime(),
+            resolution_repository=PostgresResolutionProposalPersistence(
+                session,
+                data_protection=data_protection,
+            ),
+            governance_repository=governance_repository,
+            session=None,
+        ),
+    )
+
+
 async def get_conversation_service(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
@@ -529,6 +562,10 @@ async def get_conversation_service(
     """Return the live conversation service for this request."""
 
     data_protection = _data_protection_service(session)
+    approval_ingress, approval_reviewer = _case_approval_producer_dependencies(
+        session,
+        data_protection=data_protection,
+    )
     execution_persistence = PostgresExecutionPersistence(session)
     execution_runtime = ExecutionRuntime(persistence=execution_persistence)
     deferred_execution_publisher = _DeferredExecutionPublisher(
@@ -571,6 +608,8 @@ async def get_conversation_service(
             TranslationRuntime,
             request.app.state.translation_runtime,
         ),
+        approval_queue_ingress=approval_ingress,
+        case_approval_reviewer=approval_reviewer,
     )
     try:
         yield service
@@ -587,6 +626,10 @@ async def get_dispatch_service(
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
     data_protection = _data_protection_service(session)
+    approval_ingress, approval_reviewer = _case_approval_producer_dependencies(
+        session,
+        data_protection=data_protection,
+    )
     execution_runtime = ExecutionRuntime(
         persistence=PostgresExecutionPersistence(session),
     )
@@ -655,6 +698,8 @@ async def get_dispatch_service(
         continuity_runtime=CaseContinuityRuntime(
             session_repository=session_repository,
         ),
+        approval_queue_ingress=approval_ingress,
+        case_approval_reviewer=approval_reviewer,
     )
     try:
         yield service
@@ -823,6 +868,13 @@ def get_action_approval_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> ActionApprovalService:
     """Return the manager action-approval service for this request."""
+    return build_action_approval_service(session)
+
+
+def build_action_approval_service(
+    session: AsyncSession,
+) -> ActionApprovalService:
+    """Construct the manager action-approval service for a session."""
     settings = get_settings()
     data_protection = _data_protection_service(session)
     governance_repository = PostgresGovernanceRepository(session)
@@ -831,7 +883,12 @@ def get_action_approval_service(
         data_protection=data_protection,
     )
     timeline_runtime = TimelineRuntime(persistence=session_repository)
+
     async def _orchestration_factory(tenant_id: str) -> ActionOrchestrationRuntime:
+        approval_ingress, approval_reviewer = _case_approval_producer_dependencies(
+            session,
+            data_protection=data_protection,
+        )
         tenant_runtime = TenantConfigurationRuntime(
             repository=PostgresTenantConfigurationRepository(
                 session,
@@ -871,6 +928,8 @@ def get_action_approval_service(
             ),
             approval_repository=PostgresActionApprovalRepository(session),
             timeline_runtime=timeline_runtime,
+            approval_queue_ingress=approval_ingress,
+            case_approval_reviewer=approval_reviewer,
         )
 
     return ActionApprovalService(
@@ -885,6 +944,82 @@ def get_action_approval_service(
         orchestration_runtime_factory=_orchestration_factory,
         timeline_runtime=timeline_runtime,
         session=session,
+    )
+
+
+def get_case_approval_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> CaseApprovalService:
+    """Return the SME-reviewed case approval service."""
+    data_protection = _data_protection_service(session)
+    governance_repository = PostgresGovernanceRepository(session)
+
+    # Share the request session with the action-approval service so that a
+    # case approval that fires a bound action commits the case-approved row
+    # and the fired side-effect atomically (single commit owned here).
+    action_service = build_action_approval_service(session)
+
+    async def _approve_bound_action(
+        approval_id: str,
+        approved_by: str,
+        note: str | None,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> object:
+        return await action_service.approve_in_transaction(
+            approval_id=approval_id,
+            approved_by=approved_by,
+            note=note,
+            tenant_id=tenant_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+
+    return CaseApprovalService(
+        persistence=PostgresCaseApprovalPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        sme_runtime=build_sme_review_runtime(),
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        governance_repository=governance_repository,
+        escalation_runtime=EscalationAgentRuntime(
+            escalation_persistence=PostgresEscalationPersistence(session),
+            governance_repository=governance_repository,
+            session_persistence=PostgresSessionPersistence(
+                session,
+                data_protection=data_protection,
+            ),
+        ),
+        action_approval_approve=_approve_bound_action,
+        resolution_governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=CitationCoverageGroundingChecker(
+                    document_repository=PostgresTenantConfigurationRepository(
+                        session,
+                        data_protection=data_protection,
+                    ),
+                ),
+            ),
+        ),
+        session=session,
+    )
+
+
+def get_approval_queue_ingress_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> ApprovalQueueIngressService:
+    """Return the producer-facing approval queue ingress boundary."""
+    data_protection = _data_protection_service(session)
+    return ApprovalQueueIngressService(
+        persistence=PostgresCaseApprovalPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        publisher=CeleryCaseApprovalReviewPublisher(),
     )
 
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 import uuid
 
+from app.approvals.ingress import ApprovalQueueIngressService
 from app.coordination.contracts import (
     CoordinationDispatchRequest,
     CoordinationMessage,
@@ -38,6 +39,10 @@ from app.identity import AuthorityContext
 from app.identity import TenantId
 from app.language import LanguageDetector
 from app.runtime import ExecutionGovernanceRuntime
+from app.approvals.producers import (
+    CaseApprovalReviewer,
+    request_coordination_human_review_case,
+)
 from app.session.conversation import (
     ConversationExecutionIntent,
     ConversationRuntimeError,
@@ -94,11 +99,15 @@ class ConversationDiagnosticExecutionRequester:
         execution_runtime: ExecutionRuntime,
         execution_governance_runtime: ExecutionGovernanceRuntime,
         execution_publisher: ExecutionPublisher,
+        approval_queue_ingress: ApprovalQueueIngressService | None = None,
+        case_approval_reviewer: CaseApprovalReviewer | None = None,
     ) -> None:
         self._coordination_runtime = coordination_runtime
         self._execution_runtime = execution_runtime
         self._execution_governance_runtime = execution_governance_runtime
         self._execution_publisher = execution_publisher
+        self._approval_queue_ingress = approval_queue_ingress
+        self._case_approval_reviewer = case_approval_reviewer
 
     async def request_diagnostic_execution(
         self,
@@ -126,6 +135,20 @@ class ConversationDiagnosticExecutionRequester:
             )
         )
         if coordination.outcome is not CoordinationDispatchOutcome.ACCEPTED:
+            await request_coordination_human_review_case(
+                ingress=self._approval_queue_ingress,
+                reviewer=self._case_approval_reviewer,
+                coordination_result=coordination,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                ticket_ref=f"conversation:{session_id}:{turn_id}",
+                issue_summary=coordination.error,
+                metadata={
+                    "conversation.session_id": session_id,
+                    "conversation.turn_id": turn_id,
+                    "conversation.source_language": source_language,
+                },
+            )
             raise ConversationServiceError(
                 coordination.error or coordination.outcome.value
             )
@@ -453,6 +476,8 @@ def build_conversation_service(
     execution_publisher: ExecutionPublisher,
     redis_client: Any,
     translation_runtime: TranslationRuntime | None = None,
+    approval_queue_ingress: ApprovalQueueIngressService | None = None,
+    case_approval_reviewer: CaseApprovalReviewer | None = None,
 ) -> ConversationService:
     publisher = RedisConversationEventPublisher(redis_client=redis_client)
     runtime = ConversationSessionRuntime(
@@ -462,6 +487,8 @@ def build_conversation_service(
             execution_runtime=execution_runtime,
             execution_governance_runtime=execution_governance_runtime,
             execution_publisher=execution_publisher,
+            approval_queue_ingress=approval_queue_ingress,
+            case_approval_reviewer=case_approval_reviewer,
         ),
         event_publisher=publisher,
     )

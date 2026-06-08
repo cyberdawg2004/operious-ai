@@ -22,6 +22,7 @@ QUEUE_ESCALATION = "escalation"
 QUEUE_SUPERVISOR = "supervisor"
 QUEUE_QA = "qa"
 QUEUE_SOP_INTELLIGENCE = "sop_intelligence"
+QUEUE_SME_APPROVAL = "sme_approval"
 QUEUE_KNOWLEDGE_INDEXING = "knowledge_indexing"
 
 # Maintenance queues
@@ -50,6 +51,7 @@ ALL_QUEUES: tuple[str, ...] = (
     QUEUE_SUPERVISOR,
     QUEUE_QA,
     QUEUE_SOP_INTELLIGENCE,
+    QUEUE_SME_APPROVAL,
     QUEUE_KNOWLEDGE_INDEXING,
     QUEUE_WEBHOOK_MAINTENANCE,
     QUEUE_DEAD_LETTER,

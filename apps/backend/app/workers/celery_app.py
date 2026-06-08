@@ -36,6 +36,7 @@ from app.queues import (
     QUEUE_INGRESS_VOICE,
     QUEUE_QA,
     QUEUE_SOP_INTELLIGENCE,
+    QUEUE_SME_APPROVAL,
     QUEUE_SUPERVISOR,
     QUEUE_WEBHOOK_MAINTENANCE,
 )
@@ -60,6 +61,7 @@ celery_app = Celery(
     backend=settings.celery_result_backend_url,
     include=[
         "app.workers.agent_tasks",
+        "app.workers.approval_tasks",
         "app.workers.defect_cluster_tasks",
         "app.workers.escalation_recovery_tasks",
         "app.workers.escalation_tasks",
@@ -92,6 +94,7 @@ celery_conf.update(
         "dispatch_defect_report": {"queue": QUEUE_SUPERVISOR},
         "score_supervisor_inspection": {"queue": QUEUE_QA},
         "propose_sop_intelligence_change": {"queue": QUEUE_SOP_INTELLIGENCE},
+        "review_case_approval": {"queue": QUEUE_SME_APPROVAL},
         "scan_training_recommendation_gaps": {
             "queue": QUEUE_SOP_INTELLIGENCE
         },

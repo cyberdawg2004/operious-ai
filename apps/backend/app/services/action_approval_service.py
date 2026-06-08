@@ -236,64 +236,88 @@ class ActionApprovalService:
         tenant_id: str,
         expected_tenant_id: str,
     ) -> ActionApprovalRecord:
-        _assert_tenant(tenant_id, expected_tenant_id)
         try:
-            approval = await self._require_pending(
+            resolved = await self.approve_in_transaction(
                 approval_id=approval_id,
-                expected_tenant_id=expected_tenant_id,
-            )
-            source_decision = await self._source_decision(
-                approval,
-                expected_tenant_id=expected_tenant_id,
-                require_present=True,
-            )
-            if source_decision is None:
-                raise ActionApprovalRuntimeError(
-                    "source governance decision is absent"
-                )
-            enriched = await self._with_resolution_metadata(
-                approval,
-                expected_tenant_id=expected_tenant_id,
-            )
-            manager_decision_id = await self._record_manager_approval_decision(
-                approval=enriched,
-                source_decision=source_decision,
                 approved_by=approved_by,
                 note=note,
-            )
-            orchestration = await self._orchestration_for(expected_tenant_id)
-            outcome = await orchestration.re_invoke_approved_action(
-                approval_record=enriched,
-                approved_decision_id=manager_decision_id,
-                execution_context=_execution_context_for_approval(
-                    enriched,
-                    approved_by=approved_by,
-                ),
+                tenant_id=tenant_id,
                 expected_tenant_id=expected_tenant_id,
             )
-            _require_executed(outcome)
-            resolved = await self._approvals.resolve_approval(
-                enriched.approval_id,
-                expected_tenant_id=expected_tenant_id,
-                status="approved",
-                resolved_at=datetime.now(timezone.utc),
-                resolved_by=approved_by,
-                resolution_note=note,
-                metadata={
-                    **dict(enriched.metadata),
-                    "manager_governance_decision_id": manager_decision_id,
-                    "approved_by": approved_by,
-                },
-            )
-            if resolved is None:
-                raise ActionApprovalNotFoundError(
-                    f"unknown action approval: {approval_id}"
-                )
             await self._session.commit()
             return resolved
         except Exception:
             await self._session.rollback()
             raise
+
+    async def approve_in_transaction(
+        self,
+        *,
+        approval_id: str,
+        approved_by: str,
+        note: str | None,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> ActionApprovalRecord:
+        """Approve and fire the action WITHOUT committing/rolling back.
+
+        The caller owns the transaction. Used when an SME case approval
+        must fire its bound action and mark the case approved atomically
+        in a single shared commit.
+        """
+        _assert_tenant(tenant_id, expected_tenant_id)
+        approval = await self._require_pending(
+            approval_id=approval_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        source_decision = await self._source_decision(
+            approval,
+            expected_tenant_id=expected_tenant_id,
+            require_present=True,
+        )
+        if source_decision is None:
+            raise ActionApprovalRuntimeError(
+                "source governance decision is absent"
+            )
+        enriched = await self._with_resolution_metadata(
+            approval,
+            expected_tenant_id=expected_tenant_id,
+        )
+        manager_decision_id = await self._record_manager_approval_decision(
+            approval=enriched,
+            source_decision=source_decision,
+            approved_by=approved_by,
+            note=note,
+        )
+        orchestration = await self._orchestration_for(expected_tenant_id)
+        outcome = await orchestration.re_invoke_approved_action(
+            approval_record=enriched,
+            approved_decision_id=manager_decision_id,
+            execution_context=_execution_context_for_approval(
+                enriched,
+                approved_by=approved_by,
+            ),
+            expected_tenant_id=expected_tenant_id,
+        )
+        _require_executed(outcome)
+        resolved = await self._approvals.resolve_approval(
+            enriched.approval_id,
+            expected_tenant_id=expected_tenant_id,
+            status="approved",
+            resolved_at=datetime.now(timezone.utc),
+            resolved_by=approved_by,
+            resolution_note=note,
+            metadata={
+                **dict(enriched.metadata),
+                "manager_governance_decision_id": manager_decision_id,
+                "approved_by": approved_by,
+            },
+        )
+        if resolved is None:
+            raise ActionApprovalNotFoundError(
+                f"unknown action approval: {approval_id}"
+            )
+        return resolved
 
     async def _orchestration_for(
         self,

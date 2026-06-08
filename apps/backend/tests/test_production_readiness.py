@@ -2,9 +2,8 @@
 #74/#17/#54).
 
 Production must refuse to boot with stubbed providers or missing
-security secrets unless each is EXPLICITLY acknowledged via a feature
-flag. This prevents a demo/stub configuration from being mistaken for a
-real production deployment.
+security secrets. This prevents a demo/stub configuration from being
+mistaken for a real production deployment.
 """
 
 from __future__ import annotations
@@ -46,10 +45,11 @@ def test_missing_llm_key_blocks_boot() -> None:
     assert any("LLM" in p or "llm" in p for p in exc.value.problems)
 
 
-def test_stub_llm_allowed_with_flag() -> None:
-    validate_production_config(
-        _production(ANTHROPIC_API_KEY="", ALLOW_STUB_LLM=True)
-    )
+def test_stub_llm_flag_does_not_override_production_fail_closed() -> None:
+    with pytest.raises(ProductionReadinessError):
+        validate_production_config(
+            _production(ANTHROPIC_API_KEY="", ALLOW_STUB_LLM=True)
+        )
 
 
 def test_identity_translation_blocks_boot() -> None:
@@ -57,10 +57,14 @@ def test_identity_translation_blocks_boot() -> None:
         validate_production_config(_production(TRANSLATION_PROVIDER="identity"))
 
 
-def test_identity_translation_allowed_with_flag() -> None:
-    validate_production_config(
-        _production(TRANSLATION_PROVIDER="identity", ALLOW_STUB_TRANSLATION=True)
-    )
+def test_identity_translation_flag_does_not_override_production_fail_closed() -> None:
+    with pytest.raises(ProductionReadinessError):
+        validate_production_config(
+            _production(
+                TRANSLATION_PROVIDER="identity",
+                ALLOW_STUB_TRANSLATION=True,
+            )
+        )
 
 
 def test_in_memory_vector_blocks_boot() -> None:

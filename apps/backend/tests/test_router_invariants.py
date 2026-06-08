@@ -82,6 +82,7 @@ _SCHEMAS_DIR: Final[Path] = _BACKEND_APP / "api" / "v1" / "schemas"
 #: cross-substrate imports inside router files.
 _SUBSTRATE_PACKAGES: Final[frozenset[str]] = frozenset(
     {
+        "approvals",
         "arbitration",
         "boundary",
         "cognition",
@@ -209,6 +210,8 @@ def _imports(tree: ast.Module) -> list[tuple[str, str | None]]:
 
 def _substrate_from_router_filename(name: str) -> str:
     """``governance.py`` → ``governance``; ``auth.py`` → ``auth``."""
+    if name == "case_approvals.py":
+        return "approvals"
     if name == "voice.py":
         return "boundary"
     return name.removesuffix(".py")
