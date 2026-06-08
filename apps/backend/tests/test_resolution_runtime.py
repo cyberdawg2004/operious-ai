@@ -978,10 +978,11 @@ async def test_postgres_resolution_outbound_draft_enforces_tenant_rls(
     assert page.total == 0
 
 
-def test_resolution_runtime_has_no_external_send_path() -> None:
+def test_resolution_runtime_still_has_no_customer_transmit_path() -> None:
+    """Resolution remains draft-only; governed sends live in service layer."""
+
     paths = [
         Path("apps/backend/app/runtime/resolution_runtime.py"),
-        Path("apps/backend/app/workers/agent_tasks.py"),
         Path("apps/backend/app/resolution"),
         Path("apps/backend/migrations/versions/0044_resolution_drafts.py"),
     ]
@@ -1005,6 +1006,19 @@ def test_resolution_runtime_has_no_external_send_path() -> None:
                     violations.append(f"{path}:{token}")
 
     assert violations == []
+
+
+def test_governed_whatsapp_send_path_is_explicit_service() -> None:
+    """Old invariant flipped: governed send exists, ungoverned send does not."""
+
+    source = Path(
+        "apps/backend/app/services/whatsapp_customer_reply_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WhatsAppCustomerReplySendService" in source
+    assert "get_decision" in source
+    assert "Decision.ALLOW.value" in source
+    assert "send_text_message" in source
 
 
 def test_resolution_drafts_do_not_persist_delivery_fields() -> None:

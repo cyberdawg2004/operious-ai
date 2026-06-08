@@ -19,6 +19,8 @@ from app.api.v1.schemas.boundary import (
     BoundaryEgressResponse,
     BoundaryIngressPage,
     BoundaryIngressResponse,
+    WhatsAppCustomerReplySendRequest,
+    WhatsAppCustomerReplySendResponse,
     WorkOrderFulfillmentCallbackRequest,
     WorkOrderFulfillmentReceiptResponse,
 )
@@ -32,14 +34,23 @@ from app.boundary.persistence import (
     BoundaryPersistenceProtocol,
 )
 from app.dependencies.authority import (
+    require_tenant_actions_approve,
     require_tenant_operations_read,
     require_tenant_scope,
 )
 from app.dependencies.services import get_boundary_repository
 from app.dependencies.services import get_work_order_fulfillment_receipt_service
+from app.dependencies.services import get_whatsapp_customer_reply_send_service
 from app.services.work_order_fulfillment_receipt_service import (
     WorkOrderFulfillmentReceiptError,
     WorkOrderFulfillmentReceiptService,
+)
+from app.services.whatsapp_customer_reply_service import (
+    WhatsAppCustomerReplyConfigurationError,
+    WhatsAppCustomerReplyGovernanceError,
+    WhatsAppCustomerReplyNotFoundError,
+    WhatsAppCustomerReplyProviderError,
+    WhatsAppCustomerReplySendService,
 )
 
 router = APIRouter(tags=["boundary"])
@@ -84,6 +95,63 @@ async def record_work_order_fulfillment(
         message_type=receipt.message_type,
         replay_disposition=receipt.replay_disposition,
         provider_work_order_id=receipt.provider_work_order_id,
+    )
+
+
+@router.post(
+    "/channels/whatsapp/outbound-drafts/{draft_id}/send",
+    response_model=WhatsAppCustomerReplySendResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_tenant_actions_approve)],
+)
+async def send_whatsapp_customer_reply(
+    draft_id: str,
+    payload: WhatsAppCustomerReplySendRequest,
+    service: WhatsAppCustomerReplySendService = Depends(
+        get_whatsapp_customer_reply_send_service
+    ),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+) -> WhatsAppCustomerReplySendResponse:
+    try:
+        result = await service.send_draft(
+            draft_id=draft_id,
+            tenant_id=expected_tenant_id,
+            expected_tenant_id=expected_tenant_id,
+            recipient_phone_number=payload.recipient_phone_number,
+            phone_number_id=payload.phone_number_id,
+        )
+    except WhatsAppCustomerReplyNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "whatsapp_reply_draft_not_found"},
+        ) from exc
+    except WhatsAppCustomerReplyGovernanceError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "whatsapp_reply_not_governed_send_eligible",
+                "reason": str(exc),
+            },
+        ) from exc
+    except WhatsAppCustomerReplyConfigurationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "whatsapp_channel_not_configured",
+                "reason": str(exc),
+            },
+        ) from exc
+    except WhatsAppCustomerReplyProviderError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "whatsapp_provider_send_failed"},
+        ) from exc
+    return WhatsAppCustomerReplySendResponse(
+        delivery_id=result.delivery_id,
+        status=result.status,
+        provider_message_id=result.provider_message_id,
+        transmitted=result.transmitted,
+        idempotent_replay=result.idempotent_replay,
     )
 
 

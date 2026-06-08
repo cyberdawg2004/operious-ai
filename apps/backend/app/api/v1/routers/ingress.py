@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.api.v1.schemas.ingress import (
     TicketIngressRequest,
@@ -56,6 +56,41 @@ async def create_ticket_ingress(
         quarantine_id=result.quarantine_id,
         status=result.status,
     )
+
+
+@router.get(
+    "/channels/{channel_type}/webhook",
+    response_class=PlainTextResponse,
+)
+async def verify_channel_webhook_ingress(
+    channel_type: str,
+    hub_mode: str = Query(..., alias="hub.mode"),
+    hub_verify_token: str = Query(..., alias="hub.verify_token"),
+    hub_challenge: str = Query(..., alias="hub.challenge"),
+    phone_number_id: str = Query(..., min_length=1),
+    expected_tenant_id: str | None = Depends(request_tenant_scope_opt),
+    service: TicketIngressService = Depends(get_ticket_ingress_service),
+) -> PlainTextResponse:
+    try:
+        challenge = await service.verify_channel_webhook(
+            channel_type=channel_type,
+            mode=hub_mode,
+            verify_token=hub_verify_token,
+            challenge=hub_challenge,
+            phone_number_id=phone_number_id,
+            tenant_hint=expected_tenant_id,
+        )
+    except TicketIngressRejected as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "reason": exc.reason},
+            headers=exc.headers,
+        ) from exc
+    except TicketIngressServiceError as exc:
+        raise HTTPException(
+            status_code=500, detail={"code": "ticket_ingress_failed"}
+        ) from exc
+    return PlainTextResponse(challenge, status_code=status.HTTP_200_OK)
 
 
 @router.post(

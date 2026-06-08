@@ -201,6 +201,23 @@ class WorkOrderFulfillmentReceiptResponse(BaseModel):
     provider_work_order_id: str | None = None
 
 
+class WhatsAppCustomerReplySendRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    recipient_phone_number: str = Field(min_length=1)
+    phone_number_id: str | None = Field(default=None, min_length=1)
+
+
+class WhatsAppCustomerReplySendResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    delivery_id: str
+    status: Literal["sent", "already_sent", "pending"]
+    provider_message_id: str | None = None
+    transmitted: bool
+    idempotent_replay: bool
+
+
 __all__ = [
     "BoundaryEgressPage",
     "BoundaryEgressResponse",
@@ -208,4 +225,6 @@ __all__ = [
     "BoundaryIngressResponse",
     "WorkOrderFulfillmentCallbackRequest",
     "WorkOrderFulfillmentReceiptResponse",
+    "WhatsAppCustomerReplySendRequest",
+    "WhatsAppCustomerReplySendResponse",
 ]

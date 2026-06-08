@@ -611,6 +611,95 @@ class TicketIngressService:
             canonical_envelope_id=str(result.event_id),
         )
 
+    async def verify_channel_webhook(
+        self,
+        *,
+        channel_type: str,
+        mode: str,
+        verify_token: str,
+        challenge: str,
+        phone_number_id: str,
+        tenant_hint: str | None = None,
+    ) -> str:
+        """Complete Meta's GET webhook verification handshake."""
+
+        if self._tenant_configuration_runtime is None:
+            raise TicketIngressServiceError(
+                "tenant configuration runtime is not configured"
+            )
+        tenant_channel_type = _tenant_channel_type(channel_type)
+        if tenant_channel_type is not TenantChannelType.WHATSAPP:
+            raise TicketIngressRejected(
+                code="unsupported_webhook_verification_channel",
+                reason="webhook verification is supported for whatsapp only",
+                status_code=404,
+            )
+        if mode != "subscribe":
+            raise TicketIngressRejected(
+                code="webhook_verification_rejected",
+                reason="unsupported verification mode",
+                status_code=403,
+            )
+        routing_address = phone_number_id.strip()
+        if not routing_address:
+            raise TicketIngressRejected(
+                code="webhook_verification_rejected",
+                reason="phone_number_id is required",
+                status_code=400,
+            )
+        routing_secret = (
+            await self._tenant_configuration_runtime
+            .resolve_webhook_routing_secret(
+                channel_type=TenantChannelType.WHATSAPP,
+                routing_address=routing_address,
+            )
+        )
+        await _end_read_only_routing_transaction(self._session)
+        if routing_secret is None:
+            raise TicketIngressRejected(
+                code="webhook_verification_rejected",
+                reason="unknown whatsapp route",
+                status_code=403,
+            )
+        if tenant_hint is not None and tenant_hint != routing_secret.tenant_id:
+            raise TicketIngressRejected(
+                code="webhook_verification_rejected",
+                reason="tenant route mismatch",
+                status_code=403,
+            )
+        set_current_tenant(routing_secret.tenant_id)
+        channel_config = (
+            await self._tenant_configuration_runtime
+            .resolve_active_channel_for_routing_address(
+                channel_type=TenantChannelType.WHATSAPP,
+                routing_address=routing_address,
+                expected_tenant_id=routing_secret.tenant_id,
+            )
+        )
+        if channel_config is None:
+            raise TicketIngressRejected(
+                code="webhook_verification_rejected",
+                reason="unknown whatsapp route",
+                status_code=403,
+            )
+        credentials = (
+            await self._tenant_configuration_runtime.load_channel_credentials(
+                tenant_id=routing_secret.tenant_id,
+                channel_type=TenantChannelType.WHATSAPP,
+            )
+        )
+        if not _whatsapp_verify_token_matches(
+            supplied_token=verify_token,
+            credentials=credentials,
+            routing_secret=routing_secret,
+        ):
+            raise TicketIngressRejected(
+                code="webhook_verification_rejected",
+                reason="verify token mismatch",
+                status_code=403,
+            )
+        return challenge
+
     async def _record_webhook_freshness_nonce(
         self,
         *,
@@ -1247,6 +1336,31 @@ def _select_webhook_secret(
     ):
         return previous_secret
     return channel_config.webhook_secret
+
+
+def _whatsapp_verify_token_matches(
+    *,
+    supplied_token: str,
+    credentials: Mapping[str, Any],
+    routing_secret: TenantWebhookRoutingSecretRecord,
+) -> bool:
+    token = supplied_token.strip()
+    if not token:
+        return False
+    configured_tokens = [
+        value.strip()
+        for key in (
+            "webhook_verify_token",
+            "verify_token",
+            "whatsapp_verify_token",
+            "meta_verify_token",
+        )
+        for value in (credentials.get(key),)
+        if isinstance(value, str) and value.strip()
+    ]
+    if not configured_tokens and routing_secret.webhook_secret.strip():
+        configured_tokens.append(routing_secret.webhook_secret.strip())
+    return any(hmac.compare_digest(token, candidate) for candidate in configured_tokens)
 
 
 def _webhook_signature_matches_secret(

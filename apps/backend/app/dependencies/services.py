@@ -72,6 +72,10 @@ from app.boundary.persistence import (
     BoundaryPersistenceProtocol,
     PostgresBoundaryPersistence,
 )
+from app.boundary.outbound import (
+    PostgresWhatsAppDeliveryRepository,
+    WhatsAppGraphSender,
+)
 from app.boundary.translation import TranslationRuntime
 from app.coordination.persistence import (
     CoordinationPersistenceProtocol,
@@ -196,6 +200,9 @@ from app.services.sop_intelligence_service import SOPIntelligenceService
 from app.services.supervisor_inbox_service import SupervisorInboxService
 from app.services.ticket_ingress_service import TicketChannel, TicketIngressService
 from app.services.trainer_service import TrainerRecommendationService
+from app.services.whatsapp_customer_reply_service import (
+    WhatsAppCustomerReplySendService,
+)
 from app.qa.persistence import PostgresQAPersistence
 from app.queues import DIAGNOSTIC_QUEUE_PRIORITY
 from app.session.persistence import (
@@ -416,6 +423,38 @@ def get_ticket_ingress_service(
             TenantChannelType.SHULEX: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.WHATSAPP: DIAGNOSTIC_QUEUE_PRIORITY,
         },
+    )
+
+
+def get_whatsapp_customer_reply_send_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> WhatsAppCustomerReplySendService:
+    """Return the governed WhatsApp customer-reply send service."""
+
+    settings = get_settings()
+    if not settings.TENANT_CREDENTIAL_MASTER_KEY.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "tenant_credentials_not_configured"},
+        )
+    data_protection = _data_protection_service(session)
+    resolution_repository = PostgresResolutionProposalPersistence(
+        session,
+        data_protection=data_protection,
+    )
+    return WhatsAppCustomerReplySendService(
+        draft_repository=resolution_repository,
+        proposal_repository=resolution_repository,
+        governance_repository=PostgresGovernanceRepository(session),
+        tenant_runtime=TenantConfigurationRuntime(
+            repository=PostgresTenantConfigurationRepository(session),
+            credential_encryptor=TenantCredentialEncryptor(
+                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+            ),
+        ),
+        delivery_repository=PostgresWhatsAppDeliveryRepository(session),
+        sender=WhatsAppGraphSender(),
+        session=session,
     )
 
 
