@@ -7,6 +7,7 @@ export const dashboardRoutes = {
   trace: "/dashboard/traces",
   supervisor: "/dashboard/supervisor",
   escalations: "/dashboard/escalations",
+  "case-approvals": "/dashboard/case-approvals",
   approvals: "/dashboard/approvals",
   cognition: "/dashboard/cognition",
   knowledge: "/dashboard/knowledge",

@@ -40,6 +40,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Escalation Queue",
     description: "Cases the agent could not auto-resolve within governance, awaiting human review.",
   },
+  "case-approvals": {
+    eyebrow: "Governance",
+    title: "Case Approvals",
+    description: "SME-AI-recommended resolutions awaiting human sign-off — approve to proceed, or guide a bounded re-proposal.",
+  },
   "queue-status": {
     eyebrow: "Operations",
     title: "Queue Status",

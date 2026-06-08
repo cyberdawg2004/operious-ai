@@ -874,6 +874,109 @@ export function rejectEscalation(escalationId: string, resolution: string) {
   );
 }
 
+// --- SME-reviewed case approvals (Fix 1b) --------------------------------
+// Distinct from the action-tool Approval Inbox: these are SME-AI-recommended
+// resolutions awaiting human sign-off. Approve lets the recommendation proceed;
+// guide submits a bounded re-proposal that STILL re-runs governance backend-side.
+
+export type CaseApprovalEntryCategory =
+  | "resolution_require_approval"
+  | "resolution_needs_human_approval"
+  | "refund_warranty"
+  | "low_confidence"
+  | "coordination_human_review"
+  | "crisis_action";
+
+export type CaseApprovalStatus =
+  | "pending_sme_review"
+  | "awaiting_approval"
+  | "guidance_in_progress"
+  | "approved"
+  | "escalated"
+  | "failed";
+
+export type SmeRecommendation = {
+  recommendation_id: string;
+  recommended_reply: string;
+  recommended_actions: Record<string, unknown>[];
+  rationale: string;
+  confidence: number;
+  citations: Record<string, unknown>[];
+  risk_flags: string[];
+  reply_segments: Record<string, unknown>[];
+  created_at: string;
+  metadata: Record<string, unknown>;
+};
+
+export type CaseApprovalRecord = {
+  approval_case_id: string;
+  tenant_id: string;
+  session_id: string | null;
+  execution_id: string | null;
+  dispatch_id: string | null;
+  resolution_proposal_id: string | null;
+  entry_category: CaseApprovalEntryCategory;
+  ticket_ref: string | null;
+  product: string | null;
+  issue_summary: string | null;
+  sme_recommendation_id: string | null;
+  recommended_action: Record<string, unknown> | null;
+  status: CaseApprovalStatus;
+  guidance_round: number;
+  governance_decision_id: string | null;
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export function listCaseApprovals(query: {
+  status?: CaseApprovalStatus;
+  entry_category?: CaseApprovalEntryCategory;
+  session_id?: string;
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<ApiPage<CaseApprovalRecord>>("/approvals/cases", { query });
+}
+
+export function getCaseApproval(approvalCaseId: string) {
+  return apiRequest<CaseApprovalRecord>(
+    `/approvals/cases/${encodeURIComponent(approvalCaseId)}`
+  );
+}
+
+export function approveCaseApproval(approvalCaseId: string, note: string | null) {
+  return apiRequest<CaseApprovalRecord>(
+    `/approvals/cases/${encodeURIComponent(approvalCaseId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }
+  );
+}
+
+export function guideCaseApproval(approvalCaseId: string, guidance: string) {
+  return apiRequest<CaseApprovalRecord>(
+    `/approvals/cases/${encodeURIComponent(approvalCaseId)}/guide`,
+    {
+      method: "POST",
+      body: JSON.stringify({ guidance }),
+    }
+  );
+}
+
+export function escalateCaseApproval(approvalCaseId: string, reason: string) {
+  return apiRequest<CaseApprovalRecord>(
+    `/approvals/cases/${encodeURIComponent(approvalCaseId)}/escalate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }
+  );
+}
+
 export function readOperationalMetrics(windowStart: Date, windowEnd: Date) {
   return apiRequest<OperationalMetrics>("/observability/metrics", {
     query: {
