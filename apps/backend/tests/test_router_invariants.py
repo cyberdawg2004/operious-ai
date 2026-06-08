@@ -142,6 +142,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset(
         "get_conversation_service",
         "get_coordination_repository",
         "get_data_protection_service",
+        "get_email_customer_reply_send_service",
         "get_escalation_service",
         "get_governance_repository",
         "get_health_service",
@@ -160,6 +161,7 @@ _EXPECTED_SERVICES_SURFACE: Final[frozenset[str]] = frozenset(
         "get_tenant_config_change_request_service",
         "get_tenant_configuration_service",
         "get_tenant_lifecycle_service",
+        "get_whatsapp_customer_reply_send_service",
     }
 )
 
