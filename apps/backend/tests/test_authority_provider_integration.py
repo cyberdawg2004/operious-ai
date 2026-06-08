@@ -265,7 +265,8 @@ def test_malformed_authorization_returns_400(
     assert resp.status_code == 400, description
     body = resp.json()
     assert body["error"] == "malformed_authorization_header"
-    assert body["header"] == AUTHORIZATION_HEADER
+    # #25: the header name is folded into ``reason`` (coarsened away in prod).
+    assert AUTHORIZATION_HEADER in body["reason"]
 
 
 # ─── Source singularity ─────────────────────────────────────────────

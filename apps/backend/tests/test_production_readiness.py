@@ -111,3 +111,21 @@ def test_all_problems_are_collected() -> None:
         )
     # Every problem is surfaced at once (not just the first).
     assert len(exc.value.problems) >= 3
+
+
+def test_legacy_header_authority_enabled_in_production_fails() -> None:
+    # Breach path #1 / finding #3: re-enabling upstream X-*-ID identity
+    # headers in production must be a boot failure, not a silent override.
+    with pytest.raises(ProductionReadinessError) as excinfo:
+        validate_production_config(
+            _production(LEGACY_HEADER_AUTHORITY_ENABLED=True)
+        )
+    assert any(
+        "LEGACY_HEADER_AUTHORITY_ENABLED" in problem
+        for problem in excinfo.value.problems
+    )
+
+
+def test_baseline_production_keeps_legacy_header_authority_disabled() -> None:
+    # The READY baseline must NOT trip the new gate (defaults fail-closed).
+    validate_production_config(_production())

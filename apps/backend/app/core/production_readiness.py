@@ -128,6 +128,19 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "cannot be verified against a server-derived URL."
         )
 
+    # ── Legacy header authority must stay disabled in production (S-01) ──
+    # Boot-fail if an operator override re-enables upstream-attested X-*-ID
+    # identity headers as an authority source — the most catastrophic
+    # breach path (cross-tenant identity spoofing). Defaults are already
+    # fail-closed in prod; this turns a dangerous *override* into a boot error.
+    if settings.legacy_header_authority_enabled:
+        problems.append(
+            "LEGACY_HEADER_AUTHORITY_ENABLED=true in production -> upstream "
+            "X-*-ID identity headers would be an accepted authority source, "
+            "allowing direct callers to spoof tenant identity; this must be "
+            "false (verified bearer only) in production."
+        )
+
     return tuple(problems)
 
 

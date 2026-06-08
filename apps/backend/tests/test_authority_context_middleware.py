@@ -242,8 +242,10 @@ def test_whitespace_only_header_returns_400(
     assert response.status_code == 400
     body = response.json()
     assert body["error"] == "malformed_authority_header"
-    assert body["header"] == header
-    assert body["field"] == field
+    # #25: header/field attribution is folded into ``reason`` (one surface,
+    # coarsened away in production) rather than separate top-level keys.
+    assert header in body["reason"]
+    assert field in body["reason"]
     assert "empty" in body["reason"] or "whitespace" in body["reason"]
 
 
@@ -261,7 +263,7 @@ def test_empty_string_header_returns_400() -> None:
     if response.status_code == 400:
         body = response.json()
         assert body["error"] == "malformed_authority_header"
-        assert body["header"] == TENANT_HEADER
+        assert TENANT_HEADER in body["reason"]
 
 
 # ─── Dual binding contract ──────────────────────────────────────────

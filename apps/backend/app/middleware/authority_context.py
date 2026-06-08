@@ -58,7 +58,7 @@ from typing import Awaitable, Callable, Final, Mapping
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.auth import (
@@ -204,13 +204,12 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                 "authority_authorization_malformed",
                 extra={"reason": err.reason},
             )
-            return JSONResponse(
+            # #25: route malformed-parse errors through the coarsening helper
+            # so production does not leak header/field/reason recon detail.
+            return self._auth_error(
                 status_code=400,
-                content={
-                    "error": "malformed_authorization_header",
-                    "header": AUTHORIZATION_HEADER,
-                    "reason": err.reason,
-                },
+                internal_code="malformed_authorization_header",
+                reason=f"{AUTHORIZATION_HEADER}: {err.reason}",
             )
 
         # 2. Legacy X-*-ID headers.
@@ -221,14 +220,11 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                 "authority_header_malformed",
                 extra={"header": err.header, "reason": err.reason},
             )
-            return JSONResponse(
+            # #25: coarsen malformed legacy-header parse errors in production.
+            return self._auth_error(
                 status_code=400,
-                content={
-                    "error": "malformed_authority_header",
-                    "header": err.header,
-                    "field": HEADER_TO_FIELD[err.header],
-                    "reason": err.reason,
-                },
+                internal_code="malformed_authority_header",
+                reason=f"{err.header} ({HEADER_TO_FIELD[err.header]}): {err.reason}",
             )
         has_legacy = any(v is not None for v in legacy_raw.values())
 
@@ -319,14 +315,13 @@ class AuthorityContextMiddleware(BaseHTTPMiddleware):
                         "reason": str(err),
                     },
                 )
-                return JSONResponse(
+                return self._auth_error(
                     status_code=400,
-                    content={
-                        "error": "malformed_authority_header",
-                        "header": offending_header,
-                        "field": HEADER_TO_FIELD[offending_header],
-                        "reason": str(err),
-                    },
+                    internal_code="malformed_authority_header",
+                    reason=(
+                        f"{offending_header} "
+                        f"({HEADER_TO_FIELD[offending_header]}): {err}"
+                    ),
                 )
             source = AUTHORITY_SOURCE_HEADER
         else:

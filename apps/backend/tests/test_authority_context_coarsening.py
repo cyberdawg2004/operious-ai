@@ -42,3 +42,19 @@ def test_verification_unavailable_coarsened() -> None:
     resp = _client(coarsen=True).get("/x", headers={"Authorization": "Bearer abc"})
     assert resp.status_code == 401
     assert json.loads(resp.text) == {"error": "unauthorized"}
+
+
+def test_malformed_authorization_parse_coarsened() -> None:
+    # #25: a malformed Authorization header (single token, no scheme) must
+    # coarsen in production — no header/reason recon detail leaks.
+    resp = _client(coarsen=True).get("/x", headers={"Authorization": "single-token"})
+    assert resp.status_code == 400
+    assert json.loads(resp.text) == {"error": "bad_request"}
+
+
+def test_malformed_authorization_parse_detailed_when_not_coarsened() -> None:
+    resp = _client(coarsen=False).get("/x", headers={"Authorization": "single-token"})
+    assert resp.status_code == 400
+    body = json.loads(resp.text)
+    assert body["error"] == "malformed_authorization_header"
+    assert "reason" in body
