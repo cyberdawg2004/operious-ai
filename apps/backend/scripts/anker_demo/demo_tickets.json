@@ -43,6 +43,15 @@
     "expected_category": "unknown_issue",
     "expected_governance": "HUMAN_REVIEW",
     "raw_content": "Subject: Not happy with the charger\n\nThis thing is bad and I want something done. I do not remember where I bought it, I do not have the box, and I cannot explain the issue clearly. Sometimes it works and sometimes it does not. Please fix this today."
+  },
+  {
+    "slug": "warranty-replacement-require-approval",
+    "scenario": "In-warranty replacement requiring human sign-off (case-approval queue)",
+    "channel": "email",
+    "language_code": "en",
+    "expected_category": "warranty_replacement_inquiry",
+    "expected_governance": "REQUIRE_APPROVAL",
+    "raw_content": "Subject: Warranty replacement for defective Anker PowerCore\n\nOrder ANK-DEMO-1005. I bought an Anker PowerCore 26800 forty days ago directly from Anker. It now swells slightly and will not hold a charge. I still have the original box, the receipt, and all accessories. Under the 18-month warranty I would like a replacement unit. Please confirm the warranty replacement and the next step."
   }
 ]
 

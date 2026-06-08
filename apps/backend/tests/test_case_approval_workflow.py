@@ -306,6 +306,10 @@ def test_auth0_roles_map_to_case_approval_capabilities() -> None:
         claims={"sub": "principal", "roles": ["TenantResolutionGuider"]},
         claim_mapping=DEFAULT_CLAIM_MAPPING,
     )
+    viewer = extract_capabilities_from_claims(
+        claims={"sub": "principal", "roles": ["TenantApprovalsViewer"]},
+        claim_mapping=DEFAULT_CLAIM_MAPPING,
+    )
 
     assert case_approver == frozenset(
         {"tenant.approvals.read", "tenant.actions.approve"}
@@ -313,6 +317,10 @@ def test_auth0_roles_map_to_case_approval_capabilities() -> None:
     assert guider == frozenset(
         {"tenant.approvals.read", "tenant.resolution.guide"}
     )
+    # Read-only viewer can see the queue but holds NO authority action.
+    assert viewer == frozenset({"tenant.approvals.read"})
+    assert "tenant.actions.approve" not in viewer
+    assert "tenant.resolution.guide" not in viewer
 
 
 def _service_without_proposal() -> tuple[

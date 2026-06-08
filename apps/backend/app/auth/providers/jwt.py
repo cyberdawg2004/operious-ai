@@ -176,6 +176,11 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantActionApprover": "tenant.actions.approve",
     "TenantCaseApprover": TENANT_CASE_APPROVER_CAPABILITIES,
     "TenantResolutionGuider": TENANT_RESOLUTION_GUIDER_CAPABILITIES,
+    # Read-only view of the SME approval queue, WITHOUT the approve/guide
+    # authority (mirrors the TenantGovernanceViewer/TenantCognitionViewer
+    # read-only pattern). Lets an operator see cases awaiting sign-off while
+    # the authority actions stay distinct grants (separation of duties).
+    "TenantApprovalsViewer": "tenant.approvals.read",
     "TenantTrainingWriter": "tenant.training.write",
     "TenantPrivacyAdmin": "tenant.privacy.admin",
     "TenantPrivacyApprover": "tenant.privacy.approve",
