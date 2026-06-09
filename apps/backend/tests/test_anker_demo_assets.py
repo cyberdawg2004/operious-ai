@@ -14,6 +14,14 @@ import pytest
 
 DEMO_ROOT = Path("apps/backend/scripts/anker_demo")
 SCRIPT_PATH = DEMO_ROOT / "seed_anker_demo.py"
+EXPECTED_TICKET_SLUGS = {
+    "charging-allow",
+    "refund-over-limit-deny-escalate",
+    "arabic-language-review",
+    "product-defect-claim",
+    "ambiguous-human-review",
+    "warranty-replacement-require-approval",
+}
 
 
 def _load_seed_module() -> ModuleType:
@@ -54,16 +62,12 @@ def test_anker_demo_tickets_cover_required_scenarios() -> None:
     tickets = module.load_demo_tickets()
     payloads = module.planned_ticket_payloads()
 
-    assert len(tickets) == 5
-    assert {ticket["slug"] for ticket in tickets} == {
-        "charging-allow",
-        "refund-over-limit-deny-escalate",
-        "arabic-language-review",
-        "product-defect-claim",
-        "ambiguous-human-review",
-    }
+    assert len(tickets) == len(EXPECTED_TICKET_SLUGS)
+    assert {ticket["slug"] for ticket in tickets} == EXPECTED_TICKET_SLUGS
     assert {ticket["language_code"] for ticket in tickets} >= {"en", "ar"}
-    assert len({payload["external_id"] for payload in payloads}) == 5
+    assert len({payload["external_id"] for payload in payloads}) == len(
+        EXPECTED_TICKET_SLUGS
+    )
     for payload in payloads:
         assert payload["channel"] == "email"
         assert payload["external_id"].startswith("anker-demo-")
@@ -94,7 +98,7 @@ def test_anker_demo_run_id_makes_live_payloads_retry_safe() -> None:
         run_id="retry-001",
     )
 
-    assert len(baseline) == len(retry_safe) == 5
+    assert len(baseline) == len(retry_safe) == len(EXPECTED_TICKET_SLUGS)
     assert {payload["external_id"] for payload in baseline}.isdisjoint(
         {payload["external_id"] for payload in retry_safe}
     )
@@ -113,7 +117,7 @@ def test_anker_demo_dry_run_uses_confirmed_phase_6f_endpoints(
     serialized = json.dumps(summary, sort_keys=True)
 
     assert len(summary["knowledge_documents"]) == 5
-    assert len(summary["tickets"]) == 5
+    assert len(summary["tickets"]) == len(EXPECTED_TICKET_SLUGS)
     assert "/boundary/translation/ingress" in serialized
     assert "/coordination/dispatch" in serialized
     assert "/session/" in serialized

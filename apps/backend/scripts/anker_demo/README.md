@@ -5,7 +5,7 @@ Phase 6-F creates a real Anker pilot demo path without mocks:
 - Tenant-owned governance and execution configuration for `anker-pilot`.
 - Five SOP/policy documents stored through `/api/v1/tenant/knowledge`.
 - Knowledge indexing through `/api/v1/knowledge/documents/{document_id}/ingest`.
-- Five real ticket ingress submissions through `/api/v1/boundary/translation/ingress`.
+- Six real ticket ingress submissions through `/api/v1/boundary/translation/ingress`.
 - Real dispatch through `/api/v1/coordination/dispatch`.
 - Timeline checks through `/api/v1/session/{session_id}/timeline` and
   `/api/v1/session/sessions/{session_id}/events`.
@@ -47,4 +47,3 @@ For configuration-only proof without channel credentials:
 ```bash
 python apps/backend/scripts/anker_demo/seed_anker_demo.py --skip-channel
 ```
-
