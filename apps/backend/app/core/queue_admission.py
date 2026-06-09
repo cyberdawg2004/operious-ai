@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from inspect import isawaitable
 from typing import Any, Literal, Protocol
 
+from app.core.queue_depth import (
+    QueueDepthProvider,
+    QueueDepthSample,
+    RedisQueueDepthProvider,
+)
 from app.queues import (
     ALL_QUEUES,
     QUEUE_DIAGNOSTIC_NORMAL,
@@ -37,7 +42,7 @@ class TenantQueueQoSClient(QueueDepthClient, Protocol):
 
 
 class QueueBackpressureError(RuntimeError):
-    """Raised when a Redis-backed queue is above its admission threshold."""
+    """Raised when a broker queue is above its admission threshold."""
 
     reason = "queue_backpressure"
 
@@ -84,18 +89,34 @@ class QueueDepthReport:
     queue_name: str | None = None
     age_seconds: float | None = None
     error: str | None = None
+    messages_ready: int | None = None
+    messages_unacknowledged: int | None = None
+    messages: int | None = None
 
 
 class RedisQueueDepthAdmission:
-    """Check Redis queue depth before publishing new Celery work."""
+    """Check queue depth before publishing new Celery work.
+
+    The class name is kept for compatibility with existing callers. New
+    production composition should pass ``queue_depth_provider`` so the
+    broker-specific read lives behind the provider seam.
+    """
 
     def __init__(
         self,
         *,
-        redis_client: QueueDepthClient,
+        redis_client: QueueDepthClient | None = None,
+        queue_depth_provider: QueueDepthProvider | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
-        self._redis_client = redis_client
+        if queue_depth_provider is None:
+            if redis_client is None:
+                raise ValueError(
+                    "RedisQueueDepthAdmission requires a depth provider "
+                    "or redis client"
+                )
+            queue_depth_provider = RedisQueueDepthProvider(redis_client)
+        self._queue_depth_provider = queue_depth_provider
         self._logger = logger or logging.getLogger(__name__)
 
     async def check(
@@ -108,7 +129,8 @@ class RedisQueueDepthAdmission:
         dispatch_id: str | None = None,
     ) -> None:
         try:
-            depth = await _resolve_int(self._redis_client.llen(queue_name))
+            sample = await self._queue_depth_provider.get_queue_depth(queue_name)
+            depth = sample.depth
         except Exception as exc:  # noqa: BLE001 - processing admission fails closed.
             self._logger.warning(
                 "queue_depth_check_failed",
@@ -154,17 +176,26 @@ class RedisQueueDepthAdmission:
 
 async def collect_queue_depth_reports(
     *,
-    redis_client: QueueDepthClient,
     limits: tuple[QueueDepthLimit, ...],
+    queue_depth_provider: QueueDepthProvider | None = None,
+    redis_client: QueueDepthClient | None = None,
     operation_timeout: float | None = None,
 ) -> dict[str, QueueDepthReport]:
+    if queue_depth_provider is None:
+        if redis_client is None:
+            raise ValueError(
+                "collect_queue_depth_reports requires a depth provider "
+                "or redis client"
+            )
+        queue_depth_provider = RedisQueueDepthProvider(redis_client)
+
     async def _collect(limit: QueueDepthLimit) -> tuple[str, QueueDepthReport]:
         try:
-            depth_coro = _resolve_int(redis_client.llen(limit.queue_name))
-            depth = (
-                await asyncio.wait_for(depth_coro, timeout=operation_timeout)
+            sample_coro = queue_depth_provider.get_queue_depth(limit.queue_name)
+            sample = (
+                await asyncio.wait_for(sample_coro, timeout=operation_timeout)
                 if operation_timeout is not None
-                else await depth_coro
+                else await sample_coro
             )
         except Exception:  # noqa: BLE001 - health reports must capture.
             return (
@@ -174,24 +205,47 @@ async def collect_queue_depth_reports(
                     limit=limit.max_depth,
                     status="unknown",
                     queue_name=limit.queue_name,
-                    error="redis_unavailable",
+                    error=_provider_error_name(queue_depth_provider),
                 ),
             )
         return (
             limit.logical_name,
-            QueueDepthReport(
-                depth=depth,
-                limit=limit.max_depth,
-                status=queue_depth_status(
-                    depth=depth,
-                    warn_depth=limit.warn_depth,
-                    critical_depth=limit.max_depth,
-                ),
-                queue_name=limit.queue_name,
+            _report_from_sample(
+                sample=sample,
+                limit=limit,
             ),
         )
 
     return dict(await asyncio.gather(*(_collect(limit) for limit in limits)))
+
+
+def _report_from_sample(
+    *,
+    sample: QueueDepthSample,
+    limit: QueueDepthLimit,
+) -> QueueDepthReport:
+    return QueueDepthReport(
+        depth=sample.depth,
+        limit=limit.max_depth,
+        status=queue_depth_status(
+            depth=sample.depth,
+            warn_depth=limit.warn_depth,
+            critical_depth=limit.max_depth,
+        ),
+        queue_name=limit.queue_name,
+        messages_ready=sample.messages_ready,
+        messages_unacknowledged=sample.messages_unacknowledged,
+        messages=sample.messages,
+    )
+
+
+def _provider_error_name(provider: QueueDepthProvider) -> str:
+    backend = getattr(provider, "backend", None)
+    if backend == "redis":
+        return "redis_unavailable"
+    if backend == "rabbitmq":
+        return "rabbitmq_unavailable"
+    return "queue_depth_unavailable"
 
 
 def queue_depth_status(

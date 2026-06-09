@@ -1,6 +1,6 @@
 app = "operious-ai-imad"
 
-primary_region = "sin"
+primary_region = "iad"
 
 [build]
 

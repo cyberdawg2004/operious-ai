@@ -8,6 +8,11 @@ from typing import Any, cast
 
 from app.core.admission import QueueAgeSentinelClient, record_queue_age_sentinel
 from app.core.config import get_settings
+from app.core.queue_depth import (
+    QueueDepthProvider,
+    RedisQueueDepthProvider,
+    get_queue_depth_provider,
+)
 from app.core.queue_admission import QueueDepthClient, RedisQueueDepthAdmission
 from app.core.redis import get_redis_client
 from app.escalation.publisher import EscalationPublisher
@@ -26,11 +31,13 @@ class CeleryEscalationPublisher(EscalationPublisher):
         self,
         *,
         redis_client: QueueDepthClient | None = None,
+        queue_depth_provider: QueueDepthProvider | None = None,
         queue_name: str | None = None,
         max_queue_depth: int | None = None,
     ) -> None:
         settings = get_settings()
         self._redis_client = redis_client
+        self._queue_depth_provider = queue_depth_provider
         self._queue_name = queue_name or QUEUE_ESCALATION
         self._max_queue_depth = (
             max_queue_depth
@@ -44,13 +51,17 @@ class CeleryEscalationPublisher(EscalationPublisher):
         tenant_id: str | None = None,
         dispatch_id: str | None = None,
     ) -> None:
-        client = self._redis_client
-        if client is None:
-            if _running_under_pytest():
+        provider = self._queue_depth_provider
+        if provider is None:
+            client = self._redis_client
+            if client is not None:
+                provider = RedisQueueDepthProvider(client)
+            elif _running_under_pytest():
                 return
-            client = get_redis_client()
-            self._redis_client = client
-        await RedisQueueDepthAdmission(redis_client=client).check(
+            else:
+                provider = get_queue_depth_provider()
+            self._queue_depth_provider = provider
+        await RedisQueueDepthAdmission(queue_depth_provider=provider).check(
             logical_queue=QUEUE_ESCALATION,
             queue_name=self._queue_name,
             max_queue_depth=self._max_queue_depth,

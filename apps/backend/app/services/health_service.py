@@ -37,6 +37,11 @@ from app.core.health import (
     check_redis,
     run_with_timeout,
 )
+from app.core.queue_depth import (
+    QueueDepthProvider,
+    RedisQueueDepthProvider,
+    get_queue_depth_provider,
+)
 from app.core.queue_admission import (
     QueueDepthReport,
     aggregate_queue_status,
@@ -129,6 +134,8 @@ class HealthService(BaseService):
             Callable[[], async_sessionmaker[AsyncSession]] | None
         ) = None,
         redis_provider: Callable[[], Redis] | None = None,
+        queue_depth_provider: QueueDepthProvider | None = None,
+        queue_depth_provider_factory: Callable[[], QueueDepthProvider] | None = None,
     ) -> None:
         super().__init__()
         self._settings = settings
@@ -142,6 +149,16 @@ class HealthService(BaseService):
             if redis_provider is not None
             else lambda: _require_redis(redis)
         )
+        if queue_depth_provider_factory is not None:
+            self._queue_depth_provider_factory = queue_depth_provider_factory
+        elif queue_depth_provider is not None:
+            self._queue_depth_provider_factory = lambda: queue_depth_provider
+        elif redis_provider is not None or redis is not None:
+            self._queue_depth_provider_factory = (
+                lambda: RedisQueueDepthProvider(self._redis_provider())
+            )
+        else:
+            self._queue_depth_provider_factory = get_queue_depth_provider
 
     # ─── Public API ────────────────────────────────────────────────────
 
@@ -265,7 +282,7 @@ class HealthService(BaseService):
         try:
             reports = await asyncio.wait_for(
                 collect_queue_depth_reports(
-                    redis_client=self._redis_provider(),
+                    queue_depth_provider=self._queue_depth_provider_factory(),
                     limits=limits,
                     operation_timeout=timeout,
                 ),
@@ -319,6 +336,9 @@ class HealthService(BaseService):
                 queue_name=report.queue_name,
                 age_seconds=age_seconds,
                 error=report.error,
+                messages_ready=report.messages_ready,
+                messages_unacknowledged=report.messages_unacknowledged,
+                messages=report.messages,
             )
         return enriched
 

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from inspect import isawaitable
 from typing import Any, Protocol, cast
 
+from app.core.queue_depth import QueueDepthProvider, RedisQueueDepthProvider
 from app.hardening.admission.models import (
     AdmissionChannelClass,
     AdmissionDecision,
@@ -66,9 +67,6 @@ class AdmissionRedisClient(Protocol):
     def info(self, section: str | None = None) -> Awaitable[Mapping[str, Any]] | Mapping[str, Any]:
         ...
 
-    def llen(self, name: str) -> Awaitable[int] | int:
-        ...
-
     def zrange(
         self,
         name: str,
@@ -109,9 +107,15 @@ class AdmissionGate:
         *,
         redis_client: AdmissionRedisClient,
         thresholds: AdmissionGateThresholds,
+        queue_depth_provider: QueueDepthProvider | None = None,
     ) -> None:
         self._redis = redis_client
         self._thresholds = thresholds
+        self._queue_depth_provider = (
+            queue_depth_provider
+            if queue_depth_provider is not None
+            else RedisQueueDepthProvider(cast(Any, redis_client))
+        )
 
     async def evaluate(
         self,
@@ -327,8 +331,8 @@ class AdmissionGate:
 
     async def _single_queue_depth_sample(self, *, queue_name: str) -> _TelemetrySample:
         try:
-            value = await _resolve(self._redis.llen(queue_name))
-            return _TelemetrySample(value=int(value or 0), available=True)
+            sample = await self._queue_depth_provider.get_queue_depth(queue_name)
+            return _TelemetrySample(value=sample.depth, available=True)
         except Exception:  # noqa: BLE001 - admission policy handles telemetry loss.
             logger.warning(
                 "admission_queue_depth_check_failed",

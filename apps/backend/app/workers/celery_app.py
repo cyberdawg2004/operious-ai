@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Coroutine, Mapping
+from collections.abc import Coroutine, Mapping
 from datetime import datetime, timezone
-from inspect import isawaitable
 from threading import Thread
 from typing import Any, Protocol, TypeVar, cast
+from urllib.parse import urlsplit
 
 from celery import Celery
 from celery.signals import task_failure, task_postrun, task_prerun, task_retry
 from kombu import Queue
 
+from app.core.config import Settings
 from app.core.config import get_settings
+from app.core.queue_depth import get_queue_depth_provider
 from app.core.redis import get_redis_client
 from app.data_protection.crypto import DataProtectionService
 from app.db.session import get_owner_session_factory
@@ -48,6 +50,13 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 _task_start_times: dict[str, datetime] = {}
+_VISIBILITY_TIMEOUT_BROKER_SCHEMES = {
+    "redis",
+    "rediss",
+    "redis+socket",
+    "sentinel",
+    "sqs",
+}
 
 
 class _CeleryConfig(Protocol):
@@ -55,9 +64,18 @@ class _CeleryConfig(Protocol):
         ...
 
 
+def _broker_transport_options(settings: Settings) -> dict[str, int]:
+    scheme = urlsplit(settings.celery_broker_url).scheme.lower()
+    if scheme not in _VISIBILITY_TIMEOUT_BROKER_SCHEMES:
+        return {}
+    return {
+        "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
+    }
+
+
 celery_app = Celery(
     "operious",
-    broker=settings.redis_url,
+    broker=settings.celery_broker_url,
     backend=settings.celery_result_backend_url,
     include=[
         "app.workers.agent_tasks",
@@ -84,7 +102,7 @@ celery_conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    task_queues=[Queue(name) for name in ALL_QUEUES],
+    task_queues=[Queue(name, durable=True) for name in ALL_QUEUES],
     task_default_queue=QUEUE_DIAGNOSTIC_NORMAL,
     task_routes={
         "execute_diagnostic_agent": {"queue": QUEUE_DIAGNOSTIC_NORMAL},
@@ -138,9 +156,7 @@ celery_conf.update(
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT_SECONDS,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
-    broker_transport_options={
-        "visibility_timeout": settings.CELERY_VISIBILITY_TIMEOUT_SECONDS,
-    },
+    broker_transport_options=_broker_transport_options(settings),
     beat_schedule={
         "cleanup-expired-webhook-nonces-hourly": {
             "task": "cleanup_expired_webhook_nonces",
@@ -546,19 +562,13 @@ def enqueued_at_iso() -> str:
 
 
 async def _collect_queue_depths() -> dict[str, int]:
-    redis_client = get_redis_client()
+    queue_depth_provider = get_queue_depth_provider()
     depths: dict[str, int] = {}
     for queue_name in ALL_QUEUES:
-        depths[queue_name] = int(
-            await _resolve_depth(redis_client.llen(queue_name)) or 0
-        )
+        depths[queue_name] = (
+            await queue_depth_provider.get_queue_depth(queue_name)
+        ).depth
     return depths
-
-
-async def _resolve_depth(value: Awaitable[int] | int) -> int:
-    if isawaitable(value):
-        return await value
-    return value
 
 
 def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:

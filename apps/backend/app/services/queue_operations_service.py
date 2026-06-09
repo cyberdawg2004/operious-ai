@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from inspect import isawaitable
 from typing import Any, cast
 
 from redis.asyncio import Redis
@@ -16,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.core.admission import admission_thresholds_from_settings
 from app.core.config import Settings, get_settings
+from app.core.queue_depth import (
+    QueueDepthProvider,
+    RedisQueueDepthProvider,
+    get_queue_depth_provider,
+)
 from app.core.queue_admission import queue_depth_status
 from app.core.redis import get_redis_client
 from app.db.tenant_context import get_current_tenant, set_current_tenant
@@ -50,6 +54,9 @@ class QueueDepthItemRecord:
     oldest_age_seconds: float | None
     status: str
     error: str | None = None
+    messages_ready: int | None = None
+    messages_unacknowledged: int | None = None
+    messages: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,11 +139,23 @@ class QueueOperationsService:
         *,
         session: AsyncSession,
         redis_provider: Callable[[], Redis] = get_redis_client,
+        queue_depth_provider: QueueDepthProvider | None = None,
+        queue_depth_provider_factory: Callable[[], QueueDepthProvider] | None = None,
         replay_publisher: DeadLetterReplayPublisher | None = None,
         settings: Settings | None = None,
     ) -> None:
         self._session = session
         self._redis_provider = redis_provider
+        if queue_depth_provider_factory is not None:
+            self._queue_depth_provider_factory = queue_depth_provider_factory
+        elif queue_depth_provider is not None:
+            self._queue_depth_provider_factory = lambda: queue_depth_provider
+        elif redis_provider is not get_redis_client:
+            self._queue_depth_provider_factory = (
+                lambda: RedisQueueDepthProvider(self._redis_provider())
+            )
+        else:
+            self._queue_depth_provider_factory = get_queue_depth_provider
         self._replay_publisher = (
             replay_publisher or CeleryDeadLetterReplayPublisher()
         )
@@ -148,14 +167,16 @@ class QueueOperationsService:
         snapshot_at = datetime.now(timezone.utc)
         queues: dict[str, QueueDepthItemRecord] = {}
         redis_client = cast(AdmissionRedisClient, self._redis_provider())
+        queue_depth_provider = self._queue_depth_provider_factory()
         gate = AdmissionGate(
             redis_client=redis_client,
             thresholds=admission_thresholds_from_settings(self._settings),
+            queue_depth_provider=queue_depth_provider,
         )
         for queue_name in ALL_QUEUES:
             queues[queue_name] = await self._queue_status_item(
                 queue_name=queue_name,
-                redis_client=redis_client,
+                queue_depth_provider=queue_depth_provider,
                 gate=gate,
             )
         return QueueStatusRecord(queues=queues, snapshot_at=snapshot_at)
@@ -557,11 +578,12 @@ class QueueOperationsService:
         self,
         *,
         queue_name: str,
-        redis_client: AdmissionRedisClient,
+        queue_depth_provider: QueueDepthProvider,
         gate: AdmissionGate,
     ) -> QueueDepthItemRecord:
         try:
-            depth = int(await _resolve(redis_client.llen(queue_name)) or 0)
+            sample = await queue_depth_provider.get_queue_depth(queue_name)
+            depth = sample.depth
         except Exception as exc:  # noqa: BLE001 - endpoint degrades per queue.
             logger.warning(
                 "queue_status_depth_unavailable",
@@ -575,7 +597,7 @@ class QueueOperationsService:
                 depth=0,
                 oldest_age_seconds=None,
                 status="unknown",
-                error="redis_unavailable",
+                error=_queue_depth_error_name(queue_depth_provider),
             )
         oldest_age_seconds = await gate.queue_age_seconds(queue_name=queue_name)
         return QueueDepthItemRecord(
@@ -587,6 +609,9 @@ class QueueOperationsService:
                 oldest_age_seconds=oldest_age_seconds,
                 settings=self._settings,
             ),
+            messages_ready=sample.messages_ready,
+            messages_unacknowledged=sample.messages_unacknowledged,
+            messages=sample.messages,
         )
 
 
@@ -631,6 +656,15 @@ def _queue_item_status(
     ):
         return "warn"
     return depth_status
+
+
+def _queue_depth_error_name(provider: QueueDepthProvider) -> str:
+    backend = getattr(provider, "backend", None)
+    if backend == "redis":
+        return "redis_unavailable"
+    if backend == "rabbitmq":
+        return "rabbitmq_unavailable"
+    return "queue_depth_unavailable"
 
 
 def _item_from_row(row: DeadLetterTaskRow) -> DeadLetterItemRecord:
@@ -726,12 +760,6 @@ def _metadata_dict(metadata: Mapping[str, Any], key: str) -> dict[str, Any]:
 
 def _mapping_to_dict(value: Mapping[Any, Any]) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
-
-
-async def _resolve(value: Awaitable[Any] | Any) -> Any:
-    if isawaitable(value):
-        return await value
-    return value
 
 
 def _should_commit_external_transaction(

@@ -216,6 +216,9 @@ async def test_health_report_includes_queue_depth_statuses() -> None:
         "queue_name": QUEUE_DIAGNOSTIC_NORMAL,
         "age_seconds": None,
         "error": None,
+        "messages_ready": None,
+        "messages_unacknowledged": None,
+        "messages": None,
     }
     assert response.queues["escalation"].status == "warn"
     assert response.queues["supervisor"].status == "critical"

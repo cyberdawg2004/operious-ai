@@ -10,6 +10,7 @@ from app.core.admission import (
     record_queue_age_sentinel,
 )
 from app.core.config import get_settings
+from app.core.queue_depth import get_queue_depth_provider
 from app.core.queue_admission import RedisQueueDepthAdmission
 from app.core.redis import get_redis_client
 from app.queues import (
@@ -27,7 +28,9 @@ async def admit_supervisor_publish(
     if _running_under_pytest():
         return
     settings = get_settings()
-    await RedisQueueDepthAdmission(redis_client=get_redis_client()).check(
+    await RedisQueueDepthAdmission(
+        queue_depth_provider=get_queue_depth_provider()
+    ).check(
         logical_queue=QUEUE_SUPERVISOR,
         queue_name=QUEUE_SUPERVISOR,
         max_queue_depth=settings.SUPERVISOR_QUEUE_MAX_DEPTH,
@@ -44,7 +47,9 @@ async def admit_qa_publish(
     if _running_under_pytest():
         return
     settings = get_settings()
-    await RedisQueueDepthAdmission(redis_client=get_redis_client()).check(
+    await RedisQueueDepthAdmission(
+        queue_depth_provider=get_queue_depth_provider()
+    ).check(
         logical_queue=QUEUE_QA,
         queue_name=QUEUE_QA,
         max_queue_depth=settings.QA_QUEUE_MAX_DEPTH,
@@ -61,7 +66,9 @@ async def admit_sop_intelligence_publish(
     if _running_under_pytest():
         return
     settings = get_settings()
-    await RedisQueueDepthAdmission(redis_client=get_redis_client()).check(
+    await RedisQueueDepthAdmission(
+        queue_depth_provider=get_queue_depth_provider()
+    ).check(
         logical_queue=QUEUE_SOP_INTELLIGENCE,
         queue_name=QUEUE_SOP_INTELLIGENCE,
         max_queue_depth=settings.SOP_INTELLIGENCE_QUEUE_MAX_DEPTH,

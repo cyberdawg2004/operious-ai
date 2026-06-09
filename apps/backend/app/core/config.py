@@ -202,11 +202,18 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str | None = None
     REDIS_URL: str | None = None
     QUOTA_REDIS_URL: str | None = None
+    CELERY_BROKER_URL: str | None = None
     CELERY_RESULT_BACKEND_URL: str | None = None
     CELERY_RESULT_EXPIRES_SECONDS: int = 3600
     CELERY_TASK_SOFT_TIME_LIMIT_SECONDS: int = 300
     CELERY_TASK_TIME_LIMIT_SECONDS: int = 600
     CELERY_VISIBILITY_TIMEOUT_SECONDS: int = 3600
+    QUEUE_DEPTH_BACKEND: Literal["redis", "rabbitmq"] = "redis"
+    RABBITMQ_MANAGEMENT_API_URL: str | None = None
+    RABBITMQ_MANAGEMENT_USERNAME: str | None = None
+    RABBITMQ_MANAGEMENT_PASSWORD: str | None = None
+    RABBITMQ_MANAGEMENT_VHOST: str = "/"
+    RABBITMQ_DEPTH_CACHE_TTL_SECONDS: int = 10
     INGRESS_EMAIL_QUEUE_NAME: str = QUEUE_INGRESS_EMAIL
     INGRESS_WHATSAPP_QUEUE_NAME: str = QUEUE_INGRESS_WHATSAPP
     INGRESS_SHOPIFY_QUEUE_NAME: str = QUEUE_INGRESS_SHOPIFY
@@ -684,6 +691,13 @@ class Settings(BaseSettings):
     def quota_redis_url(self) -> str:
         if self.QUOTA_REDIS_URL:
             return _normalize_redis_url(self.QUOTA_REDIS_URL)
+        return self.redis_url
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def celery_broker_url(self) -> str:
+        if self.CELERY_BROKER_URL:
+            return _normalize_redis_url(self.CELERY_BROKER_URL)
         return self.redis_url
 
     @computed_field  # type: ignore[prop-decorator]

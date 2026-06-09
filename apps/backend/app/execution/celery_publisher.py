@@ -8,6 +8,11 @@ from typing import Any, Protocol, cast
 
 from app.core.admission import QueueAgeSentinelClient, record_queue_age_sentinel
 from app.core.config import get_settings
+from app.core.queue_depth import (
+    QueueDepthProvider,
+    RedisQueueDepthProvider,
+    get_queue_depth_provider,
+)
 from app.core.queue_admission import (
     RedisQueueDepthAdmission,
     TenantQueueQoSClient,
@@ -36,6 +41,7 @@ class CeleryExecutionPublisher(ExecutionPublisher):
         self,
         *,
         redis_client: QueueDepthClient | None = None,
+        queue_depth_provider: QueueDepthProvider | None = None,
         queue_name: str | None = None,
         max_queue_depth: int | None = None,
         max_tenant_queue_depth: int | None = None,
@@ -43,6 +49,7 @@ class CeleryExecutionPublisher(ExecutionPublisher):
     ) -> None:
         settings = get_settings()
         self._redis_client = redis_client
+        self._queue_depth_provider = queue_depth_provider
         self._queue_name = queue_name or QUEUE_DIAGNOSTIC_NORMAL
         self._max_queue_depth = (
             max_queue_depth
@@ -68,13 +75,17 @@ class CeleryExecutionPublisher(ExecutionPublisher):
     ) -> None:
         """Reject publication before Celery accepts more work."""
 
-        client = self._redis_client
-        if client is None:
-            if _running_under_pytest():
+        provider = self._queue_depth_provider
+        if provider is None:
+            client = self._redis_client
+            if client is not None:
+                provider = RedisQueueDepthProvider(client)
+            elif _running_under_pytest():
                 return
-            client = cast(QueueDepthClient, get_redis_client())
-            self._redis_client = client
-        await RedisQueueDepthAdmission(redis_client=client).check(
+            else:
+                provider = get_queue_depth_provider()
+            self._queue_depth_provider = provider
+        await RedisQueueDepthAdmission(queue_depth_provider=provider).check(
             logical_queue=QUEUE_DIAGNOSTIC_NORMAL,
             queue_name=self._queue_name,
             max_queue_depth=self._max_queue_depth,

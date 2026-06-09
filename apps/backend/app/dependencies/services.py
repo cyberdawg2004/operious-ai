@@ -93,6 +93,7 @@ from app.cognition.sop_approval_event_publisher import (
 )
 from app.core.config import get_settings
 from app.core.admission import admission_thresholds_from_settings
+from app.core.queue_depth import get_queue_depth_provider
 from app.core.redis import get_redis_client
 from app.data_protection.crypto import DataProtectionError, DataProtectionService
 from app.dependencies.database import get_db_session, get_session_factory
@@ -253,6 +254,7 @@ async def get_health_service() -> HealthService:
         settings=get_settings(),
         session_factory_provider=get_session_factory,
         redis_provider=get_redis_client,
+        queue_depth_provider_factory=get_queue_depth_provider,
     )
 
 
@@ -388,6 +390,7 @@ def get_ticket_ingress_service(
         gate=AdmissionGate(
             redis_client=cast(AdmissionRedisClient, get_redis_client()),
             thresholds=admission_thresholds_from_settings(settings),
+            queue_depth_provider=get_queue_depth_provider(),
         ),
         session_factory=session_factory,
         db_pool_wait_provider=lambda: measure_db_pool_wait_ms(session_factory),
@@ -547,6 +550,7 @@ def get_admission_service() -> AdmissionService:
         gate=AdmissionGate(
             redis_client=cast(AdmissionRedisClient, get_redis_client()),
             thresholds=admission_thresholds_from_settings(settings),
+            queue_depth_provider=get_queue_depth_provider(),
         ),
         session_factory=session_factory,
         db_pool_wait_provider=lambda: measure_db_pool_wait_ms(session_factory),
@@ -1232,7 +1236,10 @@ def get_queue_operations_service(
 ) -> QueueOperationsService:
     """Return the queue operations service."""
 
-    return QueueOperationsService(session=session)
+    return QueueOperationsService(
+        session=session,
+        queue_depth_provider_factory=get_queue_depth_provider,
+    )
 
 
 def _dispatch_coordination_registry() -> CoordinationRegistry:

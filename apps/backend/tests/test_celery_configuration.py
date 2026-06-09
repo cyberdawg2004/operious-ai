@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.redis_policy import verify_redis_memory_policy
 from app.queues import QUEUE_INGRESS_VOICE, QUEUE_WEBHOOK_MAINTENANCE
 from app.workers.agent_tasks import (
@@ -25,6 +25,7 @@ from app.workers.agent_tasks import (
 )
 from app.workers.celery_app import celery_app, process_post_call_transcript
 from app.workers.celery_app import (
+    _broker_transport_options,
     emit_queue_depth_snapshot,
     evaluate_alert_conditions,
     expire_crisis_deployments,
@@ -112,6 +113,24 @@ def test_broker_connection_retry_on_startup_is_explicit() -> None:
     assert celery_app.conf.broker_connection_retry_on_startup is True
 
 
+def test_amqp_broker_transport_options_exclude_visibility_timeout() -> None:
+    settings = Settings(
+        REDIS_URL="redis://localhost:6379/0",
+        CELERY_BROKER_URL="amqps://operator:password@rabbit.example/%2F",
+    )
+
+    assert "visibility_timeout" not in _broker_transport_options(settings)
+
+
+def test_redis_broker_transport_options_include_visibility_timeout() -> None:
+    settings = Settings(
+        REDIS_URL="redis://localhost:6379/0",
+        CELERY_VISIBILITY_TIMEOUT_SECONDS=123,
+    )
+
+    assert _broker_transport_options(settings) == {"visibility_timeout": 123}
+
+
 def test_celery_result_expires_is_one_hour() -> None:
     settings = get_settings()
 
@@ -124,6 +143,13 @@ def test_fire_and_forget_tasks_ignore_results() -> None:
     assert _FIRE_AND_FORGET_TASKS
     for task_name, task in _FIRE_AND_FORGET_TASKS.items():
         assert getattr(task, "ignore_result") is True, task_name
+
+
+def test_celery_task_queues_are_durable() -> None:
+    task_queues = celery_app.conf.task_queues
+
+    assert task_queues
+    assert all(queue.durable is True for queue in task_queues)
 
 
 def test_celery_tasks_have_explicit_retry_budgets() -> None:

@@ -27,6 +27,9 @@ class QueueDepthItem(BaseModel):
     oldest_age_seconds: float | None
     status: QueueOperationStatus
     error: str | None = None
+    messages_ready: int | None = None
+    messages_unacknowledged: int | None = None
+    messages: int | None = None
 
     @classmethod
     def from_record(cls, record: QueueDepthItemRecord) -> "QueueDepthItem":
@@ -36,6 +39,9 @@ class QueueDepthItem(BaseModel):
             oldest_age_seconds=record.oldest_age_seconds,
             status=cast(QueueOperationStatus, record.status),
             error=record.error,
+            messages_ready=record.messages_ready,
+            messages_unacknowledged=record.messages_unacknowledged,
+            messages=record.messages,
         )
 
 

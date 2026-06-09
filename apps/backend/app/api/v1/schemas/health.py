@@ -102,15 +102,27 @@ class QueueDepthSchema(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    depth: int = Field(..., description="Current Redis queue depth.")
+    depth: int = Field(..., description="Current broker queue depth.")
     limit: int = Field(..., description="Configured queue depth admission limit.")
     status: QueueStatus = Field(..., description="Queue pressure status.")
-    queue_name: str | None = Field(None, description="Physical Redis queue name.")
+    queue_name: str | None = Field(None, description="Physical broker queue name.")
     age_seconds: float | None = Field(
         None,
         description="Oldest message age in seconds when available.",
     )
     error: str | None = Field(None, description="Exception class name on failure.")
+    messages_ready: int | None = Field(
+        None,
+        description="RabbitMQ ready message count when available.",
+    )
+    messages_unacknowledged: int | None = Field(
+        None,
+        description="RabbitMQ unacknowledged message count when available.",
+    )
+    messages: int | None = Field(
+        None,
+        description="RabbitMQ total message count when available.",
+    )
 
     @classmethod
     def from_domain(cls, queue: QueueDepthReport) -> "QueueDepthSchema":
@@ -121,6 +133,9 @@ class QueueDepthSchema(BaseModel):
             queue_name=queue.queue_name,
             age_seconds=queue.age_seconds,
             error=queue.error,
+            messages_ready=queue.messages_ready,
+            messages_unacknowledged=queue.messages_unacknowledged,
+            messages=queue.messages,
         )
 
 
