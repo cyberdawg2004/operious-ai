@@ -55,7 +55,9 @@ def test_fly_declares_required_process_groups() -> None:
         "worker_maintenance",
         "worker_voice_realtime",
     }
-    assert processes["web"] == "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    assert _unwrap_startup_wrapper(processes["web"]) == (
+        "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    )
 
 
 def test_fly_worker_processes_consume_only_declared_queues() -> None:
@@ -136,13 +138,20 @@ def _command_concurrency(command: str) -> int:
 
 
 def _worker_command(command: str) -> str:
-    return command.removeprefix("env DB_USE_NULLPOOL=true ").strip()
+    return _unwrap_startup_wrapper(command).removeprefix(
+        "env DB_USE_NULLPOOL=true "
+    ).strip()
 
 
 def test_fly_workers_use_nullpool() -> None:
     processes = _fly_config()["processes"]
 
     for process_name in EXPECTED_PROCESS_QUEUES:
-        assert processes[process_name].startswith("env DB_USE_NULLPOOL=true "), (
+        command = _unwrap_startup_wrapper(processes[process_name])
+        assert command.startswith("env DB_USE_NULLPOOL=true "), (
             f"{process_name} must run workers with DB_USE_NULLPOOL=true"
         )
+
+
+def _unwrap_startup_wrapper(command: str) -> str:
+    return command.removeprefix("scripts/prepare_google_credentials.sh ").strip()

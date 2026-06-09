@@ -219,7 +219,13 @@ def _required_int(payload: Mapping[str, object], key: str) -> int:
     if value is None:
         raise QueueDepthUnavailable(f"rabbitmq_management_missing_{key}")
     try:
-        return int(value)
+        if isinstance(value, bool):
+            raise TypeError("boolean is not a queue depth")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            return int(value)
+        raise TypeError(f"unsupported queue depth type: {type(value).__name__}")
     except (TypeError, ValueError) as exc:
         raise QueueDepthUnavailable(
             f"rabbitmq_management_invalid_{key}"

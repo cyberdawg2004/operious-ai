@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from inspect import isawaitable
 from typing import Any, Protocol, cast
 
-from app.core.queue_depth import QueueDepthProvider, RedisQueueDepthProvider
 from app.hardening.admission.models import (
     AdmissionChannelClass,
     AdmissionDecision,
@@ -64,6 +63,9 @@ _INTERNAL_EXECUTION_CHANNELS = frozenset(
 class AdmissionRedisClient(Protocol):
     """Redis subset used by admission checks and queue-age sentinels."""
 
+    def llen(self, name: str) -> Awaitable[int] | int:
+        ...
+
     def info(self, section: str | None = None) -> Awaitable[Mapping[str, Any]] | Mapping[str, Any]:
         ...
 
@@ -75,6 +77,11 @@ class AdmissionRedisClient(Protocol):
         *,
         withscores: bool = False,
     ) -> Awaitable[Sequence[Any]] | Sequence[Any]:
+        ...
+
+
+class AdmissionQueueDepthProvider(Protocol):
+    async def get_queue_depth(self, queue_name: str) -> Any:
         ...
 
 
@@ -99,6 +106,20 @@ class _TelemetrySample:
     unavailable_reasons: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _QueueDepthSample:
+    depth: int
+
+
+class _RedisAdmissionQueueDepthProvider:
+    def __init__(self, redis_client: AdmissionRedisClient) -> None:
+        self._redis = redis_client
+
+    async def get_queue_depth(self, queue_name: str) -> _QueueDepthSample:
+        depth = int(await _resolve(self._redis.llen(queue_name)) or 0)
+        return _QueueDepthSample(depth=depth)
+
+
 class AdmissionGate:
     """Stateless evaluator for inbound queue admission."""
 
@@ -107,14 +128,14 @@ class AdmissionGate:
         *,
         redis_client: AdmissionRedisClient,
         thresholds: AdmissionGateThresholds,
-        queue_depth_provider: QueueDepthProvider | None = None,
+        queue_depth_provider: AdmissionQueueDepthProvider | None = None,
     ) -> None:
         self._redis = redis_client
         self._thresholds = thresholds
         self._queue_depth_provider = (
             queue_depth_provider
             if queue_depth_provider is not None
-            else RedisQueueDepthProvider(cast(Any, redis_client))
+            else _RedisAdmissionQueueDepthProvider(redis_client)
         )
 
     async def evaluate(
