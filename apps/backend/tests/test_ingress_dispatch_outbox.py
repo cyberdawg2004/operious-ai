@@ -360,6 +360,61 @@ async def test_backfill_apply_creates_one_pending_intent_idempotently(
     assert await _postgres_outbox_count(pg_session, record.ingress_id) == 1
 
 
+@pytest.mark.asyncio
+async def test_unenqueued_pending_outbox_is_recovered_by_reconciler_due_scan() -> None:
+    # Capture succeeded but the best-effort immediate enqueue never happened.
+    store = InMemoryBoundaryPersistence()
+    runtime = IngressDispatchOutboxRuntime(persistence=store)
+    record = _ingress_record(channel="email", external_message_id="enqueue-failed")
+    await store.save_ingress(record)
+    outbox = await runtime.get_outbox_by_ingress(record.ingress_id)
+    assert outbox is not None
+    assert outbox.status is IngressDispatchOutboxStatus.PENDING
+
+    # The reconciler's due-PENDING scan surfaces the un-enqueued row.
+    due = await runtime.list_outbox(
+        IngressDispatchOutboxQuery(
+            status=IngressDispatchOutboxStatus.PENDING,
+            due_before_or_at=NOW,
+            limit=10,
+        )
+    )
+    assert any(item.outbox_id == outbox.outbox_id for item in due.records)
+
+    # Dispatching it (what the reconciler enqueues) drives it to DISPATCHED.
+    dispatch = _RecordingDispatchService()
+    result = await process_ingress_dispatch_outbox_runtime(
+        outbox_id=str(outbox.outbox_id),
+        outbox_runtime=runtime,
+        dispatch_service=dispatch,
+        now=NOW,
+        worker_id="pytest:reconciler-recovery",
+    )
+
+    assert result["status"] == "dispatched"
+    assert dispatch.calls == [(str(record.ingress_id), TENANT_ID)]
+    refreshed = await runtime.get_outbox(outbox.outbox_id)
+    assert refreshed is not None
+    assert refreshed.status is IngressDispatchOutboxStatus.DISPATCHED
+
+
+def test_dead_lettered_ingress_dispatch_is_replayable_from_dlq() -> None:
+    from app.queue_operations.dlq_replay import celery_kwargs_for_task
+
+    outbox_id = str(uuid.uuid4())
+    kwargs = celery_kwargs_for_task(
+        task_name="dispatch_ingress",
+        metadata={
+            "ingress_id": "ingress-dead-lettered",
+            "outbox_id": outbox_id,
+            "attempt_count": 8,
+            "channel": "email",
+        },
+    )
+
+    assert kwargs == {"outbox_id": outbox_id}
+
+
 def _ingress_record(
     *,
     channel: str,

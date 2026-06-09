@@ -141,6 +141,15 @@ def _extract_sop_intelligence_task(
     return kwargs
 
 
+def _extract_dispatch_ingress(
+    metadata: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    outbox_id = _metadata_str(metadata, "outbox_id")
+    if outbox_id is None:
+        return None
+    return {"outbox_id": outbox_id}
+
+
 def _extract_optional_maintenance_kwargs(
     *keys: str,
 ) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
@@ -161,6 +170,7 @@ _FALLBACK_KWARG_EXTRACTORS: dict[
     Callable[[Mapping[str, Any]], dict[str, Any] | None],
 ] = {
     "execute_diagnostic_agent": _extract_execute_diagnostic_agent,
+    "dispatch_ingress": _extract_dispatch_ingress,
     "create_governance_escalation": _extract_create_governance_escalation,
     "evaluate_session_supervisor": _extract_session_task,
     "score_supervisor_inspection": _extract_inspection_task,
