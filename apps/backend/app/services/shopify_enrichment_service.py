@@ -68,11 +68,19 @@ class ShopifyEnrichmentService:
         tenant_runtime: TenantCredentialLoaderProtocol | None = None,
         client: ShopifyClientProtocol | None = None,
         now: Callable[[], datetime] | None = None,
+        allow_stub_enrichment: bool | None = None,
     ) -> None:
         self._session = session
         self._tenant_runtime = tenant_runtime
         self._client = client
         self._now = now or _utcnow
+        # Fail-closed in production: fixture data must never masquerade as
+        # real Shopify product/inventory context (#73).
+        self._allow_stub_enrichment = (
+            allow_stub_enrichment
+            if allow_stub_enrichment is not None
+            else get_settings().allow_stub_shopify_enrichment_effective
+        )
 
     async def enrich_cluster(
         self,
@@ -162,7 +170,12 @@ class ShopifyEnrichmentService:
                 ),
                 "live",
             )
-        except Exception:  # noqa: BLE001 - default to deterministic stub.
+        except Exception:  # noqa: BLE001 - no live client resolved.
+            if not self._allow_stub_enrichment:
+                # Fail closed: never fabricate Shopify context in production.
+                # enrich_cluster catches this and leaves the cluster
+                # un-enriched (returns False) rather than seeding fixtures.
+                raise
             return DeterministicStubShopifyClient(), "stub"
 
 

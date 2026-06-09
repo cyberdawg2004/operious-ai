@@ -116,6 +116,8 @@ class Settings(BaseSettings):
     # derives to stub-enabled by default, with an explicit false available for
     # fail-closed tests/staging.
     ALLOW_STUB_ACTIONS: bool | None = None
+    # Deterministic Shopify enrichment fixtures (#73): fail-closed in prod.
+    ALLOW_STUB_SHOPIFY_ENRICHMENT: bool | None = None
 
     # Legacy direct tenant configuration application (S-03).
     # The durable tenant-config ledger is the production path. This flag
@@ -491,6 +493,21 @@ class Settings(BaseSettings):
             return False
         if self.ALLOW_STUB_ACTIONS is not None:
             return self.ALLOW_STUB_ACTIONS
+        return True
+
+    @property
+    def allow_stub_shopify_enrichment_effective(self) -> bool:
+        """Whether deterministic fixture Shopify enrichment may be used.
+
+        Fail-closed in production: without a live Shopify channel the cluster
+        is left un-enriched (no fabricated product/inventory data), never
+        seeded with stub fixtures. Non-production allows stubs by default so
+        dev/CI can exercise enrichment, unless explicitly disabled (#73).
+        """
+        if self.is_production:
+            return False
+        if self.ALLOW_STUB_SHOPIFY_ENRICHMENT is not None:
+            return self.ALLOW_STUB_SHOPIFY_ENRICHMENT
         return True
 
     @property
