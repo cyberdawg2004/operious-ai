@@ -13,7 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
-import { apiRequest, listSessions, type SessionRecord } from "@/lib/api";
+import { listSessions, type SessionRecord } from "@/lib/api";
 import { useApiResource } from "@/lib/use-api-resource";
 import { cn } from "@/lib/utils";
 
@@ -85,53 +85,7 @@ const openedStatus: StatusDefinition = {
   borderColor: "border-border-subtle",
 };
 
-const DEMO_PROOF_SESSIONS = [
-  {
-    sessionId: "df6139ba-81fa-5f1d-9b3e-ceba6e7bb135",
-    scenario: "Charging allow",
-  },
-  {
-    sessionId: "5bb139de-079b-5c20-a2da-3660b203a576",
-    scenario: "Refund over limit",
-  },
-  {
-    sessionId: "79b38add-3086-55f1-9820-db820697fb13",
-    scenario: "Arabic-language review",
-  },
-  {
-    sessionId: "2432a590-f7bc-5d5d-97f9-94a7d0039851",
-    scenario: "Product defect",
-  },
-  {
-    sessionId: "2e16bdcc-c518-504e-952c-b4e3d11cad41",
-    scenario: "Ambiguous human review",
-  },
-] as const;
-
-type SessionTimelineEvent = {
-  timeline_event_id: string;
-  session_id: string;
-  dispatch_id: string | null;
-  tenant_id: string | null;
-  event_type: string;
-  timestamp: string;
-  payload: Record<string, unknown>;
-  created_at: string;
-};
-
-type SessionTimelineResponse = {
-  events: SessionTimelineEvent[];
-  total: number;
-};
-
-type DemoProofSession = {
-  scenario: string;
-  session: SessionRecord;
-  timeline: SessionTimelineResponse;
-};
-
 type OperationsData = {
-  proofSessions: DemoProofSession[];
   sessions: SessionRecord[];
   total: number;
   fetchedAt: string;
@@ -147,13 +101,8 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
   const [searchQuery, setSearchQuery] = useState("");
 
   const loadOperations = useCallback(async (): Promise<OperationsData> => {
-    const [page, proofSessions] = await Promise.all([
-      listSessions({ limit: PAGE_SIZE, offset: 0 }),
-      Promise.all(DEMO_PROOF_SESSIONS.map(loadDemoProofSession)),
-    ]);
-
+    const page = await listSessions({ limit: PAGE_SIZE, offset: 0 });
     return {
-      proofSessions,
       sessions: [...page.items].sort(compareSessionsByOpenedAtDesc),
       total: page.total,
       fetchedAt: new Date().toISOString(),
@@ -185,31 +134,6 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
       return matchesLifecycle && matchesQuery;
     });
   }, [activeFilter, data?.sessions, searchQuery]);
-
-  const processingCount = useMemo(
-    () =>
-      (data?.proofSessions ?? []).filter(
-        (proof) => getProofStatusId(proof.timeline) === "initiated"
-      ).length,
-    [data?.proofSessions]
-  );
-
-  const resolvedProofCount = useMemo(
-    () =>
-      (data?.proofSessions ?? []).filter(
-        (proof) => getProofStatusId(proof.timeline) === "completed"
-      ).length,
-    [data?.proofSessions]
-  );
-
-  const proofEventCount = useMemo(
-    () =>
-      (data?.proofSessions ?? []).reduce(
-        (total, proof) => total + proof.timeline.total,
-        0
-      ),
-    [data?.proofSessions]
-  );
 
   const recordedEventCount = useMemo(
     () =>
@@ -293,30 +217,6 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
       {data && !isLoading && !error && (
         <>
           <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-            <SummaryCard label="PROOF SESSIONS" value={String(data.proofSessions.length)} />
-            <SummaryCard
-              label="PROOF READY"
-              value={String(resolvedProofCount)}
-              valueColor="text-green-success"
-            />
-            <SummaryCard
-              label="PROCESSING"
-              value={String(processingCount)}
-              valueColor="text-blue-system"
-            />
-            <SummaryCard
-              label="PROOF EVENTS"
-              value={String(proofEventCount)}
-              valueColor="text-gold-primary"
-            />
-          </div>
-
-          <DemoProofTable
-            proofSessions={data.proofSessions}
-            onOpenTrace={(sessionId) => onOpenTrace?.(sessionId)}
-          />
-
-          <div className="mt-8 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
             <SummaryCard label="TENANT SESSIONS" value={String(data.total)} />
             <SummaryCard label="VISIBLE" value={String(filteredSessions.length)} />
             <SummaryCard
@@ -392,125 +292,6 @@ function SummaryCard({
       <span className={cn("font-technical text-[26px] font-medium tabular-nums", valueColor)}>
         {value}
       </span>
-    </div>
-  );
-}
-
-function DemoProofTable({
-  proofSessions,
-  onOpenTrace,
-}: {
-  proofSessions: DemoProofSession[];
-  onOpenTrace: (sessionId: string) => void;
-}) {
-  return (
-    <div className="mt-6 overflow-hidden rounded-lg border border-border-subtle bg-surface">
-      <div className="flex min-h-12 items-center justify-between border-b border-border-subtle bg-surface-raised px-4 py-3">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
-          Live Governance Record
-        </span>
-        <span className="font-technical text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-          pilot-account
-        </span>
-      </div>
-
-      <div className="overflow-x-auto">
-        <div className="min-w-[1200px]">
-          <div className="flex h-11 items-center border-b border-border-subtle bg-surface-raised px-3 sm:h-9">
-            <TableHeader className="w-[180px]">SCENARIO</TableHeader>
-            <TableHeader className="w-[136px]">SESSION</TableHeader>
-            <TableHeader className="w-[150px]">STATUS</TableHeader>
-            <TableHeader className="w-[210px]">DIAGNOSTIC</TableHeader>
-            <TableHeader className="w-[136px]">CONFIDENCE</TableHeader>
-            <TableHeader className="w-[180px]">OPENED</TableHeader>
-            <TableHeader className="min-w-[210px] flex-1">EVIDENCE</TableHeader>
-            <TableHeader className="w-[140px] text-right">ACTION</TableHeader>
-          </div>
-
-          {proofSessions.map((proof, index) => (
-            <DemoProofRow
-              key={proof.session.session_id}
-              proof={proof}
-              isOdd={index % 2 === 1}
-              onOpenTrace={() => onOpenTrace(proof.session.session_id)}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DemoProofRow({
-  proof,
-  isOdd,
-  onOpenTrace,
-}: {
-  proof: DemoProofSession;
-  isOdd: boolean;
-  onOpenTrace: () => void;
-}) {
-  const diagnosticEvent = getDiagnosticCompletionEvent(proof.timeline);
-  const payload = diagnosticEvent?.payload ?? {};
-  const category = readString(payload.category) ?? "No classification";
-  const confidence = readNumber(payload.confidence);
-  const governanceDecisionId = readString(payload.governance_decision_id);
-  const cognitionAuditId = readString(payload.cognition_audit_id);
-
-  return (
-    <div
-      className={cn(
-        "flex min-h-16 items-center border-b border-border-subtle px-3 last:border-b-0",
-        isOdd ? "bg-canvas/50" : "bg-surface",
-        "transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
-      )}
-    >
-      <div className="w-[180px] px-2">
-        <span className="block truncate text-[13px] font-medium text-ink-primary">
-          {proof.scenario}
-        </span>
-        <span className="block truncate text-[11px] text-ink-tertiary">
-          {proof.session.external_handle}
-        </span>
-      </div>
-      <DataCell className="w-[136px]" value={shortSessionId(proof.session.session_id)} accent />
-      <div className="w-[150px] px-2">
-        <StatusBadge status={getProofStatusDefinition(proof.timeline)} />
-      </div>
-      <div className="w-[210px] px-2">
-        <span className="block truncate font-technical text-[12px] uppercase tracking-[0.08em] text-ink-primary">
-          {formatDiagnosticLabel(category)}
-        </span>
-        <span
-          className="block truncate font-technical text-[11px] tabular-nums text-ink-tertiary"
-          title={diagnosticEvent ? formatAbsoluteTime(diagnosticEvent.timestamp) : undefined}
-        >
-          {diagnosticEvent ? formatAbsoluteTime(diagnosticEvent.timestamp) : "No diagnostic event"}
-        </span>
-      </div>
-      <DataCell
-        className="w-[136px]"
-        value={confidence === null ? "n/a" : formatConfidence(confidence)}
-      />
-      <div className="w-[180px] px-2">
-        <span
-          className="block truncate font-technical text-[12px] tabular-nums text-ink-secondary"
-          title={formatAbsoluteTime(proof.session.opened_at)}
-        >
-          {formatAbsoluteTime(proof.session.opened_at)}
-        </span>
-      </div>
-      <div className="min-w-[210px] flex-1 px-2">
-        <span className="block truncate font-technical text-[11px] text-ink-secondary">
-          governance {governanceDecisionId ? shortEvidenceId(governanceDecisionId) : "n/a"}
-        </span>
-        <span className="block truncate font-technical text-[11px] text-ink-tertiary">
-          audit {cognitionAuditId ? shortEvidenceId(cognitionAuditId) : "n/a"} / events {proof.timeline.total}
-        </span>
-      </div>
-      <div className="flex w-[140px] justify-end px-2">
-        <TraceButton sessionId={proof.session.session_id} onOpenTrace={onOpenTrace} />
-      </div>
     </div>
   );
 }
@@ -640,26 +421,6 @@ function shortSessionId(value: string): string {
   return value.slice(0, 8);
 }
 
-function shortEvidenceId(value: string): string {
-  return value.length <= 13 ? value : `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
-async function loadDemoProofSession(
-  proof: (typeof DEMO_PROOF_SESSIONS)[number]
-): Promise<DemoProofSession> {
-  const encodedSessionId = encodeURIComponent(proof.sessionId);
-  const [session, timeline] = await Promise.all([
-    apiRequest<SessionRecord>(`/session/sessions/${encodedSessionId}`),
-    apiRequest<SessionTimelineResponse>(`/session/${encodedSessionId}/timeline`),
-  ]);
-
-  return {
-    scenario: proof.scenario,
-    session,
-    timeline,
-  };
-}
-
 function compareSessionsByOpenedAtDesc(left: SessionRecord, right: SessionRecord): number {
   return new Date(right.opened_at).getTime() - new Date(left.opened_at).getTime();
 }
@@ -681,36 +442,6 @@ function getQueueStatusDefinition(session: SessionRecord): StatusDefinition {
   return unknownStatus(session.lifecycle_phase);
 }
 
-function getProofStatusId(
-  timeline: SessionTimelineResponse
-): Exclude<LifecycleFilter, "all"> {
-  if (getDiagnosticCompletionEvent(timeline)) return "completed";
-  if (timeline.events.some((event) => event.event_type === "diagnostic_execution_failed")) {
-    return "failed";
-  }
-  if (timeline.events.some((event) => event.event_type === "diagnostic_execution_started")) {
-    return "initiated";
-  }
-  return "initiated";
-}
-
-function getProofStatusDefinition(timeline: SessionTimelineResponse): StatusDefinition {
-  const statusId = getProofStatusId(timeline);
-  if (statusId === "completed") return lifecycleConfig.completed;
-  if (statusId === "failed") return lifecycleConfig.failed;
-  return lifecycleConfig.initiated;
-}
-
-function getDiagnosticCompletionEvent(
-  timeline: SessionTimelineResponse
-): SessionTimelineEvent | null {
-  return (
-    [...timeline.events]
-      .reverse()
-      .find((event) => event.event_type === "diagnostic_analysis_completed") ?? null
-  );
-}
-
 function unknownStatus(label: string): StatusDefinition {
   return {
     label: label || "unknown",
@@ -719,22 +450,6 @@ function unknownStatus(label: string): StatusDefinition {
     bgColor: "bg-surface-sunken",
     borderColor: "border-border-subtle",
   };
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function formatDiagnosticLabel(value: string): string {
-  return value.replaceAll("_", " ");
-}
-
-function formatConfidence(value: number): string {
-  return `${Math.round(value * 100)}%`;
 }
 
 function formatRelativeTime(value: string): string {
