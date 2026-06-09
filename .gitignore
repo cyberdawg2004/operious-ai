@@ -71,6 +71,7 @@ secrets/
 *.key
 *.crt
 *.p12
+operious-kms.json
 
 # Docker/runtime
 docker-data/
