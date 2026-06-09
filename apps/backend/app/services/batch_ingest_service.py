@@ -135,11 +135,9 @@ class BatchIngestService:
         candidate_ids = [candidate.ingress_id for candidate in candidates]
         existing_ids: set[BoundaryIngressId] = set()
         if candidate_ids:
-            existing_ids = (
-                await self._boundary_repository.get_existing_ingress_ids(
-                    candidate_ids,
-                    expected_tenant_id=tenant_id,
-                )
+            existing_ids = await self._boundary_repository.get_existing_ingress_ids(
+                candidate_ids,
+                expected_tenant_id=tenant_id,
             )
         insertable = [
             candidate.record
@@ -148,13 +146,10 @@ class BatchIngestService:
         ]
         inserted_ids: set[BoundaryIngressId] = set()
         if insertable:
-            inserted_ids = (
-                await self._boundary_repository.bulk_insert_ingress_records(
-                    insertable
-                )
+            inserted_ids = await self._boundary_repository.bulk_insert_ingress_records(
+                insertable
             )
 
-        accepted: list[_Candidate] = []
         for candidate in candidates:
             if candidate.ingress_id in existing_ids:
                 results[candidate.index] = BatchIngestItemResult(
@@ -178,28 +173,18 @@ class BatchIngestService:
                 status=BatchItemStatus.ACCEPTED,
                 boundary_id=candidate.boundary_id,
             )
-            accepted.append(candidate)
-
-        for candidate in accepted:
-            await self._dispatch_service.dispatch(
-                ingress_id=candidate.boundary_id,
-                tenant_id=tenant_id,
-            )
 
         ordered_results = [results[index] for index in range(len(items))]
         return BatchIngestResponse(
             total=len(items),
             accepted=sum(
-                result.status is BatchItemStatus.ACCEPTED
-                for result in ordered_results
+                result.status is BatchItemStatus.ACCEPTED for result in ordered_results
             ),
             duplicate=sum(
-                result.status is BatchItemStatus.DUPLICATE
-                for result in ordered_results
+                result.status is BatchItemStatus.DUPLICATE for result in ordered_results
             ),
             rejected=sum(
-                result.status is BatchItemStatus.REJECTED
-                for result in ordered_results
+                result.status is BatchItemStatus.REJECTED for result in ordered_results
             ),
             results=ordered_results,
         )
@@ -353,9 +338,7 @@ def _parse_received_at(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        return _normalize_datetime(
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-        )
+        return _normalize_datetime(datetime.fromisoformat(value.replace("Z", "+00:00")))
     except ValueError:
         return None
 

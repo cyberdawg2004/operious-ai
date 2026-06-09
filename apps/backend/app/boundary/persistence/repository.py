@@ -10,6 +10,13 @@ from app.boundary.identity import (
     BoundaryEgressId,
     BoundaryIngressId,
 )
+from app.boundary.ingress_dispatch_outbox import (
+    IngressDispatchClaimId,
+    IngressDispatchOutboxId,
+    IngressDispatchOutboxPage,
+    IngressDispatchOutboxQuery,
+    IngressDispatchOutboxRecord,
+)
 from app.boundary.persistence.models import (
     BoundaryEgressQuery,
     BoundaryIngressQuery,
@@ -58,9 +65,80 @@ class BoundaryPersistenceProtocol(Protocol):
         records: Sequence[BoundaryIngressRecord],
     ) -> set[BoundaryIngressId]: ...
 
-    async def save_egress(
-        self, record: BoundaryEgressRecord
-    ) -> None: ...
+    async def create_outbox_for_ingress(
+        self,
+        record: BoundaryIngressRecord,
+        *,
+        created_at: datetime | None = None,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def bulk_create_outbox_for_ingress(
+        self,
+        records: tuple[BoundaryIngressRecord, ...],
+        *,
+        created_at: datetime | None = None,
+    ) -> tuple[IngressDispatchOutboxRecord, ...]: ...
+
+    async def get_ingress_dispatch_outbox(
+        self,
+        outbox_id: IngressDispatchOutboxId,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def get_ingress_dispatch_outbox_by_ingress(
+        self,
+        ingress_id: BoundaryIngressId,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def list_ingress_dispatch_outbox(
+        self,
+        query: IngressDispatchOutboxQuery,
+    ) -> IngressDispatchOutboxPage: ...
+
+    async def claim_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        worker_id: str,
+        claimed_at: datetime,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def mark_ingress_dispatch_outbox_dispatched(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        dispatched_at: datetime,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def reschedule_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        next_attempt_at: datetime,
+        error: str,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def dead_letter_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        error: str,
+        dead_lettered_at: datetime,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def requeue_stale_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        stale_before: datetime,
+        requeued_at: datetime,
+        reason: str,
+    ) -> IngressDispatchOutboxRecord | None: ...
+
+    async def save_egress(self, record: BoundaryEgressRecord) -> None: ...
 
     async def get_ingress(
         self,

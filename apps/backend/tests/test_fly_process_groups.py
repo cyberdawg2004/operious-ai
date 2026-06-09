@@ -19,6 +19,7 @@ EXPECTED_PROCESS_QUEUES = {
     "worker_supervisor": ("supervisor", "qa"),
     "worker_sop": ("sop_intelligence", "knowledge_indexing"),
     "worker_maintenance": ("webhook_maintenance", "dead_letter"),
+    "worker_ingress": ("ingress.email", "ingress.whatsapp", "ingress.shopify"),
     "worker_voice_realtime": ("ingress.voice",),
 }
 
@@ -28,6 +29,7 @@ EXPECTED_CONCURRENCY = {
     "worker_supervisor": 1,
     "worker_sop": 1,
     "worker_maintenance": 1,
+    "worker_ingress": 2,
     "worker_voice_realtime": 8,
 }
 
@@ -38,6 +40,7 @@ EXPECTED_VM_PROFILES = {
     "worker_supervisor": ("512mb", "shared", 1),
     "worker_sop": ("512mb", "shared", 1),
     "worker_maintenance": ("512mb", "shared", 1),
+    "worker_ingress": ("512mb", "shared", 1),
     "worker_voice_realtime": ("512mb", "shared", 2),
 }
 
@@ -53,6 +56,7 @@ def test_fly_declares_required_process_groups() -> None:
         "worker_supervisor",
         "worker_sop",
         "worker_maintenance",
+        "worker_ingress",
         "worker_voice_realtime",
     }
     assert _unwrap_startup_wrapper(processes["web"]) == (
@@ -100,8 +104,7 @@ def test_voice_process_groups_are_pre_warmed() -> None:
     config = _fly_config()
     assert config["http_service"]["min_machines_running"] == 1
     vm_min_machines = {
-        vm["processes"][0]: vm.get("min_machines_running", 0)
-        for vm in config["vm"]
+        vm["processes"][0]: vm.get("min_machines_running", 0) for vm in config["vm"]
     }
 
     assert vm_min_machines["web"] == 1
@@ -138,9 +141,11 @@ def _command_concurrency(command: str) -> int:
 
 
 def _worker_command(command: str) -> str:
-    return _unwrap_startup_wrapper(command).removeprefix(
-        "env DB_USE_NULLPOOL=true "
-    ).strip()
+    return (
+        _unwrap_startup_wrapper(command)
+        .removeprefix("env DB_USE_NULLPOOL=true ")
+        .strip()
+    )
 
 
 def test_fly_workers_use_nullpool() -> None:
@@ -148,9 +153,9 @@ def test_fly_workers_use_nullpool() -> None:
 
     for process_name in EXPECTED_PROCESS_QUEUES:
         command = _unwrap_startup_wrapper(processes[process_name])
-        assert command.startswith("env DB_USE_NULLPOOL=true "), (
-            f"{process_name} must run workers with DB_USE_NULLPOOL=true"
-        )
+        assert command.startswith(
+            "env DB_USE_NULLPOOL=true "
+        ), f"{process_name} must run workers with DB_USE_NULLPOOL=true"
 
 
 def _unwrap_startup_wrapper(command: str) -> str:

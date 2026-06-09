@@ -56,9 +56,7 @@ class BoundaryIngressRow(Base):
 
     __tablename__ = "boundary_ingress"
 
-    ingress_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True
-    )
+    ingress_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     direction: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
@@ -111,9 +109,7 @@ class BoundaryIngressRow(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    ended_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
@@ -163,14 +159,98 @@ class BoundaryIngressRow(Base):
     )
 
 
+class IngressDispatchOutboxRow(Base):
+    """Durable dispatch intent for a captured boundary ingress row."""
+
+    __tablename__ = "ingress_dispatch_outbox"
+
+    outbox_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    ingress_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    channel: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False, index=True)
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    worker_id: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=True, index=True
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(tenant_id) > 0",
+            name="ck_ingress_dispatch_outbox_tenant_id_nonempty",
+        ),
+        CheckConstraint(
+            "channel IN ('email', 'whatsapp', 'shopify')",
+            name="ck_ingress_dispatch_outbox_channel_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'claimed', 'dispatched', 'dead_lettered')",
+            name="ck_ingress_dispatch_outbox_status_valid",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_ingress_dispatch_outbox_attempt_nonnegative",
+        ),
+        ForeignKeyConstraint(
+            ["ingress_id"],
+            ["boundary_ingress.ingress_id"],
+            name="fk_ingress_dispatch_outbox_ingress_id_boundary_ingress",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "ingress_id",
+            name="uq_ingress_dispatch_outbox_ingress_id",
+        ),
+        Index(
+            "ix_ingress_dispatch_outbox_status_next_attempt",
+            "status",
+            "next_attempt_at",
+        ),
+        Index(
+            "ix_ingress_dispatch_outbox_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+    )
+
+
 class BoundaryEgressRow(Base):
     """ORM row for ``boundary_egress`` — write-once."""
 
     __tablename__ = "boundary_egress"
 
-    egress_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True
-    )
+    egress_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     direction: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
     )
@@ -192,9 +272,7 @@ class BoundaryEgressRow(Base):
     )
     # ``payload_body`` is ``Any`` on the record (adapter-defined
     # shape); store as JSONB.
-    payload_body: Mapped[Any] = mapped_column(
-        JSONB, nullable=False
-    )
+    payload_body: Mapped[Any] = mapped_column(JSONB, nullable=False)
     payload_content_type: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True
     )
@@ -213,9 +291,7 @@ class BoundaryEgressRow(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
-    ended_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
@@ -323,9 +399,7 @@ class WhatsAppCustomerReplyDeliveryRow(Base):
 
     __tablename__ = "whatsapp_customer_reply_deliveries"
 
-    delivery_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True
-    )
+    delivery_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH),
         nullable=False,
@@ -470,9 +544,7 @@ class EmailCustomerReplyDeliveryRow(Base):
 
     __tablename__ = "email_customer_reply_deliveries"
 
-    delivery_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True
-    )
+    delivery_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH),
         nullable=False,
@@ -625,6 +697,7 @@ __all__ = [
     "BoundaryEgressRow",
     "BoundaryIngressRow",
     "EmailCustomerReplyDeliveryRow",
+    "IngressDispatchOutboxRow",
     "WhatsAppCustomerReplyDeliveryRow",
     "WebhookNonceRecordRow",
 ]

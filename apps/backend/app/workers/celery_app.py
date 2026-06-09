@@ -34,6 +34,7 @@ from app.queues import (
     QUEUE_DEAD_LETTER,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_ESCALATION,
+    QUEUE_INGRESS_EMAIL,
     QUEUE_KNOWLEDGE_INDEXING,
     QUEUE_INGRESS_VOICE,
     QUEUE_QA,
@@ -60,8 +61,7 @@ _VISIBILITY_TIMEOUT_BROKER_SCHEMES = {
 
 
 class _CeleryConfig(Protocol):
-    def update(self, **kwargs: object) -> object:
-        ...
+    def update(self, **kwargs: object) -> object: ...
 
 
 def _broker_transport_options(settings: Settings) -> dict[str, int]:
@@ -85,6 +85,7 @@ celery_app = Celery(
         "app.workers.escalation_tasks",
         "app.workers.execution_recovery_tasks",
         "app.workers.failure_pattern_tasks",
+        "app.workers.ingress_dispatch_tasks",
         "app.workers.knowledge_tasks",
         "app.workers.outbound_tasks",
         "app.workers.qa_tasks",
@@ -113,12 +114,14 @@ celery_conf.update(
         "score_supervisor_inspection": {"queue": QUEUE_QA},
         "propose_sop_intelligence_change": {"queue": QUEUE_SOP_INTELLIGENCE},
         "review_case_approval": {"queue": QUEUE_SME_APPROVAL},
-        "scan_training_recommendation_gaps": {
-            "queue": QUEUE_SOP_INTELLIGENCE
-        },
+        "scan_training_recommendation_gaps": {"queue": QUEUE_SOP_INTELLIGENCE},
         "detect_sop_failure_patterns": {"queue": QUEUE_SOP_INTELLIGENCE},
         "reindex_knowledge_document": {"queue": QUEUE_KNOWLEDGE_INDEXING},
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        "dispatch_ingress": {"queue": QUEUE_INGRESS_EMAIL},
+        "reconcile_ingress_dispatch_outbox": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
         "reconcile_stale_execution_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
@@ -174,6 +177,12 @@ celery_conf.update(
         # crash so the durable execution intent is not orphaned.
         "reconcile-stale-execution-outbox-minutely": {
             "task": "reconcile_stale_execution_outbox",
+            "schedule": 60.0,
+            "kwargs": {"limit": 100},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        "reconcile-ingress-dispatch-outbox-minutely": {
+            "task": "reconcile_ingress_dispatch_outbox",
             "schedule": 60.0,
             "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
@@ -546,9 +555,7 @@ def on_task_retry(
             queue=_queue_from_request(request),
             tenant_id=_tenant_id_from_args(args=None, kwargs=request_kwargs),
             retry_number=int(getattr(request, "retries", 0) or 0),
-            error_class=(
-                reason.__class__.__name__ if reason is not None else "Retry"
-            ),
+            error_class=(reason.__class__.__name__ if reason is not None else "Retry"),
         )
     except Exception as exc:  # noqa: BLE001 - signal handlers never raise.
         _log_signal_failure(

@@ -36,6 +36,14 @@ from app.boundary.identity import (
     BoundaryEventId,
     BoundaryIngressId,
 )
+from app.boundary.ingress_dispatch_outbox import (
+    IngressDispatchClaimId,
+    IngressDispatchOutboxId,
+    IngressDispatchOutboxPage,
+    IngressDispatchOutboxQuery,
+    IngressDispatchOutboxRecord,
+    PostgresIngressDispatchOutboxPersistence,
+)
 from app.boundary.persistence.models import (
     BoundaryEgressQuery,
     BoundaryIngressQuery,
@@ -74,6 +82,10 @@ class PostgresBoundaryPersistence(BaseRepository):
             # SAVEPOINT isolation — see governance repo for doctrine.
             async with self.session.begin_nested():
                 self.session.add(row)
+                await self.session.flush()
+                await self._ingress_dispatch_outbox().create_outbox_for_ingress(
+                    protected_record
+                )
         except IntegrityError as exc:
             with self.session.no_autoflush:
                 existing = await self._find_duplicate_ingress(record)
@@ -97,10 +109,127 @@ class PostgresBoundaryPersistence(BaseRepository):
             BoundaryIngressRow.tenant_id == expected_tenant_id,
         )
         result = await self.session.execute(stmt)
-        return {
-            BoundaryIngressId(ingress_id)
-            for ingress_id in result.scalars()
-        }
+        return {BoundaryIngressId(ingress_id) for ingress_id in result.scalars()}
+
+    async def create_outbox_for_ingress(
+        self,
+        record: BoundaryIngressRecord,
+        *,
+        created_at: datetime | None = None,
+    ) -> IngressDispatchOutboxRecord | None:
+        return await self._ingress_dispatch_outbox().create_outbox_for_ingress(
+            record,
+            created_at=created_at,
+        )
+
+    async def bulk_create_outbox_for_ingress(
+        self,
+        records: tuple[BoundaryIngressRecord, ...],
+        *,
+        created_at: datetime | None = None,
+    ) -> tuple[IngressDispatchOutboxRecord, ...]:
+        return await self._ingress_dispatch_outbox().bulk_create_outbox_for_ingress(
+            records,
+            created_at=created_at,
+        )
+
+    async def get_ingress_dispatch_outbox(
+        self,
+        outbox_id: IngressDispatchOutboxId,
+    ) -> IngressDispatchOutboxRecord | None:
+        return await self._ingress_dispatch_outbox().get_ingress_dispatch_outbox(
+            outbox_id
+        )
+
+    async def get_ingress_dispatch_outbox_by_ingress(
+        self,
+        ingress_id: BoundaryIngressId,
+    ) -> IngressDispatchOutboxRecord | None:
+        outbox = self._ingress_dispatch_outbox()
+        return await outbox.get_ingress_dispatch_outbox_by_ingress(ingress_id)
+
+    async def list_ingress_dispatch_outbox(
+        self,
+        query: IngressDispatchOutboxQuery,
+    ) -> IngressDispatchOutboxPage:
+        return await self._ingress_dispatch_outbox().list_ingress_dispatch_outbox(query)
+
+    async def claim_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        worker_id: str,
+        claimed_at: datetime,
+    ) -> IngressDispatchOutboxRecord | None:
+        return await self._ingress_dispatch_outbox().claim_ingress_dispatch_outbox(
+            outbox_id=outbox_id,
+            claim_id=claim_id,
+            worker_id=worker_id,
+            claimed_at=claimed_at,
+        )
+
+    async def mark_ingress_dispatch_outbox_dispatched(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        dispatched_at: datetime,
+    ) -> IngressDispatchOutboxRecord | None:
+        outbox = self._ingress_dispatch_outbox()
+        return await outbox.mark_ingress_dispatch_outbox_dispatched(
+            outbox_id=outbox_id,
+            claim_id=claim_id,
+            dispatched_at=dispatched_at,
+        )
+
+    async def reschedule_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        next_attempt_at: datetime,
+        error: str,
+    ) -> IngressDispatchOutboxRecord | None:
+        outbox = self._ingress_dispatch_outbox()
+        return await outbox.reschedule_ingress_dispatch_outbox(
+            outbox_id=outbox_id,
+            claim_id=claim_id,
+            next_attempt_at=next_attempt_at,
+            error=error,
+        )
+
+    async def dead_letter_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        claim_id: IngressDispatchClaimId,
+        error: str,
+        dead_lettered_at: datetime,
+    ) -> IngressDispatchOutboxRecord | None:
+        outbox = self._ingress_dispatch_outbox()
+        return await outbox.dead_letter_ingress_dispatch_outbox(
+            outbox_id=outbox_id,
+            claim_id=claim_id,
+            error=error,
+            dead_lettered_at=dead_lettered_at,
+        )
+
+    async def requeue_stale_ingress_dispatch_outbox(
+        self,
+        *,
+        outbox_id: IngressDispatchOutboxId,
+        stale_before: datetime,
+        requeued_at: datetime,
+        reason: str,
+    ) -> IngressDispatchOutboxRecord | None:
+        outbox = self._ingress_dispatch_outbox()
+        return await outbox.requeue_stale_ingress_dispatch_outbox(
+            outbox_id=outbox_id,
+            stale_before=stale_before,
+            requeued_at=requeued_at,
+            reason=reason,
+        )
 
     async def bulk_insert_ingress_records(
         self,
@@ -108,9 +237,7 @@ class PostgresBoundaryPersistence(BaseRepository):
     ) -> set[BoundaryIngressId]:
         if not records:
             return set()
-        protected_records = [
-            await self._protect_ingress(record) for record in records
-        ]
+        protected_records = [await self._protect_ingress(record) for record in records]
         rows = [_ingress_record_to_values(record) for record in protected_records]
         stmt = (
             pg_insert(BoundaryIngressRow)
@@ -118,11 +245,20 @@ class PostgresBoundaryPersistence(BaseRepository):
             .on_conflict_do_nothing(index_elements=["ingress_id"])
             .returning(BoundaryIngressRow.ingress_id)
         )
-        result = await self.session.execute(stmt)
-        return {
-            BoundaryIngressId(ingress_id)
-            for ingress_id in result.scalars()
-        }
+        async with self.session.begin_nested():
+            result = await self.session.execute(stmt)
+            inserted_ids = {
+                BoundaryIngressId(ingress_id) for ingress_id in result.scalars()
+            }
+            if inserted_ids:
+                await self._ingress_dispatch_outbox().bulk_create_outbox_for_ingress(
+                    tuple(
+                        record
+                        for record in protected_records
+                        if record.ingress_id in inserted_ids
+                    )
+                )
+        return inserted_ids
 
     async def save_egress(self, record: BoundaryEgressRecord) -> None:
         row = _egress_record_to_row(await self._protect_egress(record))
@@ -137,17 +273,11 @@ class PostgresBoundaryPersistence(BaseRepository):
     async def _find_duplicate_ingress(
         self, record: BoundaryIngressRecord
     ) -> BoundaryIngressRecord | None:
-        predicates = [
-            BoundaryIngressRow.ingress_id == record.ingress_id
-        ]
+        predicates = [BoundaryIngressRow.ingress_id == record.ingress_id]
         if record.replay_key is not None:
-            predicates.append(
-                BoundaryIngressRow.replay_key == record.replay_key
-            )
+            predicates.append(BoundaryIngressRow.replay_key == record.replay_key)
         if record.event_id is not None:
-            predicates.append(
-                BoundaryIngressRow.event_id == record.event_id
-            )
+            predicates.append(BoundaryIngressRow.event_id == record.event_id)
         stmt = (
             select(BoundaryIngressRow)
             .where(or_(*predicates))
@@ -161,6 +291,11 @@ class PostgresBoundaryPersistence(BaseRepository):
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else await self._ingress_row_to_record(row)
 
+    def _ingress_dispatch_outbox(
+        self,
+    ) -> PostgresIngressDispatchOutboxPersistence:
+        return PostgresIngressDispatchOutboxPersistence(self.session)
+
     # ─── Point reads ─────────────────────────────────────────────────
 
     async def get_ingress(
@@ -173,9 +308,7 @@ class PostgresBoundaryPersistence(BaseRepository):
             BoundaryIngressRow.ingress_id == ingress_id
         )
         if expected_tenant_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.tenant_id == expected_tenant_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.tenant_id == expected_tenant_id)
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else await self._ingress_row_to_record(row)
 
@@ -185,13 +318,9 @@ class PostgresBoundaryPersistence(BaseRepository):
         *,
         expected_tenant_id: str | None = None,
     ) -> BoundaryEgressRecord | None:
-        stmt = select(BoundaryEgressRow).where(
-            BoundaryEgressRow.egress_id == egress_id
-        )
+        stmt = select(BoundaryEgressRow).where(BoundaryEgressRow.egress_id == egress_id)
         if expected_tenant_id is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.tenant_id == expected_tenant_id
-            )
+            stmt = stmt.where(BoundaryEgressRow.tenant_id == expected_tenant_id)
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else await self._egress_row_to_record(row)
 
@@ -205,25 +334,15 @@ class PostgresBoundaryPersistence(BaseRepository):
     ) -> BoundaryRecordPage:
         stmt = select(BoundaryIngressRow)
         if expected_tenant_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.tenant_id == expected_tenant_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.tenant_id == expected_tenant_id)
         if query.ingress_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.ingress_id == query.ingress_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.ingress_id == query.ingress_id)
         if query.event_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.event_id == query.event_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.event_id == query.event_id)
         if query.replay_key is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.replay_key == query.replay_key
-            )
+            stmt = stmt.where(BoundaryIngressRow.replay_key == query.replay_key)
         if query.source_type is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.source_type == query.source_type.value
-            )
+            stmt = stmt.where(BoundaryIngressRow.source_type == query.source_type.value)
         if query.normalization_status is not None:
             stmt = stmt.where(
                 BoundaryIngressRow.normalization_status
@@ -231,21 +350,14 @@ class PostgresBoundaryPersistence(BaseRepository):
             )
         if query.replay_disposition is not None:
             stmt = stmt.where(
-                BoundaryIngressRow.replay_disposition
-                == query.replay_disposition.value
+                BoundaryIngressRow.replay_disposition == query.replay_disposition.value
             )
         if query.correlation_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.correlation_id == query.correlation_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.correlation_id == query.correlation_id)
         if query.request_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.request_id == query.request_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.request_id == query.request_id)
         if query.tenant_id is not None:
-            stmt = stmt.where(
-                BoundaryIngressRow.tenant_id == query.tenant_id
-            )
+            stmt = stmt.where(BoundaryIngressRow.tenant_id == query.tenant_id)
         stmt = stmt.order_by(
             BoundaryIngressRow.runtime_instance_id,
             BoundaryIngressRow.sequence,
@@ -271,29 +383,17 @@ class PostgresBoundaryPersistence(BaseRepository):
     ) -> BoundaryRecordPage:
         stmt = select(BoundaryEgressRow)
         if expected_tenant_id is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.tenant_id == expected_tenant_id
-            )
+            stmt = stmt.where(BoundaryEgressRow.tenant_id == expected_tenant_id)
         if query.egress_id is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.egress_id == query.egress_id
-            )
+            stmt = stmt.where(BoundaryEgressRow.egress_id == query.egress_id)
         if query.source_type is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.source_type == query.source_type.value
-            )
+            stmt = stmt.where(BoundaryEgressRow.source_type == query.source_type.value)
         if query.correlation_id is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.correlation_id == query.correlation_id
-            )
+            stmt = stmt.where(BoundaryEgressRow.correlation_id == query.correlation_id)
         if query.request_id is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.request_id == query.request_id
-            )
+            stmt = stmt.where(BoundaryEgressRow.request_id == query.request_id)
         if query.tenant_id is not None:
-            stmt = stmt.where(
-                BoundaryEgressRow.tenant_id == query.tenant_id
-            )
+            stmt = stmt.where(BoundaryEgressRow.tenant_id == query.tenant_id)
         stmt = stmt.order_by(
             BoundaryEgressRow.runtime_instance_id,
             BoundaryEgressRow.sequence,
@@ -402,9 +502,7 @@ class PostgresBoundaryPersistence(BaseRepository):
             async with self.session.begin_nested():
                 self.session.add(row)
         except IntegrityError as exc:
-            raise WebhookReplayError(
-                "webhook nonce has already been accepted"
-            ) from exc
+            raise WebhookReplayError("webhook nonce has already been accepted") from exc
 
     async def webhook_nonce_exists(
         self,
@@ -418,8 +516,7 @@ class PostgresBoundaryPersistence(BaseRepository):
             select(WebhookNonceRecordRow.nonce)
             .where(
                 WebhookNonceRecordRow.tenant_id == tenant_id,
-                WebhookNonceRecordRow.channel_type
-                == channel_type.strip().lower(),
+                WebhookNonceRecordRow.channel_type == channel_type.strip().lower(),
                 WebhookNonceRecordRow.nonce == nonce,
                 WebhookNonceRecordRow.expires_at > now,
             )
@@ -533,19 +630,11 @@ def _ingress_row_to_record(
         source_id=row.source_id,
         tenant_id=row.tenant_id,
         adapter_name=row.adapter_name,
-        normalization_status=BoundaryNormalizationStatus(
-            row.normalization_status
-        ),
+        normalization_status=BoundaryNormalizationStatus(row.normalization_status),
         message_type=BoundaryMessageType(row.message_type),
-        replay_disposition=BoundaryReplayDisposition(
-            row.replay_disposition
-        ),
+        replay_disposition=BoundaryReplayDisposition(row.replay_disposition),
         replay_key=row.replay_key,
-        event_id=(
-            BoundaryEventId(row.event_id)
-            if row.event_id is not None
-            else None
-        ),
+        event_id=(BoundaryEventId(row.event_id) if row.event_id is not None else None),
         original_event_id=(
             BoundaryEventId(row.original_event_id)
             if row.original_event_id is not None
@@ -571,9 +660,7 @@ def _egress_record_to_row(
     record: BoundaryEgressRecord,
 ) -> BoundaryEgressRow:
     if record.governance_decision_id is None:
-        raise BoundaryPersistenceError(
-            "new egress rows require governance_decision_id"
-        )
+        raise BoundaryPersistenceError("new egress rows require governance_decision_id")
     return BoundaryEgressRow(
         egress_id=record.egress_id,
         direction=record.direction.value,

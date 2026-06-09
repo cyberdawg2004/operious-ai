@@ -13,7 +13,11 @@ import pytest
 
 from app.core.config import Settings, get_settings
 from app.core.redis_policy import verify_redis_memory_policy
-from app.queues import QUEUE_INGRESS_VOICE, QUEUE_WEBHOOK_MAINTENANCE
+from app.queues import (
+    QUEUE_INGRESS_EMAIL,
+    QUEUE_INGRESS_VOICE,
+    QUEUE_WEBHOOK_MAINTENANCE,
+)
 from app.workers.agent_tasks import (
     DiagnosticNonRetryableError,
     _DiagnosticExecutionWorkItem,
@@ -39,12 +43,15 @@ from app.workers.execution_recovery_tasks import (
     recover_stale_executions,
 )
 from app.workers.failure_pattern_tasks import detect_sop_failure_patterns
+from app.workers.ingress_dispatch_tasks import (
+    dispatch_ingress,
+    reconcile_ingress_dispatch_outbox,
+)
 from app.workers.knowledge_tasks import reindex_knowledge_document
 from app.workers.qa_tasks import score_supervisor_inspection
 from app.workers.sop_intelligence_tasks import propose_sop_intelligence_change
 from app.workers.supervisor_tasks import evaluate_session_supervisor
 from app.workers.webhook_nonce_tasks import cleanup_expired_webhook_nonces
-
 
 _BACKEND_APP_DIR = Path(__file__).parents[1] / "app"
 _RESULT_READ_SCAN_DIRS = (
@@ -63,6 +70,8 @@ _FIRE_AND_FORGET_TASKS = {
     "reindex_knowledge_document": reindex_knowledge_document,
     "create_governance_escalation": create_governance_escalation,
     "recover_stale_executions": recover_stale_executions,
+    "dispatch_ingress": dispatch_ingress,
+    "reconcile_ingress_dispatch_outbox": reconcile_ingress_dispatch_outbox,
     "reconcile_failed_execution_outbox": reconcile_failed_execution_outbox,
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
     "reconcile_stale_escalation_outbox": reconcile_stale_escalation_outbox,
@@ -82,6 +91,8 @@ _TASK_RETRY_SETTINGS = {
     "detect_sop_failure_patterns": (2, 120),
     "reindex_knowledge_document": (3, 30),
     "recover_stale_executions": (5, 30),
+    "dispatch_ingress": (0, 0),
+    "reconcile_ingress_dispatch_outbox": (5, 30),
     "reconcile_failed_execution_outbox": (5, 30),
     "reconcile_stale_execution_outbox": (5, 30),
     "reconcile_stale_escalation_outbox": (5, 30),
@@ -125,6 +136,7 @@ def test_amqp_broker_transport_options_exclude_visibility_timeout() -> None:
 def test_redis_broker_transport_options_include_visibility_timeout() -> None:
     settings = Settings(
         REDIS_URL="redis://localhost:6379/0",
+        CELERY_BROKER_URL="redis://localhost:6379/0",
         CELERY_VISIBILITY_TIMEOUT_SECONDS=123,
     )
 
@@ -183,6 +195,12 @@ def test_post_call_voice_task_routes_to_voice_queue() -> None:
     assert routes["process_post_call_transcript"]["queue"] == QUEUE_INGRESS_VOICE
 
 
+def test_ingress_dispatch_task_routes_to_email_queue() -> None:
+    routes = celery_app.conf.task_routes
+
+    assert routes["dispatch_ingress"]["queue"] == QUEUE_INGRESS_EMAIL
+
+
 def test_maintenance_task_routes_to_webhook_maintenance_queue() -> None:
     routes = celery_app.conf.task_routes
 
@@ -190,12 +208,10 @@ def test_maintenance_task_routes_to_webhook_maintenance_queue() -> None:
         routes["operious.workers.emit_queue_depth_snapshot"]["queue"]
         == QUEUE_WEBHOOK_MAINTENANCE
     )
+    assert routes["emit_queue_depth_snapshot"]["queue"] == QUEUE_WEBHOOK_MAINTENANCE
+    assert routes["recover_dead_letter_replays"]["queue"] == QUEUE_WEBHOOK_MAINTENANCE
     assert (
-        routes["emit_queue_depth_snapshot"]["queue"]
-        == QUEUE_WEBHOOK_MAINTENANCE
-    )
-    assert (
-        routes["recover_dead_letter_replays"]["queue"]
+        routes["reconcile_ingress_dispatch_outbox"]["queue"]
         == QUEUE_WEBHOOK_MAINTENANCE
     )
 

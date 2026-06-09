@@ -3,6 +3,8 @@
 from app.boundary.db.models import (
     BoundaryEgressRow,
     BoundaryIngressRow,
+    EmailCustomerReplyDeliveryRow,
+    IngressDispatchOutboxRow,
     WebhookNonceRecordRow,
     WhatsAppCustomerReplyDeliveryRow,
 )
@@ -10,6 +12,8 @@ from app.boundary.db.models import (
 __all__ = [
     "BoundaryEgressRow",
     "BoundaryIngressRow",
+    "EmailCustomerReplyDeliveryRow",
+    "IngressDispatchOutboxRow",
     "WebhookNonceRecordRow",
     "WhatsAppCustomerReplyDeliveryRow",
 ]

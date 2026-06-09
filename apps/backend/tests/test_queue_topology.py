@@ -78,9 +78,7 @@ def test_no_bare_string_queue_names_in_worker() -> None:
             continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         violations.extend(_bare_queue_string_violations(py_file, tree))
-    assert not violations, (
-        "Bare string queue names found:\n" + "\n".join(violations)
-    )
+    assert not violations, "Bare string queue names found:\n" + "\n".join(violations)
 
 
 def test_no_default_celery_queue_references() -> None:
@@ -92,8 +90,8 @@ def test_no_default_celery_queue_references() -> None:
                 "queue" in line.lower() or "route" in line.lower()
             ):
                 violations.append(f"{py_file}:{lineno}: {line.strip()}")
-    assert not violations, (
-        "Default 'celery' queue name found:\n" + "\n".join(violations)
+    assert not violations, "Default 'celery' queue name found:\n" + "\n".join(
+        violations
     )
 
 
@@ -107,15 +105,15 @@ def test_no_bare_string_queue_names_in_boundary() -> None:
         for lineno, line in enumerate(content.splitlines(), 1):
             if bare_pattern.search(line):
                 violations.append(f"{py_file}:{lineno}: {line.strip()}")
-    assert not violations, (
-        "Bare string queue names in boundary:\n" + "\n".join(violations)
+    assert not violations, "Bare string queue names in boundary:\n" + "\n".join(
+        violations
     )
 
 
 def test_all_queues_has_no_duplicates() -> None:
-    assert len(ALL_QUEUES) == len(set(ALL_QUEUES)), (
-        "ALL_QUEUES contains duplicate entries"
-    )
+    assert len(ALL_QUEUES) == len(
+        set(ALL_QUEUES)
+    ), "ALL_QUEUES contains duplicate entries"
 
 
 def test_maintenance_tasks_use_webhook_maintenance_queue() -> None:
@@ -123,15 +121,16 @@ def test_maintenance_tasks_use_webhook_maintenance_queue() -> None:
         "execution_recovery_tasks.py",
         "webhook_nonce_tasks.py",
         "escalation_recovery_tasks.py",
+        "ingress_dispatch_tasks.py",
     ]
     for filename in maintenance_files:
         filepath = WORKER_DIR / filename
         if not filepath.exists():
             continue
         content = filepath.read_text(encoding="utf-8")
-        assert "QUEUE_WEBHOOK_MAINTENANCE" in content, (
-            f"{filename} must use QUEUE_WEBHOOK_MAINTENANCE constant"
-        )
+        assert (
+            "QUEUE_WEBHOOK_MAINTENANCE" in content
+        ), f"{filename} must use QUEUE_WEBHOOK_MAINTENANCE constant"
 
 
 def test_execution_publishers_reference_queue_constants() -> None:
@@ -146,9 +145,9 @@ def test_execution_publishers_reference_queue_constants() -> None:
         violations.extend(_bare_queue_string_violations(py_file, tree))
         if ".EXECUTION_QUEUE_NAME" in content or ".ESCALATION_QUEUE_NAME" in content:
             violations.append(f"{py_file}: publisher fallback must use queue constants")
-    assert not violations, (
-        "Publisher queue references must use constants:\n" + "\n".join(violations)
-    )
+    assert (
+        not violations
+    ), "Publisher queue references must use constants:\n" + "\n".join(violations)
 
 
 def test_dead_letter_queue_constant_is_declared() -> None:

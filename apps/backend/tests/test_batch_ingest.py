@@ -8,11 +8,12 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-import httpx
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.routers.batch_ingest import batch_ingest
 from app.api.v1.schemas.ingress import (
     BatchIngestItem,
     BatchIngestItemResult,
@@ -20,7 +21,7 @@ from app.api.v1.schemas.ingress import (
     BatchIngestResponse,
     BatchItemStatus,
 )
-from app.boundary.db.models import BoundaryIngressRow
+from app.boundary.db.models import BoundaryIngressRow, IngressDispatchOutboxRow
 from app.boundary.identity import (
     BoundaryIngressId,
     as_ingress_id,
@@ -30,16 +31,6 @@ from app.boundary.persistence import (
     BoundaryIngressRecord,
     PostgresBoundaryPersistence,
 )
-from app.dependencies.services import (
-    check_batch_ingest_admission,
-    get_batch_ingest_service,
-)
-from app.hardening.admission import (
-    AdmissionDecision,
-    AdmissionOutcome,
-    AdmissionReason,
-)
-from app.main import create_app
 from app.services.batch_ingest_service import BatchIngestService
 from tests.conftest import requires_postgres
 
@@ -76,7 +67,14 @@ async def test_batch_ingest_accepts_valid_items(
     ]
     assert repo.existing_id_calls == 1
     assert repo.bulk_insert_calls == 1
-    assert len(dispatch.calls) == 2
+    assert dispatch.calls == []
+    assert (
+        await _count_outbox_rows(
+            pg_session,
+            [result.boundary_id or "" for result in response.results],
+        )
+        == 2
+    )
     for item, result in zip(items, response.results, strict=True):
         assert result.boundary_id == make_boundary_id(
             TENANT_ID,
@@ -113,11 +111,21 @@ async def test_batch_ingest_deduplicates_within_batch(
     assert response.results[0].status is BatchItemStatus.ACCEPTED
     assert response.results[1].status is BatchItemStatus.DUPLICATE
     assert response.results[0].boundary_id == response.results[1].boundary_id
-    assert len(dispatch.calls) == 1
-    assert await _count_boundary_rows(
-        pg_session,
-        [response.results[0].boundary_id or ""],
-    ) == 1
+    assert dispatch.calls == []
+    assert (
+        await _count_outbox_rows(
+            pg_session,
+            [response.results[0].boundary_id or ""],
+        )
+        == 1
+    )
+    assert (
+        await _count_boundary_rows(
+            pg_session,
+            [response.results[0].boundary_id or ""],
+        )
+        == 1
+    )
 
 
 @pytest.mark.asyncio
@@ -140,11 +148,21 @@ async def test_batch_ingest_deduplicates_across_batches(
     assert second.duplicate == 2
     assert second.rejected == 0
     assert dispatch.calls == []
+    assert (
+        await _count_outbox_rows(
+            pg_session,
+            [result.boundary_id or "" for result in first.results],
+        )
+        == 2
+    )
     assert repo.bulk_insert_calls == 2
-    assert await _count_boundary_rows(
-        pg_session,
-        [result.boundary_id or "" for result in first.results],
-    ) == 2
+    assert (
+        await _count_boundary_rows(
+            pg_session,
+            [result.boundary_id or "" for result in first.results],
+        )
+        == 2
+    )
 
 
 @pytest.mark.asyncio
@@ -176,7 +194,22 @@ async def test_1000_item_batch_with_30_percent_duplicates(
     assert response.rejected == 0
     assert repo.existing_id_calls == 1
     assert repo.bulk_insert_calls == 1
-    assert len(dispatch.calls) == 700
+    assert dispatch.calls == []
+    assert (
+        await _count_outbox_rows(
+            pg_session,
+            [
+                make_boundary_id(
+                    TENANT_ID,
+                    item.channel_type,
+                    item.source_id,
+                    item.external_message_id,
+                )
+                for item in all_items
+            ],
+        )
+        == 1000
+    )
     assert duration < 5.0
 
 
@@ -201,29 +234,49 @@ async def test_batch_rejects_items_with_empty_body(
     assert response.rejected == 1
     assert response.results[1].status is BatchItemStatus.REJECTED
     assert response.results[1].reason == "body must not be empty"
-    assert len(dispatch.calls) == 1
-    assert await _count_boundary_rows(
-        pg_session,
-        [
-            make_boundary_id(
-                TENANT_ID,
-                "email",
-                valid.source_id,
-                valid.external_message_id,
-            )
-        ],
-    ) == 1
-    assert await _count_boundary_rows(
-        pg_session,
-        [
-            make_boundary_id(
-                TENANT_ID,
-                "email",
-                invalid.source_id,
-                invalid.external_message_id,
-            )
-        ],
-    ) == 0
+    assert dispatch.calls == []
+    assert (
+        await _count_outbox_rows(
+            pg_session,
+            [
+                make_boundary_id(
+                    TENANT_ID,
+                    "email",
+                    valid.source_id,
+                    valid.external_message_id,
+                )
+            ],
+        )
+        == 1
+    )
+    assert (
+        await _count_boundary_rows(
+            pg_session,
+            [
+                make_boundary_id(
+                    TENANT_ID,
+                    "email",
+                    valid.source_id,
+                    valid.external_message_id,
+                )
+            ],
+        )
+        == 1
+    )
+    assert (
+        await _count_boundary_rows(
+            pg_session,
+            [
+                make_boundary_id(
+                    TENANT_ID,
+                    "email",
+                    invalid.source_id,
+                    invalid.external_message_id,
+                )
+            ],
+        )
+        == 0
+    )
 
 
 @pytest.mark.asyncio
@@ -245,61 +298,53 @@ async def test_batch_cannot_inject_other_tenant_items(
     assert response.accepted == 1
     assert response.rejected == 1
     assert response.results[1].status is BatchItemStatus.REJECTED
-    assert response.results[1].reason == (
-        "tenant_id does not match request authority"
+    assert response.results[1].reason == ("tenant_id does not match request authority")
+    assert dispatch.calls == []
+    assert (
+        await _count_outbox_rows(
+            pg_session,
+            [
+                make_boundary_id(
+                    TENANT_ID,
+                    "email",
+                    valid.source_id,
+                    valid.external_message_id,
+                )
+            ],
+        )
+        == 1
     )
-    assert len(dispatch.calls) == 1
     assert await _count_other_tenant_rows(pg_session, "tenant-injected") == 0
 
 
 @pytest.mark.asyncio
 async def test_batch_route_preserves_capture_when_admission_would_defer() -> None:
-    app = create_app()
     service = _RecordingBatchIngestService()
-    app.dependency_overrides[get_batch_ingest_service] = lambda: service
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/api/v1/ingest/batch",
-            json={"items": [_item_payload("admission-defer")]},
-            headers={"X-Tenant-ID": TENANT_ID},
-        )
+    response = await batch_ingest(
+        body=BatchIngestRequest(
+            items=[BatchIngestItem.model_validate(_item_payload("admission-defer"))]
+        ),
+        expected_tenant_id=TENANT_ID,
+        service=service,
+    )
 
-    assert response.status_code == 200
-    assert response.json()["accepted"] == 1
+    assert response.accepted == 1
     assert service.calls == 1
 
 
-@pytest.mark.asyncio
-async def test_batch_rejects_oversized_request(
+def test_batch_rejects_oversized_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("BATCH_INGEST_MAX_BATCH_SIZE", "1")
-    app = create_app()
-    service = _FailingBatchIngestService()
-    app.dependency_overrides[check_batch_ingest_admission] = _admitted
-    app.dependency_overrides[get_batch_ingest_service] = lambda: service
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/api/v1/ingest/batch",
-            json={
-                "items": [
-                    _item_payload("oversized-1"),
-                    _item_payload("oversized-2"),
-                ]
-            },
-            headers={"X-Tenant-ID": TENANT_ID},
+    with pytest.raises(ValidationError, match="items must contain at most 1 records"):
+        BatchIngestRequest(
+            items=[
+                BatchIngestItem.model_validate(_item_payload("oversized-1")),
+                BatchIngestItem.model_validate(_item_payload("oversized-2")),
+            ]
         )
-
-    assert response.status_code == 422
-    assert service.calls == 0
 
 
 def test_boundary_ids_are_deterministic() -> None:
@@ -328,27 +373,9 @@ def test_boundary_ids_are_deterministic() -> None:
     assert "uuid4" not in inspect.getsource(make_boundary_id)
 
 
-@pytest.mark.asyncio
-async def test_batch_rejects_empty_items_list() -> None:
-    app = create_app()
-    service = _FailingBatchIngestService()
-    app.dependency_overrides[check_batch_ingest_admission] = _admitted
-    app.dependency_overrides[get_batch_ingest_service] = lambda: service
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        openapi = await client.get("/openapi.json")
-        response = await client.post(
-            "/api/v1/ingest/batch",
-            json={"items": []},
-            headers={"X-Tenant-ID": TENANT_ID},
-        )
-
-    assert "/api/v1/ingest/batch" in openapi.json()["paths"]
-    assert response.status_code == 422
-    assert service.calls == 0
+def test_batch_rejects_empty_items_list() -> None:
+    with pytest.raises(ValidationError, match="items must not be empty"):
+        BatchIngestRequest(items=[])
 
 
 def _service(
@@ -407,6 +434,19 @@ async def _count_boundary_rows(
     return int(result.scalar_one())
 
 
+async def _count_outbox_rows(
+    session: AsyncSession,
+    boundary_ids: list[str],
+) -> int:
+    ids = [uuid.UUID(boundary_id) for boundary_id in boundary_ids]
+    result = await session.execute(
+        select(func.count())
+        .select_from(IngressDispatchOutboxRow)
+        .where(IngressDispatchOutboxRow.ingress_id.in_(ids))
+    )
+    return int(result.scalar_one())
+
+
 async def _count_other_tenant_rows(
     session: AsyncSession,
     external_message_id_prefix: str,
@@ -424,29 +464,6 @@ async def _count_other_tenant_rows(
     return int(result.scalar_one())
 
 
-async def _admitted() -> AdmissionDecision:
-    return _admission_decision(AdmissionOutcome.ADMIT)
-
-
-def _admission_decision(outcome: AdmissionOutcome) -> AdmissionDecision:
-    return AdmissionDecision(
-        decision_id=uuid.uuid5(uuid.NAMESPACE_URL, f"batch-test:{outcome.value}"),
-        outcome=outcome,
-        reason=(
-            AdmissionReason.QUEUE_DEPTH_EXCEEDED
-            if outcome is not AdmissionOutcome.ADMIT
-            else None
-        ),
-        queue_name="diagnostic.normal",
-        queue_depth=100,
-        queue_age_seconds=None,
-        redis_memory_pct=None,
-        db_pool_wait_ms=None,
-        retry_after_seconds=15,
-        evaluated_at=RECEIVED_AT,
-    )
-
-
 class _RecordingDispatchService:
     def __init__(self) -> None:
         self.calls: list[dict[str, str]] = []
@@ -454,21 +471,6 @@ class _RecordingDispatchService:
     async def dispatch(self, ingress_id: str, tenant_id: str) -> object:
         self.calls.append({"ingress_id": ingress_id, "tenant_id": tenant_id})
         return object()
-
-
-class _FailingBatchIngestService:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def process_batch(
-        self,
-        *,
-        items: list[BatchIngestItem],
-        tenant_id: str,
-    ) -> object:
-        del items, tenant_id
-        self.calls += 1
-        raise AssertionError("batch service should not be called")
 
 
 class _RecordingBatchIngestService:
@@ -497,18 +499,6 @@ class _RecordingBatchIngestService:
                 for index, item in enumerate(items)
             ],
         )
-
-
-class _FakeAdmissionService:
-    def __init__(self, outcome: AdmissionOutcome) -> None:
-        self.outcome = outcome
-
-    async def evaluate_and_persist(
-        self,
-        **kwargs: object,
-    ) -> AdmissionDecision:
-        del kwargs
-        return _admission_decision(self.outcome)
 
 
 class _CountingPostgresBoundaryPersistence(PostgresBoundaryPersistence):
