@@ -16,6 +16,7 @@ primary_region = "iad"
   worker_sop = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=1"
   worker_maintenance = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=1"
   worker_ingress = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q ingress.email,ingress.whatsapp,ingress.shopify --concurrency=2"
+  worker_outbound_send = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q outbound.send --concurrency=1"
   worker_voice_realtime = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=8 --loglevel=info"
 
 [env]
@@ -119,6 +120,14 @@ primary_region = "iad"
 
 [[vm]]
   processes = ["worker_ingress"]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+  min_machines_running = 1
+  max_machines_running = 2
+
+[[vm]]
+  processes = ["worker_outbound_send"]
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1

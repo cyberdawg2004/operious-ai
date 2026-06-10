@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,14 @@ def test_dead_letter_queue_constant_is_declared() -> None:
 
 def test_semantic_quarantine_queue_constant_is_declared() -> None:
     assert QUEUE_SEMANTIC_QUARANTINE == "semantic_quarantine"
+
+
+def test_fly_processes_consume_customer_send_queue() -> None:
+    config = tomllib.loads((BACKEND_ROOT / "fly.toml").read_text(encoding="utf-8"))
+    processes = config.get("processes", {})
+
+    assert "worker_outbound_send" in processes
+    assert "outbound.send" in processes["worker_outbound_send"]
 
 
 def _bare_queue_string_violations(
