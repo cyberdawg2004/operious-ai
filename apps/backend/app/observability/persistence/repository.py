@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from app.observability.identity import (
@@ -13,6 +14,7 @@ from app.observability.persistence.models import (
     DeadLetterExecutionQuery,
     InboundNormalizationDeadLetterPage,
     InboundNormalizationDeadLetterQuery,
+    InboundMessageTimelineLookup,
     OperationalMetricsQuery,
     OperationalSLODefinitionPage,
     OperationalSLODefinitionQuery,
@@ -25,6 +27,7 @@ from app.observability.persistence.records import (
     OperationalMetricsSnapshotRecord,
     OperationalSLODefinitionRecord,
     OperationalTraceSpanRecord,
+    InboundMessageTimelineRecord,
 )
 
 
@@ -59,6 +62,15 @@ class OperationalObservabilityPersistence(Protocol):
         *,
         expected_tenant_id: str,
     ) -> InboundNormalizationDeadLetterPage: ...
+
+    async def get_inbound_message_timeline(
+        self,
+        lookup: InboundMessageTimelineLookup,
+        *,
+        expected_tenant_id: str,
+        stall_threshold_seconds: int,
+        now: datetime | None = None,
+    ) -> InboundMessageTimelineRecord: ...
 
     async def save_slo_definition(
         self,

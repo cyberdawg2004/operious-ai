@@ -27,6 +27,7 @@ from app.identity import AuthorityContext
 from app.main import create_app
 from app.dependencies.database import get_db_session
 from app.dependencies.services import get_queue_operations_service
+from app.core.queue_depth import QueueDepthBackend, QueueDepthSample
 from app.queues import (
     ALL_QUEUES,
     QUEUE_DIAGNOSTIC_NORMAL,
@@ -104,6 +105,116 @@ async def test_queue_status_returns_all_queues(
     assert len(body["queues"]) == len(ALL_QUEUES)
     assert body["queues"][QUEUE_DIAGNOSTIC_NORMAL]["depth"] == 7
     assert body["queues"][QUEUE_DIAGNOSTIC_NORMAL]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_queue_status_ignores_stale_age_when_depth_is_zero(
+    queue_client: tuple[httpx.AsyncClient, Any],
+    pg_session: AsyncSession,
+) -> None:
+    client, app = queue_client
+    redis = _QueueRedis(depth=0, oldest_age_seconds=9999.0)
+    app.dependency_overrides[get_queue_operations_service] = _service_override(
+        QueueOperationsService(
+            session=pg_session,
+            redis_provider=lambda: redis,  # type: ignore[arg-type]
+        )
+    )
+
+    response = await client.get(
+        "/api/v1/operations/queue-status",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    queue = response.json()["queues"][QUEUE_DIAGNOSTIC_NORMAL]
+    assert queue["depth"] == 0
+    assert queue["oldest_age_seconds"] is None
+    assert queue["status"] == "ok"
+    assert redis.zrange_calls == []
+    assert (f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}", "-inf") in {
+        (call[0], call[1]) for call in redis.cleanup_calls
+    }
+    assert redis.zsets[f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}"] == {}
+
+
+@pytest.mark.asyncio
+async def test_queue_status_age_thresholds_apply_when_depth_is_positive(
+    pg_session: AsyncSession,
+) -> None:
+    settings = _queue_status_settings()
+
+    fresh = await _queue_status_for_age(
+        pg_session,
+        depth=1,
+        oldest_age_seconds=10.0,
+        settings=settings,
+    )
+    warning = await _queue_status_for_age(
+        pg_session,
+        depth=1,
+        oldest_age_seconds=40.0,
+        settings=settings,
+    )
+    critical = await _queue_status_for_age(
+        pg_session,
+        depth=1,
+        oldest_age_seconds=80.0,
+        settings=settings,
+    )
+
+    assert fresh.status == "ok"
+    assert warning.status == "warn"
+    assert critical.status == "critical"
+
+
+@pytest.mark.asyncio
+async def test_rabbitmq_zero_depth_ignores_stale_redis_age(
+    pg_session: AsyncSession,
+) -> None:
+    redis = _QueueRedis(depth=0, oldest_age_seconds=9999.0)
+    service = QueueOperationsService(
+        session=pg_session,
+        redis_provider=lambda: redis,  # type: ignore[arg-type]
+        queue_depth_provider=_StaticQueueDepthProvider(
+            backend="rabbitmq",
+            default_depth=0,
+        ),
+        settings=_queue_status_settings(),
+    )
+
+    record = await service.get_queue_status()
+    queue = record.queues[QUEUE_DIAGNOSTIC_NORMAL]
+
+    assert queue.depth == 0
+    assert queue.oldest_age_seconds is None
+    assert queue.status == "ok"
+    assert redis.zrange_calls == []
+    assert redis.zsets[f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}"] == {}
+    assert redis.zsets["unrelated:key"] == {"do-not-delete": 1.0}
+
+
+@pytest.mark.asyncio
+async def test_rabbitmq_positive_depth_still_applies_valid_age(
+    pg_session: AsyncSession,
+) -> None:
+    service = QueueOperationsService(
+        session=pg_session,
+        redis_provider=lambda: _QueueRedis(depth=0, oldest_age_seconds=80.0),  # type: ignore[arg-type]
+        queue_depth_provider=_StaticQueueDepthProvider(
+            backend="rabbitmq",
+            default_depth=3,
+        ),
+        settings=_queue_status_settings(),
+    )
+
+    record = await service.get_queue_status()
+    queue = record.queues[QUEUE_DIAGNOSTIC_NORMAL]
+
+    assert queue.depth == 3
+    assert queue.oldest_age_seconds is not None
+    assert queue.oldest_age_seconds >= 79.0
+    assert queue.status == "critical"
 
 
 @pytest.mark.asyncio
@@ -761,10 +872,52 @@ def _at(second: int) -> datetime:
     return datetime(2026, 5, 25, 12, 0, second, tzinfo=timezone.utc)
 
 
+async def _queue_status_for_age(
+    pg_session: AsyncSession,
+    *,
+    depth: int,
+    oldest_age_seconds: float,
+    settings: Any,
+):
+    service = QueueOperationsService(
+        session=pg_session,
+        redis_provider=lambda: _QueueRedis(  # type: ignore[arg-type]
+            depth=depth,
+            oldest_age_seconds=oldest_age_seconds,
+        ),
+        settings=settings,
+    )
+    return (await service.get_queue_status()).queues[QUEUE_DIAGNOSTIC_NORMAL]
+
+
+def _queue_status_settings() -> Any:
+    from app.core.config import get_settings
+
+    return get_settings().model_copy(
+        update={
+            "ADMISSION_QUEUE_AGE_WARN_SECONDS": 30,
+            "ADMISSION_QUEUE_AGE_REJECT_SECONDS": 60,
+            "ADMISSION_QUEUE_DEPTH_WARN": 500,
+            "ADMISSION_QUEUE_DEPTH_REJECT": 2000,
+        }
+    )
+
+
 class _QueueRedis:
-    def __init__(self, *, depth: int, oldest_age_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        depth: int,
+        oldest_age_seconds: float | None = None,
+    ) -> None:
         self.depth = depth
         self.oldest_age_seconds = oldest_age_seconds
+        self.zrange_calls: list[str] = []
+        self.cleanup_calls: list[tuple[str, float | str, float | str]] = []
+        self.zsets: dict[str, dict[str, float]] = {
+            f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}": {"stale-member": 1.0},
+            "unrelated:key": {"do-not-delete": 1.0}
+        }
 
     async def llen(self, _name: str) -> int:
         return self.depth
@@ -778,12 +931,54 @@ class _QueueRedis:
         withscores: bool = False,
     ) -> list[tuple[str, float]]:
         assert withscores is True
+        self.zrange_calls.append(_name)
+        if self.oldest_age_seconds is None:
+            return []
         return [("member", datetime.now().timestamp() - self.oldest_age_seconds)]
+
+    async def zremrangebyscore(
+        self,
+        name: str,
+        min_score: float | str,
+        max_score: float | str,
+    ) -> int:
+        self.cleanup_calls.append((name, min_score, max_score))
+        members = self.zsets.get(name)
+        if members is None:
+            return 0
+        before = len(members)
+        upper = float(max_score)
+        self.zsets[name] = {
+            member: score
+            for member, score in members.items()
+            if score > upper
+        }
+        return before - len(self.zsets[name])
 
 
 class _DownRedis:
     async def llen(self, _name: str) -> int:
         raise ConnectionError("redis down")
+
+
+class _StaticQueueDepthProvider:
+    def __init__(
+        self,
+        *,
+        backend: QueueDepthBackend = "redis",
+        default_depth: int = 0,
+    ) -> None:
+        self.backend: QueueDepthBackend = backend
+        self.default_depth = default_depth
+
+    async def get_queue_depth(self, queue_name: str) -> QueueDepthSample:
+        return QueueDepthSample(
+            queue_name=queue_name,
+            depth=self.default_depth,
+            messages_ready=self.default_depth,
+            messages_unacknowledged=0,
+            messages=self.default_depth,
+        )
 
 
 class _SentTasks:

@@ -394,9 +394,24 @@ def test_diagnostic_worker_task_kwargs_align_with_work_item_contract() -> None:
     assert "_enqueued_at" not in work_item_fields
     assert work_item.conversation_turn_id is None
     assert work_item_constructor_fields == work_item_fields
+    # DLQ task visibility/replay stores the durable execution identity, not
+    # customer reply addressing/thread metadata. The worker rehydrates that
+    # context from the execution/session records on replay.
     assert set(_dead_letter_task_payload(work_item)) == (
         work_item_fields
-        - {"content", "conversation_history", "conversation_turn_id"}
+        - {
+            "content",
+            "conversation_history",
+            "conversation_turn_id",
+            "source_channel",
+            "reply_recipient",
+            "reply_source",
+            "reply_subject",
+            "reply_thread_context",
+            "reply_in_reply_to_message_id",
+            "reply_references_header",
+            "reply_phone_number_id",
+        }
     )
 
 

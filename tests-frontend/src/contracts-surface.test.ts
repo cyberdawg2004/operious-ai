@@ -1,5 +1,5 @@
 import { test } from 'node:test';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, ok } from 'node:assert';
 import { join } from 'node:path';
 import { ROOT, readText } from './util.js';
 
@@ -30,4 +30,13 @@ test('ENDPOINT exposes exactly the pinned substrate groups', () => {
     'topology',
     'traces',
   ]);
+});
+
+test('Command Center queue status accepts null oldest age for empty queues', () => {
+  const text = readText(join(ROOT, 'apps', 'command-center2', 'frontend', 'lib', 'api.ts'));
+
+  ok(
+    text.includes('oldest_age_seconds: number | null;'),
+    'QueueDepthItem.oldest_age_seconds must accept null for empty queues'
+  );
 });

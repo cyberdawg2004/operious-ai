@@ -24,6 +24,7 @@ QUEUE_QA = "qa"
 QUEUE_SOP_INTELLIGENCE = "sop_intelligence"
 QUEUE_SME_APPROVAL = "sme_approval"
 QUEUE_KNOWLEDGE_INDEXING = "knowledge_indexing"
+QUEUE_OUTBOUND_SEND = "outbound.send"
 
 # Maintenance queues
 QUEUE_WEBHOOK_MAINTENANCE = "webhook_maintenance"
@@ -53,6 +54,7 @@ ALL_QUEUES: tuple[str, ...] = (
     QUEUE_SOP_INTELLIGENCE,
     QUEUE_SME_APPROVAL,
     QUEUE_KNOWLEDGE_INDEXING,
+    QUEUE_OUTBOUND_SEND,
     QUEUE_WEBHOOK_MAINTENANCE,
     QUEUE_DEAD_LETTER,
     QUEUE_SEMANTIC_QUARANTINE,

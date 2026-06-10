@@ -13,7 +13,11 @@ from redis.asyncio import Redis
 from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from app.core.admission import admission_thresholds_from_settings
+from app.core.admission import (
+    EmptyQueueAgeSentinelCleanupClient,
+    admission_thresholds_from_settings,
+    clear_empty_queue_age_sentinels,
+)
 from app.core.config import Settings, get_settings
 from app.core.queue_depth import (
     QueueDepthProvider,
@@ -178,6 +182,7 @@ class QueueOperationsService:
                 queue_name=queue_name,
                 queue_depth_provider=queue_depth_provider,
                 gate=gate,
+                redis_client=redis_client,
             )
         return QueueStatusRecord(queues=queues, snapshot_at=snapshot_at)
 
@@ -580,8 +585,10 @@ class QueueOperationsService:
         queue_name: str,
         queue_depth_provider: QueueDepthProvider,
         gate: AdmissionGate,
+        redis_client: AdmissionRedisClient,
     ) -> QueueDepthItemRecord:
         try:
+            depth_sample_cutoff = datetime.now(timezone.utc).timestamp()
             sample = await queue_depth_provider.get_queue_depth(queue_name)
             depth = sample.depth
         except Exception as exc:  # noqa: BLE001 - endpoint degrades per queue.
@@ -598,6 +605,25 @@ class QueueOperationsService:
                 oldest_age_seconds=None,
                 status="unknown",
                 error=_queue_depth_error_name(queue_depth_provider),
+            )
+        if depth <= 0:
+            await clear_empty_queue_age_sentinels(
+                redis_client=cast(EmptyQueueAgeSentinelCleanupClient, redis_client),
+                queue_name=queue_name,
+                older_than_or_at=depth_sample_cutoff,
+            )
+            return QueueDepthItemRecord(
+                queue_name=queue_name,
+                depth=depth,
+                oldest_age_seconds=None,
+                status=_queue_item_status(
+                    depth=depth,
+                    oldest_age_seconds=None,
+                    settings=self._settings,
+                ),
+                messages_ready=sample.messages_ready,
+                messages_unacknowledged=sample.messages_unacknowledged,
+                messages=sample.messages,
             )
         oldest_age_seconds = await gate.queue_age_seconds(queue_name=queue_name)
         return QueueDepthItemRecord(
@@ -643,6 +669,8 @@ def _queue_item_status(
         warn_depth=settings.ADMISSION_QUEUE_DEPTH_WARN,
         critical_depth=settings.ADMISSION_QUEUE_DEPTH_REJECT,
     )
+    if depth <= 0:
+        return depth_status
     if (
         oldest_age_seconds is not None
         and oldest_age_seconds >= settings.ADMISSION_QUEUE_AGE_REJECT_SECONDS

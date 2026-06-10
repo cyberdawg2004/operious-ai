@@ -94,6 +94,12 @@ from app.coordination.persistence import (
     CoordinationRecord,
     PostgresCoordinationPersistence,
 )
+from app.boundary.outbound.send_outbox import (
+    OutboundSendOutboxRecord,
+    PostgresOutboundSendOutboxPersistence,
+    as_outbound_send_outbox_id,
+)
+from app.boundary.outbound_send_publisher import enqueue_outbound_send_outbox
 from app.boundary.translation import (
     InMemoryTranslationPersistence,
     TranslationEgressRuntime,
@@ -177,6 +183,10 @@ from app.runtime.provider_circuit_breaker import (
     ProviderCircuitSnapshot,
 )
 from app.services.case_approval_service import CaseApprovalService
+from app.services.outbound_auto_send_service import (
+    OutboundAutoSendService,
+    OutboundSendTarget,
+)
 from app.sme import build_sme_review_runtime
 from app.workers.execution_completion_events import (
     WorkerExecutionCompletionEventSink,
@@ -196,7 +206,10 @@ from app.session.persistence import (
     SessionPersistenceProtocol,
 )
 from app.session.runtime import SessionRuntime
-from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.credentials import (
+    TenantCredentialEncryptor,
+    build_tenant_credential_encryptor_from_settings,
+)
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
 from app.workers.celery_app import celery_app, enqueued_at_iso
@@ -392,6 +405,14 @@ class _DiagnosticExecutionWorkItem:
     tenant_id: str
     content: str
     source_language: str = "en"
+    source_channel: str | None = None
+    reply_recipient: str | None = None
+    reply_source: str | None = None
+    reply_subject: str | None = None
+    reply_thread_context: str | None = None
+    reply_in_reply_to_message_id: str | None = None
+    reply_references_header: str | None = None
+    reply_phone_number_id: str | None = None
     conversation_history: tuple[Mapping[str, Any], ...] = ()
     conversation_turn_id: str | None = None
 
@@ -400,7 +421,27 @@ class _DiagnosticExecutionWorkItem:
 class _DispatchContentContext:
     content: str
     source_language: str
+    source_channel: str | None = None
+    reply_recipient: str | None = None
+    reply_source: str | None = None
+    reply_subject: str | None = None
+    reply_thread_context: str | None = None
+    reply_in_reply_to_message_id: str | None = None
+    reply_references_header: str | None = None
+    reply_phone_number_id: str | None = None
     conversation_history: tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _OutboundReplyContext:
+    source_channel: str | None = None
+    recipient: str | None = None
+    source: str | None = None
+    subject: str | None = None
+    thread_context: str | None = None
+    in_reply_to_message_id: str | None = None
+    references_header: str | None = None
+    phone_number_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,6 +451,7 @@ class _ResolutionAppendResult:
     governance_decision_id: str | None = None
     proposal_id: str | None = None
     draft_id: str | None = None
+    outbound_send_outbox_id: str | None = None
     safety_escalation_governance_decision_id: str | None = None
 
 
@@ -549,6 +591,16 @@ async def _prepare_diagnostic_execution(
             tenant_id=tenant_id,
             content=content_context.content,
             source_language=content_context.source_language,
+            source_channel=content_context.source_channel,
+            reply_recipient=content_context.reply_recipient,
+            reply_source=content_context.reply_source,
+            reply_subject=content_context.reply_subject,
+            reply_thread_context=content_context.reply_thread_context,
+            reply_in_reply_to_message_id=(
+                content_context.reply_in_reply_to_message_id
+            ),
+            reply_references_header=content_context.reply_references_header,
+            reply_phone_number_id=content_context.reply_phone_number_id,
             conversation_history=content_context.conversation_history,
             conversation_turn_id=conversation_turn_id,
         )
@@ -1183,6 +1235,10 @@ async def _persist_diagnostic_success(
                         await authority_tx.rollback()
                     raise
                 await session.commit()
+                outbound_send_published = await _publish_outbound_send_if_present(
+                    session=session,
+                    resolution_append=resolution_append,
+                )
                 resolution_escalation_published = (
                     await _publish_resolution_safety_escalation_if_present(
                         work_item=work_item,
@@ -1223,6 +1279,7 @@ async def _persist_diagnostic_success(
                     "summary": result_payload.summary,
                     "category": result_payload.category,
                     "confidence": result_payload.confidence,
+                    "outbound_send_queued": outbound_send_published,
                     **_resolution_safety_escalation_result_payload(
                         resolution_append,
                         published=resolution_escalation_published,
@@ -1417,20 +1474,120 @@ async def _load_dispatch_content(
 def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
     body = dispatch.payload_body
     source_language = _extract_source_language(body)
+    conversation_history = _extract_conversation_history(body)
     canonical_payload = body.get("canonical_payload")
     if isinstance(canonical_payload, Mapping):
-        extracted = _extract_text(cast(Mapping[str, Any], canonical_payload))
+        typed_payload = cast(Mapping[str, Any], canonical_payload)
+        extracted = _extract_text(typed_payload)
+        reply_context = _extract_outbound_reply_context(typed_payload)
         if extracted:
             return _DispatchContentContext(
                 content=extracted,
                 source_language=source_language,
-                conversation_history=_extract_conversation_history(body),
+                source_channel=reply_context.source_channel,
+                reply_recipient=reply_context.recipient,
+                reply_source=reply_context.source,
+                reply_subject=reply_context.subject,
+                reply_thread_context=reply_context.thread_context,
+                reply_in_reply_to_message_id=(
+                    reply_context.in_reply_to_message_id
+                ),
+                reply_references_header=reply_context.references_header,
+                reply_phone_number_id=reply_context.phone_number_id,
+                conversation_history=conversation_history,
             )
+    reply_context = _extract_outbound_reply_context(body)
     return _DispatchContentContext(
         content=_extract_text(body),
         source_language=source_language,
-        conversation_history=_extract_conversation_history(body),
+        source_channel=reply_context.source_channel,
+        reply_recipient=reply_context.recipient,
+        reply_source=reply_context.source,
+        reply_subject=reply_context.subject,
+        reply_thread_context=reply_context.thread_context,
+        reply_in_reply_to_message_id=reply_context.in_reply_to_message_id,
+        reply_references_header=reply_context.references_header,
+        reply_phone_number_id=reply_context.phone_number_id,
+        conversation_history=conversation_history,
     )
+
+
+def _extract_outbound_reply_context(
+    payload: Mapping[str, Any],
+) -> _OutboundReplyContext:
+    channel = _normalised_reply_channel(
+        _payload_text(payload, "channel") or _payload_text(payload, "channel_type")
+    )
+    if channel not in {"email", "whatsapp"}:
+        return _OutboundReplyContext()
+    message_id = _payload_text(payload, "message_id")
+    conversation_id = _payload_text(payload, "conversation_id")
+    thread_context = conversation_id or message_id
+    phone_number_id = _payload_text(payload, "phone_number_id")
+    source = _payload_text(payload, "to")
+    if channel == "whatsapp" and source is None:
+        source = phone_number_id
+    return _OutboundReplyContext(
+        source_channel=channel,
+        recipient=_payload_text(payload, "from"),
+        source=source,
+        subject=(
+            _reply_subject(_payload_text(payload, "subject"))
+            if channel == "email"
+            else None
+        ),
+        thread_context=thread_context,
+        in_reply_to_message_id=message_id if channel == "email" else None,
+        references_header=(
+            _email_references_header(
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+            if channel == "email"
+            else None
+        ),
+        phone_number_id=phone_number_id,
+    )
+
+
+def _normalised_reply_channel(value: str | None) -> str | None:
+    if value is None:
+        return None
+    channel = value.strip().lower()
+    if channel in {"email", "whatsapp"}:
+        return channel
+    return None
+
+
+def _payload_text(payload: Mapping[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _reply_subject(subject: str | None) -> str:
+    if subject is None:
+        return "Re: Support request"
+    if subject.lower().startswith("re:"):
+        return subject
+    return f"Re: {subject}"
+
+
+def _email_references_header(
+    *,
+    conversation_id: str | None,
+    message_id: str | None,
+) -> str | None:
+    references = tuple(
+        value
+        for value in (conversation_id, message_id)
+        if value is not None and value.strip()
+    )
+    if not references:
+        return None
+    return " ".join(dict.fromkeys(references))
 
 
 def _extract_source_language(body: Mapping[str, Any]) -> str:
@@ -1559,6 +1716,9 @@ async def _append_resolution_proposal_after_diagnostic(
                     diagnostic_confidence=result.confidence,
                     original_content=work_item.content,
                     source_language=work_item.source_language,
+                    source_channel=work_item.source_channel,
+                    reply_recipient=work_item.reply_recipient,
+                    reply_thread_context=work_item.reply_thread_context,
                     retrieved_citations=result.retrieved_citations,
                     conversation_history=work_item.conversation_history,
                 )
@@ -1593,6 +1753,13 @@ async def _append_resolution_proposal_after_diagnostic(
                     attempt_id=work_item.attempt_id,
                     event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
+            )
+            outbound_send_outbox = await _request_governed_auto_send(
+                session=session,
+                governance_repository=governance_repo,
+                proposal=proposal,
+                draft=draft,
+                work_item=work_item,
             )
             await _request_resolution_approval_cases_with_retry(
                 session=session,
@@ -1630,6 +1797,11 @@ async def _append_resolution_proposal_after_diagnostic(
                 governance_decision_id=str(proposal.governance_decision_id),
                 proposal_id=str(proposal.proposal_id),
                 draft_id=str(draft.draft_id),
+                outbound_send_outbox_id=(
+                    str(outbound_send_outbox.outbox_id)
+                    if outbound_send_outbox is not None
+                    else None
+                ),
                 safety_escalation_governance_decision_id=(
                     safety_escalation_governance_decision_id
                 ),
@@ -1643,6 +1815,11 @@ async def _append_resolution_proposal_after_diagnostic(
             ),
             proposal_id=str(proposal.proposal_id),
             draft_id=str(draft.draft_id),
+            outbound_send_outbox_id=(
+                str(outbound_send_outbox.outbox_id)
+                if outbound_send_outbox is not None
+                else None
+            ),
             safety_escalation_governance_decision_id=(
                 safety_escalation_governance_decision_id
             ),
@@ -1658,6 +1835,52 @@ async def _append_resolution_proposal_after_diagnostic(
             exc=exc,
         )
         return _ResolutionAppendResult(success=False)
+
+
+async def _request_governed_auto_send(
+    *,
+    session: AsyncSession,
+    governance_repository: PostgresGovernanceRepository,
+    proposal: ResolutionProposalRecord,
+    draft: ResolutionOutboundDraftRecord,
+    work_item: _DiagnosticExecutionWorkItem,
+) -> OutboundSendOutboxRecord | None:
+    target = _outbound_send_target_for_work_item(work_item)
+    if target is None:
+        return None
+    return await OutboundAutoSendService(
+        governance_repository=governance_repository,
+        outbox_persistence=PostgresOutboundSendOutboxPersistence(session),
+    ).request_auto_send(
+        draft=draft,
+        proposal=proposal,
+        target=target,
+        expected_tenant_id=work_item.tenant_id,
+    )
+
+
+def _outbound_send_target_for_work_item(
+    work_item: _DiagnosticExecutionWorkItem,
+) -> OutboundSendTarget | None:
+    if work_item.source_channel not in {"email", "whatsapp"}:
+        return None
+    if work_item.reply_recipient is None:
+        return None
+    if work_item.reply_thread_context is None:
+        return None
+    metadata: dict[str, Any] = {}
+    if work_item.reply_phone_number_id is not None:
+        metadata["phone_number_id"] = work_item.reply_phone_number_id
+    return OutboundSendTarget(
+        channel=work_item.source_channel,
+        recipient=work_item.reply_recipient,
+        source=work_item.reply_source,
+        subject=work_item.reply_subject,
+        thread_context=work_item.reply_thread_context,
+        in_reply_to_message_id=work_item.reply_in_reply_to_message_id,
+        references_header=work_item.reply_references_header,
+        metadata=metadata,
+    )
 
 
 async def _request_resolution_approval_cases_with_retry(
@@ -1978,6 +2201,25 @@ async def _publish_resolution_safety_escalation_with_outbox(
     return True
 
 
+async def _publish_outbound_send_if_present(
+    *,
+    session: AsyncSession,
+    resolution_append: _ResolutionAppendResult,
+) -> bool:
+    outbox_id = resolution_append.outbound_send_outbox_id
+    if outbox_id is None:
+        return False
+    outbox = await PostgresOutboundSendOutboxPersistence(
+        session
+    ).get_outbound_send_outbox(
+        as_outbound_send_outbox_id(outbox_id),
+    )
+    if outbox is None:
+        return False
+    enqueue_outbound_send_outbox(outbox)
+    return True
+
+
 def _bounded_resolution_escalation_publish_error(exc: BaseException) -> str:
     message = f"{exc.__class__.__name__}: {exc}"
     if len(message) > 240:
@@ -2035,8 +2277,8 @@ async def _action_orchestration_runtime(
     tenant_repository = PostgresTenantConfigurationRepository(session)
     tenant_runtime = TenantConfigurationRuntime(
         repository=tenant_repository,
-        credential_encryptor=TenantCredentialEncryptor(
-            platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+        credential_encryptor=build_tenant_credential_encryptor_from_settings(
+            settings
         ),
     )
     return ActionOrchestrationRuntime(

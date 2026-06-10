@@ -29,6 +29,16 @@ class QueueAgeSentinelClient(Protocol):
         ...
 
 
+class EmptyQueueAgeSentinelCleanupClient(Protocol):
+    def zremrangebyscore(
+        self,
+        name: str,
+        min: float | str,
+        max: float | str,
+    ) -> Awaitable[int] | int:
+        ...
+
+
 def admission_thresholds_from_settings(
     settings: Settings,
 ) -> AdmissionGateThresholds:
@@ -87,6 +97,25 @@ async def clear_queue_age_sentinel(
         )
 
 
+async def clear_empty_queue_age_sentinels(
+    *,
+    redis_client: EmptyQueueAgeSentinelCleanupClient,
+    queue_name: str,
+    older_than_or_at: float | None = None,
+) -> None:
+    """Best-effort removal of stale age sentinels for a known-empty queue."""
+
+    try:
+        key = QUEUE_AGE_ZSET_KEY.format(queue_name=queue_name)
+        cutoff = older_than_or_at if older_than_or_at is not None else time.time()
+        await _resolve(redis_client.zremrangebyscore(key, "-inf", cutoff))
+    except Exception:  # noqa: BLE001 - cleanup failures never affect health reads.
+        logger.warning(
+            "admission_empty_queue_age_sentinel_cleanup_failed",
+            extra={"queue_name": queue_name},
+        )
+
+
 async def _resolve(value: Awaitable[Any] | Any) -> Any:
     if isawaitable(value):
         return await value
@@ -94,8 +123,10 @@ async def _resolve(value: Awaitable[Any] | Any) -> Any:
 
 
 __all__ = [
+    "EmptyQueueAgeSentinelCleanupClient",
     "QueueAgeSentinelClient",
     "admission_thresholds_from_settings",
+    "clear_empty_queue_age_sentinels",
     "clear_queue_age_sentinel",
     "record_queue_age_sentinel",
 ]

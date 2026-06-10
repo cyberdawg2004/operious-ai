@@ -1,6 +1,13 @@
 """Tenant-owned configuration substrate."""
 
-from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.credentials import (
+    CredentialKeyProvider,
+    CredentialLifecycleState,
+    LocalMasterKeyProvider,
+    TenantCredentialEncryptor,
+    TenantCredentialEnvelopeEncryptor,
+    build_tenant_credential_encryptor_from_settings,
+)
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
@@ -30,7 +37,11 @@ __all__ = [
     "TenantChannelStatus",
     "TenantChannelType",
     "TenantConfigurationRuntime",
+    "TenantCredentialEnvelopeEncryptor",
     "TenantCredentialEncryptor",
+    "CredentialKeyProvider",
+    "CredentialLifecycleState",
+    "LocalMasterKeyProvider",
     "TenantGovernancePolicyId",
     "TenantGovernancePolicyStatus",
     "TenantKnowledgeDocumentId",
@@ -46,4 +57,5 @@ __all__ = [
     "derive_governance_policy_id",
     "derive_knowledge_document_id",
     "derive_knowledge_document_version_id",
+    "build_tenant_credential_encryptor_from_settings",
 ]

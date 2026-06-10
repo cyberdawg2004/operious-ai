@@ -1080,6 +1080,9 @@ def _channel_record_to_row(
         routing_address=record.routing_address,
         credentials_enc=record.credentials_enc,
         webhook_secret=record.webhook_secret,
+        self_service_config=dict(record.self_service_config),
+        last_validation_error=record.last_validation_error,
+        validation_evidence=dict(record.validation_evidence),
         previous_credentials_enc=record.previous_credentials_enc,
         previous_webhook_secret=record.previous_webhook_secret,
         credential_rotated_at=record.credential_rotated_at,
@@ -1099,6 +1102,9 @@ def _update_channel_row(
     row.routing_address = record.routing_address
     row.credentials_enc = record.credentials_enc
     row.webhook_secret = record.webhook_secret
+    row.self_service_config = dict(record.self_service_config)
+    row.last_validation_error = record.last_validation_error
+    row.validation_evidence = dict(record.validation_evidence)
     row.previous_credentials_enc = record.previous_credentials_enc
     row.previous_webhook_secret = record.previous_webhook_secret
     row.credential_rotated_at = record.credential_rotated_at
@@ -1119,6 +1125,9 @@ def _channel_row_to_record(
         routing_address=row.routing_address,
         credentials_enc=bytes(row.credentials_enc),
         webhook_secret=row.webhook_secret,
+        self_service_config=dict(row.self_service_config or {}),
+        last_validation_error=row.last_validation_error,
+        validation_evidence=dict(row.validation_evidence or {}),
         previous_credentials_enc=(
             bytes(row.previous_credentials_enc)
             if row.previous_credentials_enc is not None

@@ -44,8 +44,12 @@ async def test_burst_1000_multi_tenant_isolation(
         ]
     seed_duration = time.monotonic() - seed_start
     print(f"Seeding 1000 executions took: {seed_duration:.1f}s")
+    # The seed fixture intentionally uses the real capture + dispatch path.
+    # Durable ingress adds the ingress_dispatch_outbox write to each seed, so
+    # keep the guard high enough for local Postgres while still catching
+    # runaway fixture regressions.
     seed_stop_threshold = float(
-        os.environ.get("LOAD_SEED_STOP_THRESHOLD_SECONDS", "90")
+        os.environ.get("LOAD_SEED_STOP_THRESHOLD_SECONDS", "240")
     )
     assert seed_duration <= seed_stop_threshold, (
         f"Seeding 1000 executions took {seed_duration:.1f}s, "

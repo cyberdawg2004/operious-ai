@@ -28,7 +28,12 @@ class TenantStatus(StrEnum):
 
 
 class TenantChannelStatus(StrEnum):
+    DRAFT = "draft"
+    PENDING_VALIDATION = "pending_validation"
+    VALIDATION_FAILED = "validation_failed"
     ACTIVE = "active"
+    DISABLED = "disabled"
+    # Legacy values retained for generic channel compatibility.
     PAUSED = "paused"
     ERROR = "error"
     PENDING_VERIFICATION = "pending_verification"

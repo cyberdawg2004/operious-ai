@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import pytest
 from cryptography import x509
@@ -17,6 +17,7 @@ from app.boundary.adapters.email_ses import (
     validate_aws_sns_url,
 )
 from app.boundary.enums import BoundaryNormalizationStatus
+from app.boundary.ingress_dispatch_outbox import IngressDispatchOutboxRecord
 from app.boundary.persistence import (
     BoundaryIngressQuery,
     InMemoryBoundaryPersistence,
@@ -109,6 +110,41 @@ async def test_ses_sns_notification_verifies_signature_and_parses_mime() -> None
     for leaked in ("Type", "TopicArn", "Message", "mail", "receipt", "content"):
         assert leaked not in record.canonical_payload
     assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_ses_sns_notification_immediately_enqueues_committed_dispatch_outbox() -> None:
+    private_key, cert_pem = _certificate()
+    boundary_store = InMemoryBoundaryPersistence()
+    session = _FakeSession()
+    enqueued: list[IngressDispatchOutboxRecord] = []
+    service = await _service(
+        boundary_store=boundary_store,
+        session=session,
+        certificate_pem=cert_pem,
+        ingress_dispatch_enqueue=enqueued.append,
+    )
+    body = _signed_sns_body(
+        private_key=private_key,
+        message_id="sns-message-immediate",
+        timestamp=datetime.now(timezone.utc),
+        message=_ses_message(_mime_message(message_id="customer-immediate")),
+    )
+
+    result = await service.process_channel_webhook(
+        channel_type="email",
+        body=body,
+        headers={},
+        raw_body=_raw(body),
+        content_type="application/json",
+    )
+
+    assert result.ingress_id is not None
+    assert session.commits == 1
+    assert len(enqueued) == 1
+    assert str(enqueued[0].ingress_id) == result.ingress_id
+    assert enqueued[0].tenant_id == TENANT_ID
+    assert enqueued[0].channel == TenantChannelType.EMAIL.value
 
 
 @pytest.mark.asyncio
@@ -273,6 +309,9 @@ async def _service(
     session: _FakeSession,
     certificate_pem: bytes,
     subscription_confirmer: _SubscriptionConfirmer | None = None,
+    ingress_dispatch_enqueue: (
+        Callable[[IngressDispatchOutboxRecord], None] | None
+    ) = None,
 ) -> TicketIngressService:
     tenant_runtime = TenantConfigurationRuntime(
         repository=InMemoryTenantConfigurationRepository(),
@@ -296,6 +335,7 @@ async def _service(
             certificate_fetcher=_CertificateFetcher(certificate_pem)
         ),
         sns_subscription_confirmer=subscription_confirmer,
+        ingress_dispatch_enqueue=ingress_dispatch_enqueue,
     )
 
 

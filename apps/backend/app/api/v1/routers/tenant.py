@@ -16,7 +16,9 @@ from app.api.v1.schemas.tenant import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationResponse,
     TenantChannelCreateRequest,
+    TenantSesSelfServiceRequest,
     TenantChannelUpdateRequest,
+    TenantWhatsAppSelfServiceRequest,
     TenantConnectorConfigurationPage,
     TenantConnectorConfigurationResponse,
     TenantExecutionCircuitBreakerPage,
@@ -79,6 +81,11 @@ from app.tenant.change_requests import (
     TenantConfigChangeRequestStatus,
     TenantConfigChangeType,
 )
+from app.tenant.channel_self_service import (
+    TenantChannelSelfServicePayload,
+    build_ses_self_service_payload,
+    build_whatsapp_self_service_payload,
+)
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
@@ -96,6 +103,7 @@ from app.tenant.exceptions import (
 )
 from app.tenant.identity import (
     as_channel_configuration_id,
+    derive_channel_configuration_id,
     as_governance_policy_id,
     as_knowledge_document_id,
 )
@@ -379,6 +387,7 @@ async def configure_channel(
             credentials=request.credentials,
             webhook_secret=request.webhook_secret,
             status=request.status,
+            self_service_config=request.self_service_config,
         )
     except TenantConfigurationError as exc:
         raise HTTPException(
@@ -386,6 +395,78 @@ async def configure_channel(
             detail={"code": "tenant_channel_configuration_failed"},
         ) from exc
     return TenantChannelConfigurationResponse.from_record(record)
+
+
+@router.post(
+    "/channels/whatsapp/self-service",
+    response_model=TenantChannelConfigurationResponse,
+)
+async def configure_whatsapp_self_service_channel(
+    request: TenantWhatsAppSelfServiceRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantChannelConfigurationResponse:
+    return await _apply_whatsapp_self_service_channel(
+        request=request,
+        expected_tenant_id=expected_tenant_id,
+        service=service,
+        require_existing=False,
+    )
+
+
+@router.put(
+    "/channels/whatsapp/self-service",
+    response_model=TenantChannelConfigurationResponse,
+)
+async def update_whatsapp_self_service_channel(
+    request: TenantWhatsAppSelfServiceRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantChannelConfigurationResponse:
+    return await _apply_whatsapp_self_service_channel(
+        request=request,
+        expected_tenant_id=expected_tenant_id,
+        service=service,
+        require_existing=True,
+    )
+
+
+@router.post(
+    "/channels/email/self-service",
+    response_model=TenantChannelConfigurationResponse,
+)
+async def configure_email_self_service_channel(
+    request: TenantSesSelfServiceRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantChannelConfigurationResponse:
+    return await _apply_ses_self_service_channel(
+        request=request,
+        expected_tenant_id=expected_tenant_id,
+        service=service,
+        require_existing=False,
+    )
+
+
+@router.put(
+    "/channels/email/self-service",
+    response_model=TenantChannelConfigurationResponse,
+)
+async def update_email_self_service_channel(
+    request: TenantSesSelfServiceRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _direct_apply: AuthorityContext = Depends(require_tenant_channel_direct_apply),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantChannelConfigurationResponse:
+    return await _apply_ses_self_service_channel(
+        request=request,
+        expected_tenant_id=expected_tenant_id,
+        service=service,
+        require_existing=True,
+    )
 
 
 @router.get(
@@ -476,6 +557,7 @@ async def update_channel(
             credentials=request.credentials,
             webhook_secret=request.webhook_secret,
             status=request.status,
+            self_service_config=request.self_service_config,
         )
     except (ValueError, TenantConfigurationNotFoundError) as exc:
         raise HTTPException(
@@ -849,6 +931,156 @@ def _principal_or_400(authority: AuthorityContext) -> str:
             detail={"code": "principal_axis_missing"},
         )
     return str(authority.principal_id)
+
+
+async def _apply_whatsapp_self_service_channel(
+    *,
+    request: TenantWhatsAppSelfServiceRequest,
+    expected_tenant_id: str,
+    service: TenantConfigurationService,
+    require_existing: bool,
+) -> TenantChannelConfigurationResponse:
+    config_id = derive_channel_configuration_id(
+        tenant_id=expected_tenant_id,
+        channel_type=TenantChannelType.WHATSAPP,
+    )
+    existing = await service.get_channel_configuration(
+        tenant_id=expected_tenant_id,
+        config_id=config_id,
+    )
+    if require_existing and existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "channel_configuration_not_found"},
+        )
+    existing_credentials = (
+        await service.load_channel_credentials(
+            tenant_id=expected_tenant_id,
+            channel_type=TenantChannelType.WHATSAPP,
+        )
+        if existing is not None
+        else None
+    )
+    try:
+        payload = build_whatsapp_self_service_payload(
+            request.model_dump(by_alias=True, exclude_none=True),
+            existing_channel=existing,
+            existing_credentials=existing_credentials,
+        )
+    except (TenantConfigurationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "tenant_whatsapp_self_service_invalid"},
+        ) from exc
+    return await _persist_self_service_channel(
+        payload=payload,
+        expected_tenant_id=expected_tenant_id,
+        existing=existing is not None,
+        service=service,
+    )
+
+
+async def _apply_ses_self_service_channel(
+    *,
+    request: TenantSesSelfServiceRequest,
+    expected_tenant_id: str,
+    service: TenantConfigurationService,
+    require_existing: bool,
+) -> TenantChannelConfigurationResponse:
+    config_id = derive_channel_configuration_id(
+        tenant_id=expected_tenant_id,
+        channel_type=TenantChannelType.EMAIL,
+    )
+    existing = await service.get_channel_configuration(
+        tenant_id=expected_tenant_id,
+        config_id=config_id,
+    )
+    if require_existing and existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "channel_configuration_not_found"},
+        )
+    existing_credentials = (
+        await service.load_channel_credentials(
+            tenant_id=expected_tenant_id,
+            channel_type=TenantChannelType.EMAIL,
+        )
+        if existing is not None
+        else None
+    )
+    try:
+        payload = build_ses_self_service_payload(
+            request.model_dump(exclude_none=True),
+            existing_channel=existing,
+            existing_credentials=existing_credentials,
+        )
+    except (TenantConfigurationError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "tenant_ses_self_service_invalid"},
+        ) from exc
+    return await _persist_self_service_channel(
+        payload=payload,
+        expected_tenant_id=expected_tenant_id,
+        existing=existing is not None,
+        service=service,
+    )
+
+
+async def _persist_self_service_channel(
+    *,
+    payload: TenantChannelSelfServicePayload,
+    expected_tenant_id: str,
+    existing: bool,
+    service: TenantConfigurationService,
+) -> TenantChannelConfigurationResponse:
+    try:
+        if existing:
+            record = await service.update_channel(
+                tenant_id=expected_tenant_id,
+                config_id=derive_channel_configuration_id(
+                    tenant_id=expected_tenant_id,
+                    channel_type=payload.channel_type,
+                ),
+                routing_address=payload.routing_address,
+                credentials=payload.credentials,
+                webhook_secret=payload.webhook_secret,
+                status=payload.status,
+                self_service_config=payload.self_service_config,
+                last_validation_error=payload.last_validation_error,
+                validation_evidence=payload.validation_evidence,
+            )
+        else:
+            if payload.credentials is None:
+                raise TenantConfigurationError(
+                    "self-service channel credentials are required on create"
+                )
+            if payload.webhook_secret is None:
+                raise TenantConfigurationError(
+                    "self-service channel webhook secret is required on create"
+                )
+            record = await service.configure_channel(
+                tenant_id=expected_tenant_id,
+                channel_type=payload.channel_type,
+                routing_address=payload.routing_address,
+                credentials=payload.credentials,
+                webhook_secret=payload.webhook_secret,
+                status=payload.status,
+                self_service_config=payload.self_service_config,
+                last_validation_error=payload.last_validation_error,
+                validation_evidence=payload.validation_evidence,
+            )
+    except TenantConfigurationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "channel_configuration_not_found"},
+        ) from exc
+    except TenantConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "tenant_channel_self_service_failed"},
+        ) from exc
+    return TenantChannelConfigurationResponse.from_record(record)
 
 
 def _require_change_request_domain_capability(

@@ -69,6 +69,7 @@ fastapi==0.136.1
 filelock==3.29.0
 frozenlist==1.8.0
 fsspec==2026.4.0
+google-cloud-kms==2.24.2
 googleapis-common-protos==1.75.0
 greenlet==3.5.0
 grpcio==1.80.0

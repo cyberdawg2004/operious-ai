@@ -16,6 +16,7 @@ from app.core.redis_policy import verify_redis_memory_policy
 from app.queues import (
     QUEUE_INGRESS_EMAIL,
     QUEUE_INGRESS_VOICE,
+    QUEUE_OUTBOUND_SEND,
     QUEUE_WEBHOOK_MAINTENANCE,
 )
 from app.workers.agent_tasks import (
@@ -48,6 +49,10 @@ from app.workers.ingress_dispatch_tasks import (
     reconcile_ingress_dispatch_outbox,
 )
 from app.workers.knowledge_tasks import reindex_knowledge_document
+from app.workers.outbound_send_tasks import (
+    reconcile_outbound_send_outbox,
+    send_outbound_draft,
+)
 from app.workers.qa_tasks import score_supervisor_inspection
 from app.workers.sop_intelligence_tasks import propose_sop_intelligence_change
 from app.workers.supervisor_tasks import evaluate_session_supervisor
@@ -71,6 +76,8 @@ _FIRE_AND_FORGET_TASKS = {
     "create_governance_escalation": create_governance_escalation,
     "recover_stale_executions": recover_stale_executions,
     "dispatch_ingress": dispatch_ingress,
+    "send_outbound_draft": send_outbound_draft,
+    "reconcile_outbound_send_outbox": reconcile_outbound_send_outbox,
     "reconcile_ingress_dispatch_outbox": reconcile_ingress_dispatch_outbox,
     "reconcile_failed_execution_outbox": reconcile_failed_execution_outbox,
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
@@ -92,6 +99,8 @@ _TASK_RETRY_SETTINGS = {
     "reindex_knowledge_document": (3, 30),
     "recover_stale_executions": (5, 30),
     "dispatch_ingress": (0, 0),
+    "send_outbound_draft": (0, 0),
+    "reconcile_outbound_send_outbox": (5, 30),
     "reconcile_ingress_dispatch_outbox": (5, 30),
     "reconcile_failed_execution_outbox": (5, 30),
     "reconcile_stale_execution_outbox": (5, 30),
@@ -150,6 +159,14 @@ def test_celery_result_expires_is_one_hour() -> None:
     assert celery_app.conf.result_expires == 3600
 
 
+def test_ingress_dispatch_retry_defaults_match_approved_envelope() -> None:
+    settings = Settings()
+
+    assert settings.INGRESS_DISPATCH_MAX_ATTEMPTS == 8
+    assert settings.INGRESS_DISPATCH_MAX_AGE_SECONDS == 3600
+    assert settings.INGRESS_DISPATCH_RETRY_BASE_SECONDS == 30
+
+
 def test_fire_and_forget_tasks_ignore_results() -> None:
     assert celery_app.conf.task_ignore_result is True
     assert _FIRE_AND_FORGET_TASKS
@@ -201,6 +218,12 @@ def test_ingress_dispatch_task_routes_to_email_queue() -> None:
     assert routes["dispatch_ingress"]["queue"] == QUEUE_INGRESS_EMAIL
 
 
+def test_outbound_send_task_routes_to_send_queue() -> None:
+    routes = celery_app.conf.task_routes
+
+    assert routes["send_outbound_draft"]["queue"] == QUEUE_OUTBOUND_SEND
+
+
 def test_maintenance_task_routes_to_webhook_maintenance_queue() -> None:
     routes = celery_app.conf.task_routes
 
@@ -212,6 +235,10 @@ def test_maintenance_task_routes_to_webhook_maintenance_queue() -> None:
     assert routes["recover_dead_letter_replays"]["queue"] == QUEUE_WEBHOOK_MAINTENANCE
     assert (
         routes["reconcile_ingress_dispatch_outbox"]["queue"]
+        == QUEUE_WEBHOOK_MAINTENANCE
+    )
+    assert (
+        routes["reconcile_outbound_send_outbox"]["queue"]
         == QUEUE_WEBHOOK_MAINTENANCE
     )
 

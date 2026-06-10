@@ -27,6 +27,7 @@ from app.governance.subjects.base import SubjectKind
 from app.governance.subjects.communication import CommunicationGovernanceSubject
 from app.identity import coerce_tenant_id
 from app.resolution.enums import ResolutionGovernanceVerdict
+from app.resolution.identity import derive_resolution_outbound_draft_id
 from app.runtime.grounding import (
     GroundingChecker,
     GroundingCheckRequest,
@@ -39,6 +40,7 @@ from app.runtime.resolution_runtime import (
 
 _CHAIN_ID = "resolution.communication.pre_execution"
 _ACTION = "resolution.proposal.prepare"
+_CUSTOMER_REPLY_SEND_ACTION = "customer_reply.send"
 _CHANNEL = "resolution/proposal"
 _SUMMARY_MAX_CHARS = 480
 _CORRELATION_NAMESPACE = uuid.UUID("2b7b4f5a-0002-4b01-9001-000000000001")
@@ -319,6 +321,16 @@ def _subject_metadata(
     return {
         "request_id": request_id,
         "proposal_id": str(request.proposal_id),
+        "draft_id": str(
+            derive_resolution_outbound_draft_id(
+                tenant_id=request.tenant_id,
+                proposal_id=request.proposal_id,
+            )
+        ),
+        "governed_action": _CUSTOMER_REPLY_SEND_ACTION,
+        "source_channel": request.source_channel,
+        "reply_recipient": request.reply_recipient,
+        "reply_thread_context": request.reply_thread_context,
         "session_id": request.session_id,
         "execution_id": request.execution_id,
         "dispatch_id": request.dispatch_id,

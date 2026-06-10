@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ClipboardCheck,
   Inbox,
+  LayoutDashboard,
   LayoutList,
   MessageSquare,
   Network,
@@ -46,25 +47,26 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { id: "overview", href: dashboardRoutes.overview, label: "Command Overview", icon: LayoutDashboard, group: "operations" },
   { id: "operations", href: dashboardRoutes.operations, label: "Operations Queue", icon: LayoutList, group: "operations" },
   { id: "conversations", href: dashboardRoutes.conversations, label: "Conversations", icon: MessageSquare, group: "operations" },
   { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity, group: "operations" },
-  { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "DLQ Inspector", icon: AlertTriangle, group: "operations" },
+  { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "Failed Operations", icon: AlertTriangle, group: "operations" },
   { id: "fraud", href: dashboardRoutes.fraud, label: "Fraud Monitoring", icon: ShieldAlert, group: "operations" },
-  { id: "trace", href: dashboardRoutes.trace, label: "Trace Inspector", icon: Network, group: "operations" },
-  { id: "supervisor", href: dashboardRoutes.supervisor, label: "Supervisor Inbox", icon: ShieldAlert, group: "operations" },
+  { id: "trace", href: dashboardRoutes.trace, label: "Decision History", icon: Network, group: "operations" },
+  { id: "supervisor", href: dashboardRoutes.supervisor, label: "Quality Reviews", icon: ShieldAlert, group: "operations" },
   { id: "escalations", href: dashboardRoutes.escalations, label: "Escalations", icon: LifeBuoy, group: "operations", requiresCapability: "tenant.operations.read" },
   { id: "case-approvals", href: dashboardRoutes["case-approvals"], label: "Case Approvals", icon: ClipboardCheck, group: "operations", requiresCapability: "tenant.approvals.read" },
   { id: "approvals", href: dashboardRoutes.approvals, label: "Approval Inbox", icon: Inbox, group: "intelligence" },
-  { id: "cognition", href: dashboardRoutes.cognition, label: "Cognition Hub", icon: Brain, group: "intelligence" },
+  { id: "cognition", href: dashboardRoutes.cognition, label: "AI Recommendations", icon: Brain, group: "intelligence" },
   { id: "knowledge", href: dashboardRoutes.knowledge, label: "Knowledge Base", icon: BookOpen, group: "intelligence" },
   { id: "governance", href: dashboardRoutes.governance, label: "Governance", icon: Gavel, group: "platform" },
   { id: "crisis", href: dashboardRoutes.crisis, label: "Crisis History", icon: ShieldAlert, group: "platform" },
-  { id: "topology", href: dashboardRoutes.topology, label: "Topology", icon: GitBranch, group: "platform" },
+  { id: "topology", href: dashboardRoutes.topology, label: "Workforce Map", icon: GitBranch, group: "platform" },
   { id: "channels", href: dashboardRoutes.channels, label: "Channels", icon: Radio, group: "platform" },
   { id: "connectors", href: dashboardRoutes.connectors, label: "Connector Config", icon: Plug, group: "platform" },
   { id: "action-policy", href: dashboardRoutes["action-policy"], label: "Action Policy", icon: Gavel, group: "platform" },
-  { id: "config-approvals", href: dashboardRoutes["config-approvals"], label: "Config Approvals", icon: Inbox, group: "platform" },
+  { id: "config-approvals", href: dashboardRoutes["config-approvals"], label: "Configuration Approvals", icon: Inbox, group: "platform" },
   { id: "onboarding", href: dashboardRoutes.onboarding, label: "Configure Tenant", icon: Building2, group: "platform" },
   { id: "team", href: dashboardRoutes.team, label: "Team & Roles", icon: Users, group: "system" },
   { id: "audit", href: dashboardRoutes.audit, label: "Audit & Exports", icon: FileSearch, group: "system" },
@@ -148,7 +150,7 @@ export function Sidebar({
       <div className={cn("px-4 pb-3 pt-4", collapsed && "lg:px-3")}>
         <div className="flex items-center justify-between gap-3">
           <Link
-            href={dashboardRoutes.operations}
+            href={dashboardRoutes.overview}
             className="flex items-center gap-2"
             aria-label="Operious home"
           >

@@ -80,9 +80,12 @@ function FraudCircuitStates() {
   }, []);
 
   useEffect(() => {
-    void fetchStates();
+    const initial = window.setTimeout(() => void fetchStates(), 0);
     const interval = window.setInterval(() => void fetchStates(), 15_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
   }, [fetchStates]);
 
   const allHealthy = (states ?? []).every((state) => state.state !== "TRIPPED");
@@ -210,9 +213,12 @@ function QuarantineInspector() {
   }, []);
 
   useEffect(() => {
-    void fetchRecords();
+    const initial = window.setTimeout(() => void fetchRecords(), 0);
     const interval = window.setInterval(() => void fetchRecords(), 30_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
   }, [fetchRecords]);
 
   const selectedRecord = useMemo(
@@ -509,9 +515,12 @@ function FraudEventLog() {
   }, []);
 
   useEffect(() => {
-    void fetchEvents();
+    const initial = window.setTimeout(() => void fetchEvents(), 0);
     const interval = window.setInterval(() => void fetchEvents(), 60_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
   }, [fetchEvents]);
 
   return (

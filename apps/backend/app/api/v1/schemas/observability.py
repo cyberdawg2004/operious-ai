@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.observability.persistence import (
     DeadLetterExecutionPage,
     DeadLetterExecutionRecord,
+    InboundMessageTimelineRecord,
+    InboundMessageTimelineStageRecord,
     InboundNormalizationDeadLetterPage,
     InboundNormalizationDeadLetterRecord,
     OperationalAlertPage,
@@ -249,6 +251,73 @@ class InboundNormalizationDeadLetterPageResponse(BaseModel):
             ],
             total=page.total,
             offset=page.offset,
+        )
+
+
+class InboundMessageTimelineStageResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    stage: str
+    status: str
+    occurred_at: datetime
+    source_table: str
+    source_id: str
+    ids: dict[str, Any]
+    metadata: dict[str, Any]
+
+    @classmethod
+    def from_record(
+        cls,
+        record: InboundMessageTimelineStageRecord,
+    ) -> "InboundMessageTimelineStageResponse":
+        return cls(
+            stage=record.stage,
+            status=record.status,
+            occurred_at=record.occurred_at,
+            source_table=record.source_table,
+            source_id=record.source_id,
+            ids=dict(record.ids),
+            metadata=dict(record.metadata),
+        )
+
+
+class InboundMessageTimelineResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    lookup_key: str
+    lookup_value: str
+    ids: dict[str, Any]
+    stages: list[InboundMessageTimelineStageResponse]
+    current_stage: str | None
+    terminal: bool
+    stalled: bool
+    stalled_reason: str | None
+    stall_threshold_seconds: int
+    latest_event_at: datetime | None
+    generated_at: datetime
+
+    @classmethod
+    def from_record(
+        cls,
+        record: InboundMessageTimelineRecord,
+    ) -> "InboundMessageTimelineResponse":
+        return cls(
+            tenant_id=record.tenant_id,
+            lookup_key=record.lookup_key,
+            lookup_value=record.lookup_value,
+            ids=dict(record.ids),
+            stages=[
+                InboundMessageTimelineStageResponse.from_record(stage)
+                for stage in record.stages
+            ],
+            current_stage=record.current_stage,
+            terminal=record.terminal,
+            stalled=record.stalled,
+            stalled_reason=record.stalled_reason,
+            stall_threshold_seconds=record.stall_threshold_seconds,
+            latest_event_at=record.latest_event_at,
+            generated_at=record.generated_at,
         )
 
 

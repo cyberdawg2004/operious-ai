@@ -425,10 +425,21 @@ export type TenantChannelConfiguration = {
   config_id: string;
   channel_type: string;
   routing_address: string;
-  status: "active" | "paused" | "error" | "pending_verification";
+  status:
+    | "draft"
+    | "pending_validation"
+    | "validation_failed"
+    | "active"
+    | "disabled"
+    | "paused"
+    | "error"
+    | "pending_verification";
   verified_at: string | null;
   credential_rotated_at: string | null;
   credential_rotation_expires_at: string | null;
+  self_service_config: Record<string, unknown>;
+  last_validation_error: string | null;
+  validation_evidence: Record<string, unknown>;
 };
 
 export type TenantChannelCreateRequest = {
@@ -443,6 +454,39 @@ export type TenantChannelUpdateRequest = {
   routing_address?: string;
   credentials?: Record<string, unknown>;
   webhook_secret?: string;
+  status?: TenantChannelConfiguration["status"];
+  self_service_config?: Record<string, unknown>;
+};
+
+export type TenantWhatsAppSelfServiceRequest = {
+  waba_id?: string;
+  phone_number_id: string;
+  business_account_id?: string;
+  graph_api_version?: string;
+  app_id?: string;
+  config_id?: string;
+  access_token?: string;
+  system_user_token?: string;
+  webhook_verify_token?: string;
+  app_secret?: string;
+  status?: TenantChannelConfiguration["status"];
+};
+
+export type TenantSesSelfServiceRequest = {
+  mode: "managed" | "byo_role" | "byo_access_key";
+  region: string;
+  source_email?: string;
+  source_domain?: string;
+  inbound_address?: string;
+  inbound_domain?: string;
+  topic_arn?: string;
+  receipt_rule_set?: string;
+  receipt_rule_name?: string;
+  role_arn?: string;
+  external_id?: string;
+  access_key_id?: string;
+  secret_access_key?: string;
+  session_token?: string;
   status?: TenantChannelConfiguration["status"];
 };
 
@@ -1245,10 +1289,47 @@ export function updateChannelConfiguration(
   );
 }
 
-export function verifyChannelConfiguration(configId: string) {
+export function createWhatsAppSelfServiceChannel(
+  request: TenantWhatsAppSelfServiceRequest
+) {
   return apiRequest<TenantChannelConfiguration>(
-    `/tenant/channels/${encodeURIComponent(configId)}/verify`,
-    { method: "POST" }
+    "/tenant/channels/whatsapp/self-service",
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    }
+  );
+}
+
+export function updateWhatsAppSelfServiceChannel(
+  request: TenantWhatsAppSelfServiceRequest
+) {
+  return apiRequest<TenantChannelConfiguration>(
+    "/tenant/channels/whatsapp/self-service",
+    {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }
+  );
+}
+
+export function createSesSelfServiceChannel(request: TenantSesSelfServiceRequest) {
+  return apiRequest<TenantChannelConfiguration>(
+    "/tenant/channels/email/self-service",
+    {
+      method: "POST",
+      body: JSON.stringify(request),
+    }
+  );
+}
+
+export function updateSesSelfServiceChannel(request: TenantSesSelfServiceRequest) {
+  return apiRequest<TenantChannelConfiguration>(
+    "/tenant/channels/email/self-service",
+    {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }
   );
 }
 

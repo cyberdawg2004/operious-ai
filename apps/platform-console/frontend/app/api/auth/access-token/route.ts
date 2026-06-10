@@ -1,7 +1,17 @@
-import { auth0 } from "@/lib/auth0";
+import { getAuth0Client } from "@/lib/auth0";
+import { hasAuth0Environment } from "@/lib/auth0-env";
 import { NextResponse } from "next/server";
 
 export async function GET() {
+  if (!hasAuth0Environment()) {
+    return NextResponse.json(
+      { error: "Auth0 environment is not configured" },
+      { status: 401 }
+    );
+  }
+
+  const auth0 = getAuth0Client();
+
   try {
     const { token } = await auth0.getAccessToken();
     if (!token) {

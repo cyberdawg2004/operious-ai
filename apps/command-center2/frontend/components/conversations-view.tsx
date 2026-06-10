@@ -48,21 +48,18 @@ export function ConversationsView() {
     return [...page.items].sort(compareSessionsByOpenedAtDesc);
   }, []);
   const { data, error, isLoading, reload } = useApiResource(loadActiveSessions);
-  const sessions = data ?? [];
+  const sessions = useMemo(() => data ?? [], [data]);
 
   useEffect(() => {
     const intervalId = window.setInterval(reload, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
   }, [reload]);
 
-  useEffect(() => {
-    if (!selectedSessionId && sessions.length > 0) {
-      setSelectedSessionId(sessions[0].session_id);
-    }
-  }, [selectedSessionId, sessions]);
-
   const selectedSession = useMemo(
-    () => sessions.find((session) => session.session_id === selectedSessionId) ?? null,
+    () =>
+      sessions.find((session) => session.session_id === selectedSessionId) ??
+      sessions[0] ??
+      null,
     [selectedSessionId, sessions]
   );
 
@@ -84,12 +81,15 @@ export function ConversationsView() {
       <div className="flex min-h-[calc(100dvh-112px)] flex-col gap-4 lg:grid lg:grid-cols-[320px_minmax(0,1fr)]">
         <ConversationList
           sessions={sessions}
-          selectedSessionId={selectedSessionId}
+          selectedSessionId={selectedSession?.session_id ?? selectedSessionId}
           onSelect={setSelectedSessionId}
           onRefresh={reload}
         />
         {selectedSession ? (
-          <ConversationThread session={selectedSession} />
+          <ConversationThread
+            key={selectedSession.session_id}
+            session={selectedSession}
+          />
         ) : (
           <div className="cc-panel-tight flex min-h-[420px] items-center justify-center">
             <EmptyState
@@ -175,15 +175,13 @@ function ConversationList({
 
 function ConversationThread({ session }: { session: SessionRecord }) {
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
-  const [status, setStatus] = useState<string>("idle");
+  const [status, setStatus] = useState<string>("connecting");
   const [operatorMode, setOperatorMode] = useState(false);
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setMessages([]);
-    setStatus("connecting");
     const source = new EventSource(streamUrl(session.session_id), {
       withCredentials: true,
     });

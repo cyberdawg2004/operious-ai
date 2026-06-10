@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 _shared_http_client: httpx.AsyncClient | None = None
+logger = logging.getLogger(__name__)
 
 
 def init_shared_http_client(
@@ -58,7 +61,12 @@ async def close_shared_http_client() -> None:
     client = _shared_http_client
     _shared_http_client = None
     if client is not None and not client.is_closed:
-        await client.aclose()
+        try:
+            await client.aclose()
+        except RuntimeError as exc:
+            if "Event loop is closed" not in str(exc):
+                raise
+            logger.warning("shared_http_client_close_skipped_closed_loop")
 
 
 __all__ = [

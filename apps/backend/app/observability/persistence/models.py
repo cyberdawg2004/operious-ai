@@ -12,6 +12,7 @@ from app.observability.identity import (
 )
 from app.observability.persistence.records import (
     DeadLetterExecutionRecord,
+    InboundMessageTimelineRecord,
     InboundNormalizationDeadLetterRecord,
     OperationalAlertRecord,
     OperationalSLODefinitionRecord,
@@ -84,6 +85,44 @@ class InboundNormalizationDeadLetterQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class InboundMessageTimelineLookup:
+    ingress_id: str | None = None
+    external_conversation_id: str | None = None
+    session_id: str | None = None
+    execution_id: str | None = None
+    draft_id: str | None = None
+    outbound_send_outbox_id: str | None = None
+
+    def __post_init__(self) -> None:
+        populated = self.populated()
+        if len(populated) != 1:
+            raise ValueError("exactly one inbound timeline lookup key is required")
+
+    def populated(self) -> tuple[tuple[str, str], ...]:
+        values = (
+            ("ingress_id", self.ingress_id),
+            ("external_conversation_id", self.external_conversation_id),
+            ("session_id", self.session_id),
+            ("execution_id", self.execution_id),
+            ("draft_id", self.draft_id),
+            ("outbound_send_outbox_id", self.outbound_send_outbox_id),
+        )
+        return tuple(
+            (key, value.strip())
+            for key, value in values
+            if value is not None and value.strip()
+        )
+
+    @property
+    def key(self) -> str:
+        return self.populated()[0][0]
+
+    @property
+    def value(self) -> str:
+        return self.populated()[0][1]
+
+
+@dataclass(frozen=True, slots=True)
 class DeadLetterExecutionPage:
     items: tuple[DeadLetterExecutionRecord, ...]
     total: int
@@ -131,6 +170,12 @@ class InboundNormalizationDeadLetterPage:
     offset: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class InboundMessageTimelinePage:
+    items: tuple[InboundMessageTimelineRecord, ...]
+    total: int
+
+
 def _validate_page(limit: int, offset: int) -> None:
     if limit < 1:
         raise ValueError("limit must be >= 1")
@@ -143,6 +188,8 @@ __all__ = [
     "DeadLetterExecutionQuery",
     "InboundNormalizationDeadLetterPage",
     "InboundNormalizationDeadLetterQuery",
+    "InboundMessageTimelineLookup",
+    "InboundMessageTimelinePage",
     "OperationalAlertPage",
     "OperationalMetricsQuery",
     "OperationalSLODefinitionPage",

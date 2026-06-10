@@ -28,6 +28,12 @@ def _production(**overrides: object) -> Settings:
         "EMBEDDING_DEFAULT_PROVIDER": "openai",
         "OPENAI_API_KEY": "sk-openai-real",
         "TENANT_CREDENTIAL_MASTER_KEY": "x" * 32,
+        "CREDENTIAL_KMS_BACKEND": "gcp",
+        "OPERIOUS_KMS_KEY_RESOURCE": (
+            "projects/operious-kms/locations/global/keyRings/operious/"
+            "cryptoKeys/tenant-credentials"
+        ),
+        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/operious-kms.json",
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
         "PUBLIC_BASE_URL": "https://api.operious.com",
     }
@@ -86,6 +92,25 @@ def test_embedding_dimension_mismatch_blocks_boot() -> None:
 def test_missing_credential_master_key_blocks_boot() -> None:
     with pytest.raises(ProductionReadinessError):
         validate_production_config(_production(TENANT_CREDENTIAL_MASTER_KEY=""))
+
+
+def test_local_credential_kms_backend_blocks_production_boot() -> None:
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(_production(CREDENTIAL_KMS_BACKEND="local"))
+    assert any("CREDENTIAL_KMS_BACKEND=local" in p for p in exc.value.problems)
+
+
+def test_gcp_credential_kms_requires_key_resource_and_credentials() -> None:
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(
+            _production(
+                OPERIOUS_KMS_KEY_RESOURCE="",
+                GCP_KMS_KEY_RESOURCE="",
+                GOOGLE_APPLICATION_CREDENTIALS="",
+            )
+        )
+    assert any("OPERIOUS_KMS_KEY_RESOURCE" in p for p in exc.value.problems)
+    assert any("GOOGLE_APPLICATION_CREDENTIALS" in p for p in exc.value.problems)
 
 
 def test_missing_audit_secret_blocks_boot() -> None:

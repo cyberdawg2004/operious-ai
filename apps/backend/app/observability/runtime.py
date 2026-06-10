@@ -24,6 +24,7 @@ from app.observability.persistence.models import (
     DeadLetterExecutionQuery,
     InboundNormalizationDeadLetterPage,
     InboundNormalizationDeadLetterQuery,
+    InboundMessageTimelineLookup,
     OperationalAlertPage,
     OperationalMetricsQuery,
     OperationalSLODefinitionPage,
@@ -35,6 +36,7 @@ from app.observability.persistence.models import (
 )
 from app.observability.persistence.records import (
     OperationalAlertRecord,
+    InboundMessageTimelineRecord,
     OperationalMetricsSnapshotRecord,
     OperationalSLODefinitionRecord,
     OperationalTraceSpanRecord,
@@ -96,6 +98,23 @@ class OperationalObservabilityRuntime:
         return await self._persistence.list_inbound_normalization_dead_letters(
             query,
             expected_tenant_id=expected_tenant_id,
+        )
+
+    async def get_inbound_message_timeline(
+        self,
+        *,
+        lookup: InboundMessageTimelineLookup,
+        expected_tenant_id: str,
+        stall_threshold_seconds: int,
+        now: datetime | None = None,
+    ) -> InboundMessageTimelineRecord:
+        if stall_threshold_seconds < 1:
+            raise ValueError("stall_threshold_seconds must be positive")
+        return await self._persistence.get_inbound_message_timeline(
+            lookup,
+            expected_tenant_id=expected_tenant_id,
+            stall_threshold_seconds=stall_threshold_seconds,
+            now=now,
         )
 
     async def define_slo(

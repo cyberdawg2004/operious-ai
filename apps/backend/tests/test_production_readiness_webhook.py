@@ -10,6 +10,12 @@ def _prod(**overrides: object) -> Settings:
     base: dict[str, object] = {
         "ENVIRONMENT": "production",
         "TENANT_CREDENTIAL_MASTER_KEY": "k" * 32,
+        "CREDENTIAL_KMS_BACKEND": "gcp",
+        "OPERIOUS_KMS_KEY_RESOURCE": (
+            "projects/operious-kms/locations/global/keyRings/operious/"
+            "cryptoKeys/tenant-credentials"
+        ),
+        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/operious-kms.json",
         "AUDIT_EXPORT_HMAC_SECRET": "s" * 32,
         "ANTHROPIC_API_KEY": "a" * 8,
         "TRANSLATION_PROVIDER": "anthropic",

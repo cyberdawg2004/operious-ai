@@ -693,11 +693,185 @@ class EmailCustomerReplyDeliveryRow(Base):
     )
 
 
+class OutboundSendOutboxRow(Base):
+    """Durable, claimable auto-send intent for governed customer replies."""
+
+    __tablename__ = "outbound_send_outbox"
+
+    outbox_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    channel: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    draft_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
+    proposal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    dispatch_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    governance_decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        index=True,
+    )
+    recipient: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    draft_body_sha256: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+        server_default=text("'pending'"),
+    )
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(_HANDLE_WIDTH), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    provider_message_id: Mapped[str | None] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=True,
+        index=True,
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(tenant_id) > 0",
+            name="ck_outbound_send_outbox_tenant_id_nonempty",
+        ),
+        CheckConstraint(
+            "channel IN ('email', 'whatsapp')",
+            name="ck_outbound_send_outbox_channel_valid",
+        ),
+        CheckConstraint(
+            "length(action) > 0",
+            name="ck_outbound_send_outbox_action_nonempty",
+        ),
+        CheckConstraint(
+            "length(session_id) > 0",
+            name="ck_outbound_send_outbox_session_id_nonempty",
+        ),
+        CheckConstraint(
+            "length(dispatch_id) > 0",
+            name="ck_outbound_send_outbox_dispatch_id_nonempty",
+        ),
+        CheckConstraint(
+            "length(recipient) > 0",
+            name="ck_outbound_send_outbox_recipient_nonempty",
+        ),
+        CheckConstraint(
+            "length(draft_body_sha256) = 64",
+            name="ck_outbound_send_outbox_draft_body_sha256_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'claimed', 'sent', 'dead_lettered')",
+            name="ck_outbound_send_outbox_status_valid",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_outbound_send_outbox_attempt_count_nonnegative",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id"],
+            ["tenants.tenant_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["draft_id"],
+            ["resolution_outbound_drafts.draft_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["proposal_id"],
+            ["resolution_proposals.proposal_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["governance_decision_id"],
+            ["governance_decisions.decision_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "draft_id",
+            "channel",
+            "recipient",
+            "action",
+            name="uq_outbound_send_outbox_tenant_draft_channel_recipient_action",
+        ),
+        Index("ix_outbound_send_outbox_status_next_attempt", "status", "next_attempt_at"),
+        Index("ix_outbound_send_outbox_tenant_status", "tenant_id", "status"),
+    )
+
+
 __all__ = [
     "BoundaryEgressRow",
     "BoundaryIngressRow",
     "EmailCustomerReplyDeliveryRow",
     "IngressDispatchOutboxRow",
+    "OutboundSendOutboxRow",
     "WhatsAppCustomerReplyDeliveryRow",
     "WebhookNonceRecordRow",
 ]

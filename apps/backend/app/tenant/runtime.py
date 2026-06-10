@@ -32,7 +32,7 @@ from app.coordination.topology.models.escalation_path import EscalationPath
 from app.coordination.topology.models.node import CoordinationNode
 from app.coordination.topology.models.path import CoordinationPath
 from app.coordination.topology.models.topology import CoordinationTopology
-from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.credentials import TenantCredentialCodec
 from app.tenant.chronology import ChronologyVerificationResult, canonical_sha256
 from app.tenant.enums import (
     TenantChannelStatus,
@@ -104,7 +104,7 @@ class TenantConfigurationRuntime:
         self,
         *,
         repository: TenantConfigurationRepository,
-        credential_encryptor: TenantCredentialEncryptor | None = None,
+        credential_encryptor: TenantCredentialCodec | None = None,
     ) -> None:
         self._repository = repository
         self._credential_encryptor = credential_encryptor
@@ -117,7 +117,10 @@ class TenantConfigurationRuntime:
         routing_address: str,
         credentials: Mapping[str, Any],
         webhook_secret: str,
-        status: TenantChannelStatus = (TenantChannelStatus.PENDING_VERIFICATION),
+        status: TenantChannelStatus = (TenantChannelStatus.PENDING_VALIDATION),
+        self_service_config: Mapping[str, Any] | None = None,
+        last_validation_error: str | None = None,
+        validation_evidence: Mapping[str, Any] | None = None,
     ) -> TenantChannelConfigurationRecord:
         now = _utcnow()
         config_id = derive_channel_configuration_id(
@@ -137,9 +140,37 @@ class TenantConfigurationRuntime:
             routing_address=routing_address,
             credentials_enc=self._require_credential_encryptor().encrypt(
                 tenant_id=tenant_id,
+                channel_type=channel_type,
                 credentials=credentials,
             ),
             webhook_secret=webhook_secret,
+            self_service_config=(
+                dict(self_service_config)
+                if self_service_config is not None
+                else (
+                    dict(existing.self_service_config)
+                    if existing is not None
+                    else {}
+                )
+            ),
+            last_validation_error=(
+                last_validation_error
+                if last_validation_error is not None
+                else (
+                    existing.last_validation_error
+                    if existing is not None
+                    else None
+                )
+            ),
+            validation_evidence=(
+                _credential_free_validation_evidence(validation_evidence)
+                if validation_evidence is not None
+                else (
+                    dict(existing.validation_evidence)
+                    if existing is not None
+                    else {}
+                )
+            ),
             verified_at=(existing.verified_at if existing is not None else None),
             created_at=created_at,
             updated_at=now,
@@ -159,6 +190,9 @@ class TenantConfigurationRuntime:
         credentials: Mapping[str, Any] | None = None,
         webhook_secret: str | None = None,
         status: TenantChannelStatus | None = None,
+        self_service_config: Mapping[str, Any] | None = None,
+        last_validation_error: str | None = None,
+        validation_evidence: Mapping[str, Any] | None = None,
     ) -> TenantChannelConfigurationRecord:
         existing = await self._require_channel(
             tenant_id=tenant_id,
@@ -174,6 +208,7 @@ class TenantConfigurationRuntime:
             credentials_enc=(
                 self._require_credential_encryptor().encrypt(
                     tenant_id=tenant_id,
+                    channel_type=existing.channel_type,
                     credentials=credentials,
                 )
                 if credentials is not None
@@ -185,6 +220,21 @@ class TenantConfigurationRuntime:
                 else existing.webhook_secret
             ),
             status=status if status is not None else existing.status,
+            self_service_config=(
+                dict(self_service_config)
+                if self_service_config is not None
+                else existing.self_service_config
+            ),
+            last_validation_error=(
+                last_validation_error
+                if last_validation_error is not None
+                else existing.last_validation_error
+            ),
+            validation_evidence=(
+                _credential_free_validation_evidence(validation_evidence)
+                if validation_evidence is not None
+                else existing.validation_evidence
+            ),
             updated_at=_utcnow(),
         )
         await self._repository.save_channel_configuration(
@@ -215,6 +265,7 @@ class TenantConfigurationRuntime:
             existing,
             credentials_enc=self._require_credential_encryptor().encrypt(
                 tenant_id=tenant_id,
+                channel_type=existing.channel_type,
                 credentials=credentials,
             ),
             webhook_secret=webhook_secret,
@@ -236,16 +287,30 @@ class TenantConfigurationRuntime:
         *,
         tenant_id: str,
         config_id: TenantChannelConfigurationId,
+        validation_evidence: Mapping[str, Any] | None = None,
+        validation_error: str | None = None,
     ) -> TenantChannelConfigurationRecord:
         existing = await self._require_channel(
             tenant_id=tenant_id,
             config_id=config_id,
         )
         now = _utcnow()
+        evidence = _credential_free_validation_evidence(validation_evidence)
+        validated = _validation_evidence_is_success(evidence)
+        status = (
+            TenantChannelStatus.ACTIVE
+            if validated
+            else TenantChannelStatus.PENDING_VALIDATION
+        )
+        error = None if validated else (
+            validation_error or "provider validation evidence is required"
+        )
         record = replace(
             existing,
-            status=TenantChannelStatus.ACTIVE,
-            verified_at=now,
+            status=status,
+            verified_at=now if validated else existing.verified_at,
+            last_validation_error=error,
+            validation_evidence=evidence,
             updated_at=now,
         )
         await self._repository.save_channel_configuration(
@@ -262,6 +327,17 @@ class TenantConfigurationRuntime:
     ) -> TenantChannelConfigurationPage:
         return await self._repository.list_channel_configurations(
             query,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def get_channel_configuration(
+        self,
+        *,
+        tenant_id: str,
+        config_id: TenantChannelConfigurationId,
+    ) -> TenantChannelConfigurationRecord | None:
+        return await self._repository.get_channel_configuration(
+            config_id,
             expected_tenant_id=tenant_id,
         )
 
@@ -342,6 +418,7 @@ class TenantConfigurationRuntime:
         )
         return self._require_credential_encryptor().decrypt(
             tenant_id=tenant_id,
+            channel_type=channel_type,
             encrypted_credentials=record.credentials_enc,
         )
 
@@ -1030,7 +1107,7 @@ class TenantConfigurationRuntime:
             raise TenantConfigurationNotFoundError("topology configuration not found")
         return record
 
-    def _require_credential_encryptor(self) -> TenantCredentialEncryptor:
+    def _require_credential_encryptor(self) -> TenantCredentialCodec:
         if self._credential_encryptor is None:
             raise TenantConfigurationError(
                 "tenant credential encryptor is required for channel credentials"
@@ -1269,6 +1346,62 @@ def _json_object(value: object, field_name: str) -> dict[str, Any]:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+_VALIDATION_EVIDENCE_SENSITIVE_KEYS = frozenset(
+    {
+        "access_key_id",
+        "access_token",
+        "api_key",
+        "app_secret",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "bearer_token",
+        "business_token",
+        "client_secret",
+        "credential",
+        "credentials",
+        "credentials_enc",
+        "graph_api_access_token",
+        "secret",
+        "secret_access_key",
+        "session_token",
+        "token",
+        "webhook_secret",
+        "webhook_verify_token",
+    }
+)
+
+
+def _credential_free_validation_evidence(
+    evidence: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if evidence is None:
+        return {}
+    return cast(dict[str, Any], _strip_validation_evidence(evidence))
+
+
+def _strip_validation_evidence(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        sanitized: dict[str, Any] = {}
+        mapping = cast(Mapping[Any, Any], value)
+        for raw_key, raw_item in mapping.items():
+            key = str(raw_key)
+            if key.lower() in _VALIDATION_EVIDENCE_SENSITIVE_KEYS:
+                continue
+            sanitized[key] = _strip_validation_evidence(raw_item)
+        return sanitized
+    if isinstance(value, list):
+        items = cast(list[Any], value)
+        return [_strip_validation_evidence(item) for item in items]
+    return value
+
+
+def _validation_evidence_is_success(evidence: Mapping[str, Any]) -> bool:
+    result = str(evidence.get("result") or evidence.get("status") or "").casefold()
+    return result in {"ok", "success", "validated", "active"} and bool(
+        evidence.get("provider") or evidence.get("validator")
+    )
 
 
 def _assert_topology_is_dag(topology: CoordinationTopology) -> None:

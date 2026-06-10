@@ -18,6 +18,7 @@ import {
   type ActionApprovalDetail,
   type ActionApprovalSummary,
 } from "@/lib/api";
+import { TechnicalDetails } from "@/components/technical-details";
 import { useApiResource } from "@/lib/use-api-resource";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
@@ -40,7 +41,7 @@ export function ApprovalInbox() {
     []
   );
   const { data, error, isLoading, reload } = useApiResource(loadApprovals);
-  const approvals = data ?? [];
+  const approvals = useMemo(() => data ?? [], [data]);
 
   useEffect(() => {
     const interval = window.setInterval(reload, REFRESH_MS);
@@ -49,27 +50,28 @@ export function ApprovalInbox() {
 
   useEffect(() => {
     if (selectedId === null) {
-      setDetail(null);
-      setDetailError(null);
       return;
     }
     let active = true;
-    setDetailLoading(true);
-    setDetailError(null);
-    getActionApproval(selectedId)
-      .then((loaded) => {
-        if (!active) return;
-        setDetail(loaded);
-      })
-      .catch((caught: unknown) => {
-        if (!active) return;
-        setDetailError(formatApiError(caught));
-      })
-      .finally(() => {
-        if (active) setDetailLoading(false);
-      });
+    const timeout = window.setTimeout(() => {
+      setDetailLoading(true);
+      setDetailError(null);
+      getActionApproval(selectedId)
+        .then((loaded) => {
+          if (!active) return;
+          setDetail(loaded);
+        })
+        .catch((caught: unknown) => {
+          if (!active) return;
+          setDetailError(formatApiError(caught));
+        })
+        .finally(() => {
+          if (active) setDetailLoading(false);
+        });
+    }, 0);
     return () => {
       active = false;
+      window.clearTimeout(timeout);
     };
   }, [selectedId]);
 
@@ -80,6 +82,8 @@ export function ApprovalInbox() {
 
   const closeDetail = () => {
     setSelectedId(null);
+    setDetail(null);
+    setDetailError(null);
     setDenyReason("");
     setConfirmApprove(false);
     setActionError(null);
@@ -330,7 +334,9 @@ function ApprovalDetailPanel({
               >
                 <KeyValue label="Tool" value={toolLabel(detail.tool_name)} />
                 <KeyValue label="Payload" value={payloadSummary(detail.payload)} />
-                <JsonBlock value={detail.payload} />
+                <TechnicalDetails label="Show full payload" openLabel="Hide full payload">
+                  <JsonBlock value={detail.payload} />
+                </TechnicalDetails>
               </DetailSection>
 
               <DetailSection title="Classification">

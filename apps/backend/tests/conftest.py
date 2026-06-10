@@ -74,6 +74,19 @@ os.environ.setdefault("SENTRY_DSN", "")
 os.environ["EMBEDDING_DEFAULT_PROVIDER"] = "deterministic_hash"
 os.environ["OPENAI_API_KEY"] = ""
 
+# The live demo `.env` can legitimately contain CloudAMQP / Upstash values.
+# Test collection must remain hermetic and must not call or assert against
+# ambient live infrastructure, so force the default queue substrate back to
+# local Redis unless a test explicitly overrides these settings.
+os.environ["CELERY_BROKER_URL"] = ""
+os.environ["CELERY_RESULT_BACKEND_URL"] = ""
+os.environ["REDIS_URL"] = ""
+os.environ["QUOTA_REDIS_URL"] = ""
+os.environ["QUEUE_DEPTH_BACKEND"] = "redis"
+os.environ["RABBITMQ_MANAGEMENT_API_URL"] = ""
+os.environ["RABBITMQ_MANAGEMENT_USERNAME"] = ""
+os.environ["RABBITMQ_MANAGEMENT_PASSWORD"] = ""
+
 
 # ─── Postgres availability gate ───────────────────────────────────────────
 

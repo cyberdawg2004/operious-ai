@@ -96,6 +96,15 @@ class _AdmissionRedis:
         del name, start, end, withscores
         return []
 
+    async def zremrangebyscore(
+        self,
+        name: str,
+        min_score: float | str,
+        max_score: float | str,
+    ) -> int:
+        del name, min_score, max_score
+        return 0
+
 
 class _StaticDepthProvider:
     backend = "rabbitmq"

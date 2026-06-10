@@ -128,7 +128,7 @@ export default function MultilingualEnterpriseOperationsArticle() {
             </p>
             <p className="mt-5 text-[17px] leading-relaxed text-ink-body">
               The response path must also be governed. A reply translated back to
-              the customer's language is still an operational action. It may contain
+              the customer&apos;s language is still an operational action. It may contain
               a promise, a denial, a replacement instruction, or a refund explanation.
               The policy decision that allows the response should be tied to the
               original source text, the canonical content, the retrieved procedure,

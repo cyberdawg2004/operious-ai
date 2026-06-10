@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+import app.core.http as http_module
 from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMMessage
 from app.core.http import (
     close_shared_http_client,
@@ -34,6 +35,23 @@ async def test_shared_http_client_lifecycle_reuses_and_closes_pool() -> None:
     assert third is not first
 
     await close_shared_http_client()
+
+
+@pytest.mark.asyncio
+async def test_shared_http_client_close_tolerates_closed_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ClosedLoopClient:
+        is_closed = False
+
+        async def aclose(self) -> None:
+            raise RuntimeError("Event loop is closed")
+
+    monkeypatch.setattr(http_module, "_shared_http_client", ClosedLoopClient())
+
+    await close_shared_http_client()
+
+    assert http_module._shared_http_client is None
 
 
 @pytest.mark.asyncio

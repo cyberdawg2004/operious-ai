@@ -5,6 +5,7 @@ import {
   BadgeCheck,
   Check,
   Clock,
+  FileText,
   Lock,
   MessageSquarePlus,
   ShieldCheck,
@@ -25,6 +26,7 @@ import { useApiResource } from "@/lib/use-api-resource";
 import { useAuthSession } from "@/lib/use-auth-session";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { TechnicalDetails } from "@/components/technical-details";
 
 const REFRESH_MS = 30_000;
 const READ_CAPABILITY = "tenant.approvals.read";
@@ -400,10 +402,10 @@ function DetailPanel({
         <div className="sticky top-0 z-10 flex min-h-[58px] items-center justify-between border-b border-border-subtle bg-surface px-5">
           <div className="min-w-0">
             <p className="font-technical text-[10px] uppercase tracking-[0.16em] text-ink-tertiary">
-              Case Approval Review
+              Case approval review
             </p>
-            <h3 className="truncate font-technical text-[14px] font-semibold text-ink-primary">
-              {record.approval_case_id}
+            <h3 className="truncate text-[15px] font-semibold text-ink-primary">
+              {categoryTitle(record.entry_category)}
             </h3>
           </div>
           <button
@@ -423,7 +425,17 @@ function DetailPanel({
             </div>
           )}
 
-          <Section title="SME-recommended resolution">
+          {/* 1 — The customer's problem, stated before the proposed answer. */}
+          <Section title="Customer issue">
+            <Row label="Type" value={categoryTitle(record.entry_category)} />
+            <Row label="Issue" value={record.issue_summary ?? "—"} />
+            {record.product && <Row label="Product" value={record.product} />}
+            {record.ticket_ref && <Row label="Ticket" value={record.ticket_ref} mono />}
+            <Row label="Received" value={formatDate(record.requested_at)} />
+          </Section>
+
+          {/* 2 — What the AI recommends, with confidence and risk made legible. */}
+          <Section title="AI recommendation">
             {recommendation ? (
               <>
                 <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-primary">
@@ -434,18 +446,11 @@ function DetailPanel({
                     {recommendation.rationale}
                   </p>
                 )}
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <span className="rounded border border-border-subtle bg-surface px-2 py-0.5 font-technical text-[10px] uppercase tracking-[0.10em] text-ink-tertiary">
-                    confidence {Math.round((recommendation.confidence ?? 0) * 100)}%
-                  </span>
-                  {recommendation.risk_flags.map((flag) => (
-                    <span
-                      key={flag}
-                      className="rounded border border-gold-primary/40 bg-surface px-2 py-0.5 font-technical text-[10px] uppercase tracking-[0.10em] text-gold-primary"
-                    >
-                      {flag}
-                    </span>
-                  ))}
+                <div className="mt-3">
+                  <ConfidenceBar value={recommendation.confidence} />
+                </div>
+                <div className="mt-3">
+                  <RiskLevel flags={recommendation.risk_flags} />
                 </div>
               </>
             ) : (
@@ -455,41 +460,68 @@ function DetailPanel({
             )}
           </Section>
 
-          <Section title="Why this needs sign-off">
-            <Row label="Category" value={categoryTitle(record.entry_category)} />
-            <Row label="Issue" value={record.issue_summary ?? "—"} />
-            {record.ticket_ref && <Row label="Ticket" value={record.ticket_ref} mono />}
-            {record.product && <Row label="Product" value={record.product} />}
-            <Row label="Session" value={record.session_id ?? "—"} mono={Boolean(record.session_id)} />
-            <Row
-              label="Resolution proposal"
-              value={record.resolution_proposal_id ?? "—"}
-              mono={Boolean(record.resolution_proposal_id)}
-            />
-            <Row label="Created" value={formatDate(record.requested_at)} />
-          </Section>
+          {/* 3 — Evidence the recommendation is grounded in. */}
+          {recommendation && recommendation.citations.length > 0 && (
+            <Section title="Evidence">
+              <div className="flex flex-wrap gap-1.5">
+                {recommendation.citations.map((citation, index) => (
+                  <span
+                    key={`${citation}-${index}`}
+                    className="inline-flex items-center gap-1.5 rounded border border-border-subtle bg-surface px-2 py-1 text-[11.5px] text-ink-secondary"
+                  >
+                    <FileText className="h-3 w-3 text-ink-tertiary" strokeWidth={1.8} />
+                    {citation}
+                  </span>
+                ))}
+              </div>
+            </Section>
+          )}
 
           {action && (
             <Section title="Bound action (fires on approve)">
               <Row label="Tool" value={String(action.tool_name ?? "—")} mono />
-              <Row
-                label="Action approval"
-                value={String(action.action_approval_id ?? "—")}
-                mono
-              />
               <p className="pt-1 font-technical text-[11px] text-ink-tertiary">
                 Approving this case releases the governed action grant through the
                 existing action-approval path.
               </p>
+              <TechnicalDetails label="Show action identifier" openLabel="Hide action identifier">
+                <Row
+                  label="Action approval"
+                  value={String(action.action_approval_id ?? "—")}
+                  mono
+                />
+              </TechnicalDetails>
             </Section>
           )}
 
-          <Section title="Lifecycle">
-            <Row label="Status" value={record.status} />
+          {/* 4 — Governance & lifecycle; raw identifiers kept behind a toggle. */}
+          <Section title="Governance & lifecycle">
+            <Row label="Status" value={statusLabel(record.status)} />
             <Row label="Guidance round" value={`${record.guidance_round} / 1`} />
-            <Row label="Governance decision" value={record.governance_decision_id ?? "—"} mono={Boolean(record.governance_decision_id)} />
-            <Row label="Resolved by" value={record.resolved_by ?? "—"} />
-            <Row label="Resolved at" value={record.resolved_at ? formatDate(record.resolved_at) : "—"} />
+            {record.resolved_by && <Row label="Resolved by" value={record.resolved_by} />}
+            {record.resolved_at && (
+              <Row label="Resolved at" value={formatDate(record.resolved_at)} />
+            )}
+            <TechnicalDetails label="Show case identifiers" openLabel="Hide case identifiers">
+              <div className="space-y-2">
+                <Row label="Case ID" value={record.approval_case_id} mono />
+                <Row
+                  label="Session"
+                  value={record.session_id ?? "—"}
+                  mono={Boolean(record.session_id)}
+                />
+                <Row
+                  label="Resolution proposal"
+                  value={record.resolution_proposal_id ?? "—"}
+                  mono={Boolean(record.resolution_proposal_id)}
+                />
+                <Row
+                  label="Governance decision"
+                  value={record.governance_decision_id ?? "—"}
+                  mono={Boolean(record.governance_decision_id)}
+                />
+              </div>
+            </TechnicalDetails>
           </Section>
 
           {/* ---- Controls: each gated + ABSENT without the capability ---- */}
@@ -703,6 +735,61 @@ function DetailPanel({
   );
 }
 
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(100, Math.round((value ?? 0) * 100)));
+  const fill =
+    pct >= 85 ? "bg-green-success" : pct >= 60 ? "bg-warning-amber" : "bg-red-alert";
+  const text =
+    pct >= 85
+      ? "text-green-success"
+      : pct >= 60
+        ? "text-warning-amber"
+        : "text-red-alert";
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <span className="font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+          AI confidence
+        </span>
+        <span className={cn("font-technical text-[12px] font-semibold tabular-nums", text)}>
+          {pct}%
+        </span>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-surface-sunken">
+        <div className={cn("h-full rounded-full", fill)} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RiskLevel({ flags }: { flags: string[] }) {
+  if (flags.length === 0) {
+    return (
+      <div className="flex items-center gap-2 text-[12px] text-green-success">
+        <ShieldCheck className="h-3.5 w-3.5" strokeWidth={1.8} />
+        No risk flags raised
+      </div>
+    );
+  }
+  return (
+    <div>
+      <span className="font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+        Risk flags
+      </span>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {flags.map((flag) => (
+          <span
+            key={flag}
+            className="rounded border border-red-alert/40 bg-red-alert/10 px-2 py-0.5 font-technical text-[10px] uppercase tracking-[0.10em] text-red-alert"
+          >
+            {flag.replace(/_/g, " ")}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-border-subtle bg-surface-raised p-4">
@@ -753,6 +840,7 @@ type ParsedRecommendation = {
   rationale: string;
   confidence: number;
   risk_flags: string[];
+  citations: string[];
 };
 
 function smeRecommendation(record: CaseApprovalRecord): ParsedRecommendation | null {
@@ -768,7 +856,27 @@ function smeRecommendation(record: CaseApprovalRecord): ParsedRecommendation | n
     risk_flags: Array.isArray(flags)
       ? flags.filter((flag): flag is string => typeof flag === "string")
       : [],
+    citations: parseCitations(value["citations"]),
   };
+}
+
+/** Render citations as human-readable source labels rather than raw objects. */
+function parseCitations(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry, index) => {
+    if (typeof entry === "string") return entry;
+    if (entry && typeof entry === "object") {
+      const obj = entry as Record<string, unknown>;
+      for (const key of ["title", "source", "document_title", "document_id", "uri", "url"]) {
+        if (typeof obj[key] === "string" && obj[key]) return obj[key] as string;
+      }
+    }
+    return `Source ${index + 1}`;
+  });
+}
+
+function statusLabel(status: CaseApprovalStatus): string {
+  return status.replace(/_/g, " ").replace(/\bsme\b/i, "SME");
 }
 
 function categoryTitle(category: CaseApprovalRecord["entry_category"]): string {

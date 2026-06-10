@@ -144,13 +144,13 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
     <div className="flex-1 overflow-auto bg-[var(--canvas)] px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
       <div className="mb-6">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)]">
-          COGNITION · APPROVAL QUEUE
+          INTELLIGENCE · APPROVAL QUEUE
         </span>
       </div>
 
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <h1 className="font-serif font-bold text-[32px] text-[var(--ink-primary)]">
-          Cognition Hub
+          AI Recommendations
         </h1>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:gap-4">
           <div className="flex w-full flex-wrap items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-1 sm:w-auto">

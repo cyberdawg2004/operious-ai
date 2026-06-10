@@ -19,6 +19,7 @@ import {
 import { useApiResource } from "@/lib/use-api-resource";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { TechnicalDetails } from "@/components/technical-details";
 
 const REFRESH_MS = 30_000;
 
@@ -92,10 +93,10 @@ export function ConfigChangeApprovals() {
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
-            Governance / Config Changes
+            Governance / Configuration Changes
           </span>
           <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
-            Config Change Approvals
+            Configuration Approvals
           </h2>
         </div>
         <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
@@ -210,9 +211,6 @@ function RequestCard({
         </div>
         <StatusBadge status={request.status} />
       </div>
-      <pre className="mt-3 max-h-28 overflow-hidden rounded-md border border-border-subtle bg-surface-raised p-2 text-[11px] leading-relaxed text-ink-secondary">
-        {JSON.stringify(request.proposed_payload, null, 2)}
-      </pre>
     </button>
   );
 }
@@ -296,16 +294,20 @@ function DetailPanel({
           </Section>
 
           <Section title="Proposed payload (credential-redacted)">
-            <pre className="max-h-72 overflow-auto rounded-md border border-border-subtle bg-surface p-3 text-[11px] leading-relaxed text-ink-secondary">
-              {JSON.stringify(request.proposed_payload, null, 2)}
-            </pre>
+            <TechnicalDetails label="Show proposed payload" openLabel="Hide proposed payload">
+              <pre className="max-h-72 overflow-auto rounded-md border border-border-subtle bg-surface p-3 text-[11px] leading-relaxed text-ink-secondary">
+                {JSON.stringify(request.proposed_payload, null, 2)}
+              </pre>
+            </TechnicalDetails>
           </Section>
 
           {request.outcome_payload && (
             <Section title="Outcome">
-              <pre className="max-h-56 overflow-auto rounded-md border border-border-subtle bg-surface p-3 text-[11px] leading-relaxed text-ink-secondary">
-                {JSON.stringify(request.outcome_payload, null, 2)}
-              </pre>
+              <TechnicalDetails label="Show outcome payload" openLabel="Hide outcome payload">
+                <pre className="max-h-56 overflow-auto rounded-md border border-border-subtle bg-surface p-3 text-[11px] leading-relaxed text-ink-secondary">
+                  {JSON.stringify(request.outcome_payload, null, 2)}
+                </pre>
+              </TechnicalDetails>
             </Section>
           )}
 

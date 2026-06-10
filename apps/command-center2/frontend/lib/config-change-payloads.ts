@@ -297,9 +297,134 @@ export function buildChannelChangePayload(
     routing_address: input.routingAddress,
     credentials: dropBlankValues(input.credentials),
     webhook_secret: input.webhookSecret,
-    status: input.status ?? "pending_verification",
+    status: input.status ?? "pending_validation",
   };
   return { change_type: "channel", payload };
+}
+
+export type WhatsAppSelfServiceChannelInput = {
+  waba_id?: string;
+  phone_number_id: string;
+  business_account_id?: string;
+  graph_api_version?: string;
+  app_id?: string;
+  config_id?: string;
+  access_token?: string;
+  system_user_token?: string;
+  webhook_verify_token?: string;
+  app_secret?: string;
+  status?: string;
+};
+
+export function buildWhatsAppSelfServiceChannelChangePayload(
+  input: WhatsAppSelfServiceChannelInput
+): ConfigChangeRequestBody {
+  const credentials = dropBlankValues({
+    access_token: input.access_token ?? "",
+    system_user_token: input.system_user_token ?? "",
+    webhook_verify_token: input.webhook_verify_token ?? "",
+    app_secret: input.app_secret ?? "",
+  });
+  const payload: Record<string, unknown> = {
+    _schema_version: CONFIG_CHANGE_SCHEMA_VERSION,
+    operation: "configure",
+    channel_type: "whatsapp",
+    routing_address: input.phone_number_id,
+    credentials: {
+      ...credentials,
+      provider: "meta_whatsapp_manual",
+      phone_number_id: input.phone_number_id,
+      graph_api_version: input.graph_api_version ?? "v25.0",
+    },
+    webhook_secret: "pending-provider-validation",
+    status: input.status ?? "pending_validation",
+    self_service_config: compactValues({
+      setup: "manual_token",
+      waba_id: input.waba_id,
+      phone_number_id: input.phone_number_id,
+      business_account_id: input.business_account_id,
+      graph_api_version: input.graph_api_version ?? "v25.0",
+      app_id: input.app_id,
+      config_id: input.config_id,
+    }),
+  };
+  return { change_type: "channel", payload };
+}
+
+export type SesSelfServiceChannelInput = {
+  mode: "managed" | "byo_role" | "byo_access_key";
+  region: string;
+  source_email?: string;
+  source_domain?: string;
+  inbound_address?: string;
+  inbound_domain?: string;
+  topic_arn?: string;
+  receipt_rule_set?: string;
+  receipt_rule_name?: string;
+  role_arn?: string;
+  external_id?: string;
+  access_key_id?: string;
+  secret_access_key?: string;
+  session_token?: string;
+  status?: string;
+};
+
+export function buildSesSelfServiceChannelChangePayload(
+  input: SesSelfServiceChannelInput
+): ConfigChangeRequestBody {
+  const routingAddress =
+    input.inbound_address
+    ?? input.source_email
+    ?? input.inbound_domain
+    ?? input.source_domain
+    ?? "";
+  const credentials = dropBlankValues({
+    access_key_id: input.access_key_id ?? "",
+    secret_access_key: input.secret_access_key ?? "",
+    session_token: input.session_token ?? "",
+  });
+  const payload: Record<string, unknown> = {
+    _schema_version: CONFIG_CHANGE_SCHEMA_VERSION,
+    operation: "configure",
+    channel_type: "email",
+    routing_address: routingAddress,
+    credentials: compactValues({
+      ...credentials,
+      mode: input.mode,
+      region: input.region,
+      source_email_address: input.source_email,
+      domain: input.source_domain,
+      role_arn: input.role_arn,
+      external_id: input.external_id,
+      topic_arn: input.topic_arn,
+    }),
+    webhook_secret: input.topic_arn ?? "pending-provider-validation",
+    status: input.status ?? "pending_validation",
+    self_service_config: compactValues({
+      mode: input.mode,
+      region: input.region,
+      source_email: input.source_email,
+      source_domain: input.source_domain,
+      inbound_address: input.inbound_address,
+      inbound_domain: input.inbound_domain,
+      topic_arn: input.topic_arn,
+      receipt_rule_set: input.receipt_rule_set,
+      receipt_rule_name: input.receipt_rule_name,
+      role_arn: input.role_arn,
+      external_id: input.external_id,
+    }),
+  };
+  return { change_type: "channel", payload };
+}
+
+function compactValues(value: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item !== undefined && item !== null && item !== "") {
+      out[key] = item;
+    }
+  }
+  return out;
 }
 
 function dropBlankValues(values: Record<string, string>): Record<string, string> {

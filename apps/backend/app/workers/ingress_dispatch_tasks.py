@@ -19,6 +19,10 @@ from app.boundary.ingress_dispatch_outbox import (
     IngressDispatchOutboxStatus,
     PostgresIngressDispatchOutboxPersistence,
 )
+from app.boundary.ingress_dispatch_publisher import (
+    enqueue_ingress_dispatch_outbox,
+    queue_for_ingress_dispatch_channel,
+)
 from app.core.config import get_settings
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
@@ -34,17 +38,14 @@ from app.hardening.admission import AdmissionOutcome
 from app.queues import (
     DIAGNOSTIC_QUEUE_PRIORITY,
     QUEUE_INGRESS_EMAIL,
-    QUEUE_INGRESS_SHOPIFY,
-    QUEUE_INGRESS_WHATSAPP,
     QUEUE_WEBHOOK_MAINTENANCE,
 )
 from app.services.admission_service import AdmissionService
-from app.workers.celery_app import celery_app, enqueued_at_iso
+from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import (
     DeadLetterTaskRecord,
     PostgresDeadLetterTaskPersistence,
 )
-
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
 
@@ -312,15 +313,8 @@ async def reconcile_ingress_dispatch_outbox_runtime(
             )
         )
         enqueued = 0
-        task = cast(Any, dispatch_ingress)
         for outbox in due.records:
-            task.apply_async(
-                kwargs={
-                    "outbox_id": str(outbox.outbox_id),
-                    "_enqueued_at": enqueued_at_iso(),
-                },
-                queue=queue_for_ingress_dispatch_channel(outbox.channel),
-            )
+            enqueue_ingress_dispatch_outbox(outbox)
             enqueued += 1
         await session.commit()
         return {
@@ -330,14 +324,6 @@ async def reconcile_ingress_dispatch_outbox_runtime(
             "due_scanned": due.total,
             "enqueued": enqueued,
         }
-
-
-def queue_for_ingress_dispatch_channel(channel: str) -> str:
-    if channel == "whatsapp":
-        return QUEUE_INGRESS_WHATSAPP
-    if channel == "shopify":
-        return QUEUE_INGRESS_SHOPIFY
-    return QUEUE_INGRESS_EMAIL
 
 
 async def _reschedule_or_dead_letter(
@@ -603,6 +589,7 @@ def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 __all__ = [
     "dispatch_ingress",
     "dispatch_ingress_task_runtime",
+    "enqueue_ingress_dispatch_outbox",
     "process_ingress_dispatch_outbox_runtime",
     "queue_for_ingress_dispatch_channel",
     "reconcile_ingress_dispatch_outbox",

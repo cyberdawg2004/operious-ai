@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { TechnicalDetails } from "@/components/technical-details";
 import {
   formatApiError,
   listDeadLetters,
@@ -148,11 +149,11 @@ export function DlqInspectorView() {
   return (
     <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
       <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
-        OPERATIONS · DEAD LETTERS
+        OPERATIONS · FAILED OPERATIONS
       </div>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="font-display text-[32px] font-semibold text-ink-primary">
-          DLQ Inspector
+          Failed Operations
         </h1>
         <button
           type="button"
@@ -210,11 +211,11 @@ export function DlqInspectorView() {
         </label>
       </div>
 
-      {isLoading && !data && <LoadingState label="Loading dead letter records..." />}
+      {isLoading && !data && <LoadingState label="Loading failed operations..." />}
 
       {error && !data && !isLoading && (
         <ErrorState
-          title="DLQ records unavailable"
+          title="Failed operations unavailable"
           message={error}
           actionLabel="Retry"
           onAction={() => void fetchDeadLetters()}
@@ -223,8 +224,8 @@ export function DlqInspectorView() {
 
       {data && !isLoading && !error && data.items.length === 0 && (
         <EmptyState
-          title="No dead letter records found for this tenant."
-          message="The dead-letter task table returned no records for the current filters."
+          title="No failed operations"
+          message="No operations failed processing for the current filters."
           actionLabel="Refresh"
           onAction={() => void fetchDeadLetters()}
         />
@@ -234,7 +235,7 @@ export function DlqInspectorView() {
         <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
           {error && (
             <div className="border-b border-warning-amber/30 bg-warning-amber/10 px-4 py-2 text-[13px] text-warning-amber">
-              DLQ records unavailable. Showing the last successful page.
+              Failed operations unavailable. Showing the last successful page.
             </div>
           )}
 
@@ -388,9 +389,11 @@ function DeadLetterRow({
               <div className="mb-1 font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary">
                 Task Payload
               </div>
-              <pre className="max-h-[260px] overflow-auto rounded border border-border-subtle bg-surface px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-secondary">
-                {JSON.stringify(item.task_payload, null, 2)}
-              </pre>
+              <TechnicalDetails label="Show task payload" openLabel="Hide task payload">
+                <pre className="max-h-[260px] overflow-auto rounded border border-border-subtle bg-surface px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-secondary">
+                  {JSON.stringify(item.task_payload, null, 2)}
+                </pre>
+              </TechnicalDetails>
             </section>
           </div>
 

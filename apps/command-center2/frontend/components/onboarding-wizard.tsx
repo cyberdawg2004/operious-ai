@@ -205,7 +205,7 @@ function PhaseBAction({
         <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] text-ink-secondary">
           Governed change pending · status{" "}
           <strong className="text-ink-primary">{step.pendingChange.status}</strong>. Approve and
-          apply it (as a different principal) in Config Approvals to complete this step.
+          apply it (as a different principal) in Configuration Approvals to complete this step.
         </div>
       )}
       {step.id === "channel" && step.state !== "complete" && (
@@ -252,7 +252,7 @@ function ApproverLink() {
         onClick={() => router.push(dashboardRoutes["config-approvals"])}
         className="mt-3 inline-flex h-9 items-center gap-2 rounded border border-gold-primary/40 px-3 text-[12px] text-gold-primary hover:bg-gold-primary/10"
       >
-        Open Config Approvals (approver) <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
+        Open Configuration Approvals (approver) <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
       </button>
     </div>
   );

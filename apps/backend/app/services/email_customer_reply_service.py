@@ -143,6 +143,9 @@ class EmailCustomerReplySendService:
         source_email_address: str | None = None,
         in_reply_to_message_id: str | None = None,
         references_header: str | None = None,
+        expected_governance_decision_id: uuid.UUID | str | None = None,
+        expected_draft_body_sha256: str | None = None,
+        allow_failed_delivery_retry: bool = False,
     ) -> EmailCustomerReplySendResult:
         if tenant_id != expected_tenant_id:
             raise ValueError("tenant_id does not match expected_tenant_id")
@@ -158,6 +161,9 @@ class EmailCustomerReplySendService:
                 source_email_address=source_email_address,
                 in_reply_to_message_id=in_reply_to_message_id,
                 references_header=references_header,
+                expected_governance_decision_id=expected_governance_decision_id,
+                expected_draft_body_sha256=expected_draft_body_sha256,
+                allow_failed_delivery_retry=allow_failed_delivery_retry,
             )
         except Exception:
             await self._rollback()
@@ -176,6 +182,9 @@ class EmailCustomerReplySendService:
         source_email_address: str | None,
         in_reply_to_message_id: str | None,
         references_header: str | None,
+        expected_governance_decision_id: uuid.UUID | str | None,
+        expected_draft_body_sha256: str | None,
+        allow_failed_delivery_retry: bool,
     ) -> EmailCustomerReplySendResult:
         recipient = _required_text("recipient_email_address", recipient_email_address)
         subject_text = _required_text("subject", subject)
@@ -186,6 +195,11 @@ class EmailCustomerReplySendService:
         proposal = await self._load_sendable_proposal(
             proposal_id=str(draft.proposal_id),
             expected_tenant_id=expected_tenant_id,
+        )
+        _assert_expected_outbox_guards(
+            draft=draft,
+            expected_governance_decision_id=expected_governance_decision_id,
+            expected_draft_body_sha256=expected_draft_body_sha256,
         )
         self._assert_draft_and_proposal_lineage(draft=draft, proposal=proposal)
         await self._assert_persisted_governance_allow(
@@ -244,6 +258,7 @@ class EmailCustomerReplySendService:
             in_reply_to_message_id=_optional_text(in_reply_to_message_id),
             references_header=_optional_text(references_header),
         )
+        should_transmit = created
         if not created:
             if delivery.status is EmailDeliveryStatus.SENT:
                 return EmailCustomerReplySendResult(
@@ -261,61 +276,68 @@ class EmailCustomerReplySendService:
                     transmitted=False,
                     idempotent_replay=True,
                 )
-            raise EmailCustomerReplyProviderError(
-                "email delivery previously failed and is not auto-retried"
-            )
-
-        try:
-            response = await self._sender.send_email(
-                SesEmailSendRequest(
-                    region=credentials.region,
-                    access_key_id=credentials.access_key_id,
-                    secret_access_key=credentials.secret_access_key,
-                    session_token=credentials.session_token,
-                    endpoint_url=credentials.endpoint_url,
-                    configuration_set_name=credentials.configuration_set_name,
-                    from_email_address=credentials.source_email_address,
-                    recipient_email_address=recipient,
-                    subject=subject_text,
-                    body_text=draft.draft_body,
-                    in_reply_to_message_id=_optional_text(in_reply_to_message_id),
-                    references_header=_optional_text(references_header),
-                    timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+            if allow_failed_delivery_retry and _email_delivery_error_is_retryable(
+                delivery.error_code
+            ):
+                should_transmit = True
+            else:
+                raise EmailCustomerReplyProviderError(
+                    "email delivery previously failed and is not auto-retried"
                 )
-            )
-        except SesV2SendError as exc:
-            await self._mark_failed(
-                delivery_id=delivery_id,
-                expected_tenant_id=expected_tenant_id,
-                error_code=f"ses_v2_http_{exc.status_code}",
-                provider_status_code=exc.status_code,
-            )
-            raise EmailCustomerReplyProviderError(
-                "ses v2 rejected the message"
-            ) from exc
-        except Exception as exc:
-            await self._mark_failed(
-                delivery_id=delivery_id,
-                expected_tenant_id=expected_tenant_id,
-                error_code=exc.__class__.__name__,
-            )
-            raise EmailCustomerReplyProviderError("ses v2 send failed") from exc
 
-        sent = await self._delivery_repository.mark_sent(
-            delivery_id,
-            expected_tenant_id=expected_tenant_id,
-            provider_message_id=response.provider_message_id,
-            provider_status_code=response.status_code,
-            sent_at=datetime.now(timezone.utc),
-        )
-        await self._commit()
-        return EmailCustomerReplySendResult(
-            delivery_id=str(sent.delivery_id),
-            status="sent",
-            provider_message_id=sent.provider_message_id,
-            transmitted=True,
-            idempotent_replay=False,
-        )
+        if should_transmit:
+            try:
+                response = await self._sender.send_email(
+                    SesEmailSendRequest(
+                        region=credentials.region,
+                        access_key_id=credentials.access_key_id,
+                        secret_access_key=credentials.secret_access_key,
+                        session_token=credentials.session_token,
+                        endpoint_url=credentials.endpoint_url,
+                        configuration_set_name=credentials.configuration_set_name,
+                        from_email_address=credentials.source_email_address,
+                        recipient_email_address=recipient,
+                        subject=subject_text,
+                        body_text=draft.draft_body,
+                        in_reply_to_message_id=_optional_text(in_reply_to_message_id),
+                        references_header=_optional_text(references_header),
+                        timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+                    )
+                )
+            except SesV2SendError as exc:
+                await self._mark_failed(
+                    delivery_id=delivery_id,
+                    expected_tenant_id=expected_tenant_id,
+                    error_code=f"ses_v2_http_{exc.status_code}",
+                    provider_status_code=exc.status_code,
+                )
+                raise EmailCustomerReplyProviderError(
+                    "ses v2 rejected the message"
+                ) from exc
+            except Exception as exc:
+                await self._mark_failed(
+                    delivery_id=delivery_id,
+                    expected_tenant_id=expected_tenant_id,
+                    error_code=exc.__class__.__name__,
+                )
+                raise EmailCustomerReplyProviderError("ses v2 send failed") from exc
+
+            sent = await self._delivery_repository.mark_sent(
+                delivery_id,
+                expected_tenant_id=expected_tenant_id,
+                provider_message_id=response.provider_message_id,
+                provider_status_code=response.status_code,
+                sent_at=datetime.now(timezone.utc),
+            )
+            await self._commit()
+            return EmailCustomerReplySendResult(
+                delivery_id=str(sent.delivery_id),
+                status="sent",
+                provider_message_id=sent.provider_message_id,
+                transmitted=True,
+                idempotent_replay=False,
+            )
+        raise EmailCustomerReplyProviderError("email delivery was not transmitted")
 
     async def _load_sendable_draft(
         self,
@@ -576,6 +598,38 @@ def _resolved_source_email_address(
             "tenant email source_email_address is required"
         )
     return resolved.lower()
+
+
+def _assert_expected_outbox_guards(
+    *,
+    draft: ResolutionOutboundDraftRecord,
+    expected_governance_decision_id: uuid.UUID | str | None,
+    expected_draft_body_sha256: str | None,
+) -> None:
+    if expected_governance_decision_id is not None:
+        expected_decision_id = uuid.UUID(str(expected_governance_decision_id))
+        if draft.governance_decision_id != expected_decision_id:
+            raise EmailCustomerReplyGovernanceError(
+                "outbox governance decision mismatch"
+            )
+    if expected_draft_body_sha256 is not None:
+        expected_digest = expected_draft_body_sha256.strip().lower()
+        if draft.draft_body_sha256 != expected_digest:
+            raise EmailCustomerReplyGovernanceError(
+                "outbox draft body hash mismatch"
+            )
+
+
+def _email_delivery_error_is_retryable(error_code: str | None) -> bool:
+    if error_code is None:
+        return False
+    if not error_code.startswith("ses_v2_http_"):
+        return False
+    try:
+        status_code = int(error_code.removeprefix("ses_v2_http_"))
+    except ValueError:
+        return False
+    return status_code == 429 or status_code >= 500
 
 
 def _credential_string(credentials: Mapping[str, Any], *keys: str) -> str:

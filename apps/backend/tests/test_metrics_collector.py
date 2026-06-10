@@ -159,7 +159,7 @@ async def test_health_returns_all_queues() -> None:
     response = await _health_response(_MetricsRedis())
 
     assert set(ALL_QUEUES).issubset(response.queues)
-    assert len(ALL_QUEUES) == 16
+    assert len(ALL_QUEUES) == 17
     assert response.queues[QUEUE_DIAGNOSTIC_NORMAL].status == "ok"
 
 
@@ -214,6 +214,23 @@ async def test_health_queue_age_timeout_does_not_block_depths() -> None:
     assert set(ALL_QUEUES).issubset(response.queues)
     assert response.queues[QUEUE_DIAGNOSTIC_NORMAL].status == "ok"
     assert response.queues[QUEUE_DIAGNOSTIC_NORMAL].age_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_health_ignores_stale_queue_age_when_depth_is_zero() -> None:
+    redis = _MetricsRedis(oldest_age_seconds=9999.0)
+
+    response = await _health_response(redis)
+
+    queue = response.queues[QUEUE_DIAGNOSTIC_NORMAL]
+    assert queue.depth == 0
+    assert queue.status == "ok"
+    assert queue.age_seconds is None
+    assert redis.zrange_calls == []
+    assert any(
+        call[0] == f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}"
+        for call in redis.cleanup_calls
+    )
 
 
 @pytest.mark.asyncio
@@ -332,12 +349,16 @@ class _MetricsRedis:
         *,
         fail_llen: bool = False,
         hang_zrange: bool = False,
+        oldest_age_seconds: float | None = None,
         delay_llen_seconds: float = 0.0,
     ) -> None:
         self.depths = dict(depths or {})
         self.fail_llen = fail_llen
         self.hang_zrange = hang_zrange
+        self.oldest_age_seconds = oldest_age_seconds
         self.delay_llen_seconds = delay_llen_seconds
+        self.zrange_calls: list[str] = []
+        self.cleanup_calls: list[tuple[str, float | str, float | str]] = []
         self.zadds: list[tuple[str, Mapping[str, float], bool]] = []
         self.values: dict[str, int] = {}
 
@@ -356,9 +377,12 @@ class _MetricsRedis:
         *,
         withscores: bool = False,
     ) -> list[tuple[str, float]]:
-        del name, start, end, withscores
+        del start, end, withscores
+        self.zrange_calls.append(name)
         if self.hang_zrange:
             await asyncio.sleep(10)
+        if self.oldest_age_seconds is not None:
+            return [("member", datetime.now(timezone.utc).timestamp() - self.oldest_age_seconds)]
         return []
 
     async def zadd(
@@ -391,6 +415,15 @@ class _MetricsRedis:
     async def expire(self, key: str, seconds: int) -> bool:
         del key, seconds
         return True
+
+    async def zremrangebyscore(
+        self,
+        name: str,
+        min_score: float | str,
+        max_score: float | str,
+    ) -> int:
+        self.cleanup_calls.append((name, min_score, max_score))
+        return 1
 
 
 class _FakeTask:

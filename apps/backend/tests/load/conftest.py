@@ -579,6 +579,10 @@ async def _delete_tenant_data(session: AsyncSession, tenant_id: str) -> None:
         {"t": tenant_id},
     )
     await session.execute(
+        text("DELETE FROM ingress_dispatch_outbox WHERE tenant_id = :t"),
+        {"t": tenant_id},
+    )
+    await session.execute(
         text("DELETE FROM boundary_ingress WHERE tenant_id = :t"),
         {"t": tenant_id},
     )

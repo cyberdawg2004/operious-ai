@@ -3,6 +3,8 @@
 import { useCallback, useState } from "react";
 import {
   createChannelConfiguration,
+  createSesSelfServiceChannel,
+  createWhatsAppSelfServiceChannel,
   createGovernancePolicy,
   formatApiError,
   getApiBaseUrl,
@@ -14,15 +16,18 @@ import {
   listGovernancePolicies,
   listOperationalAlerts,
   listTopologyConfigurations,
+  updateSesSelfServiceChannel,
   updateChannelConfiguration,
+  updateWhatsAppSelfServiceChannel,
   updateGovernancePolicy,
-  verifyChannelConfiguration,
   type ApiPage,
   type DeadLetterExecution,
   type OperationalAlert,
   type TenantChannelConfiguration,
   type TenantGovernancePolicy,
+  type TenantSesSelfServiceRequest,
   type TenantTopologyConfiguration,
+  type TenantWhatsAppSelfServiceRequest,
 } from "@/lib/api";
 import type { AuthSessionState } from "@/lib/use-auth-session";
 import { useApiResource } from "@/lib/use-api-resource";
@@ -56,14 +61,15 @@ type ChannelModal =
 type ChannelCredentialField = {
   key: string;
   label: string;
-  type: "text" | "password" | "number";
+  type: "text" | "password" | "number" | "select";
   placeholder: string;
   required: boolean;
   helpText?: string;
+  options?: string[];
 };
 
 const CHANNEL_TYPE_LABELS: Record<string, string> = {
-  email: "Email (SMTP)",
+  email: "Email (SES)",
   whatsapp: "WhatsApp Business",
   voice: "Voice (Twilio)",
   zendesk: "Zendesk",
@@ -89,42 +95,113 @@ const CHANNEL_TYPE_OPTIONS = [
 const CHANNEL_CREDENTIAL_FIELDS: Record<string, ChannelCredentialField[]> = {
   email: [
     {
-      key: "smtp_host",
-      label: "SMTP Host",
+      key: "mode",
+      label: "SES Mode",
+      type: "select",
+      placeholder: "managed",
+      required: true,
+      options: ["managed", "byo_role", "byo_access_key"],
+    },
+    {
+      key: "region",
+      label: "AWS Region",
       type: "text",
-      placeholder: "smtp.example.com",
+      placeholder: "us-east-1",
       required: true,
     },
     {
-      key: "smtp_port",
-      label: "SMTP Port",
-      type: "number",
-      placeholder: "587",
-      required: true,
-    },
-    {
-      key: "smtp_user",
-      label: "SMTP Username",
-      type: "text",
-      placeholder: "sender@example.com",
-      required: true,
-    },
-    {
-      key: "smtp_password",
-      label: "SMTP Password",
-      type: "password",
-      placeholder: "••••••••",
-      required: true,
-    },
-    {
-      key: "from_address",
-      label: "From Address",
+      key: "source_email",
+      label: "Source Email",
       type: "text",
       placeholder: "support@yourcompany.com",
-      required: true,
+      required: false,
+    },
+    {
+      key: "source_domain",
+      label: "Source Domain",
+      type: "text",
+      placeholder: "yourcompany.com",
+      required: false,
+    },
+    {
+      key: "inbound_address",
+      label: "Inbound Address",
+      type: "text",
+      placeholder: "support@yourcompany.com",
+      required: false,
+    },
+    {
+      key: "inbound_domain",
+      label: "Inbound Domain",
+      type: "text",
+      placeholder: "yourcompany.com",
+      required: false,
+    },
+    {
+      key: "topic_arn",
+      label: "SNS Topic ARN",
+      type: "text",
+      placeholder: "arn:aws:sns:us-east-1:123456789012:topic",
+      required: false,
+    },
+    {
+      key: "receipt_rule_set",
+      label: "Receipt Rule Set",
+      type: "text",
+      placeholder: "default-rule-set",
+      required: false,
+    },
+    {
+      key: "receipt_rule_name",
+      label: "Receipt Rule Name",
+      type: "text",
+      placeholder: "operious-inbound",
+      required: false,
+    },
+    {
+      key: "role_arn",
+      label: "BYO Role ARN",
+      type: "text",
+      placeholder: "arn:aws:iam::123456789012:role/operious-ses",
+      required: false,
+    },
+    {
+      key: "external_id",
+      label: "External ID",
+      type: "text",
+      placeholder: "tenant-external-id",
+      required: false,
+    },
+    {
+      key: "access_key_id",
+      label: "Access Key ID",
+      type: "password",
+      placeholder: "AKIA...",
+      required: false,
+    },
+    {
+      key: "secret_access_key",
+      label: "Secret Access Key",
+      type: "password",
+      placeholder: "Leave blank to keep current value",
+      required: false,
+    },
+    {
+      key: "session_token",
+      label: "Session Token",
+      type: "password",
+      placeholder: "Temporary credentials only",
+      required: false,
     },
   ],
   whatsapp: [
+    {
+      key: "waba_id",
+      label: "WABA ID",
+      type: "text",
+      placeholder: "1234567890",
+      required: false,
+    },
     {
       key: "phone_number_id",
       label: "Phone Number ID",
@@ -134,19 +211,54 @@ const CHANNEL_CREDENTIAL_FIELDS: Record<string, ChannelCredentialField[]> = {
       helpText: "Found in Meta Business Suite > WhatsApp > API Setup",
     },
     {
+      key: "business_account_id",
+      label: "Business Account ID",
+      type: "text",
+      placeholder: "1234567890",
+      required: false,
+    },
+    {
+      key: "graph_api_version",
+      label: "Graph API Version",
+      type: "text",
+      placeholder: "v25.0",
+      required: true,
+    },
+    {
+      key: "app_id",
+      label: "Meta App ID",
+      type: "text",
+      placeholder: "1234567890",
+      required: false,
+    },
+    {
+      key: "config_id",
+      label: "Embedded Signup Config ID",
+      type: "text",
+      placeholder: "config-id",
+      required: false,
+    },
+    {
       key: "access_token",
-      label: "Permanent Access Token",
+      label: "Access Token",
       type: "password",
       placeholder: "EAAxxxxxxxx",
       required: true,
     },
     {
-      key: "verify_token",
+      key: "webhook_verify_token",
       label: "Webhook Verify Token",
-      type: "text",
-      placeholder: "your_verify_token",
-      required: true,
-      helpText: "Set this in Meta webhook configuration",
+      type: "password",
+      placeholder: "Generated if blank on first setup",
+      required: false,
+      helpText: "Set the generated or tenant-provided token in Meta webhooks",
+    },
+    {
+      key: "app_secret",
+      label: "Meta App Secret",
+      type: "password",
+      placeholder: "Optional signature validation secret",
+      required: false,
     },
   ],
   voice: [
@@ -423,11 +535,11 @@ export function TopologyView() {
   const load = useCallback(() => listTopologyConfigurations(), []);
   return (
     <RecordListView
-      eyebrow="TOPOLOGY · CONFIGURATION"
-      title="Topology"
+      eyebrow="PLATFORM · WORKFORCE MAP"
+      title="Workforce Map"
       load={load}
-      emptyTitle="No topology configurations"
-      emptyMessage="The tenant topology endpoint returned no configured agent topology records."
+      emptyTitle="No workforce map configured"
+      emptyMessage="No agent organization has been configured for this tenant yet."
       renderItem={(topology: TenantTopologyConfiguration) => (
         <RecordCard
           title={topology.topology_name}
@@ -447,8 +559,6 @@ export function TopologyView() {
 export function ChannelsView() {
   const [modal, setModal] = useState<ChannelModal>({ type: "none" });
   const [formError, setFormError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [busyChannelId, setBusyChannelId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const load = useCallback(() => listChannelConfigurations(), []);
   const { data, error, isLoading, reload } = useApiResource(load);
@@ -470,19 +580,40 @@ export function ChannelsView() {
     try {
       const credentialsText = String(form.get("credentials") || "").trim();
       const webhookSecret = String(form.get("webhook_secret") || "").trim();
-      const status = String(form.get("status") || "pending_verification") as TenantChannelConfiguration["status"];
-      if (channel) {
+      const channelType = String(form.get("channel_type") || channel?.channel_type || "");
+      const routingAddress = String(form.get("routing_address") || "");
+      const status = String(form.get("status") || "pending_validation") as TenantChannelConfiguration["status"];
+      const credentials = parseJsonObject(credentialsText || "{}");
+      if (channelType === "whatsapp") {
+        const request = buildWhatsAppSelfServiceRequest(credentials, status);
+        if (channel) {
+          await updateWhatsAppSelfServiceChannel(request);
+        } else {
+          await createWhatsAppSelfServiceChannel(request);
+        }
+      } else if (channelType === "email") {
+        const request = buildSesSelfServiceRequest(
+          credentials,
+          routingAddress,
+          status
+        );
+        if (channel) {
+          await updateSesSelfServiceChannel(request);
+        } else {
+          await createSesSelfServiceChannel(request);
+        }
+      } else if (channel) {
         await updateChannelConfiguration(channel.config_id, {
-          routing_address: String(form.get("routing_address") || ""),
-          credentials: credentialsText ? parseJsonObject(credentialsText) : undefined,
+          routing_address: routingAddress,
+          credentials: credentialsText ? credentials : undefined,
           webhook_secret: webhookSecret || undefined,
           status,
         });
       } else {
         await createChannelConfiguration({
-          channel_type: String(form.get("channel_type") || ""),
-          routing_address: String(form.get("routing_address") || ""),
-          credentials: parseJsonObject(credentialsText || "{}"),
+          channel_type: channelType,
+          routing_address: routingAddress,
+          credentials,
           webhook_secret: webhookSecret,
           status,
         });
@@ -492,19 +623,6 @@ export function ChannelsView() {
     } catch (caught: unknown) {
       setFormError(formatApiError(caught));
       setIsSubmitting(false);
-    }
-  };
-
-  const verifyChannel = async (channel: TenantChannelConfiguration) => {
-    setBusyChannelId(channel.config_id);
-    setActionError(null);
-    try {
-      await verifyChannelConfiguration(channel.config_id);
-      reload();
-    } catch (caught: unknown) {
-      setActionError(formatApiError(caught));
-    } finally {
-      setBusyChannelId(null);
     }
   };
 
@@ -519,11 +637,6 @@ export function ChannelsView() {
       {isLoading && <LoadingState />}
       {error && !isLoading && (
         <ErrorState title="Channels unavailable" message={error} onAction={reload} />
-      )}
-      {actionError && !isLoading && (
-        <div className="mb-5">
-          <ErrorState title="Channel action failed" message={actionError} actionLabel="Dismiss" onAction={() => setActionError(null)} />
-        </div>
       )}
       {data && !isLoading && !error && data.items.length === 0 && (
         <EmptyState
@@ -545,6 +658,14 @@ export function ChannelsView() {
                 ["Routing address", channel.routing_address],
                 ["Verified", channel.verified_at ? formatDateTime(channel.verified_at) : "Not verified"],
                 [
+                  "Validation error",
+                  channel.last_validation_error ?? "No validation error recorded",
+                ],
+                [
+                  "Self-service config",
+                  stringify(channel.self_service_config),
+                ],
+                [
                   "Credential rotation",
                   channel.credential_rotated_at
                     ? formatDateTime(channel.credential_rotated_at)
@@ -558,13 +679,6 @@ export function ChannelsView() {
                     className="h-9 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
                   >
                     Edit
-                  </button>
-                  <button
-                    onClick={() => void verifyChannel(channel)}
-                    disabled={busyChannelId === channel.config_id}
-                    className="h-9 rounded border border-gold-primary/40 px-3 text-[12px] text-gold-primary hover:bg-gold-primary/10 disabled:opacity-50"
-                  >
-                    Verify
                   </button>
                 </div>
               }
@@ -941,8 +1055,8 @@ function ChannelForm({
       <SelectInput
         name="status"
         label="Status"
-        defaultValue={channel?.status ?? "pending_verification"}
-        options={["pending_verification", "active", "paused", "error"]}
+        defaultValue={channel?.status ?? "pending_validation"}
+        options={["draft", "pending_validation", "validation_failed", "disabled"]}
       />
       {channel && (
         <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
@@ -1013,15 +1127,30 @@ function CredentialInput({
         {field.label}
         {required && <span className="ml-1 text-red-alert">*</span>}
       </span>
-      <input
-        type={field.type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        required={required}
-        autoComplete={field.type === "password" ? "new-password" : "off"}
-        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
-      />
+      {field.type === "select" ? (
+        <select
+          value={value || field.options?.[0] || ""}
+          onChange={(event) => onChange(event.target.value)}
+          required={required}
+          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+        >
+          {(field.options ?? []).map((option) => (
+            <option key={option} value={option}>
+              {formatLabel(option)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={field.type}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          required={required}
+          autoComplete={field.type === "password" ? "new-password" : "off"}
+          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+        />
+      )}
       {field.helpText && (
         <span className="mt-1 block text-[12px] leading-relaxed text-ink-tertiary">
           {field.helpText}
@@ -1037,12 +1166,93 @@ function buildCredentialPayload(
 ): Record<string, string> {
   const payload: Record<string, string> = {};
   for (const field of fields) {
-    const value = credentialValues[field.key]?.trim();
+    const value =
+      credentialValues[field.key]?.trim()
+      || (field.type === "select" ? field.options?.[0] : undefined);
     if (value) {
       payload[field.key] = value;
     }
   }
   return payload;
+}
+
+function buildWhatsAppSelfServiceRequest(
+  credentials: Record<string, unknown>,
+  status: TenantChannelConfiguration["status"]
+): TenantWhatsAppSelfServiceRequest {
+  return compactObject({
+    waba_id: optionalText(credentials.waba_id),
+    phone_number_id: requiredText(credentials.phone_number_id, "phone_number_id"),
+    business_account_id: optionalText(credentials.business_account_id),
+    graph_api_version: optionalText(credentials.graph_api_version) ?? "v25.0",
+    app_id: optionalText(credentials.app_id),
+    config_id: optionalText(credentials.config_id),
+    access_token: optionalText(credentials.access_token),
+    system_user_token: optionalText(credentials.system_user_token),
+    webhook_verify_token: optionalText(credentials.webhook_verify_token),
+    app_secret: optionalText(credentials.app_secret),
+    status,
+  });
+}
+
+function buildSesSelfServiceRequest(
+  credentials: Record<string, unknown>,
+  routingAddress: string,
+  status: TenantChannelConfiguration["status"]
+): TenantSesSelfServiceRequest {
+  const route = routingAddress.trim();
+  const sourceEmail = optionalText(credentials.source_email);
+  const sourceDomain = optionalText(credentials.source_domain);
+  const fallbackRoute =
+    sourceEmail || sourceDomain || (route.includes("@") ? route : undefined);
+  const fallbackDomain =
+    sourceDomain || (!route.includes("@") && route ? route : undefined);
+  return compactObject({
+    mode: sesMode(optionalText(credentials.mode)),
+    region: requiredText(credentials.region, "region"),
+    source_email: sourceEmail ?? fallbackRoute,
+    source_domain: sourceDomain ?? fallbackDomain,
+    inbound_address: optionalText(credentials.inbound_address),
+    inbound_domain: optionalText(credentials.inbound_domain),
+    topic_arn: optionalText(credentials.topic_arn),
+    receipt_rule_set: optionalText(credentials.receipt_rule_set),
+    receipt_rule_name: optionalText(credentials.receipt_rule_name),
+    role_arn: optionalText(credentials.role_arn),
+    external_id: optionalText(credentials.external_id),
+    access_key_id: optionalText(credentials.access_key_id),
+    secret_access_key: optionalText(credentials.secret_access_key),
+    session_token: optionalText(credentials.session_token),
+    status,
+  });
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item !== undefined && item !== null && item !== "") {
+      out[key] = item;
+    }
+  }
+  return out as T;
+}
+
+function optionalText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return text || undefined;
+}
+
+function requiredText(value: unknown, key: string): string {
+  const text = optionalText(value);
+  if (!text) throw new Error(`${key} is required`);
+  return text;
+}
+
+function sesMode(value: string | undefined): TenantSesSelfServiceRequest["mode"] {
+  if (value === "managed" || value === "byo_role" || value === "byo_access_key") {
+    return value;
+  }
+  return "managed";
 }
 
 function TextInput({

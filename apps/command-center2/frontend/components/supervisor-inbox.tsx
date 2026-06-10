@@ -39,10 +39,10 @@ export function SupervisorInbox() {
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-gold-primary">
-            SUPERVISOR - RISK REVIEW
+            OPERATIONS · QUALITY REVIEW
           </div>
           <h1 className="font-display text-[32px] font-bold text-ink-primary">
-            Supervisor Inbox
+            Quality Reviews
           </h1>
         </div>
         <button

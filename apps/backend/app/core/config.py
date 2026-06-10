@@ -309,6 +309,7 @@ class Settings(BaseSettings):
     ALERT_DLQ_SPIKE_THRESHOLD: int = 5
     ALERT_REDIS_MEMORY_PCT: float = 85.0
     ALERT_DB_POOL_UTILIZATION: float = 0.9
+    INBOUND_TIMELINE_STALL_THRESHOLD_SECONDS: int = 60
     QUOTA_REQUESTS_PER_MINUTE_DEFAULT: int = 60
     QUOTA_TOKENS_PER_MINUTE_DEFAULT: int = 100_000
     QUOTA_REQUESTS_PER_HOUR_DEFAULT: int = 1_000
@@ -410,6 +411,13 @@ class Settings(BaseSettings):
     # explicitly provide key material before channel credential write
     # endpoints can be used.
     TENANT_CREDENTIAL_MASTER_KEY: str = ""
+    CREDENTIAL_KMS_BACKEND: Literal["local", "gcp"] = "local"
+    OPERIOUS_KMS_KEY_RESOURCE: str = ""
+    # Backwards-compatible alias only. New deployments should set
+    # OPERIOUS_KMS_KEY_RESOURCE.
+    GCP_KMS_KEY_RESOURCE: str = ""
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
+    CREDENTIAL_DEK_CACHE_TTL_SECONDS: int = 300
 
     # ─── Data protection envelope encryption (Spec 1c) ──────────────
     # Comma-separated versioned key ring entries, e.g.
@@ -451,8 +459,8 @@ class Settings(BaseSettings):
     ESCALATION_OUTBOX_CLAIM_LEASE_SECONDS: int = 300
     INGRESS_DISPATCH_CLAIM_LEASE_SECONDS: int = 300
     INGRESS_DISPATCH_RECOVERY_BATCH_SIZE: int = 100
-    INGRESS_DISPATCH_MAX_ATTEMPTS: int = 5
-    INGRESS_DISPATCH_MAX_AGE_SECONDS: int = 86_400
+    INGRESS_DISPATCH_MAX_ATTEMPTS: int = 8
+    INGRESS_DISPATCH_MAX_AGE_SECONDS: int = 3_600
     INGRESS_DISPATCH_RETRY_BASE_SECONDS: int = 30
 
     # ─── Survivability (P2-E) ────────────────────────────────────────
@@ -492,6 +500,13 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def credential_kms_key_resource(self) -> str:
+        canonical = self.OPERIOUS_KMS_KEY_RESOURCE.strip()
+        if canonical:
+            return canonical
+        return self.GCP_KMS_KEY_RESOURCE.strip()
 
     @property
     def allow_stub_actions_effective(self) -> bool:

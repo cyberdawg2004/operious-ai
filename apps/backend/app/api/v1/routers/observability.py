@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.observability import (
     DeadLetterExecutionPageResponse,
+    InboundMessageTimelineResponse,
     InboundNormalizationDeadLetterPageResponse,
     OperationalAlertPageResponse,
     OperationalMetricsResponse,
@@ -19,6 +20,7 @@ from app.api.v1.schemas.observability import (
     OperationalTraceSpanResponse,
     StuckExecutionAlertPageResponse,
 )
+from app.core.config import Settings, get_settings
 from app.dependencies.authority import (
     require_tenant_observability_read,
     require_tenant_scope,
@@ -129,6 +131,52 @@ async def list_inbound_normalization_dead_letters(
         offset=offset,
     )
     return InboundNormalizationDeadLetterPageResponse.from_page(page)
+
+
+@router.get(
+    "/inbound-message-timeline",
+    response_model=InboundMessageTimelineResponse,
+)
+async def get_inbound_message_timeline(
+    ingress_id: str | None = Query(default=None),
+    external_conversation_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+    execution_id: str | None = Query(default=None),
+    draft_id: str | None = Query(default=None),
+    outbound_send_outbox_id: str | None = Query(default=None),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _obs: AuthorityContext = Depends(require_tenant_observability_read),
+    service: OperationalObservabilityService = Depends(
+        get_operational_observability_service
+    ),
+    settings: Settings = Depends(get_settings),
+) -> InboundMessageTimelineResponse:
+    if (
+        _inbound_timeline_lookup_key_count(
+            ingress_id=ingress_id,
+            external_conversation_id=external_conversation_id,
+            session_id=session_id,
+            execution_id=execution_id,
+            draft_id=draft_id,
+            outbound_send_outbox_id=outbound_send_outbox_id,
+        )
+        != 1
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "exactly_one_lookup_key_required"},
+        )
+    record = await service.get_inbound_message_timeline(
+        tenant_id=expected_tenant_id,
+        ingress_id=ingress_id,
+        external_conversation_id=external_conversation_id,
+        session_id=session_id,
+        execution_id=execution_id,
+        draft_id=draft_id,
+        outbound_send_outbox_id=outbound_send_outbox_id,
+        stall_threshold_seconds=settings.INBOUND_TIMELINE_STALL_THRESHOLD_SECONDS,
+    )
+    return InboundMessageTimelineResponse.from_record(record)
 
 
 @router.post(
@@ -310,3 +358,26 @@ async def list_trace_spans(
 
 
 __all__ = ["router"]
+
+
+def _inbound_timeline_lookup_key_count(
+    *,
+    ingress_id: str | None,
+    external_conversation_id: str | None,
+    session_id: str | None,
+    execution_id: str | None,
+    draft_id: str | None,
+    outbound_send_outbox_id: str | None,
+) -> int:
+    return sum(
+        1
+        for value in (
+            ingress_id,
+            external_conversation_id,
+            session_id,
+            execution_id,
+            draft_id,
+            outbound_send_outbox_id,
+        )
+        if value is not None and value.strip()
+    )

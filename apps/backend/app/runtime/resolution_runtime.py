@@ -160,6 +160,9 @@ class ResolutionProposalRequest:
     diagnostic_confidence: float
     original_content: str
     source_language: str = "en"
+    source_channel: str | None = None
+    reply_recipient: str | None = None
+    reply_thread_context: str | None = None
     retrieved_citations: Sequence[Mapping[str, Any]] = ()
     conversation_history: Sequence[Mapping[str, Any]] = ()
 
@@ -189,6 +192,9 @@ class ResolutionGovernanceGateRequest:
     local_reasons: tuple[str, ...]
     reply_segments: tuple[Mapping[str, Any], ...] = ()
     source_language: str = "en"
+    source_channel: str | None = None
+    reply_recipient: str | None = None
+    reply_thread_context: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +307,9 @@ class ResolutionRuntime:
                 local_reasons=gate.reasons,
                 reply_segments=reply_segments,
                 source_language=_normalise_language(request.source_language),
+                source_channel=request.source_channel,
+                reply_recipient=request.reply_recipient,
+                reply_thread_context=request.reply_thread_context,
             )
         )
 

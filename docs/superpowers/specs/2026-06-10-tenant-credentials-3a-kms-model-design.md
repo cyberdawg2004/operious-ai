@@ -65,12 +65,20 @@ read:   wrapped_dek --(CredentialKeyProvider.unwrap_dek, cached by wrapped-DEK h
 ```
 
 **Provider seam** `CredentialKeyProvider`:
-- `wrap_dek(plaintext_dek, *, tenant_id, channel) -> bytes`
-- `unwrap_dek(wrapped_dek, *, tenant_id, channel) -> bytes`
+- `wrap_dek(plaintext_dek, *, tenant_id, channel) -> WrappedDekMetadata`
+- `unwrap_dek(wrapped_dek_metadata, *, tenant_id, channel) -> bytes`
+
+`WrappedDekMetadata` is structured and persisted in the credential envelope. It includes
+the wrapping backend/provider, the GCP key resource or local key version, the wrapped DEK,
+and provider metadata needed for decrypt, rotation, and audit. `CREDENTIAL_KMS_BACKEND`
+selects the default provider for **new writes only**; decrypt always follows the provider
+metadata embedded in the `OPCRED2` blob. Switching `CREDENTIAL_KMS_BACKEND=local` must not
+attempt to decrypt a GCP-wrapped blob with the local provider.
 
 Implementations, selected by `CREDENTIAL_KMS_BACKEND`:
 - **`GcpCloudKmsKeyProvider`** (`gcp`, prod): `google-cloud-kms` Encrypt/Decrypt against
-  `GCP_KMS_KEY_RESOURCE`, passing `tenant_id|channel` as KMS
+  `OPERIOUS_KMS_KEY_RESOURCE` (canonical; `GCP_KMS_KEY_RESOURCE` accepted only as a
+  backwards-compatible alias), passing `tenant_id|channel` as KMS
   `additional_authenticated_data`, authenticated via `GOOGLE_APPLICATION_CREDENTIALS`
   (`operious-kms.json`, already provided by `prepare_google_credentials.sh`).
 - **`LocalMasterKeyProvider`** (`local`, tests/dev + migration fallback): wraps the DEK
@@ -82,15 +90,16 @@ decrypted outside its tenant/channel scope even if the DEK leaked — matching t
 
 ### 4.1 Container format
 A new versioned container `OPCRED2:` stored in `credentials_enc`:
-`magic b"OPCRED2:" + json{ kms_backend, kms_key_version, wrapped_dek(b64), nonce(b64),
-ciphertext(b64) }`. The old `TenantCredentialEncryptor` magic remains decryptable for
-migration (see §5).
+`magic b"OPCRED2:" + json{ provider, key_resource, local_key_version,
+provider_metadata, wrapped_dek(b64), nonce(b64), ciphertext(b64) }`. The old
+`TenantCredentialEncryptor` magic remains decryptable for migration (see §5).
 
 ## 5. Migration of existing credentials
 
-- **Dual-read decrypt:** if the blob starts with `OPCRED2:`, decrypt via the new envelope;
-  else decrypt via the legacy `TenantCredentialEncryptor` (HKDF) path. On the next write of
-  that row, re-encrypt to `OPCRED2:`.
+- **Dual-read decrypt:** if the blob starts with `OPCRED2:`, decrypt via the provider
+  metadata embedded in that envelope; else decrypt via the legacy
+  `TenantCredentialEncryptor` (HKDF) path. On the next write of that row, re-encrypt to
+  `OPCRED2:`.
 - **One-shot re-encrypt command:** a management script (mirroring Spec #2's
   dry-run-first backfill) that re-encrypts `credentials_enc` **and**
   `previous_credentials_enc` for all rows to `OPCRED2:`. **Dry-run by default** (reports
@@ -111,9 +120,14 @@ brief KMS blips:
 
 A registry `channel_type → validated model`, validated before encryption and after decrypt:
 
-- **WhatsApp**: `waba_id, phone_number_id, business_token, app_secret, verify_token`
+- **WhatsApp**: current direct send shape `access_token, phone_number_id,
+  graph_api_version` remains valid; future Embedded Signup shapes may add `waba_id,
+  business_token, app_secret, verify_token`.
 - **SES-managed**: `domain, region, identity_arn, dkim_tokens, mail_from_domain,
   verification_status`
+- **SES current/direct**: `access_key_id/aws_access_key_id`,
+  `secret_access_key/aws_secret_access_key`, `region/aws_region/ses_region`, optional
+  `session_token`, `endpoint_url`, `configuration_set_name`
 - **SES-BYO**: `role_arn, external_id, region`
 - **Shopify**: `access_token` (existing shape, formalized)
 
@@ -121,9 +135,10 @@ A registry `channel_type → validated model`, validated before encryption and a
 
 ## 8. Lifecycle + validation seam
 
-Use the existing `TenantChannelConfigurationRow.status` + `verified_at`. States and
-transitions: `PENDING → VALIDATING → ACTIVE → FAILED | REVOKED` (REVOKED terminal). A
-`ChannelCredentialValidator` interface (per channel type):
+Use the existing `TenantChannelConfigurationRow.status` + `verified_at`; 3a does not widen
+the live `TenantChannelStatus` enum. The spec lifecycle maps to current states:
+`PENDING/VALIDATING -> PENDING_VERIFICATION`, `ACTIVE -> ACTIVE`, `FAILED -> ERROR`, and
+`REVOKED -> PAUSED`. A `ChannelCredentialValidator` interface (per channel type):
 - 3a ships **format validation** (schema-shape + required fields) and the seam.
 - 3b/3c ship **live validation** (Meta token check; SES identity/DNS check) that drives
   `VALIDATING → ACTIVE/FAILED` and sets `verified_at`.
@@ -135,7 +150,8 @@ current and previous blobs migrate to `OPCRED2:` and decrypt via dual-read.
 
 ```
 CREDENTIAL_KMS_BACKEND=gcp                 # local for tests/dev
-GCP_KMS_KEY_RESOURCE=projects/operious-kms-81c603/locations/<loc>/keyRings/<ring>/cryptoKeys/<key>
+OPERIOUS_KMS_KEY_RESOURCE=projects/operious-kms-81c603/locations/<loc>/keyRings/<ring>/cryptoKeys/<key>
+GCP_KMS_KEY_RESOURCE=...                   # optional legacy alias only
 GOOGLE_APPLICATION_CREDENTIALS=...         # operious-kms.json (already wired)
 CREDENTIAL_DEK_CACHE_TTL_SECONDS=300
 TENANT_CREDENTIAL_MASTER_KEY=...           # retained for LocalMasterKeyProvider + migration fallback
@@ -159,8 +175,8 @@ TENANT_CREDENTIAL_MASTER_KEY=...           # retained for LocalMasterKeyProvider
 
 ## 11. Rollback
 
-- `CREDENTIAL_KMS_BACKEND=local` reverts to the local-master KEK with no data change
-  (blobs are still `OPCRED2:`, just wrapped by the local provider going forward).
+- `CREDENTIAL_KMS_BACKEND=local` changes only new writes to the local-master KEK. Existing
+  GCP-wrapped `OPCRED2` blobs still require the embedded GCP provider metadata to decrypt.
 - Dual-read keeps legacy blobs decryptable, so a half-migrated state is safe.
 - The lifecycle/schema additions are additive; no destructive migration.
 

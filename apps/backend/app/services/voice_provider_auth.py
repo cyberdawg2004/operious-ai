@@ -7,7 +7,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
-from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.credentials import build_tenant_credential_encryptor_from_settings
 from app.tenant.enums import TenantChannelType
 from app.tenant.exceptions import TenantConfigurationError
 from app.tenant.persistence import PostgresTenantConfigurationRepository
@@ -19,16 +19,15 @@ VoiceProviderAuthTokenLoader = Callable[[str], Awaitable[str | None]]
 def get_voice_provider_auth_token_loader() -> VoiceProviderAuthTokenLoader:
     async def load_auth_token(tenant_id: str) -> str | None:
         settings = get_settings()
-        if not settings.TENANT_CREDENTIAL_MASTER_KEY.strip():
-            return None
         try:
+            credential_codec = build_tenant_credential_encryptor_from_settings(
+                settings
+            )
             session_factory = get_session_factory()
             async with session_factory() as session:
                 runtime = TenantConfigurationRuntime(
                     repository=PostgresTenantConfigurationRepository(session),
-                    credential_encryptor=TenantCredentialEncryptor(
-                        platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
-                    ),
+                    credential_encryptor=credential_codec,
                 )
                 credentials = await runtime.load_channel_credentials(
                     tenant_id=tenant_id,

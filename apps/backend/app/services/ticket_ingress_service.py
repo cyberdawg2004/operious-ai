@@ -47,8 +47,9 @@ from app.boundary.enums import (
     BoundaryNormalizationStatus,
     BoundarySourceType,
 )
-from app.boundary.identity import derive_ingress_id
+from app.boundary.identity import BoundaryIngressId, derive_ingress_id
 from app.boundary.ingress import BoundaryIngressRuntime
+from app.boundary.ingress_dispatch_outbox import IngressDispatchOutboxRecord
 from app.boundary.models.payload import IngressPayload
 from app.boundary.models.source import BoundarySource
 from app.boundary.persistence import BoundaryPersistenceProtocol
@@ -98,6 +99,7 @@ WebhookTicketChannel = Literal["email", "whatsapp", "shulex", "lark"]
 WEBHOOK_FRESHNESS_WINDOW_SECONDS = 300
 WEBHOOK_NONCE_TTL_SECONDS = 24 * 60 * 60
 logger = logging.getLogger(__name__)
+IngressDispatchEnqueue = Callable[[IngressDispatchOutboxRecord], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +136,7 @@ class TicketIngressService:
         webhook_queue_by_channel: (
             Mapping[TenantChannelType, Sequence[str]] | None
         ) = None,
+        ingress_dispatch_enqueue: IngressDispatchEnqueue | None = None,
         sns_message_verifier: SnsMessageVerifier | None = None,
         sns_subscription_confirmer: SnsSubscriptionConfirmer | None = None,
         ses_raw_email_fetcher: SesRawEmailFetcher | None = None,
@@ -152,6 +155,7 @@ class TicketIngressService:
             channel_type: tuple(queue_names)
             for channel_type, queue_names in (webhook_queue_by_channel or {}).items()
         }
+        self._ingress_dispatch_enqueue = ingress_dispatch_enqueue
         self._sns_message_verifier = sns_message_verifier or SnsMessageVerifier()
         self._sns_subscription_confirmer = (
             sns_subscription_confirmer or HttpSnsSubscriptionConfirmer()
@@ -241,6 +245,12 @@ class TicketIngressService:
             )
 
         await self._session.commit()
+        await self._best_effort_enqueue_captured_ingress_dispatch(
+            ingress_id=result.ingress_id,
+            tenant_id=expected_tenant_id,
+            channel=channel,
+            request_correlation_id=external_id,
+        )
         return TicketIngressServiceResult(
             ingress_id=str(result.ingress_id),
             canonical_envelope_id=str(result.event_id),
@@ -631,6 +641,12 @@ class TicketIngressService:
                 code="channel_webhook_rejected",
                 reason=result.normalization.error or "normalization failed",
             )
+        await self._best_effort_enqueue_captured_ingress_dispatch(
+            ingress_id=result.ingress_id,
+            tenant_id=channel_config.tenant_id,
+            channel=tenant_channel_type.value,
+            request_correlation_id=webhook_request_id,
+        )
         await self._record_processing_admission_after_capture(
             tenant_id=channel_config.tenant_id,
             channel_type=tenant_channel_type,
@@ -827,6 +843,12 @@ class TicketIngressService:
                 code="ses_email_webhook_rejected",
                 reason=result.normalization.error or "normalization failed",
             )
+        await self._best_effort_enqueue_captured_ingress_dispatch(
+            ingress_id=result.ingress_id,
+            tenant_id=channel_config.tenant_id,
+            channel=TenantChannelType.EMAIL.value,
+            request_correlation_id=webhook_request_id,
+        )
         await self._record_processing_admission_after_capture(
             tenant_id=channel_config.tenant_id,
             channel_type=TenantChannelType.EMAIL,
@@ -1034,6 +1056,35 @@ class TicketIngressService:
                 status_code=401,
             ) from exc
 
+    async def _best_effort_enqueue_captured_ingress_dispatch(
+        self,
+        *,
+        ingress_id: BoundaryIngressId,
+        tenant_id: str,
+        channel: str,
+        request_correlation_id: str,
+    ) -> None:
+        if self._ingress_dispatch_enqueue is None:
+            return
+        outbox = await self._persistence.get_ingress_dispatch_outbox_by_ingress(
+            ingress_id
+        )
+        if outbox is None:
+            return
+        try:
+            self._ingress_dispatch_enqueue(outbox)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "ingress_dispatch_immediate_enqueue_failed",
+                extra={
+                    "tenant_id": tenant_id,
+                    "channel": channel,
+                    "request_correlation_id": request_correlation_id,
+                    "ingress_id": str(ingress_id),
+                    "outbox_id": str(outbox.outbox_id),
+                },
+            )
+
     async def _record_processing_admission_after_capture(
         self,
         *,
@@ -1056,10 +1107,11 @@ class TicketIngressService:
         if decision.outcome is AdmissionOutcome.ADMIT:
             return
         logger.warning(
-            "post_capture_processing_admission_deferred",
+            "post_capture_processing_admission_pressure_recorded",
             extra={
                 "tenant_id": tenant_id,
                 "channel": channel_type.value,
+                "dispatch_recovery": "ingress_dispatch_outbox",
                 "decision_id": str(decision.decision_id),
                 "outcome": decision.outcome.value,
                 "reason": (

@@ -21,7 +21,8 @@ from app.boundary.outbound import (
 )
 from app.core.config import get_settings
 from app.runtime.db.models import DefectReportRow, OutboundDispatchRow
-from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.credentials import build_tenant_credential_encryptor_from_settings
+from app.tenant.exceptions import TenantCredentialEncryptionError
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.persistence import (
     PostgresTenantConfigurationRepository,
@@ -310,14 +311,16 @@ class OutboundDispatchService:
 
 
 def _build_tenant_runtime(session: AsyncSession) -> TenantConfigurationRuntime:
-    key = get_settings().TENANT_CREDENTIAL_MASTER_KEY
-    if not key.strip():
+    settings = get_settings()
+    try:
+        credential_codec = build_tenant_credential_encryptor_from_settings(settings)
+    except TenantCredentialEncryptionError as exc:
         raise OutboundDispatchConfigurationError(
-            "tenant credential master key is required"
-        )
+            "tenant credential custody is not configured"
+        ) from exc
     return TenantConfigurationRuntime(
         repository=PostgresTenantConfigurationRepository(session),
-        credential_encryptor=TenantCredentialEncryptor(platform_master_key=key),
+        credential_encryptor=credential_codec,
     )
 
 

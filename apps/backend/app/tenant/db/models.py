@@ -78,6 +78,19 @@ class TenantChannelConfigurationRow(Base):
     routing_address: Mapped[str] = mapped_column(String(_ROUTING_WIDTH), nullable=False)
     credentials_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     webhook_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    self_service_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    last_validation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validation_evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
     previous_credentials_enc: Mapped[bytes | None] = mapped_column(
         LargeBinary, nullable=True
     )

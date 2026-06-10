@@ -25,6 +25,7 @@ import {
 } from "@/lib/config-change-payloads";
 import { useApiResource } from "@/lib/use-api-resource";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { TechnicalDetails } from "@/components/technical-details";
 
 /**
  * Per-connector-type credential field. Credentials NEVER ride the connector
@@ -456,9 +457,11 @@ function ActionPolicyCard({ policy }: { policy: TenantGovernancePolicy }) {
         <Field label="Approved by" value={policy.approved_by} />
         <Field label="Effective from" value={policy.effective_from} />
       </div>
-      <pre className="mt-3 max-h-72 overflow-auto rounded border border-border-subtle bg-surface-raised p-3 text-[11px] leading-relaxed text-ink-secondary">
-        {JSON.stringify(policy.parameters, null, 2)}
-      </pre>
+      <TechnicalDetails label="Show policy parameters" openLabel="Hide policy parameters">
+        <pre className="max-h-72 overflow-auto rounded border border-border-subtle bg-surface-raised p-3 text-[11px] leading-relaxed text-ink-secondary">
+          {JSON.stringify(policy.parameters, null, 2)}
+        </pre>
+      </TechnicalDetails>
     </article>
   );
 }

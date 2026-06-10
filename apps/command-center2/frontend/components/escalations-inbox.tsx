@@ -13,6 +13,7 @@ import { useApiResource } from "@/lib/use-api-resource";
 import { useAuthSession } from "@/lib/use-auth-session";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
+import { TechnicalDetails } from "@/components/technical-details";
 
 const REFRESH_MS = 30_000;
 const APPROVE_CAPABILITY = "tenant.actions.approve";
@@ -327,8 +328,6 @@ function DetailPanel({
           </Section>
 
           <Section title="Context">
-            <Row label="Session" value={escalation.session_id} mono />
-            <Row label="Governance decision" value={escalation.governance_decision_id} mono />
             <Row label="Decision" value={escalation.source_decision ?? "—"} />
             <Row label="Handoff" value={escalation.handoff_kind} />
             <Row label="Priority" value={escalation.priority} />
@@ -337,18 +336,32 @@ function DetailPanel({
               Full grounding (citations, blocked output) is on the originating
               session trace, decision {shortId(escalation.governance_decision_id)}.
             </p>
+            <TechnicalDetails label="Show identifiers" openLabel="Hide identifiers">
+              <div className="space-y-2">
+                <Row label="Session" value={escalation.session_id} mono />
+                <Row
+                  label="Governance decision"
+                  value={escalation.governance_decision_id}
+                  mono
+                />
+              </div>
+            </TechnicalDetails>
           </Section>
 
           <Section title="Lifecycle">
             <Row label="Status" value={escalation.status} />
             <Row label="Resolved by" value={escalation.resolved_by ?? "—"} />
             <Row label="Resolution" value={escalation.resolution ?? "—"} />
-            <Row
-              label="Override decision"
-              value={escalation.governance_override_decision_id ?? "—"}
-              mono={Boolean(escalation.governance_override_decision_id)}
-            />
             <Row label="Resolved at" value={escalation.resolved_at ? formatDate(escalation.resolved_at) : "—"} />
+            {escalation.governance_override_decision_id && (
+              <TechnicalDetails label="Show override identifier" openLabel="Hide override identifier">
+                <Row
+                  label="Override decision"
+                  value={escalation.governance_override_decision_id}
+                  mono
+                />
+              </TechnicalDetails>
+            )}
           </Section>
 
           {/* AUTHORITY GATE: approve/reject are ABSENT (not disabled) unless the

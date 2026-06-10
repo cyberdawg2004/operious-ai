@@ -1,4 +1,4 @@
-import { auth0 } from "@/lib/auth0";
+import { getAuth0Client } from "@/lib/auth0";
 import { hasAuth0Environment } from "@/lib/auth0-env";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -18,6 +18,8 @@ export async function proxy(request: NextRequest) {
     signInUrl.searchParams.set("auth", "unconfigured");
     return NextResponse.redirect(signInUrl);
   }
+
+  const auth0 = getAuth0Client();
 
   if (isProtectedPath(request.nextUrl.pathname)) {
     const session = await auth0.getSession(request);

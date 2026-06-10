@@ -230,12 +230,12 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
     <div className="min-w-0 flex-1 bg-canvas px-4 py-5 sm:px-6 lg:px-8">
       <div className="mb-6">
         <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-gold-primary">
-          TRACE - SESSION TIMELINE
+          OPERATIONS · DECISION TIMELINE
         </div>
 
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <h1 className="font-display text-[32px] font-bold text-ink-primary">
-            Trace Inspector
+            Decision History
           </h1>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

@@ -8,6 +8,8 @@ from app.observability.persistence.models import (
     DeadLetterExecutionQuery,
     InboundNormalizationDeadLetterPage,
     InboundNormalizationDeadLetterQuery,
+    InboundMessageTimelineLookup,
+    InboundMessageTimelinePage,
     OperationalAlertPage,
     OperationalMetricsQuery,
     OperationalSLODefinitionPage,
@@ -22,6 +24,8 @@ from app.observability.persistence.postgres import (
 )
 from app.observability.persistence.records import (
     DeadLetterExecutionRecord,
+    InboundMessageTimelineRecord,
+    InboundMessageTimelineStageRecord,
     InboundNormalizationDeadLetterRecord,
     OperationalAlertRecord,
     OperationalMetricsSnapshotRecord,
@@ -42,6 +46,10 @@ __all__ = [
     "InboundNormalizationDeadLetterPage",
     "InboundNormalizationDeadLetterQuery",
     "InboundNormalizationDeadLetterRecord",
+    "InboundMessageTimelineLookup",
+    "InboundMessageTimelinePage",
+    "InboundMessageTimelineRecord",
+    "InboundMessageTimelineStageRecord",
     "OperationalAlertPage",
     "OperationalAlertRecord",
     "OperationalMetricsQuery",

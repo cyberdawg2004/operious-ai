@@ -140,8 +140,41 @@ class InboundNormalizationDeadLetterRecord:
     metadata: MetadataMap = field(default_factory=_empty_json_object)
 
 
+@dataclass(frozen=True, slots=True)
+class InboundMessageTimelineStageRecord:
+    """One proven durable stage in an inbound message lifecycle."""
+
+    stage: str
+    status: str
+    occurred_at: datetime
+    source_table: str
+    source_id: str
+    ids: MetadataMap = field(default_factory=_empty_json_object)
+    metadata: MetadataMap = field(default_factory=_empty_json_object)
+
+
+@dataclass(frozen=True, slots=True)
+class InboundMessageTimelineRecord:
+    """Tenant-scoped derived timeline for one inbound message chain."""
+
+    tenant_id: str
+    lookup_key: str
+    lookup_value: str
+    ids: MetadataMap
+    stages: tuple[InboundMessageTimelineStageRecord, ...]
+    current_stage: str | None
+    terminal: bool
+    stalled: bool
+    stalled_reason: str | None
+    stall_threshold_seconds: int
+    latest_event_at: datetime | None
+    generated_at: datetime
+
+
 __all__ = [
     "DeadLetterExecutionRecord",
+    "InboundMessageTimelineRecord",
+    "InboundMessageTimelineStageRecord",
     "InboundNormalizationDeadLetterRecord",
     "OperationalAlertRecord",
     "OperationalMetricsSnapshotRecord",

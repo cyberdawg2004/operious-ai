@@ -110,6 +110,64 @@ test('channel credential payload includes only typed credential values', () => {
   strictEqual(payload.webhook_secret, 'wh');
 });
 
+test('whatsapp self-service channel payload keeps only typed secrets', () => {
+  const { change_type, payload } = payloads.buildWhatsAppSelfServiceChannelChangePayload({
+    waba_id: 'waba-1',
+    phone_number_id: 'phone-1',
+    graph_api_version: 'v25.0',
+    access_token: 'token',
+    webhook_verify_token: '',
+  });
+  strictEqual(change_type, 'channel');
+  strictEqual(payload.channel_type, 'whatsapp');
+  strictEqual(payload.routing_address, 'phone-1');
+  strictEqual(payload.status, 'pending_validation');
+  deepStrictEqual(payload.self_service_config, {
+    setup: 'manual_token',
+    waba_id: 'waba-1',
+    phone_number_id: 'phone-1',
+    graph_api_version: 'v25.0',
+  });
+  deepStrictEqual(payload.credentials, {
+    access_token: 'token',
+    provider: 'meta_whatsapp_manual',
+    phone_number_id: 'phone-1',
+    graph_api_version: 'v25.0',
+  });
+});
+
+test('ses self-service channel payload supports managed and byo access-key modes', () => {
+  const managed = payloads.buildSesSelfServiceChannelChangePayload({
+    mode: 'managed',
+    region: 'us-east-1',
+    source_domain: 'example.com',
+    inbound_address: 'support@example.com',
+  }).payload;
+  strictEqual(managed.channel_type, 'email');
+  strictEqual(managed.routing_address, 'support@example.com');
+  strictEqual(managed.status, 'pending_validation');
+  deepStrictEqual(managed.self_service_config, {
+    mode: 'managed',
+    region: 'us-east-1',
+    source_domain: 'example.com',
+    inbound_address: 'support@example.com',
+  });
+
+  const byo = payloads.buildSesSelfServiceChannelChangePayload({
+    mode: 'byo_access_key',
+    region: 'us-east-1',
+    source_email: 'support@example.com',
+    access_key_id: 'AKIA',
+    secret_access_key: '',
+  }).payload;
+  deepStrictEqual(byo.credentials, {
+    access_key_id: 'AKIA',
+    mode: 'byo_access_key',
+    region: 'us-east-1',
+    source_email_address: 'support@example.com',
+  });
+});
+
 // ─── action_tools policy mapping ──────────────────────────────────────────
 
 test('action policy parameters carry all four required tool rules', () => {
@@ -251,6 +309,14 @@ test('connector editor drives the credential-free builder and a separate credent
   ok(src.includes('Leave blank to keep current value'));
   // The connector config form must not contain credential input field keys.
   ok(!src.includes('credentials_enc'));
+});
+
+test('channels view does not expose unsafe direct verify', () => {
+  const src = readText(join(CC2, 'components', 'integration-views.tsx'));
+  ok(!src.includes('verifyChannelConfiguration'));
+  ok(!src.includes('/verify'));
+  ok(src.includes('createWhatsAppSelfServiceChannel'));
+  ok(src.includes('createSesSelfServiceChannel'));
 });
 
 // ─── Constraint D: governed lifecycle is shown, never a direct write ───────

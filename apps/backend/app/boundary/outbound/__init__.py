@@ -37,6 +37,13 @@ from app.boundary.outbound.whatsapp_delivery import (
     WhatsAppDeliveryStatus,
     derive_whatsapp_customer_reply_delivery_id,
 )
+from app.boundary.outbound.send_outbox import (
+    InMemoryOutboundSendOutboxPersistence,
+    OutboundSendOutboxRecord,
+    OutboundSendOutboxRuntime,
+    OutboundSendOutboxStatus,
+    PostgresOutboundSendOutboxPersistence,
+)
 
 __all__ = [
     "InMemoryWhatsAppDeliveryRepository",
@@ -44,10 +51,15 @@ __all__ = [
     "EmailDeliveryRepository",
     "EmailDeliveryStatus",
     "InMemoryEmailDeliveryRepository",
+    "InMemoryOutboundSendOutboxPersistence",
+    "OutboundSendOutboxRecord",
+    "OutboundSendOutboxRuntime",
+    "OutboundSendOutboxStatus",
     "OutboundWebhookAdapter",
     "OutboundWebhookRequest",
     "OutboundWebhookResponse",
     "PostgresEmailDeliveryRepository",
+    "PostgresOutboundSendOutboxPersistence",
     "PostgresWhatsAppDeliveryRepository",
     "SesEmailSendRequest",
     "SesEmailSendResponse",

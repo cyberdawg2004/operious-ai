@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   Search,
+  LayoutDashboard,
   LayoutList,
   Network,
   Brain,
@@ -45,6 +46,12 @@ const categories: CommandCategory[] = [
     label: "RECENT",
     items: [
       {
+        id: "open-overview",
+        icon: LayoutDashboard,
+        label: "Open Command Overview",
+        shortcut: ["G", "V"],
+      },
+      {
         id: "open-operations",
         icon: LayoutList,
         label: "Open Operations Queue",
@@ -59,13 +66,13 @@ const categories: CommandCategory[] = [
       {
         id: "open-dlq-inspector",
         icon: AlertTriangle,
-        label: "Open DLQ Inspector",
+        label: "Open Failed Operations",
         shortcut: ["G", "D"],
       },
       {
         id: "open-trace",
         icon: Network,
-        label: "Open Trace Inspector",
+        label: "Open Decision History",
         shortcut: ["G", "T"],
       },
     ],
@@ -83,7 +90,7 @@ const categories: CommandCategory[] = [
       {
         id: "nav-cognition",
         icon: Brain,
-        label: "Open Cognition Hub",
+        label: "Open AI Recommendations",
         shortcut: ["G", "C"],
       },
       {
@@ -101,7 +108,7 @@ const categories: CommandCategory[] = [
       {
         id: "nav-topology",
         icon: GitBranch,
-        label: "Open Topology",
+        label: "Open Workforce Map",
         shortcut: ["G", "Y"],
       },
       {
@@ -185,6 +192,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate }: CommandPalettePr
 
   function executeItem(item: CommandItem) {
     const routeMap: Record<string, string> = {
+      "open-overview": "overview",
       "open-operations": "operations",
       "open-queue-status": "queue-status",
       "open-dlq-inspector": "dlq-inspector",

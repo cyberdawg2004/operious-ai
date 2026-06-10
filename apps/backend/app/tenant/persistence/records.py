@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Mapping
 
@@ -28,6 +28,10 @@ from app.tenant.identity import (
 )
 
 
+def _empty_mapping() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class TenantChannelConfigurationRecord:
     config_id: TenantChannelConfigurationId
@@ -40,6 +44,9 @@ class TenantChannelConfigurationRecord:
     verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    self_service_config: Mapping[str, Any] = field(default_factory=_empty_mapping)
+    last_validation_error: str | None = None
+    validation_evidence: Mapping[str, Any] = field(default_factory=_empty_mapping)
     previous_credentials_enc: bytes | None = None
     previous_webhook_secret: str | None = None
     credential_rotated_at: datetime | None = None

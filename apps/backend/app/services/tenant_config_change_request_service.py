@@ -514,8 +514,22 @@ class TenantConfigChangeRequestService:
                 status=TenantChannelStatus(
                     str(
                         payload.get("status")
-                        or TenantChannelStatus.PENDING_VERIFICATION.value
+                        or TenantChannelStatus.PENDING_VALIDATION.value
                     )
+                ),
+                self_service_config=_mapping(
+                    payload,
+                    "self_service_config",
+                    default={},
+                ),
+                last_validation_error=_optional_str(
+                    payload,
+                    "last_validation_error",
+                ),
+                validation_evidence=_mapping(
+                    payload,
+                    "validation_evidence",
+                    default={},
                 ),
                 bypass_direct_apply_gate=True,
                 commit=False,
@@ -537,6 +551,18 @@ class TenantConfigChangeRequestService:
                     None
                     if payload.get("status") is None
                     else TenantChannelStatus(_str(payload, "status"))
+                ),
+                self_service_config=_optional_mapping(
+                    payload,
+                    "self_service_config",
+                ),
+                last_validation_error=_optional_str(
+                    payload,
+                    "last_validation_error",
+                ),
+                validation_evidence=_optional_mapping(
+                    payload,
+                    "validation_evidence",
                 ),
                 bypass_direct_apply_gate=True,
                 commit=False,

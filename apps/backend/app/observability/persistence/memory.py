@@ -25,6 +25,7 @@ from app.observability.persistence.calculations import (
 from app.observability.persistence.models import (
     DeadLetterExecutionPage,
     DeadLetterExecutionQuery,
+    InboundMessageTimelineLookup,
     InboundNormalizationDeadLetterPage,
     InboundNormalizationDeadLetterQuery,
     OperationalMetricsQuery,
@@ -37,6 +38,7 @@ from app.observability.persistence.models import (
 )
 from app.observability.persistence.records import (
     DeadLetterExecutionRecord,
+    InboundMessageTimelineRecord,
     InboundNormalizationDeadLetterRecord,
     OperationalMetricsSnapshotRecord,
     OperationalSLODefinitionRecord,
@@ -214,6 +216,37 @@ class InMemoryOperationalObservabilityPersistence:
             items=tuple(sliced),
             total=total,
             offset=query.offset,
+        )
+
+    async def get_inbound_message_timeline(
+        self,
+        lookup: InboundMessageTimelineLookup,
+        *,
+        expected_tenant_id: str,
+        stall_threshold_seconds: int,
+        now: datetime | None = None,
+    ) -> InboundMessageTimelineRecord:
+        timestamp = now or datetime.now()
+        return InboundMessageTimelineRecord(
+            tenant_id=expected_tenant_id,
+            lookup_key=lookup.key,
+            lookup_value=lookup.value,
+            ids={
+                "ingress_id": lookup.ingress_id,
+                "external_conversation_id": lookup.external_conversation_id,
+                "session_id": lookup.session_id,
+                "execution_id": lookup.execution_id,
+                "draft_id": lookup.draft_id,
+                "outbound_send_outbox_id": lookup.outbound_send_outbox_id,
+            },
+            stages=(),
+            current_stage=None,
+            terminal=False,
+            stalled=False,
+            stalled_reason=None,
+            stall_threshold_seconds=stall_threshold_seconds,
+            latest_event_at=None,
+            generated_at=timestamp,
         )
 
     async def save_slo_definition(

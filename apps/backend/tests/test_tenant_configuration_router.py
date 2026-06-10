@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import VerifiedIdentity
@@ -19,7 +20,14 @@ from app.dependencies.authority import (
 )
 from app.dependencies.database import get_db_session
 from app.main import create_app
-from app.tenant.db.models import ConnectorConfigRow, TenantRow
+from app.tenant.credentials import is_opcred2
+from app.tenant.db.models import (
+    ConnectorConfigRow,
+    TenantChannelConfigurationRow,
+    TenantRow,
+)
+from app.tenant.enums import TenantChannelType
+from app.tenant.identity import derive_channel_configuration_id
 from tests.conftest import requires_postgres
 
 pytestmark = [requires_postgres]
@@ -98,7 +106,11 @@ async def test_channel_endpoint_redacts_credentials(
         json={
             "channel_type": "email",
             "routing_address": "support@example.com",
-            "credentials": {"api_key": "secret-api-key"},
+            "credentials": {
+                "access_key_id": "AKIA_TEST",
+                "secret_access_key": "secret-access-key",
+                "region": "us-east-1",
+            },
             "webhook_secret": "webhook-secret",
         },
     )
@@ -113,8 +125,11 @@ async def test_channel_endpoint_redacts_credentials(
         "verified_at",
         "credential_rotated_at",
         "credential_rotation_expires_at",
+        "self_service_config",
+        "last_validation_error",
+        "validation_evidence",
     }
-    assert "secret-api-key" not in response.text
+    assert "secret-access-key" not in response.text
     assert "webhook-secret" not in response.text
 
     listed = await tenant_client.get(
@@ -122,7 +137,7 @@ async def test_channel_endpoint_redacts_credentials(
         headers=_headers(),
     )
     assert listed.status_code == 200
-    assert "secret-api-key" not in listed.text
+    assert "secret-access-key" not in listed.text
     assert listed.json()["total"] == 1
 
 
@@ -136,10 +151,15 @@ async def test_channel_point_update_and_verify_are_tenant_scoped(
         json={
             "channel_type": "whatsapp",
             "routing_address": "+15550001000",
-            "credentials": {"token": "secret-token"},
+            "credentials": {
+                "access_token": "secret-token",
+                "phone_number_id": "+15550001000",
+                "graph_api_version": "v25.0",
+            },
             "webhook_secret": "webhook-secret",
         },
     )
+    assert created.status_code == 200
     config_id = created.json()["config_id"]
 
     cross = await tenant_client.put(
@@ -163,8 +183,142 @@ async def test_channel_point_update_and_verify_are_tenant_scoped(
         headers=_headers("tenant-acme"),
     )
     assert verified.status_code == 200
-    assert verified.json()["status"] == "active"
-    assert verified.json()["verified_at"] is not None
+    assert verified.json()["status"] == "pending_validation"
+    assert verified.json()["verified_at"] is None
+    assert "provider validation evidence" in verified.json()["last_validation_error"]
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_self_service_uses_opcred2_and_preserves_blank_secret_update(
+    pg_session: AsyncSession,
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    secret = "EAA-whatsapp-self-service-secret"
+    created = await tenant_client.post(
+        "/api/v1/tenant/channels/whatsapp/self-service",
+        headers=_headers(),
+        json={
+            "waba_id": "waba-123",
+            "phone_number_id": "phone-123",
+            "business_account_id": "business-123",
+            "graph_api_version": "v25.0",
+            "access_token": secret,
+            "webhook_verify_token": "verify-token-secret",
+        },
+    )
+
+    assert created.status_code == 200
+    body = created.json()
+    assert body["status"] == "pending_validation"
+    assert body["verified_at"] is None
+    assert body["self_service_config"]["phone_number_id"] == "phone-123"
+    assert body["validation_evidence"]["provider"] == "meta_graph"
+    assert secret not in created.text
+    assert "verify-token-secret" not in created.text
+    row = await _channel_row(
+        pg_session,
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.WHATSAPP,
+    )
+    first_credentials_enc = bytes(row.credentials_enc)
+    assert is_opcred2(first_credentials_enc)
+    assert secret.encode() not in first_credentials_enc
+
+    updated = await tenant_client.put(
+        "/api/v1/tenant/channels/whatsapp/self-service",
+        headers=_headers(),
+        json={
+            "waba_id": "waba-456",
+            "phone_number_id": "phone-123",
+            "business_account_id": "business-123",
+            "graph_api_version": "v25.0",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["self_service_config"]["waba_id"] == "waba-456"
+    row_after_blank_update = await _channel_row(
+        pg_session,
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.WHATSAPP,
+    )
+    assert bytes(row_after_blank_update.credentials_enc) == first_credentials_enc
+
+
+@pytest.mark.asyncio
+async def test_ses_self_service_modes_are_redacted_and_opcred2(
+    pg_session: AsyncSession,
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    managed = await tenant_client.post(
+        "/api/v1/tenant/channels/email/self-service",
+        headers=_headers(),
+        json={
+            "mode": "managed",
+            "region": "us-east-1",
+            "source_domain": "example.com",
+            "inbound_address": "support@example.com",
+        },
+    )
+    assert managed.status_code == 200
+    assert managed.json()["status"] == "pending_validation"
+    assert managed.json()["self_service_config"]["mode"] == "managed"
+    managed_row = await _channel_row(
+        pg_session,
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.EMAIL,
+    )
+    assert is_opcred2(bytes(managed_row.credentials_enc))
+
+    access_secret = "ses-secret-access-key"
+    byo_access_key = await tenant_client.post(
+        "/api/v1/tenant/channels/email/self-service",
+        headers=_headers(),
+        json={
+            "mode": "byo_access_key",
+            "region": "us-east-1",
+            "source_email": "support@example.com",
+            "topic_arn": "arn:aws:sns:us-east-1:123456789012:operious",
+            "access_key_id": "AKIA_SELF_SERVICE",
+            "secret_access_key": access_secret,
+        },
+    )
+    assert byo_access_key.status_code == 200
+    assert byo_access_key.json()["self_service_config"]["mode"] == "byo_access_key"
+    assert access_secret not in byo_access_key.text
+    access_key_row = await _channel_row(
+        pg_session,
+        tenant_id="tenant-acme",
+        channel_type=TenantChannelType.EMAIL,
+    )
+    assert is_opcred2(bytes(access_key_row.credentials_enc))
+    assert access_secret.encode() not in bytes(access_key_row.credentials_enc)
+
+
+@pytest.mark.asyncio
+async def test_invalid_self_service_payloads_are_rejected(
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    missing_whatsapp_token = await tenant_client.post(
+        "/api/v1/tenant/channels/whatsapp/self-service",
+        headers=_headers(),
+        json={
+            "phone_number_id": "phone-123",
+            "graph_api_version": "v25.0",
+        },
+    )
+    assert missing_whatsapp_token.status_code == 400
+
+    invalid_ses = await tenant_client.post(
+        "/api/v1/tenant/channels/email/self-service",
+        headers=_headers(),
+        json={
+            "mode": "byo_access_key",
+            "region": "us-east-1",
+            "source_email": "support@example.com",
+        },
+    )
+    assert invalid_ses.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -427,3 +581,24 @@ async def _seed_connector(
         )
     )
     await session.flush()
+
+
+async def _channel_row(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    channel_type: TenantChannelType,
+) -> TenantChannelConfigurationRow:
+    config_id = derive_channel_configuration_id(
+        tenant_id=tenant_id,
+        channel_type=channel_type,
+    )
+    row = (
+        await session.execute(
+            select(TenantChannelConfigurationRow).where(
+                TenantChannelConfigurationRow.tenant_id == tenant_id,
+                TenantChannelConfigurationRow.config_id == config_id,
+            )
+        )
+    ).scalar_one()
+    return row

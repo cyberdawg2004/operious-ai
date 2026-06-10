@@ -25,6 +25,11 @@ import { useAuthSession } from "@/lib/use-auth-session";
 import { cn } from "@/lib/utils";
 
 const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; description: string }> = {
+  overview: {
+    eyebrow: "Overview",
+    title: "Command Overview",
+    description: "Live snapshot of your AI workforce — operations handled, automation rate, pending decisions, and system health.",
+  },
   operations: {
     eyebrow: "Operations",
     title: "Operations Queue",
@@ -52,8 +57,8 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   },
   "dlq-inspector": {
     eyebrow: "Operations",
-    title: "DLQ Inspector",
-    description: "Tenant-scoped dead-letter task records with replay controls.",
+    title: "Failed Operations",
+    description: "Operations that failed processing and need replay or review.",
   },
   fraud: {
     eyebrow: "Operations",
@@ -61,14 +66,14 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     description: "Semantic circuit states, quarantine clusters, and fraud review.",
   },
   trace: {
-    eyebrow: "Observability",
-    title: "Trace Inspector",
-    description: "Replay recorded spans and inspect substrate-level execution evidence.",
+    eyebrow: "Operations",
+    title: "Decision History",
+    description: "Replay how a decision was reached, step by step, with full evidence.",
   },
   supervisor: {
     eyebrow: "Operations",
-    title: "Supervisor Inbox",
-    description: "Risky inspections, QA score evidence, and trainer recommendations.",
+    title: "Quality Reviews",
+    description: "Flagged reviews, quality scores, and coaching recommendations.",
   },
   approvals: {
     eyebrow: "Governance",
@@ -76,8 +81,8 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     description: "Pending manager approvals for governed action tools.",
   },
   cognition: {
-    eyebrow: "Cognition",
-    title: "Cognition Hub",
+    eyebrow: "Intelligence",
+    title: "AI Recommendations",
     description: "Review agent proposals, confidence signals, and escalation pathways.",
   },
   knowledge: {
@@ -96,9 +101,9 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     description: "Emergency rule activity, active deployments, and audit events.",
   },
   topology: {
-    eyebrow: "Topology",
-    title: "Topology",
-    description: "Configured agent topology for the current tenant scope.",
+    eyebrow: "Platform",
+    title: "Workforce Map",
+    description: "How your AI agents are organized for this tenant.",
   },
   channels: {
     eyebrow: "Boundary",
@@ -117,7 +122,7 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   },
   "config-approvals": {
     eyebrow: "Governance",
-    title: "Config Change Approvals",
+    title: "Configuration Approvals",
     description: "Approve or reject proposed connector and action-policy changes (dual control).",
   },
   onboarding: {

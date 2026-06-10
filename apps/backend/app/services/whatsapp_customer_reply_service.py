@@ -138,6 +138,9 @@ class WhatsAppCustomerReplySendService:
         expected_tenant_id: str,
         recipient_phone_number: str,
         phone_number_id: str | None = None,
+        expected_governance_decision_id: uuid.UUID | str | None = None,
+        expected_draft_body_sha256: str | None = None,
+        allow_failed_delivery_retry: bool = False,
     ) -> WhatsAppCustomerReplySendResult:
         if tenant_id != expected_tenant_id:
             raise ValueError("tenant_id does not match expected_tenant_id")
@@ -150,6 +153,9 @@ class WhatsAppCustomerReplySendService:
                 expected_tenant_id=expected_tenant_id,
                 recipient_phone_number=recipient_phone_number,
                 phone_number_id=phone_number_id,
+                expected_governance_decision_id=expected_governance_decision_id,
+                expected_draft_body_sha256=expected_draft_body_sha256,
+                allow_failed_delivery_retry=allow_failed_delivery_retry,
             )
         except Exception:
             await self._rollback()
@@ -165,6 +171,9 @@ class WhatsAppCustomerReplySendService:
         expected_tenant_id: str,
         recipient_phone_number: str,
         phone_number_id: str | None,
+        expected_governance_decision_id: uuid.UUID | str | None,
+        expected_draft_body_sha256: str | None,
+        allow_failed_delivery_retry: bool,
     ) -> WhatsAppCustomerReplySendResult:
         recipient = _required_text("recipient_phone_number", recipient_phone_number)
         draft = await self._load_sendable_draft(
@@ -174,6 +183,11 @@ class WhatsAppCustomerReplySendService:
         proposal = await self._load_sendable_proposal(
             proposal_id=str(draft.proposal_id),
             expected_tenant_id=expected_tenant_id,
+        )
+        _assert_expected_outbox_guards(
+            draft=draft,
+            expected_governance_decision_id=expected_governance_decision_id,
+            expected_draft_body_sha256=expected_draft_body_sha256,
         )
         self._assert_draft_and_proposal_lineage(draft=draft, proposal=proposal)
         await self._assert_persisted_governance_allow(
@@ -226,6 +240,7 @@ class WhatsAppCustomerReplySendService:
             recipient_phone_number=recipient,
             draft=draft,
         )
+        should_transmit = created
         if not created:
             if delivery.status is WhatsAppDeliveryStatus.SENT:
                 return WhatsAppCustomerReplySendResult(
@@ -243,56 +258,65 @@ class WhatsAppCustomerReplySendService:
                     transmitted=False,
                     idempotent_replay=True,
                 )
-            raise WhatsAppCustomerReplyProviderError(
-                "whatsapp delivery previously failed and is not auto-retried"
-            )
-
-        try:
-            response = await self._sender.send_text_message(
-                WhatsAppTextMessageRequest(
-                    graph_api_base_url=credentials.graph_api_base_url,
-                    graph_api_version=credentials.graph_api_version,
-                    phone_number_id=credentials.phone_number_id,
-                    access_token=credentials.access_token,
-                    recipient_phone_number=recipient,
-                    body=draft.draft_body,
-                    timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+            if allow_failed_delivery_retry and _whatsapp_delivery_error_is_retryable(
+                delivery.error_code
+            ):
+                should_transmit = True
+            else:
+                raise WhatsAppCustomerReplyProviderError(
+                    "whatsapp delivery previously failed and is not auto-retried"
                 )
-            )
-        except WhatsAppGraphAPIError as exc:
-            await self._mark_failed(
-                delivery_id=delivery_id,
-                expected_tenant_id=expected_tenant_id,
-                error_code=f"whatsapp_graph_http_{exc.status_code}",
-                provider_status_code=exc.status_code,
-            )
-            raise WhatsAppCustomerReplyProviderError(
-                "whatsapp graph api rejected the message"
-            ) from exc
-        except Exception as exc:
-            await self._mark_failed(
-                delivery_id=delivery_id,
-                expected_tenant_id=expected_tenant_id,
-                error_code=exc.__class__.__name__,
-            )
-            raise WhatsAppCustomerReplyProviderError(
-                "whatsapp graph api send failed"
-            ) from exc
 
-        sent = await self._delivery_repository.mark_sent(
-            delivery_id,
-            expected_tenant_id=expected_tenant_id,
-            provider_message_id=response.provider_message_id,
-            provider_status_code=response.status_code,
-            sent_at=datetime.now(timezone.utc),
-        )
-        await self._commit()
-        return WhatsAppCustomerReplySendResult(
-            delivery_id=str(sent.delivery_id),
-            status="sent",
-            provider_message_id=sent.provider_message_id,
-            transmitted=True,
-            idempotent_replay=False,
+        if should_transmit:
+            try:
+                response = await self._sender.send_text_message(
+                    WhatsAppTextMessageRequest(
+                        graph_api_base_url=credentials.graph_api_base_url,
+                        graph_api_version=credentials.graph_api_version,
+                        phone_number_id=credentials.phone_number_id,
+                        access_token=credentials.access_token,
+                        recipient_phone_number=recipient,
+                        body=draft.draft_body,
+                        timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
+                    )
+                )
+            except WhatsAppGraphAPIError as exc:
+                await self._mark_failed(
+                    delivery_id=delivery_id,
+                    expected_tenant_id=expected_tenant_id,
+                    error_code=f"whatsapp_graph_http_{exc.status_code}",
+                    provider_status_code=exc.status_code,
+                )
+                raise WhatsAppCustomerReplyProviderError(
+                    "whatsapp graph api rejected the message"
+                ) from exc
+            except Exception as exc:
+                await self._mark_failed(
+                    delivery_id=delivery_id,
+                    expected_tenant_id=expected_tenant_id,
+                    error_code=exc.__class__.__name__,
+                )
+                raise WhatsAppCustomerReplyProviderError(
+                    "whatsapp graph api send failed"
+                ) from exc
+
+            sent = await self._delivery_repository.mark_sent(
+                delivery_id,
+                expected_tenant_id=expected_tenant_id,
+                provider_message_id=response.provider_message_id,
+                provider_status_code=response.status_code,
+                sent_at=datetime.now(timezone.utc),
+            )
+            await self._commit()
+            return WhatsAppCustomerReplySendResult(
+                delivery_id=str(sent.delivery_id),
+                status="sent",
+                provider_message_id=sent.provider_message_id,
+                transmitted=True,
+                idempotent_replay=False,
+            )
+        raise WhatsAppCustomerReplyProviderError(
+            "whatsapp delivery was not transmitted"
         )
 
     async def _load_sendable_draft(
@@ -513,6 +537,38 @@ def _resolved_phone_number_id(
             "tenant whatsapp phone_number_id is required"
         )
     return resolved
+
+
+def _assert_expected_outbox_guards(
+    *,
+    draft: ResolutionOutboundDraftRecord,
+    expected_governance_decision_id: uuid.UUID | str | None,
+    expected_draft_body_sha256: str | None,
+) -> None:
+    if expected_governance_decision_id is not None:
+        expected_decision_id = uuid.UUID(str(expected_governance_decision_id))
+        if draft.governance_decision_id != expected_decision_id:
+            raise WhatsAppCustomerReplyGovernanceError(
+                "outbox governance decision mismatch"
+            )
+    if expected_draft_body_sha256 is not None:
+        expected_digest = expected_draft_body_sha256.strip().lower()
+        if draft.draft_body_sha256 != expected_digest:
+            raise WhatsAppCustomerReplyGovernanceError(
+                "outbox draft body hash mismatch"
+            )
+
+
+def _whatsapp_delivery_error_is_retryable(error_code: str | None) -> bool:
+    if error_code is None:
+        return False
+    if not error_code.startswith("whatsapp_graph_http_"):
+        return False
+    try:
+        status_code = int(error_code.removeprefix("whatsapp_graph_http_"))
+    except ValueError:
+        return False
+    return status_code == 429 or status_code >= 500
 
 
 def _credential_string(

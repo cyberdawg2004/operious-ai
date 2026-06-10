@@ -15,6 +15,12 @@ def _ready_production(**overrides: object) -> Settings:
         "EMBEDDING_DEFAULT_PROVIDER": "openai",
         "OPENAI_API_KEY": "sk-openai-real",
         "TENANT_CREDENTIAL_MASTER_KEY": "x" * 32,
+        "CREDENTIAL_KMS_BACKEND": "gcp",
+        "OPERIOUS_KMS_KEY_RESOURCE": (
+            "projects/operious-kms/locations/global/keyRings/operious/"
+            "cryptoKeys/tenant-credentials"
+        ),
+        "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/operious-kms.json",
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
         "PUBLIC_BASE_URL": "https://api.operious.com",
     }

@@ -157,6 +157,7 @@ test('governed channel-create payload is a channel change request with credentia
   strictEqual(payload.channel_type, 'shopify');
   deepStrictEqual(payload.credentials, { access_token: 'shpat_x' });
   strictEqual(payload.webhook_secret, 'wh');
+  strictEqual(payload.status, 'pending_validation');
 });
 
 // ─── The wizard: no create-tenant, composes the proven editors ─────────────

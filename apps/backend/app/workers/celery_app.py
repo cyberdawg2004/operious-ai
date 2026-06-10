@@ -37,6 +37,7 @@ from app.queues import (
     QUEUE_INGRESS_EMAIL,
     QUEUE_KNOWLEDGE_INDEXING,
     QUEUE_INGRESS_VOICE,
+    QUEUE_OUTBOUND_SEND,
     QUEUE_QA,
     QUEUE_SOP_INTELLIGENCE,
     QUEUE_SME_APPROVAL,
@@ -87,6 +88,7 @@ celery_app = Celery(
         "app.workers.failure_pattern_tasks",
         "app.workers.ingress_dispatch_tasks",
         "app.workers.knowledge_tasks",
+        "app.workers.outbound_send_tasks",
         "app.workers.outbound_tasks",
         "app.workers.qa_tasks",
         "app.workers.s10_probe_tasks",
@@ -119,7 +121,11 @@ celery_conf.update(
         "reindex_knowledge_document": {"queue": QUEUE_KNOWLEDGE_INDEXING},
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "dispatch_ingress": {"queue": QUEUE_INGRESS_EMAIL},
+        "send_outbound_draft": {"queue": QUEUE_OUTBOUND_SEND},
         "reconcile_ingress_dispatch_outbox": {
+            "queue": QUEUE_WEBHOOK_MAINTENANCE,
+        },
+        "reconcile_outbound_send_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
         "reconcile_stale_execution_outbox": {
@@ -183,6 +189,12 @@ celery_conf.update(
         },
         "reconcile-ingress-dispatch-outbox-minutely": {
             "task": "reconcile_ingress_dispatch_outbox",
+            "schedule": 60.0,
+            "kwargs": {"limit": 100},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        "reconcile-outbound-send-outbox-minutely": {
+            "task": "reconcile_outbound_send_outbox",
             "schedule": 60.0,
             "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},

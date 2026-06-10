@@ -83,6 +83,9 @@ class TenantConfigurationService:
         credentials: Mapping[str, Any],
         webhook_secret: str,
         status: TenantChannelStatus,
+        self_service_config: Mapping[str, Any] | None = None,
+        last_validation_error: str | None = None,
+        validation_evidence: Mapping[str, Any] | None = None,
         bypass_direct_apply_gate: bool = False,
         commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
@@ -94,6 +97,9 @@ class TenantConfigurationService:
             credentials=credentials,
             webhook_secret=webhook_secret,
             status=status,
+            self_service_config=self_service_config,
+            last_validation_error=last_validation_error,
+            validation_evidence=validation_evidence,
         )
         if commit:
             await self._session.commit()
@@ -108,6 +114,9 @@ class TenantConfigurationService:
         credentials: Mapping[str, Any] | None,
         webhook_secret: str | None,
         status: TenantChannelStatus | None,
+        self_service_config: Mapping[str, Any] | None = None,
+        last_validation_error: str | None = None,
+        validation_evidence: Mapping[str, Any] | None = None,
         bypass_direct_apply_gate: bool = False,
         commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
@@ -119,6 +128,9 @@ class TenantConfigurationService:
             credentials=credentials,
             webhook_secret=webhook_secret,
             status=status,
+            self_service_config=self_service_config,
+            last_validation_error=last_validation_error,
+            validation_evidence=validation_evidence,
         )
         if commit:
             await self._session.commit()
@@ -157,6 +169,8 @@ class TenantConfigurationService:
         *,
         tenant_id: str,
         config_id: TenantChannelConfigurationId,
+        validation_evidence: Mapping[str, Any] | None = None,
+        validation_error: str | None = None,
         bypass_direct_apply_gate: bool = False,
         commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
@@ -164,6 +178,8 @@ class TenantConfigurationService:
         record = await self._runtime.verify_channel(
             tenant_id=tenant_id,
             config_id=config_id,
+            validation_evidence=validation_evidence,
+            validation_error=validation_error,
         )
         if commit:
             await self._session.commit()
@@ -265,6 +281,28 @@ class TenantConfigurationService:
                 limit=limit,
                 offset=offset,
             ),
+        )
+
+    async def get_channel_configuration(
+        self,
+        *,
+        tenant_id: str,
+        config_id: TenantChannelConfigurationId,
+    ) -> TenantChannelConfigurationRecord | None:
+        return await self._runtime.get_channel_configuration(
+            tenant_id=tenant_id,
+            config_id=config_id,
+        )
+
+    async def load_channel_credentials(
+        self,
+        *,
+        tenant_id: str,
+        channel_type: TenantChannelType,
+    ) -> dict[str, Any]:
+        return await self._runtime.load_channel_credentials(
+            tenant_id=tenant_id,
+            channel_type=channel_type,
         )
 
     async def create_knowledge_document(

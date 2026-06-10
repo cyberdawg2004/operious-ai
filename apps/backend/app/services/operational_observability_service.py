@@ -22,6 +22,8 @@ from app.observability.persistence import (
     DeadLetterExecutionQuery,
     InboundNormalizationDeadLetterPage,
     InboundNormalizationDeadLetterQuery,
+    InboundMessageTimelineLookup,
+    InboundMessageTimelineRecord,
     OperationalAlertPage,
     OperationalMetricsQuery,
     OperationalMetricsSnapshotRecord,
@@ -113,6 +115,35 @@ class OperationalObservabilityService:
                 offset=offset,
             ),
             expected_tenant_id=tenant_id,
+        )
+
+    async def get_inbound_message_timeline(
+        self,
+        *,
+        tenant_id: str,
+        lookup: InboundMessageTimelineLookup | None = None,
+        ingress_id: str | None = None,
+        external_conversation_id: str | None = None,
+        session_id: str | None = None,
+        execution_id: str | None = None,
+        draft_id: str | None = None,
+        outbound_send_outbox_id: str | None = None,
+        stall_threshold_seconds: int,
+        now: datetime | None = None,
+    ) -> InboundMessageTimelineRecord:
+        resolved_lookup = lookup or InboundMessageTimelineLookup(
+            ingress_id=ingress_id,
+            external_conversation_id=external_conversation_id,
+            session_id=session_id,
+            execution_id=execution_id,
+            draft_id=draft_id,
+            outbound_send_outbox_id=outbound_send_outbox_id,
+        )
+        return await self._runtime.get_inbound_message_timeline(
+            lookup=resolved_lookup,
+            expected_tenant_id=tenant_id,
+            stall_threshold_seconds=stall_threshold_seconds,
+            now=now,
         )
 
     async def define_slo(

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.tenant.enums import (
     TenantChannelStatus,
@@ -47,16 +47,25 @@ from app.tenant.lifecycle import (
 _SENSITIVE_CHANGE_PAYLOAD_KEYS = frozenset(
     {
         "access_token",
+        "access_key_id",
         "api_key",
+        "app_secret",
         "auth_header",
+        "aws_access_key_id",
+        "aws_secret_access_key",
         "bearer_token",
         "client_secret",
         "credential",
         "credentials",
         "credentials_enc",
+        "graph_api_access_token",
         "secret",
+        "secret_access_key",
+        "session_token",
+        "system_user_token",
         "token",
         "webhook_secret",
+        "webhook_verify_token",
     }
 )
 
@@ -78,6 +87,21 @@ def _redact_sensitive_payload(value: Any) -> Any:
     return value
 
 
+def _require_self_service_channel_status(status: TenantChannelStatus) -> None:
+    allowed = {
+        TenantChannelStatus.DRAFT,
+        TenantChannelStatus.PENDING_VALIDATION,
+        TenantChannelStatus.VALIDATION_FAILED,
+        TenantChannelStatus.ACTIVE,
+        TenantChannelStatus.DISABLED,
+    }
+    if status not in allowed:
+        raise ValueError(
+            "status must be draft, pending_validation, validation_failed, "
+            "active, or disabled"
+        )
+
+
 class TenantChannelCreateRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -85,7 +109,8 @@ class TenantChannelCreateRequest(BaseModel):
     routing_address: str = Field(min_length=1)
     credentials: dict[str, Any]
     webhook_secret: str = Field(min_length=1)
-    status: TenantChannelStatus = TenantChannelStatus.PENDING_VERIFICATION
+    status: TenantChannelStatus = TenantChannelStatus.PENDING_VALIDATION
+    self_service_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class TenantLifecycleCreateRequest(BaseModel):
@@ -183,6 +208,79 @@ class TenantChannelUpdateRequest(BaseModel):
     credentials: dict[str, Any] | None = None
     webhook_secret: str | None = Field(default=None, min_length=1)
     status: TenantChannelStatus | None = None
+    self_service_config: dict[str, Any] | None = None
+
+
+class TenantWhatsAppSelfServiceRequest(BaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    waba_id: str | None = Field(default=None, min_length=1)
+    phone_number_id: str = Field(min_length=1)
+    business_account_id: str | None = Field(default=None, min_length=1)
+    graph_api_version: str = Field(default="v25.0", min_length=2)
+    app_id: str | None = Field(default=None, min_length=1)
+    meta_config_id: str | None = Field(
+        default=None,
+        alias="config_id",
+        min_length=1,
+    )
+    access_token: str | None = Field(default=None, min_length=1)
+    system_user_token: str | None = Field(default=None, min_length=1)
+    webhook_verify_token: str | None = Field(default=None, min_length=1)
+    app_secret: str | None = Field(default=None, min_length=1)
+    status: TenantChannelStatus = TenantChannelStatus.PENDING_VALIDATION
+
+    @model_validator(mode="after")
+    def _validate_status(self) -> "TenantWhatsAppSelfServiceRequest":
+        _require_self_service_channel_status(self.status)
+        return self
+
+
+class TenantSesSelfServiceRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    mode: Literal["managed", "byo_role", "byo_access_key"]
+    region: str = Field(min_length=1)
+    source_email: str | None = Field(default=None, min_length=3)
+    source_domain: str | None = Field(default=None, min_length=3)
+    inbound_address: str | None = Field(default=None, min_length=3)
+    inbound_domain: str | None = Field(default=None, min_length=3)
+    topic_arn: str | None = Field(default=None, min_length=1)
+    receipt_rule_set: str | None = Field(default=None, min_length=1)
+    receipt_rule_name: str | None = Field(default=None, min_length=1)
+    role_arn: str | None = Field(default=None, min_length=1)
+    external_id: str | None = Field(default=None, min_length=1)
+    access_key_id: str | None = Field(default=None, min_length=1)
+    aws_access_key_id: str | None = Field(default=None, min_length=1)
+    secret_access_key: str | None = Field(default=None, min_length=1)
+    aws_secret_access_key: str | None = Field(default=None, min_length=1)
+    session_token: str | None = Field(default=None, min_length=1)
+    status: TenantChannelStatus = TenantChannelStatus.PENDING_VALIDATION
+
+    @model_validator(mode="after")
+    def _validate_ses_shape(self) -> "TenantSesSelfServiceRequest":
+        _require_self_service_channel_status(self.status)
+        if not any(
+            (
+                self.source_email,
+                self.source_domain,
+                self.inbound_address,
+                self.inbound_domain,
+            )
+        ):
+            raise ValueError(
+                "one of source_email, source_domain, inbound_address, "
+                "or inbound_domain is required"
+            )
+        if self.mode == "byo_role" and (
+            not self.role_arn or not self.external_id
+        ):
+            raise ValueError("role_arn and external_id are required for byo_role")
+        return self
 
 
 class TenantChannelConfigurationResponse(BaseModel):
@@ -197,6 +295,9 @@ class TenantChannelConfigurationResponse(BaseModel):
     verified_at: str | None = None
     credential_rotated_at: str | None = None
     credential_rotation_expires_at: str | None = None
+    self_service_config: dict[str, Any] = Field(default_factory=dict)
+    last_validation_error: str | None = None
+    validation_evidence: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_record(
@@ -223,6 +324,9 @@ class TenantChannelConfigurationResponse(BaseModel):
                 if record.credential_rotation_expires_at is not None
                 else None
             ),
+            self_service_config=dict(record.self_service_config),
+            last_validation_error=record.last_validation_error,
+            validation_evidence=dict(record.validation_evidence),
         )
 
 

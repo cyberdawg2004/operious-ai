@@ -41,6 +41,7 @@ EXPECTED_QUEUES = {
     "sop_intelligence",
     "sme_approval",
     "knowledge_indexing",
+    "outbound.send",
     "webhook_maintenance",
     "dead_letter",
     "semantic_quarantine",

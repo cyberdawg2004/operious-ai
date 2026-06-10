@@ -29,7 +29,11 @@ from typing import Literal, Sequence, cast
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.admission import admission_thresholds_from_settings
+from app.core.admission import (
+    EmptyQueueAgeSentinelCleanupClient,
+    admission_thresholds_from_settings,
+    clear_empty_queue_age_sentinels,
+)
 from app.core.config import Settings
 from app.core.health import (
     DependencyCheck,
@@ -310,8 +314,9 @@ class HealthService(BaseService):
         *,
         timeout: float,
     ) -> dict[str, QueueDepthReport]:
+        redis_client = cast(AdmissionRedisClient, self._redis_provider())
         gate = AdmissionGate(
-            redis_client=cast(AdmissionRedisClient, self._redis_provider()),
+            redis_client=redis_client,
             thresholds=admission_thresholds_from_settings(self._settings),
         )
         enriched: dict[str, QueueDepthReport] = {}
@@ -319,7 +324,19 @@ class HealthService(BaseService):
         per_queue_timeout = min(0.1, timeout / max(len(reports), 1))
         for name, report in reports.items():
             age_seconds: float | None = None
-            if report.queue_name is not None and report.status != "unknown":
+            if (
+                report.queue_name is not None
+                and report.status != "unknown"
+                and report.depth <= 0
+            ):
+                await clear_empty_queue_age_sentinels(
+                    redis_client=cast(
+                        EmptyQueueAgeSentinelCleanupClient,
+                        redis_client,
+                    ),
+                    queue_name=report.queue_name,
+                )
+            elif report.queue_name is not None and report.status != "unknown":
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining > 0:
                     try:

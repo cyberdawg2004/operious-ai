@@ -763,9 +763,9 @@ function DocumentDetail({ document }: { document: TenantKnowledgeDocument }) {
         <Detail label="Uploaded by" value={document.uploaded_by} />
         <Detail label="Created" value={formatDate(document.created_at)} />
       </div>
-      <pre className="max-h-[360px] overflow-auto rounded border border-border-subtle bg-surface-sunken p-4 text-[12px] leading-relaxed text-ink-secondary whitespace-pre-wrap">
+      <div className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded border border-border-subtle bg-surface-raised p-4 text-[13px] leading-relaxed text-ink-body">
         {document.content}
-      </pre>
+      </div>
     </div>
   );
 }

@@ -7,7 +7,7 @@ import hmac
 import json
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import pytest
 
@@ -16,6 +16,7 @@ from app.boundary.enums import (
     BoundaryNormalizationStatus,
     BoundarySourceType,
 )
+from app.boundary.ingress_dispatch_outbox import IngressDispatchOutboxRecord
 from app.boundary.persistence import (
     BoundaryIngressQuery,
     InMemoryBoundaryPersistence,
@@ -174,6 +175,71 @@ async def test_channel_webhook_ingress_normalizes_to_common_envelope(
     assert "header" not in record.canonical_payload
     assert "shop_id" not in record.canonical_payload
     assert session.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_channel_webhook_immediately_enqueues_committed_dispatch_outbox() -> None:
+    boundary_store = InMemoryBoundaryPersistence()
+    session = _FakeSession()
+    enqueued: list[IngressDispatchOutboxRecord] = []
+    service = await _service_with_channel(
+        boundary_store=boundary_store,
+        session=session,
+        channel_type=TenantChannelType.WHATSAPP,
+        routing_address="phone-number-immediate",
+        tenant_id=TENANT_ID,
+        webhook_secret="whatsapp-secret",
+        ingress_dispatch_enqueue=enqueued.append,
+    )
+    body = _with_fresh_timestamp(
+        TenantChannelType.WHATSAPP,
+        {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "metadata": {
+                                    "phone_number_id": "phone-number-immediate"
+                                },
+                                "messages": [
+                                    {
+                                        "id": "wamid.immediate",
+                                        "from": "15551234567",
+                                        "timestamp": "1779458400",
+                                        "type": "text",
+                                        "text": {
+                                            "body": "My charger stopped working."
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    raw_body = _raw(body)
+
+    result = await service.process_channel_webhook(
+        channel_type=TenantChannelType.WHATSAPP.value,
+        body=body,
+        headers=_signed_headers(
+            channel_type=TenantChannelType.WHATSAPP,
+            secret="whatsapp-secret",
+            raw_body=raw_body,
+        ),
+        raw_body=raw_body,
+        content_type="application/json",
+    )
+
+    assert result.ingress_id is not None
+    assert session.commits == 1
+    assert len(enqueued) == 1
+    assert str(enqueued[0].ingress_id) == result.ingress_id
+    assert enqueued[0].tenant_id == TENANT_ID
+    assert enqueued[0].channel == TenantChannelType.WHATSAPP.value
 
 
 @pytest.mark.asyncio
@@ -400,6 +466,9 @@ async def _service_with_channel(
     tenant_id: str,
     webhook_secret: str,
     credentials: Mapping[str, Any] | None = None,
+    ingress_dispatch_enqueue: (
+        Callable[[IngressDispatchOutboxRecord], None] | None
+    ) = None,
 ) -> TicketIngressService:
     tenant_runtime = TenantConfigurationRuntime(
         repository=InMemoryTenantConfigurationRepository(),
@@ -419,6 +488,7 @@ async def _service_with_channel(
         persistence=boundary_store,
         session=session,  # type: ignore[arg-type]
         tenant_configuration_runtime=tenant_runtime,
+        ingress_dispatch_enqueue=ingress_dispatch_enqueue,
     )
 
 

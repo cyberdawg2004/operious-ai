@@ -233,8 +233,13 @@ from app.services.tenant_lifecycle_service import TenantLifecycleService
 from app.tenant.change_requests import (
     PostgresTenantConfigChangeRequestRepository,
 )
-from app.tenant.credentials import TenantCredentialEncryptor
+from app.tenant.credentials import (
+    TenantCredentialCodec,
+    TenantCredentialEncryptor,
+    build_tenant_credential_encryptor_from_settings,
+)
 from app.tenant.enums import TenantChannelType
+from app.tenant.exceptions import TenantCredentialEncryptionError
 from app.tenant.lifecycle import PostgresTenantLifecycleRepository
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.tenant.runtime import TenantConfigurationRuntime
@@ -294,6 +299,23 @@ def get_data_protection_service(
             detail={"code": "data_protection_not_configured"},
         )
     return service
+
+
+def _tenant_credential_codec_or_503(settings: object) -> TenantCredentialCodec:
+    try:
+        return build_tenant_credential_encryptor_from_settings(settings)
+    except TenantCredentialEncryptionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "tenant_credentials_not_configured"},
+        ) from exc
+
+
+def _maybe_tenant_credential_codec(settings: object) -> TenantCredentialCodec | None:
+    try:
+        return build_tenant_credential_encryptor_from_settings(settings)
+    except TenantCredentialEncryptionError:
+        return None
 
 
 # ─── Phase 3.2 substrate repository factories ───────────────────────────
@@ -376,14 +398,17 @@ def get_ticket_ingress_service(
     session: AsyncSession = Depends(get_db_session),
 ) -> TicketIngressService:
     """Return the ticket-ingress write service for this request."""
+    from app.boundary.ingress_dispatch_publisher import (
+        enqueue_ingress_dispatch_outbox,
+    )
+
     settings = get_settings()
     tenant_runtime: TenantConfigurationRuntime | None = None
-    if settings.TENANT_CREDENTIAL_MASTER_KEY:
+    tenant_credential_codec = _maybe_tenant_credential_codec(settings)
+    if tenant_credential_codec is not None:
         tenant_runtime = TenantConfigurationRuntime(
             repository=PostgresTenantConfigurationRepository(session),
-            credential_encryptor=TenantCredentialEncryptor(
-                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
-            ),
+            credential_encryptor=tenant_credential_codec,
         )
     session_factory = get_session_factory()
     admission_service = AdmissionService(
@@ -431,6 +456,7 @@ def get_ticket_ingress_service(
             TenantChannelType.SHULEX: DIAGNOSTIC_QUEUE_PRIORITY,
             TenantChannelType.WHATSAPP: DIAGNOSTIC_QUEUE_PRIORITY,
         },
+        ingress_dispatch_enqueue=enqueue_ingress_dispatch_outbox,
     )
 
 
@@ -440,11 +466,7 @@ def get_whatsapp_customer_reply_send_service(
     """Return the governed WhatsApp customer-reply send service."""
 
     settings = get_settings()
-    if not settings.TENANT_CREDENTIAL_MASTER_KEY.strip():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "tenant_credentials_not_configured"},
-        )
+    tenant_credential_codec = _tenant_credential_codec_or_503(settings)
     data_protection = _data_protection_service(session)
     resolution_repository = PostgresResolutionProposalPersistence(
         session,
@@ -456,9 +478,7 @@ def get_whatsapp_customer_reply_send_service(
         governance_repository=PostgresGovernanceRepository(session),
         tenant_runtime=TenantConfigurationRuntime(
             repository=PostgresTenantConfigurationRepository(session),
-            credential_encryptor=TenantCredentialEncryptor(
-                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
-            ),
+            credential_encryptor=tenant_credential_codec,
         ),
         delivery_repository=PostgresWhatsAppDeliveryRepository(session),
         sender=WhatsAppGraphSender(),
@@ -472,11 +492,7 @@ def get_email_customer_reply_send_service(
     """Return the governed SES email customer-reply send service."""
 
     settings = get_settings()
-    if not settings.TENANT_CREDENTIAL_MASTER_KEY.strip():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "tenant_credentials_not_configured"},
-        )
+    tenant_credential_codec = _tenant_credential_codec_or_503(settings)
     data_protection = _data_protection_service(session)
     resolution_repository = PostgresResolutionProposalPersistence(
         session,
@@ -488,9 +504,7 @@ def get_email_customer_reply_send_service(
         governance_repository=PostgresGovernanceRepository(session),
         tenant_runtime=TenantConfigurationRuntime(
             repository=PostgresTenantConfigurationRepository(session),
-            credential_encryptor=TenantCredentialEncryptor(
-                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
-            ),
+            credential_encryptor=tenant_credential_codec,
         ),
         delivery_repository=PostgresEmailDeliveryRepository(session),
         sender=SesV2EmailSender(),
@@ -862,9 +876,7 @@ def get_tenant_configuration_service(
             session,
             data_protection=data_protection,
         ),
-        credential_encryptor=TenantCredentialEncryptor(
-            platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
-        ),
+        credential_encryptor=_tenant_credential_codec_or_503(settings),
     )
     return TenantConfigurationService(
         runtime=runtime,
@@ -974,9 +986,7 @@ def build_action_approval_service(
                 session,
                 data_protection=data_protection,
             ),
-            credential_encryptor=TenantCredentialEncryptor(
-                platform_master_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
-            ),
+            credential_encryptor=_tenant_credential_codec_or_503(settings),
         )
         return ActionOrchestrationRuntime(
             tool_invoker=ToolInvoker(

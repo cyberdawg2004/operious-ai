@@ -93,6 +93,29 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "TENANT_CREDENTIAL_MASTER_KEY is empty -> tenant channel "
             "credentials cannot be encrypted/used."
         )
+    credential_kms_backend = settings.CREDENTIAL_KMS_BACKEND.strip().casefold()
+    if credential_kms_backend == "local":
+        problems.append(
+            "CREDENTIAL_KMS_BACKEND=local -> tenant channel credentials use "
+            "the local master key instead of GCP Cloud KMS."
+        )
+    elif credential_kms_backend == "gcp":
+        if not settings.credential_kms_key_resource:
+            problems.append(
+                "CREDENTIAL_KMS_BACKEND=gcp but OPERIOUS_KMS_KEY_RESOURCE "
+                "is empty -> tenant credential DEKs cannot be wrapped by "
+                "GCP Cloud KMS."
+            )
+        if not settings.GOOGLE_APPLICATION_CREDENTIALS.strip():
+            problems.append(
+                "CREDENTIAL_KMS_BACKEND=gcp but GOOGLE_APPLICATION_CREDENTIALS "
+                "is empty -> the GCP Cloud KMS client cannot authenticate."
+            )
+    else:
+        problems.append(
+            f"CREDENTIAL_KMS_BACKEND={settings.CREDENTIAL_KMS_BACKEND!r} is "
+            "unsupported; expected 'gcp' in production."
+        )
     if (
         not settings.DATA_PROTECTION_MASTER_KEYS.strip()
         and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
