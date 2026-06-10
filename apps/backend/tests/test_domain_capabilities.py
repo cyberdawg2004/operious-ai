@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -73,6 +74,7 @@ _DOMAIN_CAPABILITIES = {
 class _FakeTenantConfigurationService:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.channel_calls: list[dict[str, Any]] = []
 
     async def configure_channel(
         self,
@@ -80,11 +82,38 @@ class _FakeTenantConfigurationService:
         tenant_id: str,
         channel_type: TenantChannelType,
         routing_address: str,
-        credentials: dict[str, Any],
+        credentials: Mapping[str, Any],
         webhook_secret: str,
         status: TenantChannelStatus,
+        self_service_config: Mapping[str, Any] | None = None,
+        last_validation_error: str | None = None,
+        validation_evidence: Mapping[str, Any] | None = None,
+        bypass_direct_apply_gate: bool = False,
+        commit: bool = True,
     ) -> TenantChannelConfigurationRecord:
+        del bypass_direct_apply_gate, commit
         self.calls.append("channel")
+        self.channel_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "channel_type": channel_type,
+                "routing_address": routing_address,
+                "credentials": dict(credentials),
+                "webhook_secret": webhook_secret,
+                "status": status,
+                "self_service_config": (
+                    dict(self_service_config)
+                    if self_service_config is not None
+                    else {}
+                ),
+                "last_validation_error": last_validation_error,
+                "validation_evidence": (
+                    dict(validation_evidence)
+                    if validation_evidence is not None
+                    else {}
+                ),
+            }
+        )
         return TenantChannelConfigurationRecord(
             config_id=derive_channel_configuration_id(
                 tenant_id=tenant_id,
@@ -99,6 +128,15 @@ class _FakeTenantConfigurationService:
             verified_at=None,
             created_at=_NOW,
             updated_at=_NOW,
+            self_service_config=(
+                dict(self_service_config)
+                if self_service_config is not None
+                else {}
+            ),
+            last_validation_error=last_validation_error,
+            validation_evidence=(
+                dict(validation_evidence) if validation_evidence is not None else {}
+            ),
         )
 
     async def create_knowledge_document(
@@ -329,9 +367,29 @@ def test_channel_route_requires_channel_capability(
     )
 
     assert ok.status_code == 200
+    assert ok.json()["self_service_config"] == {
+        "setup_mode": "operator_console",
+        "validation": {"status": "not_started"},
+    }
     assert denied.status_code == 403
     assert TENANT_CHANNEL_ADMIN_CAPABILITY in denied.text
     assert domain_client.config_service.calls == ["channel"]
+    assert domain_client.config_service.channel_calls == [
+        {
+            "tenant_id": _TENANT_ID,
+            "channel_type": TenantChannelType.EMAIL,
+            "routing_address": "support@example.com",
+            "credentials": {"api_key": "secret"},
+            "webhook_secret": "webhook",
+            "status": TenantChannelStatus.PENDING_VALIDATION,
+            "self_service_config": {
+                "setup_mode": "operator_console",
+                "validation": {"status": "not_started"},
+            },
+            "last_validation_error": None,
+            "validation_evidence": {},
+        }
+    ]
 
 
 def test_policy_route_requires_policy_capability(domain_client: _Harness) -> None:
@@ -567,6 +625,10 @@ def _channel_payload() -> dict[str, Any]:
         "routing_address": "support@example.com",
         "credentials": {"api_key": "secret"},
         "webhook_secret": "webhook",
+        "self_service_config": {
+            "setup_mode": "operator_console",
+            "validation": {"status": "not_started"},
+        },
     }
 
 
