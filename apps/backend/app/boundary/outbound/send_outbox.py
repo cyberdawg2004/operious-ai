@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Mapping, NewType, Protocol, cast
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 
@@ -136,6 +136,21 @@ class OutboundSendOutboxPersistenceProtocol(Protocol):
         query: OutboundSendOutboxQuery,
     ) -> OutboundSendOutboxPage: ...
 
+    async def list_due_pending_fair(
+        self,
+        *,
+        now: datetime,
+        per_tenant_limit: int,
+        limit: int,
+    ) -> tuple[OutboundSendOutboxRecord, ...]:
+        """Return due PENDING rows fairly across tenants.
+
+        At most ``per_tenant_limit`` rows per tenant (oldest-due first),
+        capped at ``limit`` rows total. This prevents one tenant's backlog
+        from starving others on the single-concurrency outbound worker.
+        """
+        ...
+
     async def claim_outbound_send_outbox(
         self,
         *,
@@ -217,6 +232,23 @@ class OutboundSendOutboxRuntime:
         query: OutboundSendOutboxQuery,
     ) -> OutboundSendOutboxPage:
         return await self._persistence.list_outbound_send_outbox(query)
+
+    async def list_due_pending_fair(
+        self,
+        *,
+        now: datetime,
+        per_tenant_limit: int,
+        limit: int,
+    ) -> tuple[OutboundSendOutboxRecord, ...]:
+        if per_tenant_limit < 1:
+            raise ValueError("per_tenant_limit must be positive")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        return await self._persistence.list_due_pending_fair(
+            now=now,
+            per_tenant_limit=per_tenant_limit,
+            limit=limit,
+        )
 
     async def claim_due_outbox(
         self,
@@ -528,6 +560,50 @@ class PostgresOutboundSendOutboxPersistence(BaseRepository):
             offset=page.offset,
         )
 
+    async def list_due_pending_fair(
+        self,
+        *,
+        now: datetime,
+        per_tenant_limit: int,
+        limit: int,
+    ) -> tuple[OutboundSendOutboxRecord, ...]:
+        due_order = (
+            OutboundSendOutboxRow.next_attempt_at.asc().nullsfirst(),
+            OutboundSendOutboxRow.created_at.asc(),
+            OutboundSendOutboxRow.outbox_id.asc(),
+        )
+        ranked = (
+            select(
+                OutboundSendOutboxRow.outbox_id.label("oid"),
+                func.row_number()
+                .over(
+                    partition_by=OutboundSendOutboxRow.tenant_id,
+                    order_by=due_order,
+                )
+                .label("rn"),
+            )
+            .where(
+                OutboundSendOutboxRow.status
+                == OutboundSendOutboxStatus.PENDING.value
+            )
+            .where(
+                or_(
+                    OutboundSendOutboxRow.next_attempt_at.is_(None),
+                    OutboundSendOutboxRow.next_attempt_at <= now,
+                )
+            )
+            .subquery()
+        )
+        fair_ids = select(ranked.c.oid).where(ranked.c.rn <= per_tenant_limit)
+        stmt = (
+            select(OutboundSendOutboxRow)
+            .where(OutboundSendOutboxRow.outbox_id.in_(fair_ids))
+            .order_by(*due_order)
+            .limit(limit)
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return tuple(_row_to_outbox_record(row) for row in rows)
+
     async def claim_outbound_send_outbox(
         self,
         *,
@@ -767,6 +843,39 @@ class InMemoryOutboundSendOutboxPersistence:
             limit=query.limit,
             offset=query.offset,
         )
+
+    async def list_due_pending_fair(
+        self,
+        *,
+        now: datetime,
+        per_tenant_limit: int,
+        limit: int,
+    ) -> tuple[OutboundSendOutboxRecord, ...]:
+        async with self._lock:
+            due = [
+                r
+                for r in self._records.values()
+                if r.status is OutboundSendOutboxStatus.PENDING
+                and (r.next_attempt_at is None or r.next_attempt_at <= now)
+            ]
+
+        def _due_key(record: OutboundSendOutboxRecord) -> tuple[datetime, datetime, str]:
+            return (
+                record.next_attempt_at or record.created_at,
+                record.created_at,
+                str(record.outbox_id),
+            )
+
+        per_tenant: dict[str, int] = {}
+        selected: list[OutboundSendOutboxRecord] = []
+        for record in sorted(due, key=_due_key):
+            count = per_tenant.get(record.tenant_id, 0)
+            if count >= per_tenant_limit:
+                continue
+            per_tenant[record.tenant_id] = count + 1
+            selected.append(record)
+        selected.sort(key=_due_key)
+        return tuple(selected[:limit])
 
     async def claim_outbound_send_outbox(
         self,

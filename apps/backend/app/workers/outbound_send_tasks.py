@@ -256,16 +256,29 @@ async def reconcile_outbound_send_outbox_runtime(
                 dead_letter_sink=None,
                 created_at=ts,
             )
-        due = await runtime.list_outbox(
-            OutboundSendOutboxQuery(
-                tenant_id=tenant_id,
-                status=OutboundSendOutboxStatus.PENDING,
-                due_before_or_at=ts,
+        if tenant_id is None:
+            # Global sweep: drain due rows FAIRLY across tenants so one
+            # tenant's backlog cannot starve others on the single-concurrency
+            # outbound worker (#37). At most per_tenant_limit rows per tenant
+            # per sweep; the rest stay PENDING for the next sweep.
+            due_records = await runtime.list_due_pending_fair(
+                now=ts,
+                per_tenant_limit=_outbound_reconcile_per_tenant_limit(),
                 limit=limit,
             )
-        )
+        else:
+            due_records = (
+                await runtime.list_outbox(
+                    OutboundSendOutboxQuery(
+                        tenant_id=tenant_id,
+                        status=OutboundSendOutboxStatus.PENDING,
+                        due_before_or_at=ts,
+                        limit=limit,
+                    )
+                )
+            ).records
         enqueued = 0
-        for outbox in due.records:
+        for outbox in due_records:
             enqueue_outbound_send_outbox(outbox)
             enqueued += 1
         await session.commit()
@@ -273,7 +286,7 @@ async def reconcile_outbound_send_outbox_runtime(
             "status": "completed",
             "stale_requeued": stale.requeued_count,
             "dead_lettered": exhausted.dead_lettered_count,
-            "due_scanned": due.total,
+            "due_scanned": len(due_records),
             "enqueued": enqueued,
         }
 
@@ -525,6 +538,12 @@ def _postgres_runtime(session: AsyncSession) -> OutboundSendOutboxRuntime:
     return OutboundSendOutboxRuntime(
         persistence=PostgresOutboundSendOutboxPersistence(session),
     )
+
+
+def _outbound_reconcile_per_tenant_limit() -> int:
+    from app.core.config import get_settings
+
+    return max(1, int(get_settings().OUTBOUND_SEND_RECONCILE_PER_TENANT_LIMIT))
 
 
 def _bounded_error(exc: Exception) -> str:

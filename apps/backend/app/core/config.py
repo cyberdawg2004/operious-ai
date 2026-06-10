@@ -275,6 +275,10 @@ class Settings(BaseSettings):
     EXECUTION_QUEUE_NAME: str = QUEUE_DIAGNOSTIC_NORMAL
     EXECUTION_QUEUE_MAX_DEPTH: int = 10_000
     EXECUTION_QUEUE_TENANT_MAX_DEPTH: int = 100
+    # Per-tenant fairness for the single-concurrency outbound send worker:
+    # the reconciler enqueues at most this many of one tenant's due rows per
+    # sweep so a tenant backlog cannot starve other tenants' replies (#37).
+    OUTBOUND_SEND_RECONCILE_PER_TENANT_LIMIT: int = 25
     ESCALATION_QUEUE_NAME: str = QUEUE_ESCALATION
     ESCALATION_QUEUE_MAX_DEPTH: int = 10_000
     SUPERVISOR_QUEUE_NAME: str = QUEUE_SUPERVISOR
