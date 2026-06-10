@@ -20,6 +20,7 @@ EXPECTED_PROCESS_QUEUES = {
     "worker_sop": ("sop_intelligence", "knowledge_indexing"),
     "worker_maintenance": ("webhook_maintenance", "dead_letter"),
     "worker_ingress": ("ingress.email", "ingress.whatsapp", "ingress.shopify"),
+    "worker_outbound_send": ("outbound.send",),
     "worker_voice_realtime": ("ingress.voice",),
 }
 
@@ -30,6 +31,7 @@ EXPECTED_CONCURRENCY = {
     "worker_sop": 1,
     "worker_maintenance": 1,
     "worker_ingress": 2,
+    "worker_outbound_send": 1,
     "worker_voice_realtime": 8,
 }
 
@@ -41,6 +43,7 @@ EXPECTED_VM_PROFILES = {
     "worker_sop": ("512mb", "shared", 1),
     "worker_maintenance": ("512mb", "shared", 1),
     "worker_ingress": ("512mb", "shared", 1),
+    "worker_outbound_send": ("512mb", "shared", 1),
     "worker_voice_realtime": ("512mb", "shared", 2),
 }
 
@@ -57,6 +60,7 @@ def test_fly_declares_required_process_groups() -> None:
         "worker_sop",
         "worker_maintenance",
         "worker_ingress",
+        "worker_outbound_send",
         "worker_voice_realtime",
     }
     assert _unwrap_startup_wrapper(processes["web"]) == (
