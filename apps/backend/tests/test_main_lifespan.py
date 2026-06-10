@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+import json
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import cast
 
@@ -44,9 +45,13 @@ class _SequencedPubSub:
         if not self._subscribe_succeeds:
             raise RuntimeError("redis unavailable")
 
-    async def listen(self) -> AsyncIterator[object]:
+    async def get_message(
+        self,
+        *,
+        ignore_subscribe_messages: bool = False,
+        timeout: float | None = None,
+    ) -> object:
         raise RuntimeError("listener stream closed")
-        yield {}
 
     async def aclose(self) -> None:
         return None
@@ -61,6 +66,49 @@ class _SequencedRedis:
         outcome = self._outcomes[self.calls]
         self.calls += 1
         return _SequencedPubSub(subscribe_succeeds=outcome)
+
+
+class _IdleThenMessagePubSub:
+    """Pub/sub that idles (get_message -> None) then delivers one pmessage.
+
+    Models the steady-state case: most polls return None because no
+    invalidation is pending. An idle poll must NOT be treated as a failure.
+    """
+
+    def __init__(self) -> None:
+        self._steps: list[object] = [
+            None,
+            None,
+            {
+                "type": "pmessage",
+                "data": json.dumps({"tenant_id": "tenant-idle"}),
+            },
+            "cancel",
+        ]
+        self._index = 0
+
+    async def psubscribe(self, _pattern: str) -> None:
+        return None
+
+    async def get_message(
+        self,
+        *,
+        ignore_subscribe_messages: bool = False,
+        timeout: float | None = None,
+    ) -> object | None:
+        step = self._steps[min(self._index, len(self._steps) - 1)]
+        self._index += 1
+        if step == "cancel":
+            raise asyncio.CancelledError
+        return step
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _IdleThenMessageRedis:
+    def pubsub(self) -> _IdleThenMessagePubSub:
+        return _IdleThenMessagePubSub()
 
 
 def _app_with_redis(redis: object) -> FastAPI:
@@ -134,3 +182,30 @@ async def test_policy_invalidation_listener_resets_backoff_after_subscribe(
 
     assert redis.calls == 3
     assert delays == [1.0, 2.0, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_policy_invalidation_listener_ignores_idle_polls(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="app.main")
+    delays: list[float] = []
+    monkeypatch.setattr(
+        main,
+        "_sleep_policy_invalidation_retry",
+        _sleep_recorder(delays, stop_after=1),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await main._governance_policy_invalidation_listener(
+            _app_with_redis(_IdleThenMessageRedis())
+        )
+
+    messages = [record.message for record in caplog.records]
+    # Idle polls (get_message -> None) must not be treated as failures.
+    assert "governance_invalidation_listener_failed" not in messages
+    # The real pmessage after the idle polls is processed.
+    assert "governance_policies_reloaded" in messages
+    # The failure/backoff retry path is never entered.
+    assert delays == []

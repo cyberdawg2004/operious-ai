@@ -113,6 +113,9 @@ ALLOWED_ORIGINS = [
 _POLICY_INVALIDATION_PATTERN = "governance:policy:invalidate:*"
 _POLICY_INVALIDATION_RETRY_INITIAL_SECONDS = 1.0
 _POLICY_INVALIDATION_RETRY_MAX_SECONDS = 30.0
+# Idle poll window for the invalidation subscription. Returning from an idle
+# poll is normal (no pending invalidation); it must not be treated as an error.
+_POLICY_INVALIDATION_POLL_TIMEOUT_SECONDS = 1.0
 
 
 def _build_cors_origins(raw: str) -> list[str]:
@@ -271,7 +274,21 @@ def _tenant_id_from_invalidation_message(data: object) -> str:
 
 
 async def _iter_pubsub_messages(pubsub: PubSub) -> AsyncIterator[object]:
-    async for message in pubsub.listen():  # type: ignore[reportUnknownMemberType]
+    # Poll with an explicit timeout instead of the blocking ``listen()``.
+    # ``listen()`` does a blocking socket read bounded by the client's
+    # ``socket_timeout`` (<= 5s), so an idle subscription (the steady state)
+    # raises a read timeout every few seconds and forces a needless
+    # reconnect. ``get_message(timeout=...)`` returns ``None`` on an idle
+    # poll window and only raises on a real connection failure, which the
+    # caller's reconnect/backoff loop still handles. The client's
+    # ``health_check_interval`` keeps the connection alive between messages.
+    while True:
+        message = await pubsub.get_message(  # type: ignore[reportUnknownMemberType]
+            ignore_subscribe_messages=True,
+            timeout=_POLICY_INVALIDATION_POLL_TIMEOUT_SECONDS,
+        )
+        if message is None:
+            continue
         yield message
 
 
