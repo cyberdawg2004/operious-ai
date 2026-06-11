@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Coroutine
 from datetime import datetime, timezone
 from threading import Thread
@@ -13,7 +14,14 @@ from app.db.session import get_owner_session_factory
 from app.workers.celery_app import celery_app
 from app.queues import QUEUE_WEBHOOK_MAINTENANCE
 
+logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+
+
+def cleanup_batch_is_backlogged(*, deleted_count: int, limit: int) -> bool:
+    """Saturating a cleanup batch means expired nonces are accumulating faster
+    than one run drains them — a growth signal to alert on (#52)."""
+    return deleted_count >= limit
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -38,10 +46,21 @@ def cleanup_expired_webhook_nonces(
     deleted = _run_async(
         cleanup_expired_webhook_nonces_runtime(now=cutoff, limit=limit)
     )
+    backlogged = cleanup_batch_is_backlogged(deleted_count=deleted, limit=limit)
+    if backlogged:
+        logger.warning(
+            "webhook_nonce_cleanup_backlog",
+            extra={
+                "deleted_count": deleted,
+                "limit": limit,
+                "cutoff": cutoff.isoformat(),
+            },
+        )
     return {
         "status": "completed",
         "deleted_count": deleted,
         "cutoff": cutoff.isoformat(),
+        "backlog": backlogged,
     }
 
 
