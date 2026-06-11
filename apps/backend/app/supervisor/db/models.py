@@ -63,8 +63,8 @@ class SupervisorInspectionRow(Base):
     request_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
     )
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_HANDLE_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
     )
     tenant_authority_source: Mapped[str | None] = mapped_column(
         String(_ENUM_WIDTH), nullable=True

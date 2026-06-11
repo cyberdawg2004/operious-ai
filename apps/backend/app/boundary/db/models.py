@@ -70,8 +70,8 @@ class BoundaryIngressRow(Base):
     source_id: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH), nullable=False, index=True
     )
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_HANDLE_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
     )
     adapter_name: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH), nullable=False, index=True
@@ -264,8 +264,8 @@ class BoundaryEgressRow(Base):
     source_id: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH), nullable=False, index=True
     )
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_HANDLE_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
     )
     adapter_name: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH), nullable=False, index=True

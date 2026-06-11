@@ -108,8 +108,8 @@ class ArbitrationEvaluationRow(Base):
     request_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True
     )
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_HANDLE_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True

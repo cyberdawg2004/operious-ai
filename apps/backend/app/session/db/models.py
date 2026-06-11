@@ -99,8 +99,8 @@ class SessionRow(Base):
     external_handle: Mapped[str] = mapped_column(
         String(_HANDLE_WIDTH), nullable=False, index=True
     )
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_HANDLE_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
     )
     principal_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH), nullable=True, index=True

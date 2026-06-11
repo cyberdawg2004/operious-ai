@@ -435,11 +435,7 @@ class PostgresSessionPersistence(BaseRepository):
         *,
         parent: SessionRow | None,
     ) -> SessionEventRecord:
-        if (
-            self._data_protection is None
-            or parent is None
-            or parent.tenant_id is None
-        ):
+        if self._data_protection is None or parent is None:
             return record
         payload = await self._data_protection.encrypt_json_values(
             dict(record.payload),
@@ -451,7 +447,7 @@ class PostgresSessionPersistence(BaseRepository):
 
     async def _session_row_to_record(self, row: SessionRow) -> SessionRecord:
         record = _session_row_to_record(row)
-        if self._data_protection is None or row.tenant_id is None:
+        if self._data_protection is None:
             return record
         context_attributes = await self._data_protection.decrypt_json_values(
             record.context_attributes
@@ -582,7 +578,11 @@ def _update_session_row(
     """
     row.scope = record.scope.value
     row.external_handle = record.external_handle
-    row.tenant_id = record.tenant_id
+    # tenant_id is NOT NULL and never changes once persisted (PK-adjacent);
+    # only overwrite when the higher-revision record carries it, so a missing
+    # value can never null out a tenant-scoped row.
+    if record.tenant_id is not None:
+        row.tenant_id = record.tenant_id
     row.principal_id = record.principal_id
     row.opened_at = record.opened_at
     row.lifecycle_phase = record.lifecycle_phase.value

@@ -246,8 +246,8 @@ class GovernanceDecisionRow(Base):
     )
     # Nullable by doctrine: governance MAY persist tenantless
     # (system-level) decisions. See module docstring.
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_CHAIN_ID_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_CHAIN_ID_WIDTH), nullable=False, index=True
     )
     subject_kind: Mapped[str] = mapped_column(
         String(_DECISION_ENUM_WIDTH),
@@ -341,8 +341,8 @@ class GovernanceTraceRow(Base):
     actor: Mapped[str] = mapped_column(
         String(_CHAIN_ID_WIDTH), nullable=False
     )
-    tenant_id: Mapped[str | None] = mapped_column(
-        String(_CHAIN_ID_WIDTH), nullable=True, index=True
+    tenant_id: Mapped[str] = mapped_column(
+        String(_CHAIN_ID_WIDTH), nullable=False, index=True
     )
     subject_kind: Mapped[str] = mapped_column(
         String(_DECISION_ENUM_WIDTH),
