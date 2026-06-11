@@ -111,6 +111,7 @@ ActionOrchestrationRuntimeFactory = Callable[
     [str],
     Awaitable[ActionOrchestrationRuntime],
 ]
+PostCommitFlush = Callable[[], Awaitable[None]]
 
 
 class ActionApprovalService:
@@ -126,6 +127,7 @@ class ActionApprovalService:
         session: AsyncSession,
         orchestration_runtime: ActionOrchestrationRuntime | None = None,
         orchestration_runtime_factory: ActionOrchestrationRuntimeFactory | None = None,
+        post_commit_flush: PostCommitFlush | None = None,
     ) -> None:
         if orchestration_runtime is None and orchestration_runtime_factory is None:
             raise ValueError("ActionApprovalService requires orchestration runtime")
@@ -136,6 +138,7 @@ class ActionApprovalService:
         self._sessions = session_repository
         self._orchestration = orchestration_runtime
         self._orchestration_factory = orchestration_runtime_factory
+        self._post_commit_flush = post_commit_flush
         self._timeline = timeline_runtime
         self._session = session
 
@@ -245,10 +248,16 @@ class ActionApprovalService:
                 expected_tenant_id=expected_tenant_id,
             )
             await self._session.commit()
+            await self.flush_after_commit()
             return resolved
         except Exception:
             await self._session.rollback()
             raise
+
+    async def flush_after_commit(self) -> None:
+        """Flush side-effect publications after the caller-owned commit."""
+        if self._post_commit_flush is not None:
+            await self._post_commit_flush()
 
     async def approve_in_transaction(
         self,

@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.dependencies.services import EscalationOutboxPublishError
-from app.dependencies.services import (
-    _DeferredEscalationPublisher,  # pyright: ignore[reportPrivateUsage]
+from app.escalation.deferred_publisher import (
+    DeferredEscalationPublisher,
+    EscalationOutboxPublishError,
 )
 from app.escalation import (
     EscalationAgentRuntime,
@@ -199,7 +199,7 @@ async def test_deferred_escalation_publisher_claims_and_marks_published() -> Non
     runtime, store = await _runtime()
     delegate = _RecordingEscalationPublisher()
     commits = _CommitRecorder()
-    deferred = _DeferredEscalationPublisher(
+    deferred = DeferredEscalationPublisher(
         delegate=delegate,
         escalation_runtime=runtime,
         session=commits,  # type: ignore[arg-type]
@@ -211,13 +211,19 @@ async def test_deferred_escalation_publisher_claims_and_marks_published() -> Non
         tenant_id=_TENANT,
         session_id=_SESSION_ID,
     )
-    await deferred.flush()
-
     escalation = await store.get_escalation_for_governance_decision(
         _DENY_ID,
         expected_tenant_id=_TENANT,
     )
     assert escalation is not None
+    prepared_outbox = await store.get_escalation_outbox_by_escalation(
+        escalation.escalation_id,
+        expected_tenant_id=_TENANT,
+    )
+    assert prepared_outbox is not None
+    assert prepared_outbox.status is EscalationOutboxStatus.PENDING
+    await deferred.flush()
+
     outbox = await store.get_escalation_outbox_by_escalation(
         escalation.escalation_id,
         expected_tenant_id=_TENANT,
@@ -236,7 +242,7 @@ async def test_deferred_escalation_publisher_claims_and_marks_escalate_published
     runtime, store = await _runtime()
     delegate = _RecordingEscalationPublisher()
     commits = _CommitRecorder()
-    deferred = _DeferredEscalationPublisher(
+    deferred = DeferredEscalationPublisher(
         delegate=delegate,
         escalation_runtime=runtime,
         session=commits,  # type: ignore[arg-type]
@@ -248,13 +254,19 @@ async def test_deferred_escalation_publisher_claims_and_marks_escalate_published
         tenant_id=_TENANT,
         session_id=_SESSION_ID,
     )
-    await deferred.flush()
-
     escalation = await store.get_escalation_for_governance_decision(
         _ESCALATE_ID,
         expected_tenant_id=_TENANT,
     )
     assert escalation is not None
+    prepared_outbox = await store.get_escalation_outbox_by_escalation(
+        escalation.escalation_id,
+        expected_tenant_id=_TENANT,
+    )
+    assert prepared_outbox is not None
+    assert prepared_outbox.status is EscalationOutboxStatus.PENDING
+    await deferred.flush()
+
     assert escalation.handoff_kind == EscalationHandoffKind.ESCALATION.value
     outbox = await store.get_escalation_outbox_by_escalation(
         escalation.escalation_id,
@@ -271,7 +283,7 @@ async def test_deferred_escalation_publisher_claims_and_marks_escalate_published
 async def test_deferred_escalation_publisher_marks_failed_on_delegate_error() -> None:
     runtime, store = await _runtime()
     commits = _CommitRecorder()
-    deferred = _DeferredEscalationPublisher(
+    deferred = DeferredEscalationPublisher(
         delegate=_FailingEscalationPublisher(),
         escalation_runtime=runtime,
         session=commits,  # type: ignore[arg-type]
@@ -322,7 +334,7 @@ async def test_deferred_escalation_publisher_rejects_unpublishable_outbox() -> N
         error="previous terminal failure",
         expected_tenant_id=_TENANT,
     )
-    deferred = _DeferredEscalationPublisher(
+    deferred = DeferredEscalationPublisher(
         delegate=_RecordingEscalationPublisher(),
         escalation_runtime=runtime,
         session=_CommitRecorder(),  # type: ignore[arg-type]

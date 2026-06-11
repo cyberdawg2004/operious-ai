@@ -109,8 +109,10 @@ from app.events import PostgresOperationalEventPersistence
 from app.events.appender import OperationalEventAppender
 from app.events.read_service import OperationalEventReader
 from app.escalation.celery_publisher import CeleryEscalationPublisher
+from app.escalation.deferred_publisher import (
+    DeferredEscalationPublisher,
+)
 from app.escalation.persistence import PostgresEscalationPersistence
-from app.escalation.publisher import EscalationPublisher
 from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.enforcement.handlers import (
     AllowHandler,
@@ -122,7 +124,7 @@ from app.governance.enforcement.handlers import (
     RequireApprovalHandler,
 )
 from app.governance.enforcement.runtime import GovernanceRuntime
-from app.governance.enums import Decision, EnforcementStage
+from app.governance.enums import EnforcementStage
 from app.governance.evaluators.engine import PolicyEvaluationEngine
 from app.governance.persistence import (
     BaseGovernanceRepository,
@@ -733,7 +735,7 @@ async def get_dispatch_service(
         session=session,
         publisher_id="api:dispatch",
     )
-    deferred_escalation_publisher = _DeferredEscalationPublisher(
+    deferred_escalation_publisher = DeferredEscalationPublisher(
         delegate=CeleryEscalationPublisher(),
         escalation_runtime=EscalationAgentRuntime(
             escalation_persistence=PostgresEscalationPersistence(session),
@@ -975,6 +977,16 @@ def build_action_approval_service(
         data_protection=data_protection,
     )
     timeline_runtime = TimelineRuntime(persistence=session_repository)
+    deferred_escalation_publisher = DeferredEscalationPublisher(
+        delegate=CeleryEscalationPublisher(),
+        escalation_runtime=EscalationAgentRuntime(
+            escalation_persistence=PostgresEscalationPersistence(session),
+            governance_repository=governance_repository,
+            session_persistence=session_repository,
+        ),
+        session=session,
+        publisher_id="api:action-approval",
+    )
 
     async def _orchestration_factory(tenant_id: str) -> ActionOrchestrationRuntime:
         approval_ingress, approval_reviewer = _case_approval_producer_dependencies(
@@ -1011,6 +1023,7 @@ def build_action_approval_service(
                 connector_invocation_repository=(
                     PostgresConnectorInvocationRepository(session)
                 ),
+                escalation_publisher=deferred_escalation_publisher,
                 redis_client=get_redis_client(),
                 pre_approved_decision_ttl_seconds=(
                     settings.AGENT_PRE_APPROVED_DECISION_TTL_SECONDS
@@ -1034,6 +1047,7 @@ def build_action_approval_service(
         orchestration_runtime_factory=_orchestration_factory,
         timeline_runtime=timeline_runtime,
         session=session,
+        post_commit_flush=deferred_escalation_publisher.flush,
     )
 
 
@@ -1084,6 +1098,7 @@ def get_case_approval_service(
             ),
         ),
         action_approval_approve=_approve_bound_action,
+        post_commit_flush=action_service.flush_after_commit,
         resolution_governance_gate=ResolutionGovernanceGate(
             governance_runtime=build_resolution_governance_runtime(
                 persistence=governance_repository,
@@ -1308,139 +1323,6 @@ class _DiagnosticExecutionIntent:
     claim_id: str
 
 
-@dataclass(frozen=True, slots=True)
-class _EscalationIntent:
-    governance_decision_id: str
-    tenant_id: str
-    session_id: str | None
-    source_decision: Decision
-
-
-class _DeferredEscalationPublisher(EscalationPublisher):
-    """Request-scoped escalation outbox publisher."""
-
-    def __init__(
-        self,
-        *,
-        delegate: EscalationPublisher,
-        escalation_runtime: EscalationAgentRuntime,
-        session: AsyncSession,
-        publisher_id: str,
-    ) -> None:
-        self._delegate = delegate
-        self._escalation_runtime = escalation_runtime
-        self._session = session
-        self._publisher_id = publisher_id
-        self._intents: list[_EscalationIntent] = []
-
-    async def publish_governance_denial(
-        self,
-        *,
-        governance_decision_id: str,
-        tenant_id: str,
-        session_id: str | None = None,
-    ) -> None:
-        self._intents.append(
-            _EscalationIntent(
-                governance_decision_id=governance_decision_id,
-                tenant_id=tenant_id,
-                session_id=session_id,
-                source_decision=Decision.DENY,
-            )
-        )
-
-    async def publish_governance_escalation(
-        self,
-        *,
-        governance_decision_id: str,
-        tenant_id: str,
-        session_id: str | None = None,
-    ) -> None:
-        self._intents.append(
-            _EscalationIntent(
-                governance_decision_id=governance_decision_id,
-                tenant_id=tenant_id,
-                session_id=session_id,
-                source_decision=Decision.ESCALATE,
-            )
-        )
-
-    async def flush(self) -> None:
-        for intent in self._intents:
-            if intent.source_decision is Decision.ESCALATE:
-                prepared = (
-                    await self._escalation_runtime.prepare_governance_escalation_outbox(
-                        governance_decision_id=intent.governance_decision_id,
-                        expected_tenant_id=intent.tenant_id,
-                        session_id=intent.session_id,
-                        metadata={
-                            "source_governance_decision_id": (
-                                intent.governance_decision_id
-                            ),
-                            "source_session_id": intent.session_id,
-                            "source_decision": intent.source_decision.value,
-                        },
-                    )
-                )
-            else:
-                prepared = await self._escalation_runtime.prepare_governance_denial_outbox(
-                    governance_decision_id=intent.governance_decision_id,
-                    expected_tenant_id=intent.tenant_id,
-                    session_id=intent.session_id,
-                    metadata={
-                        "source_governance_decision_id": (
-                            intent.governance_decision_id
-                        ),
-                        "source_session_id": intent.session_id,
-                        "source_decision": intent.source_decision.value,
-                    },
-                )
-            claim = await self._escalation_runtime.claim_outbox_for_escalation(
-                escalation_id=prepared.escalation.escalation_id,
-                publisher_id=self._publisher_id,
-                expected_tenant_id=intent.tenant_id,
-            )
-            if not claim.claimed or claim.outbox is None:
-                if claim.reason == "outbox_not_publishable:published":
-                    continue
-                raise EscalationOutboxPublishError(
-                    prepared.escalation.escalation_id,
-                    claim.reason or "outbox_claim_refused",
-                )
-            await self._session.commit()
-            try:
-                if intent.source_decision is Decision.ESCALATE:
-                    await self._delegate.publish_governance_escalation(
-                        governance_decision_id=intent.governance_decision_id,
-                        tenant_id=intent.tenant_id,
-                        session_id=intent.session_id,
-                    )
-                else:
-                    await self._delegate.publish_governance_denial(
-                        governance_decision_id=intent.governance_decision_id,
-                        tenant_id=intent.tenant_id,
-                        session_id=intent.session_id,
-                    )
-            except Exception as exc:
-                await self._escalation_runtime.mark_outbox_failed(
-                    outbox_id=claim.outbox.outbox_id,
-                    claim_id=_require_outbox_claim_id(claim.outbox.claim_id),
-                    error=_bounded_publish_error(exc),
-                    expected_tenant_id=intent.tenant_id,
-                )
-                await self._session.commit()
-                raise EscalationOutboxPublishError(
-                    prepared.escalation.escalation_id,
-                    _bounded_publish_error(exc),
-                ) from exc
-            await self._escalation_runtime.mark_outbox_published(
-                outbox_id=claim.outbox.outbox_id,
-                claim_id=_require_outbox_claim_id(claim.outbox.claim_id),
-                expected_tenant_id=intent.tenant_id,
-            )
-            await self._session.commit()
-
-
 class _DeferredExecutionPublisher(ExecutionPublisher):
     """Request-scoped outbox publisher that flushes after DB commit."""
 
@@ -1538,31 +1420,11 @@ class ExecutionOutboxPublishError(RuntimeError):
         self.reason = reason
 
 
-class EscalationOutboxPublishError(RuntimeError):
-    """Raised when a committed escalation intent cannot be published."""
-
-    def __init__(self, escalation_id: str, reason: str) -> None:
-        super().__init__(
-            f"escalation outbox publish failed for {escalation_id}: {reason}"
-        )
-        self.escalation_id = escalation_id
-        self.reason = reason
-
-
 def _bounded_publish_error(exc: BaseException) -> str:
     message = f"{exc.__class__.__name__}: {exc}"
     if len(message) > 240:
         return f"{message[:237]}..."
     return message
-
-
-def _require_outbox_claim_id(claim_id: str | None) -> str:
-    if claim_id is None:
-        raise EscalationOutboxPublishError(
-            "unknown",
-            "claimed escalation outbox is missing claim_id",
-        )
-    return claim_id
 
 
 def _require_execution_outbox_claim_id(

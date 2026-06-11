@@ -91,10 +91,16 @@ async def reconcile_stale_escalation_outbox_runtime(
             limit=limit,
         )
         await session.commit()
+        pending = await runtime.list_pending_outbox_records(
+            expected_tenant_id=tenant_id,
+            limit=limit,
+        )
+        publishable_by_id = {outbox.outbox_id: outbox for outbox in pending}
+        publishable_by_id.update({outbox.outbox_id: outbox for outbox in sweep.requeued})
         publisher = CeleryEscalationPublisher()
         republished: list[dict[str, object]] = []
         failed: list[dict[str, object]] = []
-        for outbox in sweep.requeued:
+        for outbox in publishable_by_id.values():
             claim = await runtime.claim_outbox_for_escalation(
                 escalation_id=outbox.escalation_id,
                 publisher_id="worker:escalation-recovery",
@@ -170,6 +176,7 @@ async def reconcile_stale_escalation_outbox_runtime(
         return {
             "status": "completed",
             "requeued_count": len(sweep.requeued),
+            "pending_count": len(pending),
             "republished_count": len(republished),
             "failed_count": len(failed),
             "republished": republished,

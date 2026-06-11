@@ -39,8 +39,13 @@ from app.escalation.persistence import (
 )
 from app.escalation.publisher import EscalationPublisher
 from app.escalation.runtime import EscalationAgentRuntime
+from app.escalation.deferred_publisher import (
+    DeferredEscalationPublisher,
+    EscalationOutboxPublishError,
+)
 
 __all__ = [
+    "DeferredEscalationPublisher",
     "EscalationAgentRuntime",
     "EscalationError",
     "EscalationId",
@@ -48,6 +53,7 @@ __all__ = [
     "EscalationNotFoundError",
     "EscalationOutboxClaimId",
     "EscalationOutboxId",
+    "EscalationOutboxPublishError",
     "EscalationOutboxPage",
     "EscalationOutboxQuery",
     "EscalationOutboxRecord",

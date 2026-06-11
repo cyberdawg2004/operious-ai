@@ -76,6 +76,7 @@ from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
 from app.agents.identity import derive_tool_invocation_id
 from app.escalation.celery_publisher import CeleryEscalationPublisher
+from app.escalation.publisher import EscalationPublisher
 from app.governance.context import GovernanceContext
 from app.governance.crisis import publish_crisis_intercept_event
 from app.governance.enforcement.runtime import GovernanceRuntime
@@ -107,6 +108,7 @@ class ToolInvoker:
         governance_runtime: GovernanceRuntime | None = None,
         grant_repository: AgentActionGrantRepository | None = None,
         connector_invocation_repository: ConnectorInvocationRepository | None = None,
+        escalation_publisher: EscalationPublisher | None = None,
         redis_client: Any | None = None,
         pre_approved_decision_ttl_seconds: int = _DEFAULT_PRE_APPROVED_TTL_SECONDS,
     ) -> None:
@@ -124,6 +126,7 @@ class ToolInvoker:
         self._governance = governance_runtime
         self._grants = grant_repository
         self._connector_invocations = connector_invocation_repository
+        self._escalation_publisher = escalation_publisher
         self._redis_client = redis_client
         self._pre_approved_ttl_seconds = max(1, pre_approved_decision_ttl_seconds)
 
@@ -484,6 +487,7 @@ class ToolInvoker:
                         decision=decision,
                         tenant_id=context.tenant_id,
                         session_id=_metadata_str(request.metadata, "session_id"),
+                        publisher=self._escalation_publisher,
                     )
                 except Exception as exc:  # noqa: BLE001 - invoker never raises.
                     return self._denied_envelope(
@@ -1127,12 +1131,13 @@ async def _publish_crisis_handoff_if_needed(
     decision: Any,
     tenant_id: str | None,
     session_id: str | None,
+    publisher: EscalationPublisher | None = None,
 ) -> bool:
     if tenant_id is None or session_id is None:
         return False
     if crisis_policy_name_from_decision(decision) is None:
         return False
-    publisher = CeleryEscalationPublisher()
+    publisher = publisher or CeleryEscalationPublisher()
     if decision.decision is Decision.DENY:
         await publisher.publish_governance_denial(
             governance_decision_id=str(decision.decision_id),

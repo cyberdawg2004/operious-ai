@@ -122,6 +122,7 @@ from app.execution import (
     PostgresExecutionPersistence,
 )
 from app.escalation.celery_publisher import CeleryEscalationPublisher
+from app.escalation.deferred_publisher import DeferredEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
 from app.escalation.runtime import EscalationAgentRuntime
 from app.approvals.enums import CaseApprovalEntryCategory, CaseApprovalStatus
@@ -453,6 +454,7 @@ class _ResolutionAppendResult:
     draft_id: str | None = None
     outbound_send_outbox_id: str | None = None
     safety_escalation_governance_decision_id: str | None = None
+    post_commit_flushes: tuple[Callable[[], Awaitable[None]], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1235,6 +1237,8 @@ async def _persist_diagnostic_success(
                         await authority_tx.rollback()
                     raise
                 await session.commit()
+                for flush in resolution_append.post_commit_flushes:
+                    await flush()
                 outbound_send_published = await _publish_outbound_send_if_present(
                     session=session,
                     resolution_append=resolution_append,
@@ -1679,6 +1683,7 @@ async def _append_resolution_proposal_after_diagnostic(
     result: DiagnosticResult,
     diagnostic_event_id: str,
 ) -> _ResolutionAppendResult:
+    post_commit_flushes: list[Callable[[], Awaitable[None]]] = []
     try:
         async with session.begin_nested():
             data_protection = _data_protection_service(session)
@@ -1781,6 +1786,7 @@ async def _append_resolution_proposal_after_diagnostic(
                     session=session,
                     timeline=timeline,
                     tenant_id=work_item.tenant_id,
+                    post_commit_flushes=post_commit_flushes,
                 )
                 await action_runtime.execute_proposal_actions(
                     proposal=proposal,
@@ -1805,6 +1811,7 @@ async def _append_resolution_proposal_after_diagnostic(
                 safety_escalation_governance_decision_id=(
                     safety_escalation_governance_decision_id
                 ),
+                post_commit_flushes=tuple(post_commit_flushes),
             )
         return _ResolutionAppendResult(
             success=True,
@@ -1823,6 +1830,7 @@ async def _append_resolution_proposal_after_diagnostic(
             safety_escalation_governance_decision_id=(
                 safety_escalation_governance_decision_id
             ),
+            post_commit_flushes=tuple(post_commit_flushes),
         )
     except ResolutionApprovalCaseCreationError:
         raise
@@ -2254,6 +2262,7 @@ async def _action_orchestration_runtime(
     session: AsyncSession,
     timeline: TimelineRuntime,
     tenant_id: str,
+    post_commit_flushes: list[Callable[[], Awaitable[None]]] | None = None,
 ) -> ActionOrchestrationRuntime:
     settings = get_settings()
     data_protection = _data_protection_service(session)
@@ -2281,6 +2290,20 @@ async def _action_orchestration_runtime(
             settings
         ),
     )
+    governance_repository = PostgresGovernanceRepository(session)
+    session_persistence = PostgresSessionPersistence(session)
+    deferred_escalation_publisher = DeferredEscalationPublisher(
+        delegate=CeleryEscalationPublisher(),
+        escalation_runtime=EscalationAgentRuntime(
+            escalation_persistence=PostgresEscalationPersistence(session),
+            governance_repository=governance_repository,
+            session_persistence=session_persistence,
+        ),
+        session=session,
+        publisher_id="worker:action-orchestration",
+    )
+    if post_commit_flushes is not None:
+        post_commit_flushes.append(deferred_escalation_publisher.flush)
     return ActionOrchestrationRuntime(
         tool_invoker=ToolInvoker(
             tool_registry=await build_tenant_action_tool_registry(
@@ -2293,7 +2316,7 @@ async def _action_orchestration_runtime(
             # Per-task runtime construction bounds policy staleness to the
             # current task; new tasks pick up new composition.
             governance_runtime=build_action_tool_governance_runtime(
-                persistence=PostgresGovernanceRepository(session),
+                persistence=governance_repository,
                 redis_client=get_redis_client(),
                 tenant_configuration_repository=tenant_repository,
             ),
@@ -2301,6 +2324,7 @@ async def _action_orchestration_runtime(
             connector_invocation_repository=PostgresConnectorInvocationRepository(
                 session
             ),
+            escalation_publisher=deferred_escalation_publisher,
             redis_client=get_redis_client(),
             pre_approved_decision_ttl_seconds=(
                 get_settings().AGENT_PRE_APPROVED_DECISION_TTL_SECONDS

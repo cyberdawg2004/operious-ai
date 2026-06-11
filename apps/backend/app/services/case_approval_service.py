@@ -81,6 +81,7 @@ ActionApprovalApprove = Callable[
     [str, str, str | None, str, str],
     Awaitable[object],
 ]
+PostCommitFlush = Callable[[], Awaitable[None]]
 
 
 class ResolutionApprovalPersistenceProtocol(
@@ -106,6 +107,7 @@ class CaseApprovalService:
         injection_scanner: KnowledgeInjectionScanner | None = None,
         action_approval_approve: ActionApprovalApprove | None = None,
         resolution_governance_gate: ResolutionGovernanceGateProtocol | None = None,
+        post_commit_flush: PostCommitFlush | None = None,
     ) -> None:
         self._persistence = persistence
         self._sme_runtime = sme_runtime
@@ -116,6 +118,7 @@ class CaseApprovalService:
         self._scanner = injection_scanner or PatternKnowledgeInjectionScanner()
         self._action_approval_approve = action_approval_approve
         self._resolution_gate = resolution_governance_gate
+        self._post_commit_flush = post_commit_flush
 
     async def list_cases(
         self,
@@ -694,6 +697,8 @@ class CaseApprovalService:
     async def _commit(self) -> None:
         if self._session is not None:
             await self._session.commit()
+        if self._post_commit_flush is not None:
+            await self._post_commit_flush()
 
     async def _rollback(self) -> None:
         if self._session is not None:

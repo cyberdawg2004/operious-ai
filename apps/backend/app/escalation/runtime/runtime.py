@@ -599,6 +599,23 @@ class EscalationAgentRuntime:
                 requeued.append(recovered)
         return EscalationOutboxReconcileSweepResult(requeued=tuple(requeued))
 
+    async def list_pending_outbox_records(
+        self,
+        *,
+        expected_tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[EscalationOutboxRecord, ...]:
+        """Return unclaimed escalation outbox rows ready for publication."""
+
+        page = await self._escalations.list_escalation_outbox(
+            EscalationOutboxQuery(
+                status=EscalationOutboxStatus.PENDING,
+                limit=limit,
+            ),
+            expected_tenant_id=expected_tenant_id,
+        )
+        return page.items
+
     async def approve_escalation(
         self,
         *,
