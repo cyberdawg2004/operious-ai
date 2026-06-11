@@ -42,6 +42,7 @@ EXPECTED_VM_PROFILES = {
     "worker_supervisor": ("512mb", "shared", 1),
     "worker_sop": ("512mb", "shared", 1),
     "worker_maintenance": ("512mb", "shared", 1),
+    "worker_beat": ("256mb", "shared", 1),
     "worker_ingress": ("512mb", "shared", 1),
     "worker_outbound_send": ("512mb", "shared", 1),
     "worker_voice_realtime": ("512mb", "shared", 2),
@@ -59,6 +60,7 @@ def test_fly_declares_required_process_groups() -> None:
         "worker_supervisor",
         "worker_sop",
         "worker_maintenance",
+        "worker_beat",
         "worker_ingress",
         "worker_outbound_send",
         "worker_voice_realtime",
@@ -84,6 +86,31 @@ def test_fly_worker_concurrency_is_explicit() -> None:
 
     for process_name, expected_concurrency in EXPECTED_CONCURRENCY.items():
         assert _command_concurrency(processes[process_name]) == expected_concurrency
+
+
+def test_fly_declares_exactly_one_dedicated_celery_beat_scheduler() -> None:
+    processes = _fly_config()["processes"]
+
+    beat_processes = [
+        process_name
+        for process_name, command in processes.items()
+        if _celery_command(command).startswith("celery -A app.workers.celery_app beat ")
+    ]
+
+    assert beat_processes == ["worker_beat"]
+    assert _celery_command(processes["worker_beat"]) == (
+        "celery -A app.workers.celery_app beat "
+        "--loglevel=info --schedule=/tmp/celerybeat-schedule"
+    )
+
+
+def test_fly_workers_do_not_embed_beat_scheduler() -> None:
+    processes = _fly_config()["processes"]
+
+    for process_name in EXPECTED_PROCESS_QUEUES:
+        command = _celery_command(processes[process_name])
+        assert " -B" not in command
+        assert " --beat" not in command
 
 
 def test_http_service_targets_web_process_only() -> None:
@@ -112,7 +139,15 @@ def test_voice_process_groups_are_pre_warmed() -> None:
     }
 
     assert vm_min_machines["web"] == 1
+    assert vm_min_machines["worker_beat"] == 1
     assert vm_min_machines["worker_voice_realtime"] == 1
+
+
+def test_celery_beat_process_runs_as_a_single_scheduler() -> None:
+    beat_vm = _vm_profile("worker_beat")
+
+    assert beat_vm["min_machines_running"] == 1
+    assert beat_vm["max_machines_running"] == 1
 
 
 def test_vm_profiles_match_process_groups() -> None:
@@ -132,6 +167,13 @@ def _fly_config() -> dict[str, object]:
     return tomllib.loads(FLY_TOML.read_text(encoding="utf-8"))
 
 
+def _vm_profile(process_name: str) -> dict[str, object]:
+    for vm in _fly_config()["vm"]:
+        if vm["processes"] == [process_name]:
+            return vm
+    raise AssertionError(f"missing VM profile for {process_name}")
+
+
 def _command_queues(command: str) -> tuple[str, ...]:
     match = re.search(r"(?:\s-Q|\s--queues)\s+([^\s]+)", command)
     assert match is not None, f"missing -Q flag in {command}"
@@ -145,21 +187,25 @@ def _command_concurrency(command: str) -> int:
 
 
 def _worker_command(command: str) -> str:
-    return (
-        _unwrap_startup_wrapper(command)
-        .removeprefix("env DB_USE_NULLPOOL=true ")
-        .strip()
-    )
+    return _celery_command(command)
 
 
 def test_fly_workers_use_nullpool() -> None:
     processes = _fly_config()["processes"]
 
-    for process_name in EXPECTED_PROCESS_QUEUES:
+    for process_name in (*EXPECTED_PROCESS_QUEUES, "worker_beat"):
         command = _unwrap_startup_wrapper(processes[process_name])
         assert command.startswith(
             "env DB_USE_NULLPOOL=true "
         ), f"{process_name} must run workers with DB_USE_NULLPOOL=true"
+
+
+def _celery_command(command: str) -> str:
+    return (
+        _unwrap_startup_wrapper(command)
+        .removeprefix("env DB_USE_NULLPOOL=true ")
+        .strip()
+    )
 
 
 def _unwrap_startup_wrapper(command: str) -> str:

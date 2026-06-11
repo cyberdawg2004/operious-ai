@@ -243,6 +243,22 @@ def test_maintenance_task_routes_to_webhook_maintenance_queue() -> None:
     )
 
 
+def test_celery_beat_schedules_ingress_and_outbound_reconcilers() -> None:
+    schedule = celery_app.conf.beat_schedule
+
+    for schedule_name, task_name in {
+        "reconcile-ingress-dispatch-outbox-minutely": (
+            "reconcile_ingress_dispatch_outbox"
+        ),
+        "reconcile-outbound-send-outbox-minutely": "reconcile_outbound_send_outbox",
+    }.items():
+        entry = schedule[schedule_name]
+        assert entry["task"] == task_name
+        assert entry["schedule"] == 60.0
+        assert entry["kwargs"] == {"limit": 100}
+        assert entry["options"] == {"queue": QUEUE_WEBHOOK_MAINTENANCE}
+
+
 def test_diagnostic_retry_countdown_uses_exponential_backoff() -> None:
     assert _retry_countdown(_task_with_retries(0)) == 30
     assert _retry_countdown(_task_with_retries(1)) == 60
