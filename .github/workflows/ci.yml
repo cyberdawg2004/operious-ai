@@ -74,6 +74,19 @@ jobs:
         with:
           name: pip-audit-report
           path: pip-audit-report.json
+      - name: Dependency license audit (pip-licenses)
+        run: |
+          pip install pip-licenses
+          pip-licenses --format=json --output-file backend-licenses.json
+          # Fail closed on SaaS-incompatible network/strong copyleft. Weak
+          # copyleft (LGPL/MPL) is permitted for a hosted service.
+          pip-licenses --fail-on "GPL-3.0-only;GPL-3.0-or-later;AGPL-3.0-only;AGPL-3.0-or-later;GNU General Public License v3 or later (GPLv3+);GNU General Public License v3 (GPLv3);GNU Affero General Public License v3 or later (AGPLv3+);GNU Affero General Public License v3 (AGPLv3)"
+      - name: Upload license report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-licenses
+          path: backend-licenses.json
       - name: Lint (ruff)
         working-directory: apps/backend
         run: ruff check app tests scripts
@@ -259,3 +272,17 @@ jobs:
         run: npm install
       - name: Run invariant tests
         run: npm run test:frontend
+
+  dependency-review:
+    name: Dependency review (PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-3.0, AGPL-3.0
