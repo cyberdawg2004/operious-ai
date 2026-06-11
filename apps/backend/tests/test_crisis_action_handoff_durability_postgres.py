@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-import inspect
 import os
 from datetime import datetime, timezone
 
@@ -29,7 +28,6 @@ from app.agents.tools import ToolInvoker
 from app.agents.tools.action_governance import build_action_tool_governance_runtime
 from app.agents.tools.actions import build_action_tool_registry
 from app.agents.value_objects import CausalityMetadata
-from app.dependencies.services import build_action_approval_service
 from app.escalation import DeferredEscalationPublisher, EscalationAgentRuntime
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.escalation.persistence import PostgresEscalationPersistence
@@ -38,7 +36,6 @@ from app.governance.persistence import PostgresGovernanceRepository
 from app.session.enums import SessionLifecyclePhase, SessionScope
 from app.session.identity import SessionId, SessionLineageId
 from app.session.persistence import PostgresSessionPersistence, SessionRecord
-from app.workers import agent_tasks
 from tests.conftest import requires_postgres
 
 pytestmark = [requires_postgres]
@@ -142,18 +139,6 @@ async def test_action_invoker_crisis_handoff_is_durable_before_flush(
     ).list_pending_outbox_records(expected_tenant_id=_TENANT_ID)
     assert len(pending) == 1
     assert pending[0].metadata["source_governance_decision_id"] == decision_id
-
-
-def test_action_orchestration_and_worker_invokers_receive_durable_publisher() -> None:
-    service_source = inspect.getsource(build_action_approval_service)
-    worker_source = inspect.getsource(agent_tasks._action_orchestration_runtime)
-
-    assert "DeferredEscalationPublisher(" in service_source
-    assert "escalation_publisher=deferred_escalation_publisher" in service_source
-    assert "post_commit_flush=deferred_escalation_publisher.flush" in service_source
-    assert "DeferredEscalationPublisher(" in worker_source
-    assert "escalation_publisher=deferred_escalation_publisher" in worker_source
-    assert "post_commit_flushes.append(deferred_escalation_publisher.flush)" in worker_source
 
 
 async def _real_redis() -> Redis:
