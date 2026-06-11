@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.boundary.db.models import BoundaryIngressRow, IngressDispatchOutboxRow
@@ -24,6 +26,7 @@ from app.boundary.ingress_dispatch_outbox import (
     IngressDispatchOutboxQuery,
     IngressDispatchOutboxRuntime,
     IngressDispatchOutboxStatus,
+    PostgresIngressDispatchOutboxPersistence,
 )
 from app.boundary.persistence import (
     BoundaryIngressRecord,
@@ -33,6 +36,14 @@ from app.boundary.persistence import (
 from scripts.backfill_ingress_dispatch_outbox import (
     backfill_ingress_dispatch_outbox,
 )
+from app.queues import QUEUE_INGRESS_EMAIL
+from app.runtime.db.models import DeadLetterTaskRow
+from app.services.queue_operations_service import (
+    DEAD_LETTER_REPLAY_PUBLISHED,
+    DeadLetterAlreadyReplayedError,
+    QueueOperationsService,
+)
+from app.tenant.db.models import TenantRow
 from tests.conftest import requires_postgres
 from app.workers.ingress_dispatch_tasks import process_ingress_dispatch_outbox_runtime
 
@@ -398,6 +409,168 @@ async def test_unenqueued_pending_outbox_is_recovered_by_reconciler_due_scan() -
     assert refreshed.status is IngressDispatchOutboxStatus.DISPATCHED
 
 
+@pytest.mark.asyncio
+@requires_postgres
+async def test_dead_lettered_ingress_dispatch_replay_resets_and_dispatches_end_to_end(
+    pg_session: AsyncSession,
+) -> None:
+    record, outbox, dlq = await _dead_letter_postgres_ingress_dispatch(
+        pg_session,
+        external_message_id="dlq-replay-end-to-end",
+    )
+    sent = _RecordingReplayPublisher()
+    service = QueueOperationsService(session=pg_session, replay_publisher=sent)
+
+    replay = await service.replay_dead_letter(
+        dlq_id=str(dlq.dead_letter_task_id),
+        tenant_id=TENANT_ID,
+        replayed_by="operator-principal",
+    )
+
+    assert replay.status == "replayed"
+    assert sent.calls == [
+        (
+            "dispatch_ingress",
+            {"outbox_id": str(outbox.outbox_id)},
+            QUEUE_INGRESS_EMAIL,
+        )
+    ]
+    runtime = _postgres_test_runtime(pg_session, max_age_seconds=60)
+    reset = await runtime.get_outbox(outbox.outbox_id)
+    assert reset is not None
+    assert reset.status is IngressDispatchOutboxStatus.PENDING
+    assert reset.attempt_count == 0
+    assert reset.claim_id is None
+    assert reset.claimed_at is None
+    assert reset.next_attempt_at == reset.created_at
+    assert reset.created_at > outbox.created_at
+    assert reset.metadata["replay.dead_letter_task_id"] == str(
+        dlq.dead_letter_task_id
+    )
+
+    sweep = await runtime.dead_letter_exhausted_pending(
+        now=reset.created_at + timedelta(seconds=30),
+        limit=10,
+        tenant_id=TENANT_ID,
+    )
+    assert sweep.dead_lettered_count == 0
+    dispatch = _SessionExecutionRecordingDispatchService(pg_session)
+
+    result = await process_ingress_dispatch_outbox_runtime(
+        outbox_id=str(outbox.outbox_id),
+        outbox_runtime=runtime,
+        dispatch_service=dispatch,
+        admission_service=_AdmissionService(allowed=True),
+        session=pg_session,
+        now=reset.created_at + timedelta(seconds=31),
+        worker_id="pytest:dlq-replay",
+    )
+
+    assert result["status"] == "dispatched"
+    assert dispatch.calls == [(str(record.ingress_id), TENANT_ID)]
+    refreshed = await runtime.get_outbox(outbox.outbox_id)
+    assert refreshed is not None
+    assert refreshed.status is IngressDispatchOutboxStatus.DISPATCHED
+    assert await _recorded_dispatch_counts(pg_session, record.ingress_id) == (1, 1)
+
+
+@pytest.mark.asyncio
+@requires_postgres
+async def test_dead_lettered_ingress_dispatch_replay_is_idempotent(
+    pg_session: AsyncSession,
+) -> None:
+    record, outbox, dlq = await _dead_letter_postgres_ingress_dispatch(
+        pg_session,
+        external_message_id="dlq-replay-idempotent",
+    )
+    sent = _RecordingReplayPublisher()
+    service = QueueOperationsService(session=pg_session, replay_publisher=sent)
+    runtime = _postgres_test_runtime(pg_session)
+    dispatch = _SessionExecutionRecordingDispatchService(pg_session)
+
+    await service.replay_dead_letter(
+        dlq_id=str(dlq.dead_letter_task_id),
+        tenant_id=TENANT_ID,
+        replayed_by="operator-principal",
+    )
+    first = await process_ingress_dispatch_outbox_runtime(
+        outbox_id=str(outbox.outbox_id),
+        outbox_runtime=runtime,
+        dispatch_service=dispatch,
+        admission_service=_AdmissionService(allowed=True),
+        session=pg_session,
+        now=datetime.now(timezone.utc),
+        worker_id="pytest:dlq-replay-idempotent-a",
+    )
+
+    with pytest.raises(DeadLetterAlreadyReplayedError):
+        await service.replay_dead_letter(
+            dlq_id=str(dlq.dead_letter_task_id),
+            tenant_id=TENANT_ID,
+            replayed_by="operator-principal",
+        )
+    second = await process_ingress_dispatch_outbox_runtime(
+        outbox_id=str(outbox.outbox_id),
+        outbox_runtime=runtime,
+        dispatch_service=dispatch,
+        admission_service=_AdmissionService(allowed=True),
+        session=pg_session,
+        now=datetime.now(timezone.utc),
+        worker_id="pytest:dlq-replay-idempotent-b",
+    )
+
+    assert first["status"] == "dispatched"
+    assert second["status"] == "not_claimed"
+    assert second["reason"] == "outbox_not_claimable:dispatched"
+    assert len(sent.calls) == 1
+    assert dispatch.calls == [(str(record.ingress_id), TENANT_ID)]
+    assert await _recorded_dispatch_counts(pg_session, record.ingress_id) == (1, 1)
+
+
+@pytest.mark.asyncio
+@requires_postgres
+async def test_published_noop_ingress_dispatch_replay_retries_dead_lettered_target(
+    pg_session: AsyncSession,
+) -> None:
+    _record, outbox, dlq = await _dead_letter_postgres_ingress_dispatch(
+        pg_session,
+        external_message_id="dlq-replay-published-noop",
+    )
+    dlq.replayed = True
+    dlq.replay_state = DEAD_LETTER_REPLAY_PUBLISHED
+    dlq.replayed_at = NOW + timedelta(seconds=2)
+    dlq.replayed_by = "operator-principal"
+    dlq.replay_attempt_count = 1
+    dlq.replay_claim_id = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"published-noop:{dlq.dead_letter_task_id}",
+    )
+    await pg_session.flush()
+    sent = _RecordingReplayPublisher()
+    service = QueueOperationsService(session=pg_session, replay_publisher=sent)
+
+    await service.replay_dead_letter(
+        dlq_id=str(dlq.dead_letter_task_id),
+        tenant_id=TENANT_ID,
+        replayed_by="operator-principal",
+    )
+
+    await pg_session.refresh(dlq)
+    reset = await _postgres_test_runtime(pg_session).get_outbox(outbox.outbox_id)
+    assert reset is not None
+    assert reset.status is IngressDispatchOutboxStatus.PENDING
+    assert dlq.replayed is True
+    assert dlq.replay_state == DEAD_LETTER_REPLAY_PUBLISHED
+    assert dlq.replay_attempt_count == 2
+    assert sent.calls == [
+        (
+            "dispatch_ingress",
+            {"outbox_id": str(outbox.outbox_id)},
+            QUEUE_INGRESS_EMAIL,
+        )
+    ]
+
+
 def test_dead_lettered_ingress_dispatch_is_replayable_from_dlq() -> None:
     from app.queue_operations.dlq_replay import celery_kwargs_for_task
 
@@ -504,6 +677,111 @@ class _FailingDispatchService:
         raise RuntimeError("dispatch transport failed")
 
 
+class _SessionExecutionRecordingDispatchService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self.calls: list[tuple[str, str]] = []
+
+    async def dispatch(self, ingress_id: str, tenant_id: str) -> object:
+        self.calls.append((ingress_id, tenant_id))
+        session_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"dlq-replay-session:{tenant_id}:{ingress_id}",
+        )
+        dispatch_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"dlq-replay-dispatch:{tenant_id}:{ingress_id}",
+            )
+        )
+        execution_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"dlq-replay-execution:{tenant_id}:{dispatch_id}",
+        )
+        metadata = json.dumps({"boundary.ingress_id": ingress_id})
+        now = datetime.now(timezone.utc)
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO operational_sessions (
+                    session_id, scope, external_handle, tenant_id,
+                    principal_id, opened_at, lifecycle_phase,
+                    lifecycle_recorded_at, lifecycle_reason, lineage_id,
+                    root_session_id, parent_session_id, ancestor_session_ids,
+                    lineage_depth, sequence_head, revision,
+                    context_environment, context_labels, context_attributes,
+                    context_notes, metadata
+                )
+                VALUES (
+                    :session_id, 'tenant', :ingress_id, :tenant_id,
+                    NULL, :now, 'active',
+                    :now, NULL, :session_id,
+                    :session_id, NULL, CAST(:empty_list AS jsonb),
+                    0, 0, 1,
+                    NULL, CAST(:empty_list AS jsonb), CAST(:empty_object AS jsonb),
+                    NULL, CAST(:metadata AS jsonb)
+                )
+                ON CONFLICT (session_id) DO NOTHING
+                """
+            ),
+            {
+                "session_id": session_id,
+                "ingress_id": ingress_id,
+                "tenant_id": tenant_id,
+                "now": now,
+                "empty_list": "[]",
+                "empty_object": "{}",
+                "metadata": metadata,
+            },
+        )
+        await self._session.execute(
+            text(
+                """
+                INSERT INTO execution_records (
+                    execution_id, kind, dispatch_id, session_id, tenant_id,
+                    state, attempt_count, requested_at, claimed_at,
+                    completed_at, failed_at, worker_id, diagnostic_category,
+                    diagnostic_confidence, result, error, metadata
+                )
+                VALUES (
+                    :execution_id, 'diagnostic_agent', :dispatch_id,
+                    :session_id_text, :tenant_id,
+                    'requested', 0, :now, NULL,
+                    NULL, NULL, NULL, NULL,
+                    NULL, CAST(:empty_object AS jsonb), NULL,
+                    CAST(:metadata AS jsonb)
+                )
+                ON CONFLICT ON CONSTRAINT uq_execution_records_tenant_dispatch_kind
+                DO NOTHING
+                """
+            ),
+            {
+                "execution_id": execution_id,
+                "dispatch_id": dispatch_id,
+                "session_id_text": str(session_id),
+                "tenant_id": tenant_id,
+                "now": now,
+                "empty_object": "{}",
+                "metadata": metadata,
+            },
+        )
+        return object()
+
+
+class _RecordingReplayPublisher:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any], str]] = []
+
+    def publish(
+        self,
+        *,
+        task_name: str,
+        kwargs: Mapping[str, Any],
+        queue: str,
+    ) -> None:
+        self.calls.append((task_name, dict(kwargs), queue))
+
+
 class _RecordingDeadLetterSink:
     def __init__(self) -> None:
         self.records: list[dict[str, object]] = []
@@ -518,6 +796,101 @@ class _RecordingEventSink:
 
     async def emit(self, **kwargs: object) -> None:
         self.events.append(dict(kwargs))
+
+
+def _postgres_test_runtime(
+    session: AsyncSession,
+    *,
+    max_age_seconds: int = 3600,
+) -> IngressDispatchOutboxRuntime:
+    return IngressDispatchOutboxRuntime(
+        persistence=PostgresIngressDispatchOutboxPersistence(session),
+        max_attempts=8,
+        max_age_seconds=max_age_seconds,
+    )
+
+
+async def _dead_letter_postgres_ingress_dispatch(
+    session: AsyncSession,
+    *,
+    external_message_id: str,
+) -> tuple[BoundaryIngressRecord, Any, DeadLetterTaskRow]:
+    await session.merge(TenantRow(tenant_id=TENANT_ID))
+    await session.flush()
+    repo = PostgresBoundaryPersistence(session)
+    record = _ingress_record(
+        channel="email",
+        external_message_id=external_message_id,
+    )
+    await repo.save_ingress(record)
+    runtime = IngressDispatchOutboxRuntime(
+        persistence=PostgresIngressDispatchOutboxPersistence(session),
+        max_attempts=1,
+    )
+    outbox = await runtime.get_outbox_by_ingress(record.ingress_id)
+    assert outbox is not None
+    result = await process_ingress_dispatch_outbox_runtime(
+        outbox_id=str(outbox.outbox_id),
+        outbox_runtime=runtime,
+        dispatch_service=_FailingDispatchService(),
+        admission_service=_AdmissionService(allowed=True),
+        session=session,
+        now=NOW + timedelta(seconds=1),
+        worker_id="pytest:seed-dead-letter",
+    )
+    assert result["status"] == "dead_lettered"
+    dead_letter = await _dead_letter_for_outbox(session, outbox.outbox_id)
+    assert dead_letter is not None
+    refreshed = await runtime.get_outbox(outbox.outbox_id)
+    assert refreshed is not None
+    assert refreshed.status is IngressDispatchOutboxStatus.DEAD_LETTERED
+    return record, refreshed, dead_letter
+
+
+async def _dead_letter_for_outbox(
+    session: AsyncSession,
+    outbox_id: object,
+) -> DeadLetterTaskRow | None:
+    return (
+        await session.execute(
+            select(DeadLetterTaskRow).where(
+                DeadLetterTaskRow.task_name == "dispatch_ingress",
+                DeadLetterTaskRow.task_id == str(outbox_id),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _recorded_dispatch_counts(
+    session: AsyncSession,
+    ingress_id: object,
+) -> tuple[int, int]:
+    params = {"ingress_id": str(ingress_id)}
+    sessions = (
+        await session.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM operational_sessions
+                WHERE metadata->>'boundary.ingress_id' = :ingress_id
+                """
+            ),
+            params,
+        )
+    ).scalar_one()
+    executions = (
+        await session.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM execution_records
+                WHERE metadata->>'boundary.ingress_id' = :ingress_id
+                """
+            ),
+            params,
+        )
+    ).scalar_one()
+    return int(sessions), int(executions)
 
 
 class _OutboxFailingPostgresBoundaryPersistence(PostgresBoundaryPersistence):

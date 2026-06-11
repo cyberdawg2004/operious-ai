@@ -26,6 +26,8 @@ from app.core.queue_depth import (
 )
 from app.core.queue_admission import queue_depth_status
 from app.core.redis import get_redis_client
+from app.boundary.db.models import IngressDispatchOutboxRow
+from app.boundary.ingress_dispatch_outbox import IngressDispatchOutboxStatus
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.hardening.admission import AdmissionGate
 from app.hardening.admission.gate import AdmissionRedisClient
@@ -251,6 +253,10 @@ class QueueOperationsService:
                     tenant_id=tenant_id,
                     replayed_by=replayed_by,
                 )
+                await self._prepare_claimed_replay_target(
+                    claim=claim,
+                    tenant_id=tenant_id,
+                )
                 await self._session.commit()
                 if _should_commit_external_transaction(
                     session=self._session,
@@ -402,13 +408,6 @@ class QueueOperationsService:
                 .where(
                     DeadLetterTaskRow.dead_letter_task_id == parsed_id,
                     DeadLetterTaskRow.tenant_id == tenant_id,
-                    DeadLetterTaskRow.replayed.is_(False),
-                    DeadLetterTaskRow.replay_state.in_(
-                        (
-                            DEAD_LETTER_REPLAY_NONE,
-                            DEAD_LETTER_REPLAY_FAILED,
-                        )
-                    ),
                 )
                 .with_for_update(skip_locked=True)
             )
@@ -424,6 +423,24 @@ class QueueOperationsService:
             ).scalar_one_or_none()
             if existing_id is None:
                 raise DeadLetterNotFoundError("dead-letter record not found")
+            raise DeadLetterAlreadyReplayedError(
+                "dead-letter replay already in progress"
+            )
+
+        retry_published_ingress = False
+        replayable = row.replayed is False and row.replay_state in {
+            DEAD_LETTER_REPLAY_NONE,
+            DEAD_LETTER_REPLAY_FAILED,
+        }
+        if not replayable:
+            retry_published_ingress = (
+                await self._is_published_ingress_replay_retryable(
+                    row=row,
+                    tenant_id=tenant_id,
+                )
+            )
+            replayable = retry_published_ingress
+        if not replayable:
             raise DeadLetterAlreadyReplayedError(
                 "dead-letter replay already in progress"
             )
@@ -446,12 +463,8 @@ class QueueOperationsService:
                     DeadLetterTaskRow.dead_letter_task_id
                     == row.dead_letter_task_id,
                     DeadLetterTaskRow.tenant_id == tenant_id,
-                    DeadLetterTaskRow.replayed.is_(False),
-                    DeadLetterTaskRow.replay_state.in_(
-                        (
-                            DEAD_LETTER_REPLAY_NONE,
-                            DEAD_LETTER_REPLAY_FAILED,
-                        )
+                    _dead_letter_replay_claim_state_predicate(
+                        retry_published_ingress=retry_published_ingress,
                     ),
                     DeadLetterTaskRow.replay_attempt_count
                     == row.replay_attempt_count,
@@ -472,7 +485,7 @@ class QueueOperationsService:
                     },
                 )
             ),
-        )
+            )
         if result.rowcount != 1:
             raise DeadLetterAlreadyReplayedError(
                 "dead-letter replay already in progress"
@@ -487,11 +500,90 @@ class QueueOperationsService:
             claim_id=claim_id,
         )
 
+    async def _is_published_ingress_replay_retryable(
+        self,
+        *,
+        row: DeadLetterTaskRow,
+        tenant_id: str,
+    ) -> bool:
+        if (
+            row.task_name != "dispatch_ingress"
+            or row.replayed is not True
+            or row.replay_state != DEAD_LETTER_REPLAY_PUBLISHED
+        ):
+            return False
+        outbox_id = _outbox_id_from_kwargs(_replay_kwargs_for_row(row))
+        outbox_status = (
+            await self._session.execute(
+                select(IngressDispatchOutboxRow.status)
+                .where(
+                    IngressDispatchOutboxRow.outbox_id == outbox_id,
+                    IngressDispatchOutboxRow.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if outbox_status is None:
+            raise DeadLetterCannotReplayUnknownTaskError(
+                "cannot_replay_missing_ingress_dispatch_outbox"
+            )
+        return outbox_status == IngressDispatchOutboxStatus.DEAD_LETTERED.value
+
     async def _set_replay_tenant(self, tenant_id: str) -> None:
         await self._session.execute(
             text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
             {"tenant_id": tenant_id},
         )
+
+    async def _prepare_claimed_replay_target(
+        self,
+        *,
+        claim: _DeadLetterReplayClaim,
+        tenant_id: str,
+    ) -> None:
+        if claim.task_name != "dispatch_ingress":
+            return
+        outbox_id = _claim_outbox_id(claim)
+        row = (
+            await self._session.execute(
+                select(IngressDispatchOutboxRow)
+                .where(
+                    IngressDispatchOutboxRow.outbox_id == outbox_id,
+                    IngressDispatchOutboxRow.tenant_id == tenant_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise DeadLetterCannotReplayUnknownTaskError(
+                "cannot_replay_missing_ingress_dispatch_outbox"
+            )
+        if row.status in {
+            IngressDispatchOutboxStatus.CLAIMED.value,
+            IngressDispatchOutboxStatus.DISPATCHED.value,
+        }:
+            return
+        metadata = dict(row.metadata_json or {})
+        original_created_at = metadata.get("replay.original_created_at")
+        previous_created_at = row.created_at
+        row.status = IngressDispatchOutboxStatus.PENDING.value
+        row.claim_id = None
+        row.worker_id = None
+        row.claimed_at = None
+        row.dispatched_at = None
+        row.attempt_count = 0
+        row.next_attempt_at = claim.replayed_at
+        row.created_at = claim.replayed_at
+        row.last_error = None
+        row.metadata_json = {
+            **metadata,
+            "replay.dead_letter_task_id": str(claim.dlq_id),
+            "replay.reset_at": claim.replayed_at.isoformat(),
+            "replay.reset_by": claim.replayed_by,
+            "replay.original_created_at": original_created_at
+            or previous_created_at.isoformat(),
+        }
+        await self._session.flush()
 
     async def _mark_dead_letter_replay_published(
         self,
@@ -760,6 +852,41 @@ def _derive_replay_claim_id(
         _DLQ_REPLAY_CLAIM_NAMESPACE,
         f"{dlq_id}|{tenant_id}|{replay_attempt_count}",
     )
+
+
+def _dead_letter_replay_claim_state_predicate(
+    *,
+    retry_published_ingress: bool,
+) -> Any:
+    if retry_published_ingress:
+        return and_(
+            DeadLetterTaskRow.task_name == "dispatch_ingress",
+            DeadLetterTaskRow.replayed.is_(True),
+            DeadLetterTaskRow.replay_state == DEAD_LETTER_REPLAY_PUBLISHED,
+        )
+    return and_(
+        DeadLetterTaskRow.replayed.is_(False),
+        DeadLetterTaskRow.replay_state.in_(
+            (
+                DEAD_LETTER_REPLAY_NONE,
+                DEAD_LETTER_REPLAY_FAILED,
+            )
+        ),
+    )
+
+
+def _claim_outbox_id(claim: _DeadLetterReplayClaim) -> uuid.UUID:
+    return _outbox_id_from_kwargs(claim.kwargs)
+
+
+def _outbox_id_from_kwargs(kwargs: Mapping[str, Any]) -> uuid.UUID:
+    raw_outbox_id = kwargs.get("outbox_id")
+    try:
+        return uuid.UUID(str(raw_outbox_id))
+    except (TypeError, ValueError) as exc:
+        raise DeadLetterCannotReplayUnknownTaskError(
+            "cannot_replay_invalid_ingress_dispatch_outbox"
+        ) from exc
 
 
 def _bounded_replay_error(exc: BaseException) -> str:
