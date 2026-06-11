@@ -116,6 +116,34 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             f"CREDENTIAL_KMS_BACKEND={settings.CREDENTIAL_KMS_BACKEND!r} is "
             "unsupported; expected 'gcp' in production."
         )
+    # Data-protection master key custody (#54/#55).
+    data_protection_kms_backend = (
+        settings.DATA_PROTECTION_KMS_BACKEND.strip().casefold()
+    )
+    if data_protection_kms_backend == "local":
+        problems.append(
+            "DATA_PROTECTION_KMS_BACKEND=local -> the data-protection master "
+            "key sits at rest in plaintext instead of being wrapped by GCP "
+            "Cloud KMS."
+        )
+    elif data_protection_kms_backend == "gcp":
+        if not settings.data_protection_kms_key_resource:
+            problems.append(
+                "DATA_PROTECTION_KMS_BACKEND=gcp but OPERIOUS_KMS_KEY_RESOURCE "
+                "is empty -> the data-protection master key cannot be "
+                "unwrapped by GCP Cloud KMS."
+            )
+        if not settings.GOOGLE_APPLICATION_CREDENTIALS.strip():
+            problems.append(
+                "DATA_PROTECTION_KMS_BACKEND=gcp but GOOGLE_APPLICATION_"
+                "CREDENTIALS is empty -> the GCP Cloud KMS client cannot "
+                "authenticate."
+            )
+    else:
+        problems.append(
+            f"DATA_PROTECTION_KMS_BACKEND={settings.DATA_PROTECTION_KMS_BACKEND!r} "
+            "is unsupported; expected 'gcp' in production."
+        )
     if (
         not settings.DATA_PROTECTION_MASTER_KEYS.strip()
         and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()

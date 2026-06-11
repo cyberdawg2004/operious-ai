@@ -16,6 +16,7 @@ def _ready_production(**overrides: object) -> Settings:
         "OPENAI_API_KEY": "sk-openai-real",
         "TENANT_CREDENTIAL_MASTER_KEY": "x" * 32,
         "CREDENTIAL_KMS_BACKEND": "gcp",
+        "DATA_PROTECTION_KMS_BACKEND": "gcp",
         "OPERIOUS_KMS_KEY_RESOURCE": (
             "projects/operious-kms/locations/global/keyRings/operious/"
             "cryptoKeys/tenant-credentials"

@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from app.approvals.persistence import PostgresCaseApprovalPersistence
 from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_session_factory
 from app.db.tenant_context import set_current_tenant
 from app.governance.persistence import PostgresGovernanceRepository
@@ -103,7 +104,11 @@ def _data_protection_service(session: Any) -> DataProtectionService | None:
         and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
     ):
         return None
-    return DataProtectionService.from_settings(session, settings)
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+    )
 
 
 def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:

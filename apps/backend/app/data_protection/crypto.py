@@ -6,7 +6,7 @@ import base64
 import json
 import os
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
@@ -60,6 +60,11 @@ _SENSITIVE_JSON_KEYS: Final[frozenset[str]] = frozenset(
 
 class DataProtectionError(RuntimeError):
     """Raised when protected data cannot be encrypted or decrypted safely."""
+
+
+# Composition root supplies this when DATA_PROTECTION_KMS_BACKEND=gcp to
+# unwrap KMS-wrapped master key material into the plaintext KEK.
+MasterKeyUnwrap = Callable[[bytes], bytes]
 
 
 class LegalHoldBlockedError(DataProtectionError):
@@ -146,20 +151,43 @@ class MasterKeyRing:
         self._keys = decoded
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "MasterKeyRing":
+    def from_settings(
+        cls,
+        settings: Settings,
+        *,
+        master_key_unwrap: "MasterKeyUnwrap | None" = None,
+    ) -> "MasterKeyRing":
+        """Build the ring from settings.
+
+        ``master_key_unwrap`` is supplied by the composition root when
+        ``DATA_PROTECTION_KMS_BACKEND=gcp``: each entry's material is base64
+        KMS-wrapped ciphertext that is unwrapped to the plaintext KEK. When
+        ``None`` (local backend), materials are plaintext key material.
+        """
         raw_ring = getattr(settings, "DATA_PROTECTION_MASTER_KEYS", "")
         active = getattr(settings, "DATA_PROTECTION_ACTIVE_MASTER_KEY_VERSION", "")
         if raw_ring.strip():
-            keys: dict[str, str] = {}
+            keys: dict[str, str | bytes] = {}
             for chunk in raw_ring.split(","):
                 version, sep, material = chunk.partition(":")
                 if not sep:
                     raise DataProtectionError(
                         "DATA_PROTECTION_MASTER_KEYS entries must be version:key"
                     )
-                keys[version.strip()] = material.strip()
+                stripped = material.strip()
+                if master_key_unwrap is not None:
+                    keys[version.strip()] = master_key_unwrap(
+                        _b64d_strict(stripped)
+                    )
+                else:
+                    keys[version.strip()] = stripped
             active_version = active.strip() or next(iter(keys))
             return cls(keys=keys, active_version=active_version)
+        if master_key_unwrap is not None:
+            raise DataProtectionError(
+                "DATA_PROTECTION_KMS_BACKEND=gcp requires "
+                "DATA_PROTECTION_MASTER_KEYS to hold KMS-wrapped material"
+            )
         key = settings.TENANT_CREDENTIAL_MASTER_KEY
         return cls(keys={"v1": key}, active_version="v1")
 
@@ -233,8 +261,20 @@ class DataProtectionService:
         self._ring = master_key_ring
 
     @classmethod
-    def from_settings(cls, session: AsyncSession, settings: Settings) -> "DataProtectionService":
-        return cls(session, master_key_ring=MasterKeyRing.from_settings(settings))
+    def from_settings(
+        cls,
+        session: AsyncSession,
+        settings: Settings,
+        *,
+        master_key_unwrap: "MasterKeyUnwrap | None" = None,
+    ) -> "DataProtectionService":
+        return cls(
+            session,
+            master_key_ring=MasterKeyRing.from_settings(
+                settings,
+                master_key_unwrap=master_key_unwrap,
+            ),
+        )
 
     async def encrypt_json_values(
         self,
@@ -951,6 +991,16 @@ def _b64e(value: bytes) -> str:
 def _b64d(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def _b64d_strict(value: str) -> bytes:
+    """Decode standard base64 KMS-wrapped material (fail-closed)."""
+    try:
+        return base64.b64decode(value, validate=True)
+    except ValueError as exc:  # binascii.Error subclasses ValueError
+        raise DataProtectionError(
+            "KMS-wrapped master key material is not valid base64"
+        ) from exc
 
 
 def _json_bytes(value: Mapping[str, Any]) -> bytes:

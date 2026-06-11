@@ -96,6 +96,7 @@ from app.core.admission import admission_thresholds_from_settings
 from app.core.queue_depth import get_queue_depth_provider
 from app.core.redis import get_redis_client
 from app.data_protection.crypto import DataProtectionError, DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.dependencies.database import get_db_session, get_session_factory
 from app.execution import (
     ExecutionOutboxClaimId,
@@ -280,7 +281,11 @@ def _data_protection_service(
         and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
     ):
         return None
-    return DataProtectionService.from_settings(session, settings)
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+    )
 
 
 def get_data_protection_service(

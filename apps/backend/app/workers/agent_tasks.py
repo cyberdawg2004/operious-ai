@@ -84,6 +84,7 @@ from app.cognition.identity import (
     derive_semantic_rejection_id,
 )
 from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.cognition.models import DiagnosticLLMCompletion
 from app.cognition.semantic import (
     DEFAULT_AUTHORIZED_GOVERNANCE_TERMS,
@@ -3626,7 +3627,11 @@ def _data_protection_service(session: AsyncSession) -> DataProtectionService | N
         and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
     ):
         return None
-    return DataProtectionService.from_settings(session, settings)
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+    )
 
 
 def _bounded_exception_message(exc: BaseException) -> str:

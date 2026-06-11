@@ -430,6 +430,12 @@ class Settings(BaseSettings):
     # backwards-compatible single-key deployments.
     DATA_PROTECTION_MASTER_KEYS: str = ""
     DATA_PROTECTION_ACTIVE_MASTER_KEY_VERSION: str = "v1"
+    # Key custody backend for the data-protection master key ring (#54/#55).
+    # "local": DATA_PROTECTION_MASTER_KEYS entries are plaintext key material.
+    # "gcp":   each entry's material is base64 GCP-KMS-wrapped ciphertext that
+    #          is unwrapped via Cloud KMS at boot (master key never at rest in
+    #          plaintext). Uses OPERIOUS_KMS_KEY_RESOURCE + GOOGLE_APPLICATION_CREDENTIALS.
+    DATA_PROTECTION_KMS_BACKEND: Literal["local", "gcp"] = "local"
     DATA_PROTECTION_DEFAULT_RETENTION_DAYS: int = 90
 
     # ─── Outbound dispatch SSRF allowlist (S-06) ─────────────────────
@@ -511,6 +517,14 @@ class Settings(BaseSettings):
         if canonical:
             return canonical
         return self.GCP_KMS_KEY_RESOURCE.strip()
+
+    @property
+    def data_protection_kms_key_resource(self) -> str:
+        """KMS key resource for the data-protection master key (#55).
+
+        Reuses the same operator KMS key as tenant credentials by default.
+        """
+        return self.credential_kms_key_resource
 
     @property
     def allow_stub_actions_effective(self) -> bool:

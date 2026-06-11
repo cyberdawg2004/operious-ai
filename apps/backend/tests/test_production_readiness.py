@@ -29,6 +29,7 @@ def _production(**overrides: object) -> Settings:
         "OPENAI_API_KEY": "sk-openai-real",
         "TENANT_CREDENTIAL_MASTER_KEY": "x" * 32,
         "CREDENTIAL_KMS_BACKEND": "gcp",
+        "DATA_PROTECTION_KMS_BACKEND": "gcp",
         "OPERIOUS_KMS_KEY_RESOURCE": (
             "projects/operious-kms/locations/global/keyRings/operious/"
             "cryptoKeys/tenant-credentials"
@@ -154,3 +155,26 @@ def test_legacy_header_authority_enabled_in_production_fails() -> None:
 def test_baseline_production_keeps_legacy_header_authority_disabled() -> None:
     # The READY baseline must NOT trip the new gate (defaults fail-closed).
     validate_production_config(_production())
+
+
+def test_data_protection_kms_local_blocks_boot() -> None:
+    # #54/#55: the data-protection master key must be under KMS custody in
+    # production, not sitting at rest in plaintext.
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(_production(DATA_PROTECTION_KMS_BACKEND="local"))
+    assert any(
+        "DATA_PROTECTION_KMS_BACKEND=local" in problem
+        for problem in exc.value.problems
+    )
+
+
+def test_data_protection_kms_gcp_requires_key_resource() -> None:
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(
+            _production(OPERIOUS_KMS_KEY_RESOURCE="", GCP_KMS_KEY_RESOURCE="")
+        )
+    assert any(
+        "data-protection master key" in problem.lower()
+        or "OPERIOUS_KMS_KEY_RESOURCE" in problem
+        for problem in exc.value.problems
+    )
