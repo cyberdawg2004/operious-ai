@@ -61,9 +61,7 @@ class PostgresDeadLetterTaskPersistence(BaseRepository):
                 created_at=record.created_at,
                 metadata_json=dict(record.metadata),
             )
-            .on_conflict_do_nothing(
-                index_elements=[DeadLetterTaskRow.dead_letter_task_id]
-            )
+            .on_conflict_do_nothing()
         )
         result = await self.session.execute(stmt)
         inserted = getattr(result, "rowcount", 0) == 1
@@ -75,10 +73,21 @@ class PostgresDeadLetterTaskPersistence(BaseRepository):
             record.dead_letter_task_id,
             expected_tenant_id=record.tenant_id,
         )
+        if existing is None:
+            existing = await self.get_dead_letter_task_by_task_identity(
+                task_name=record.task_name,
+                task_id=record.task_id,
+                expected_tenant_id=record.tenant_id,
+            )
+        logged_id = (
+            existing.dead_letter_task_id
+            if existing is not None
+            else record.dead_letter_task_id
+        )
         _logger.info(
             "dlq_replay_idempotent_write",
             extra={
-                "dead_letter_task_id": str(record.dead_letter_task_id),
+                "dead_letter_task_id": str(logged_id),
                 "tenant_id": record.tenant_id,
                 "task_name": record.task_name,
                 "task_id": record.task_id,
@@ -91,6 +100,22 @@ class PostgresDeadLetterTaskPersistence(BaseRepository):
             },
         )
         return existing or record
+
+    async def get_dead_letter_task_by_task_identity(
+        self,
+        *,
+        task_name: str,
+        task_id: str,
+        expected_tenant_id: str | None = None,
+    ) -> DeadLetterTaskRecord | None:
+        stmt = select(DeadLetterTaskRow).where(
+            DeadLetterTaskRow.task_name == task_name,
+            DeadLetterTaskRow.task_id == task_id,
+        )
+        if expected_tenant_id is not None:
+            stmt = stmt.where(DeadLetterTaskRow.tenant_id == expected_tenant_id)
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        return _row_to_record(row) if row else None
 
     async def get_dead_letter_task(
         self,

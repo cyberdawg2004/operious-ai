@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.execution import ExecutionRuntime, PostgresExecutionPersistence
@@ -22,10 +23,12 @@ from app.api.v1.schemas.health import HealthResponse
 from app.escalation.celery_publisher import CeleryEscalationPublisher
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.services.health_service import HealthService
+from app.runtime.db.models import DeadLetterTaskRow
 from app.workers import dead_letter_persistence
 from app.workers.agent_tasks import execute_diagnostic_agent
 from app.workers.celery_app import celery_app
 from app.workers.dead_letter_persistence import (
+    DeadLetterTaskRecord,
     PostgresDeadLetterTaskPersistence,
     derive_dead_letter_task_id,
     record_dead_letter_task,
@@ -425,6 +428,83 @@ async def test_dead_letter_task_replay_is_idempotent_and_logged(
         record.message == "dlq_replay_idempotent_write"
         and getattr(record, "dead_letter_task_id") == str(first.dead_letter_task_id)
         and getattr(record, "attempt_count") == 3
+        for record in caplog.records
+    )
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_dead_letter_task_replay_is_idempotent_by_task_identity(
+    pg_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    captured: list[tuple[str, str | None]] = []
+
+    def _capture_message(message: str, level: str | None = None) -> None:
+        captured.append((message, level))
+
+    monkeypatch.setattr(
+        dead_letter_persistence.sentry_sdk,
+        "capture_message",
+        _capture_message,
+    )
+    caplog.set_level(logging.INFO, logger="app.workers.dead_letter_persistence")
+    repo = PostgresDeadLetterTaskPersistence(pg_session)
+    task_id = "ingress-outbox-replayed"
+    first = DeadLetterTaskRecord(
+        dead_letter_task_id=uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "dlq:ingress-dispatch:tenant-acme:ingress-outbox-replayed:8",
+        ),
+        tenant_id="tenant-acme",
+        task_name="dispatch_ingress",
+        task_id=task_id,
+        execution_id=None,
+        queue="ingress.email",
+        reason="ingress dispatch retry budget exhausted",
+        retry_count=8,
+        created_at=datetime(2026, 6, 11, 20, 12, tzinfo=timezone.utc),
+        metadata={"attempt_count": 8},
+    )
+    replay_exhausted = DeadLetterTaskRecord(
+        dead_letter_task_id=uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "dlq:ingress-dispatch:tenant-acme:ingress-outbox-replayed:9",
+        ),
+        tenant_id="tenant-acme",
+        task_name="dispatch_ingress",
+        task_id=task_id,
+        execution_id=None,
+        queue="ingress.email",
+        reason="ingress dispatch retry budget exhausted again",
+        retry_count=9,
+        created_at=datetime(2026, 6, 11, 20, 27, tzinfo=timezone.utc),
+        metadata={"attempt_count": 9},
+    )
+
+    persisted_first = await repo.record_dead_letter_task(first)
+    persisted_second = await repo.record_dead_letter_task(replay_exhausted)
+    count = (
+        await pg_session.execute(
+            select(func.count())
+            .select_from(DeadLetterTaskRow)
+            .where(
+                DeadLetterTaskRow.task_name == "dispatch_ingress",
+                DeadLetterTaskRow.task_id == task_id,
+            )
+        )
+    ).scalar_one()
+
+    assert persisted_first.dead_letter_task_id == first.dead_letter_task_id
+    assert persisted_second.dead_letter_task_id == first.dead_letter_task_id
+    assert persisted_second.retry_count == 8
+    assert count == 1
+    assert captured == [("dead_letter_task_created", "error")]
+    assert any(
+        record.message == "dlq_replay_idempotent_write"
+        and getattr(record, "dead_letter_task_id") == str(first.dead_letter_task_id)
+        and getattr(record, "attempt_count") == 9
         for record in caplog.records
     )
 
