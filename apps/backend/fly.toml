@@ -13,6 +13,7 @@ primary_region = "iad"
   worker_diagnostic = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=4"
   worker_escalation = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q escalation --concurrency=1"
   worker_supervisor = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q supervisor,qa --concurrency=1"
+  worker_sme_approval = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sme_approval --concurrency=1"
   worker_sop = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=1"
   worker_maintenance = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=1"
   worker_beat = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
@@ -97,6 +98,14 @@ primary_region = "iad"
 
 [[vm]]
   processes = ["worker_supervisor"]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+  min_machines_running = 1
+  max_machines_running = 2
+
+[[vm]]
+  processes = ["worker_sme_approval"]
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
