@@ -60,6 +60,22 @@ class OutboundSendTarget:
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
+@dataclass(frozen=True, slots=True)
+class OutboundAutoSendRefusalReason:
+    """Terminal reason for refusing a governed auto-send attempt."""
+
+    code: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class OutboundAutoSendRequestResult:
+    """Outcome of a governed auto-send request attempt."""
+
+    outbox: OutboundSendOutboxRecord | None
+    reason: OutboundAutoSendRefusalReason | None = None
+
+
 class OutboundAutoSendService:
     """Create retryable send intents only for exact persisted ALLOW decisions."""
 
@@ -80,8 +96,8 @@ class OutboundAutoSendService:
         target: OutboundSendTarget,
         expected_tenant_id: str,
         created_at: datetime | None = None,
-    ) -> OutboundSendOutboxRecord | None:
-        """Create one durable send intent, or silently refuse governance misses."""
+    ) -> OutboundAutoSendRequestResult:
+        """Create one durable send intent, or return a typed terminal refusal."""
 
         tenant_id = expected_tenant_id.strip()
         if not tenant_id:
@@ -94,22 +110,46 @@ class OutboundAutoSendService:
             or recipient is None
             or thread_context is None
         ):
-            return None
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=OutboundAutoSendRefusalReason(
+                    code="unsupported_target",
+                    message="governed auto-send target is unsupported",
+                ),
+            )
         if not _draft_and_proposal_are_exact(
             draft=draft,
             proposal=proposal,
             expected_tenant_id=tenant_id,
         ):
-            return None
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=OutboundAutoSendRefusalReason(
+                    code="governance_miss",
+                    message="governed auto-send missed exact proposal/draft lineage",
+                ),
+            )
         governance_decision_id = draft.governance_decision_id
         if governance_decision_id is None:
-            return None
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=OutboundAutoSendRefusalReason(
+                    code="governance_miss",
+                    message="governed auto-send missed governance decision linkage",
+                ),
+            )
         decision = await self._governance_repository.get_decision(
             str(governance_decision_id),
             expected_tenant_id=tenant_id,
         )
         if decision is None:
-            return None
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=OutboundAutoSendRefusalReason(
+                    code="governance_miss",
+                    message="governed auto-send decision was not found",
+                ),
+            )
         canonical_reply = _canonical_reply_for_governance(draft)
         if not _decision_is_exact_send_allow(
             decision=decision,
@@ -121,7 +161,13 @@ class OutboundAutoSendService:
             thread_context=thread_context,
             canonical_reply=canonical_reply,
         ):
-            return None
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=OutboundAutoSendRefusalReason(
+                    code="governance_miss",
+                    message="governed auto-send decision was not an exact allow",
+                ),
+            )
         record = make_outbound_send_outbox_record(
             tenant_id=tenant_id,
             channel=channel,
@@ -141,7 +187,8 @@ class OutboundAutoSendService:
                 channel=channel,
             ),
         )
-        return await self._outbox_persistence.create_outbound_send_outbox(record)
+        outbox = await self._outbox_persistence.create_outbound_send_outbox(record)
+        return OutboundAutoSendRequestResult(outbox=outbox)
 
 
 def _draft_and_proposal_are_exact(
@@ -304,6 +351,8 @@ def _sanitize_metadata_value(value: Any) -> Any:
 
 __all__ = [
     "CUSTOMER_REPLY_SEND_ACTION",
+    "OutboundAutoSendRefusalReason",
+    "OutboundAutoSendRequestResult",
     "OutboundAutoSendService",
     "OutboundSendTarget",
     "SUPPORTED_AUTO_SEND_CHANNELS",

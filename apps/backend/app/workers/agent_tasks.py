@@ -96,7 +96,6 @@ from app.coordination.persistence import (
     PostgresCoordinationPersistence,
 )
 from app.boundary.outbound.send_outbox import (
-    OutboundSendOutboxRecord,
     PostgresOutboundSendOutboxPersistence,
     as_outbound_send_outbox_id,
 )
@@ -186,6 +185,8 @@ from app.runtime.provider_circuit_breaker import (
 )
 from app.services.case_approval_service import CaseApprovalService
 from app.services.outbound_auto_send_service import (
+    OutboundAutoSendRefusalReason,
+    OutboundAutoSendRequestResult,
     OutboundAutoSendService,
     OutboundSendTarget,
 )
@@ -250,6 +251,7 @@ _FAILED = "diagnostic_execution_failed"
 _RESOLUTION_CREATED = "resolution_proposal_created"
 _RESOLUTION_DRAFT_CREATED = "resolution_outbound_draft_created"
 _RESOLUTION_FAILED = "resolution_proposal_failed"
+_AUTO_SEND_TERMINAL_REFUSAL = "AUTO_SEND_TERMINAL_REFUSAL"
 _MAX_EXECUTION_ATTEMPTS = 5
 _APPROVAL_CASE_CREATION_MAX_ATTEMPTS = 2
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
@@ -1760,13 +1762,24 @@ async def _append_resolution_proposal_after_diagnostic(
                     event_type=_RESOLUTION_DRAFT_CREATED,
                 ),
             )
-            outbound_send_outbox = await _request_governed_auto_send(
+            auto_send_result = await _request_governed_auto_send(
                 session=session,
                 governance_repository=governance_repo,
                 proposal=proposal,
                 draft=draft,
                 work_item=work_item,
+                timeline=timeline,
             )
+            if (
+                resolution_proposal_is_send_eligible(proposal)
+                and proposal.governance_decision_id is not None
+                and auto_send_result.outbox is None
+                and auto_send_result.reason is None
+            ):
+                raise AssertionError(
+                    "send-eligible proposal ended without outbox row, approval case, "
+                    "escalation, or terminal refusal"
+                )
             await _request_resolution_approval_cases_with_retry(
                 session=session,
                 proposal=proposal,
@@ -1805,8 +1818,8 @@ async def _append_resolution_proposal_after_diagnostic(
                 proposal_id=str(proposal.proposal_id),
                 draft_id=str(draft.draft_id),
                 outbound_send_outbox_id=(
-                    str(outbound_send_outbox.outbox_id)
-                    if outbound_send_outbox is not None
+                    str(auto_send_result.outbox.outbox_id)
+                    if auto_send_result.outbox is not None
                     else None
                 ),
                 safety_escalation_governance_decision_id=(
@@ -1824,8 +1837,8 @@ async def _append_resolution_proposal_after_diagnostic(
             proposal_id=str(proposal.proposal_id),
             draft_id=str(draft.draft_id),
             outbound_send_outbox_id=(
-                str(outbound_send_outbox.outbox_id)
-                if outbound_send_outbox is not None
+                str(auto_send_result.outbox.outbox_id)
+                if auto_send_result.outbox is not None
                 else None
             ),
             safety_escalation_governance_decision_id=(
@@ -1853,11 +1866,21 @@ async def _request_governed_auto_send(
     proposal: ResolutionProposalRecord,
     draft: ResolutionOutboundDraftRecord,
     work_item: _DiagnosticExecutionWorkItem,
-) -> OutboundSendOutboxRecord | None:
+    timeline: TimelineRuntime,
+) -> OutboundAutoSendRequestResult:
     target = _outbound_send_target_for_work_item(work_item)
     if target is None:
-        return None
-    return await OutboundAutoSendService(
+        return await _record_auto_send_terminal_refusal(
+            timeline=timeline,
+            work_item=work_item,
+            proposal=proposal,
+            draft=draft,
+            reason=OutboundAutoSendRefusalReason(
+                code="unsupported_target",
+                message="governed auto-send target is unsupported",
+            ),
+        )
+    result = await OutboundAutoSendService(
         governance_repository=governance_repository,
         outbox_persistence=PostgresOutboundSendOutboxPersistence(session),
     ).request_auto_send(
@@ -1866,6 +1889,55 @@ async def _request_governed_auto_send(
         target=target,
         expected_tenant_id=work_item.tenant_id,
     )
+    if result.reason is not None:
+        await _record_auto_send_terminal_refusal(
+            timeline=timeline,
+            work_item=work_item,
+            proposal=proposal,
+            draft=draft,
+            reason=result.reason,
+        )
+    return result
+
+
+async def _record_auto_send_terminal_refusal(
+    *,
+    timeline: TimelineRuntime,
+    work_item: _DiagnosticExecutionWorkItem,
+    proposal: ResolutionProposalRecord,
+    draft: ResolutionOutboundDraftRecord,
+    reason: OutboundAutoSendRefusalReason,
+) -> OutboundAutoSendRequestResult:
+    logger.warning(
+        "resolution_auto_send_terminal_refusal",
+        extra={
+            "tenant_id": work_item.tenant_id,
+            "dispatch_id": work_item.dispatch_id,
+            "proposal_id": str(proposal.proposal_id),
+            "draft_id": str(draft.draft_id),
+            "auto_send_reason_code": reason.code,
+            "auto_send_reason_message": reason.message,
+        },
+    )
+    await timeline.append_event(
+        dispatch_id=work_item.dispatch_id,
+        session_id=work_item.session_id,
+        tenant_id=work_item.tenant_id,
+        event_type=_AUTO_SEND_TERMINAL_REFUSAL,
+        payload={
+            "reason_code": reason.code,
+            "reason_message": reason.message,
+            "proposal_id": str(proposal.proposal_id),
+            "draft_id": str(draft.draft_id),
+            "source_channel": work_item.source_channel,
+        },
+        idempotency_key=_timeline_idempotency_key(
+            execution_id=work_item.execution_id,
+            attempt_id=work_item.attempt_id,
+            event_type=_AUTO_SEND_TERMINAL_REFUSAL,
+        ),
+    )
+    return OutboundAutoSendRequestResult(outbox=None, reason=reason)
 
 
 def _outbound_send_target_for_work_item(

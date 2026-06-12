@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -40,6 +41,7 @@ from app.services.outbound_auto_send_service import (
     OutboundAutoSendService,
     OutboundSendTarget,
 )
+import app.workers.agent_tasks as agent_tasks
 from app.workers.outbound_send_tasks import (
     OutboundSendExecutionResult,
     process_outbound_send_outbox_runtime,
@@ -91,9 +93,9 @@ async def test_ready_exact_persisted_allow_creates_one_send_intent() -> None:
         created_at=NOW + timedelta(seconds=1),
     )
 
-    assert first is not None
-    assert second is not None
-    assert second.outbox_id == first.outbox_id
+    assert first.outbox is not None
+    assert second.outbox is not None
+    assert second.outbox.outbox_id == first.outbox.outbox_id
     page = await outbox.list_outbound_send_outbox(
         OutboundSendOutboxQuery(tenant_id=TENANT_ID)
     )
@@ -143,7 +145,8 @@ async def test_non_exact_or_non_allow_governance_creates_no_intent_and_sends_not
         created_at=NOW,
     )
 
-    assert result is None
+    assert result.outbox is None
+    assert result.reason is not None
     page = await outbox.list_outbound_send_outbox(
         OutboundSendOutboxQuery(tenant_id=TENANT_ID)
     )
@@ -162,11 +165,72 @@ async def test_missing_thread_context_creates_no_intent_and_sends_nothing() -> N
         created_at=NOW,
     )
 
-    assert result is None
+    assert result.outbox is None
+    assert result.reason is not None
     page = await outbox.list_outbound_send_outbox(
         OutboundSendOutboxQuery(tenant_id=TENANT_ID)
     )
     assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_non_exact_or_non_allow_governance_returns_terminal_refusal_reason() -> None:
+    service, _ = await _service(decision=Decision.DENY)
+
+    result = await service.request_auto_send(
+        draft=_draft(),
+        proposal=_proposal(),
+        target=_target(),
+        expected_tenant_id=TENANT_ID,
+        created_at=NOW,
+    )
+
+    assert result is not None
+    assert result.outbox is None
+    assert result.reason is not None
+    assert result.reason.code == "governance_miss"
+
+
+@pytest.mark.asyncio
+async def test_request_governed_auto_send_logs_terminal_refusal_for_missing_target() -> None:
+    timeline = _RecordingTimeline()
+
+    request_governed_auto_send = getattr(
+        agent_tasks,
+        "_request_governed_auto_send",
+    )
+
+    result = await request_governed_auto_send(
+        session=cast(Any, object()),
+        governance_repository=cast(Any, InMemoryGovernanceRepository()),
+        proposal=cast(Any, _proposal()),
+        draft=cast(Any, _draft()),
+        work_item=cast(
+            Any,
+            SimpleNamespace(
+                source_channel="sms",
+                reply_recipient=None,
+                reply_thread_context=None,
+                reply_phone_number_id=None,
+                reply_source=None,
+                reply_subject=None,
+                reply_in_reply_to_message_id=None,
+                reply_references_header=None,
+                tenant_id=TENANT_ID,
+                dispatch_id=DISPATCH_ID,
+                session_id=SESSION_ID,
+                execution_id=EXECUTION_ID,
+                attempt_id="attempt-1",
+            ),
+        ),
+        timeline=cast(Any, timeline),
+    )
+
+    assert result is not None
+    assert result.reason is not None
+    assert result.reason.code == "unsupported_target"
+    assert timeline.events
+    assert timeline.events[0]["event_type"] == "AUTO_SEND_TERMINAL_REFUSAL"
 
 
 @pytest.mark.asyncio
@@ -276,7 +340,7 @@ async def test_credentials_are_not_copied_to_outbox_or_worker_result() -> None:
         created_at=NOW,
     )
 
-    assert result is not None
+    assert result.outbox is not None
     assert "do-not-copy" not in str(result)
     page = await outbox.list_outbound_send_outbox(
         OutboundSendOutboxQuery(tenant_id=TENANT_ID)
@@ -312,21 +376,21 @@ async def _runtime_with_intent(
     max_attempts: int = 3,
 ) -> tuple[OutboundSendOutboxRuntime, OutboundSendOutboxRecord]:
     service, persistence = await _service()
-    outbox = await service.request_auto_send(
+    result = await service.request_auto_send(
         draft=_draft(),
         proposal=_proposal(),
         target=_target(),
         expected_tenant_id=TENANT_ID,
         created_at=NOW,
     )
-    assert outbox is not None
+    assert result.outbox is not None
     return (
         OutboundSendOutboxRuntime(
             persistence=persistence,
             max_attempts=max_attempts,
             retry_base_seconds=30,
         ),
-        outbox,
+        result.outbox,
     )
 
 
@@ -422,6 +486,15 @@ def _decision(
         subject_kind="communication",
         metadata=metadata,
     )
+
+
+class _RecordingTimeline:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    async def append_event(self, **kwargs: Any) -> dict[str, Any]:
+        self.events.append(kwargs)
+        return {"event_id": str(uuid.uuid4())}
 
 
 class _Executor:
