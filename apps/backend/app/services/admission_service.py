@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from collections.abc import Awaitable, Callable, Sequence
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 
 from app.db.models.admission import AdmissionRecordRow
 from app.hardening.admission import (
@@ -189,18 +186,64 @@ async def measure_db_pool_wait_ms(
     *,
     timeout_seconds: float = 1.0,
 ) -> float:
-    """Measure wait to acquire and execute a tiny DB round-trip."""
+    """Estimate DB pool saturation from local engine statistics without network I/O."""
 
-    async def _probe() -> float:
-        started = time.perf_counter()
-        async with session_factory() as session:
-            await session.execute(text("SELECT 1"))
-        return round((time.perf_counter() - started) * 1000, 2)
+    del timeout_seconds
+    engine = _resolve_engine(session_factory)
+    if engine is None:
+        return 0.0
+    pool = getattr(engine, "pool", None)
+    if pool is None:
+        return 0.0
+    checked_out = _safe_pool_int(pool, "checkedout")
+    size = _safe_pool_int(pool, "size")
+    overflow = _safe_pool_int(pool, "overflow")
+    if checked_out is None or size is None or overflow is None:
+        return 0.0
+    capacity = max(size + overflow, 1)
+    if checked_out <= 0:
+        return 0.0
+    utilization = checked_out / capacity
+    if utilization >= 1.0:
+        return 1000.0
+    if utilization >= 0.75:
+        return 500.0
+    if utilization >= 0.5:
+        return 250.0
+    return round(utilization * 100, 2)
 
+
+def _resolve_engine(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncEngine | object | None:
+    bind = getattr(session_factory, "bind", None)
+    if bind is None and hasattr(session_factory, "kw"):
+        bind = getattr(session_factory.kw, "get", lambda *_: None)("bind")
+    if bind is None:
+        return None
+    if hasattr(bind, "pool"):
+        return bind
+    if isinstance(bind, AsyncEngine):
+        return bind
+    sync_engine = getattr(bind, "sync_engine", None)
+    if hasattr(sync_engine, "pool"):
+        return sync_engine
+    return sync_engine if isinstance(sync_engine, AsyncEngine) else None
+
+
+def _safe_pool_int(pool: object, method_name: str) -> int | None:
+    method = getattr(pool, method_name, None)
+    if method is None:
+        return None
     try:
-        return await asyncio.wait_for(_probe(), timeout=timeout_seconds)
-    except TimeoutError:
-        return round(timeout_seconds * 1000, 2)
+        value = method()
+    except Exception:  # noqa: BLE001 - pool introspection must be tolerant.
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    return None
 
 
 __all__ = ["AdmissionService", "measure_db_pool_wait_ms"]

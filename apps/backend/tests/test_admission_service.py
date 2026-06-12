@@ -15,7 +15,7 @@ from app.hardening.admission import (
     AdmissionReason,
 )
 from app.queues import QUEUE_DIAGNOSTIC_NORMAL
-from app.services.admission_service import AdmissionService
+from app.services.admission_service import AdmissionService, measure_db_pool_wait_ms
 
 
 TENANT_ID = "tenant-admission-service"
@@ -83,6 +83,63 @@ def _thresholds() -> AdmissionGateThresholds:
         redis_memory_pct_warn=70,
         redis_memory_pct_reject=90,
     )
+
+
+class _FakePool:
+    def __init__(self, *, checkedout: int, size: int, overflow: int) -> None:
+        self._checkedout = checkedout
+        self._size = size
+        self._overflow = overflow
+
+    def checkedout(self) -> int:
+        return self._checkedout
+
+    def size(self) -> int:
+        return self._size
+
+    def overflow(self) -> int:
+        return self._overflow
+
+
+class _FakeEngine:
+    def __init__(self, pool: _FakePool) -> None:
+        self.pool = pool
+
+
+class _FakeSessionFactory:
+    def __init__(self, *, engine: _FakeEngine | None = None) -> None:
+        self.bind = engine
+
+
+@pytest.mark.asyncio
+async def test_measure_db_pool_wait_ms_uses_local_pool_stats_for_healthy_pool() -> None:
+    factory = _FakeSessionFactory(
+        engine=_FakeEngine(_FakePool(checkedout=1, size=10, overflow=0))
+    )
+
+    value = await measure_db_pool_wait_ms(factory)  # type: ignore[arg-type]
+
+    assert value < 250.0
+
+
+@pytest.mark.asyncio
+async def test_measure_db_pool_wait_ms_rises_for_saturated_pool() -> None:
+    factory = _FakeSessionFactory(
+        engine=_FakeEngine(_FakePool(checkedout=10, size=10, overflow=0))
+    )
+
+    value = await measure_db_pool_wait_ms(factory)  # type: ignore[arg-type]
+
+    assert value >= 250.0
+
+
+@pytest.mark.asyncio
+async def test_measure_db_pool_wait_ms_returns_benign_value_for_nullpool_path() -> None:
+    factory = _FakeSessionFactory(engine=None)
+
+    value = await measure_db_pool_wait_ms(factory)  # type: ignore[arg-type]
+
+    assert value == 0.0
 
 
 @pytest.mark.parametrize(
