@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
@@ -18,12 +19,18 @@ Return ONLY compact JSON matching this schema:
 {
   "language": "en",
   "segments": [
+    {"kind": "acknowledgment", "text": "...", "citation_ranks": []},
     {"kind": "claim", "text": "...", "citation_ranks": [1]},
     {"kind": "question", "text": "...", "citation_ranks": []}
   ]
 }
 
 Rules:
+- "acknowledgment" segments are short, non-factual courtesy or empathy text
+  only (e.g. greetings, apologies for the inconvenience, offers to help).
+  They must not state or imply any fact about the product, the customer's
+  account or situation, eligibility, policy, compensation, or shipping.
+  Acknowledgment segments must not include citation_ranks.
 - Every customer-facing factual claim MUST cite one or more retrieved
   evidence ranks in citation_ranks.
 - Do not place citation markers such as [1] in text. The renderer owns
@@ -37,10 +44,41 @@ Rules:
 - Keep the reply concise, professional, and helpful.
 """
 
+# Conservative, deterministic signal of a factual assertion that must not be
+# exempted from citation coverage. If an "acknowledgment" segment matches
+# this, it is reclassified to "claim" (with no citations) so GroundingPolicy
+# denies it as uncited -- the LLM cannot grant its own grounding exemption by
+# mislabeling a factual claim as an acknowledgment.
+_UNSAFE_ACKNOWLEDGMENT_PATTERN = re.compile(
+    r"\b("
+    r"refund\w*|replac\w*|warrant\w*|eligib\w*|credit\w*|compensat\w*|"
+    r"discount\w*|exchang\w*|reimburs\w*|guarant\w*|entitle\w*|"
+    r"polic\w*|cover\w*|approv\w*|denial|denied|ship\w*|rma|return\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+_DIGIT_PATTERN = re.compile(r"\d")
+
+
+def _is_safe_acknowledgment(text: str) -> bool:
+    """Conservative check for non-factual courtesy/empathy text.
+
+    Returns False (unsafe) if the text contains any signal of a verifiable
+    factual assertion -- policy, eligibility, compensation, shipping, or a
+    numeric detail. Callers must fail closed by reclassifying unsafe
+    "acknowledgment" segments to "claim".
+    """
+
+    if _DIGIT_PATTERN.search(text):
+        return False
+    if _UNSAFE_ACKNOWLEDGMENT_PATTERN.search(text):
+        return False
+    return True
+
 
 @dataclass(frozen=True, slots=True)
 class GroundedReplySegment:
-    kind: Literal["claim", "question"]
+    kind: Literal["claim", "question", "acknowledgment"]
     text: str
     citation_ranks: tuple[int, ...] = ()
 
@@ -178,17 +216,22 @@ def parse_grounded_reply_draft(
             raise ValueError("grounded reply segment must be an object")
         segment = cast(Mapping[str, Any], value)
         kind = str(segment.get("kind") or "").strip().lower()
-        if kind not in {"claim", "question"}:
+        if kind not in {"claim", "question", "acknowledgment"}:
             raise ValueError("grounded reply segment kind is invalid")
         text = str(segment.get("text") or "").strip()
         if not text:
             raise ValueError("grounded reply segment text is required")
         ranks = _citation_ranks(segment.get("citation_ranks"))
-        if kind == "question" and ranks:
-            raise ValueError("question segments cannot carry citations")
+        if kind in {"question", "acknowledgment"} and ranks:
+            raise ValueError("question/acknowledgment segments cannot carry citations")
+        if kind == "acknowledgment" and not _is_safe_acknowledgment(text):
+            # Fail closed: the LLM cannot self-grant a grounding exemption by
+            # mislabeling a factual claim as an acknowledgment. Reclassify to
+            # "claim" with no citations so GroundingPolicy denies it.
+            kind = "claim"
         segments.append(
             GroundedReplySegment(
-                kind=cast(Literal["claim", "question"], kind),
+                kind=cast(Literal["claim", "question", "acknowledgment"], kind),
                 text=text,
                 citation_ranks=ranks,
             )

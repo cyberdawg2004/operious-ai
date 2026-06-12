@@ -34,6 +34,12 @@ class GroundingChecker(Protocol):
         ...
 
 
+# Segment kinds that make no factual assertion and therefore carry no
+# citation requirement. Any kind not in this set (including "claim" and any
+# unrecognized/future kind) is treated as a citable claim -- fail-closed.
+_EXEMPT_GROUNDING_KINDS = frozenset({"question", "acknowledgment"})
+
+
 class CitationCoverageGroundingChecker:
     """Verify claim citations resolve to approved/current knowledge spans."""
 
@@ -50,7 +56,7 @@ class CitationCoverageGroundingChecker:
         ungrounded: list[dict[str, Any]] = []
         claim_count = 0
         for index, segment in enumerate(request.reply_segments):
-            if _segment_kind(segment) != "claim":
+            if _segment_kind(segment) in _EXEMPT_GROUNDING_KINDS:
                 continue
             claim_count += 1
             text = _segment_text(segment)
