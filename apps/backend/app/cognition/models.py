@@ -65,20 +65,11 @@ class CognitionSemanticRejectionDirection(StrEnum):
     NONE = "NONE"
 
 
-class DiagnosticCategory(StrEnum):
-    ACCOUNT_ISSUE = "account_issue"
-    CHARGING_ISSUE = "charging_issue"
-    CONNECTIVITY_ISSUE = "connectivity_issue"
-    PRODUCT_DEFECT = "product_defect"
-    REFUND_ISSUE = "refund_issue"
-    UNKNOWN_ISSUE = "unknown_issue"
-
-
 class DiagnosticLLMOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1, max_length=4000)
-    category: DiagnosticCategory
+    category: str = Field(min_length=1, max_length=200)
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str = Field(max_length=4000, default="")
 
@@ -88,6 +79,14 @@ class DiagnosticLLMOutput(BaseModel):
         text = value.strip()
         if not text:
             raise ValueError("summary must not be blank")
+        return text
+
+    @field_validator("category")
+    @classmethod
+    def _category_not_blank(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("category must not be blank")
         return text
 
     @field_validator("confidence", mode="before")
@@ -223,7 +222,6 @@ __all__ = [
     "CognitionLLMUsageStatus",
     "CognitionSemanticRejectionDirection",
     "CognitionSemanticRejectionRecord",
-    "DiagnosticCategory",
     "DiagnosticLLMCompletion",
     "DiagnosticLLMOutput",
     "DiagnosticLLMUsage",

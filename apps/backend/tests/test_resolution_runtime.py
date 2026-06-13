@@ -26,6 +26,7 @@ from app.resolution.persistence import (
     ResolutionOutboundDraftQuery,
     ResolutionProposalQuery,
 )
+from app.cognition.diagnostic_runtime import _validated_category
 from app.governance.persistence import InMemoryGovernanceRepository
 from app.runtime.conversation_generation import (
     ConversationGenerationRequest,
@@ -39,6 +40,7 @@ from app.runtime.grounding import (
 )
 from app.runtime.resolution_governance_gate import (
     ResolutionGovernanceGate,
+    _approval_rule,
     build_resolution_governance_runtime,
 )
 from app.runtime.resolution_runtime import (
@@ -47,22 +49,60 @@ from app.runtime.resolution_runtime import (
     ResolutionOutboundDraftRuntime,
     ResolutionProposalRequest,
     ResolutionRuntime,
+    _evaluate_gate,
     _map_central_governance_result,
+    _monetary_commitment_exceeds_threshold,
+    _recommended_actions,
+    _resolution_category,
+    _unsupported_commitment_patterns,
     resolution_outbound_draft_timeline_payload,
     resolution_proposal_is_send_eligible,
     resolution_proposal_timeline_payload,
 )
+from app.runtime.resolution_autonomy_policy import (
+    RESOLUTION_AUTONOMY_POLICY_TYPE,
+    ResolutionAutonomyPolicy,
+    resolve_resolution_autonomy_policy,
+)
+from app.runtime.resolution_taxonomy_policy import (
+    RESOLUTION_TAXONOMY_POLICY_TYPE,
+    UNCLASSIFIED_CATEGORY_ID,
+    ResolutionTaxonomyCategory,
+    ResolutionTaxonomyPolicy,
+    _COLLECT_CONTEXT_FALLBACK_ACTION,
+    resolve_resolution_taxonomy_policy,
+)
+from app.tenant.chronology import canonical_sha256
 from app.tenant.db.models import TenantRow
 from app.tenant.enums import (
+    TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
 )
-from app.tenant.identity import as_knowledge_document_id
-from app.tenant.persistence import TenantKnowledgeDocumentRecord
+from app.tenant.identity import (
+    as_knowledge_document_id,
+    derive_governance_policy_version_id,
+)
+from app.tenant.persistence import (
+    InMemoryTenantConfigurationRepository,
+    TenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
+    TenantKnowledgeDocumentRecord,
+)
 from tests.conftest import requires_postgres, set_pg_rls_tenant
 
 TENANT_ID = "tenant-resolution"
+_EMPTY_TAXONOMY = ResolutionTaxonomyPolicy(
+    categories=(),
+    monetary_remedy_keywords=frozenset(),
+    monetary_currency_symbols=frozenset(),
+    monetary_currency_codes=frozenset(),
+    unsupported_commitment_patterns=frozenset(),
+)
+_POLICY_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_POLICY_APPROVED_BY = "policy-admin"
+_POLICY_APPROVAL_ID = "approval-resolution-autonomy"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 EXECUTION_ID = "22222222-2222-4222-8222-222222222222"
 DISPATCH_ID = "33333333-3333-4333-8333-333333333333"
@@ -125,6 +165,7 @@ class _FakeDocumentRepository:
 def _governed_resolution_runtime(
     *,
     governance_repository: InMemoryGovernanceRepository,
+    tenant_configuration_repository: TenantConfigurationRepository | None = None,
 ) -> ResolutionRuntime:
     return ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence(),
@@ -132,8 +173,10 @@ def _governed_resolution_runtime(
             governance_runtime=build_resolution_governance_runtime(
                 persistence=governance_repository,
                 grounding_checker=StaticGroundingChecker(allowed=True),
+                tenant_configuration_repository=tenant_configuration_repository,
             )
         ),
+        tenant_configuration_repository=tenant_configuration_repository,
     )
 
 
@@ -210,6 +253,235 @@ def _request(
         original_content=content,
         retrieved_citations=citations if citations is not None else [_citation()],
     )
+
+
+async def _resolution_autonomy_repository(
+    *,
+    category_allowlist: frozenset[str] = frozenset(
+        {"charging_issue", "warranty_replacement_inquiry"}
+    ),
+    monetary_commitment_threshold_cents: int = 10_000,
+    tenant_id: str = TENANT_ID,
+    version: int = 1,
+) -> InMemoryTenantConfigurationRepository:
+    repository = InMemoryTenantConfigurationRepository()
+    parameters: dict[str, object] = {
+        "reply_auto_send": {
+            "category_allowlist": sorted(category_allowlist),
+            "monetary_commitment_threshold_cents": monetary_commitment_threshold_cents,
+        }
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_AUTONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+    await _save_resolution_taxonomy_policy(
+        repository,
+        tenant_id=tenant_id,
+        category_ids=category_allowlist | {"charging_issue", "warranty_replacement_inquiry"},
+    )
+    return repository
+
+
+async def _save_resolution_taxonomy_policy(
+    repository: InMemoryTenantConfigurationRepository,
+    *,
+    tenant_id: str,
+    category_ids: frozenset[str],
+    version: int = 1,
+) -> None:
+    parameters: dict[str, object] = {
+        "categories": [
+            {
+                "id": category_id,
+                "label": category_id.replace("_", " ").title(),
+                "description": f"Issues classified as {category_id}.",
+                "recommended_actions": [
+                    {
+                        "type": "collect_context",
+                        "label": "Gather additional details from the customer "
+                        "before proceeding",
+                        "requires_execution": False,
+                    }
+                ],
+            }
+            for category_id in sorted(category_ids)
+        ],
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+
+
+async def _save_governance_policy(
+    repository: InMemoryTenantConfigurationRepository,
+    *,
+    tenant_id: str,
+    policy_type: str,
+    parameters: dict[str, object],
+    version: int = 1,
+) -> None:
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": policy_type,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=policy_type,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=policy_type,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+
+
+BANK_TENANT_ID = "tenant-bank-pilot"
+
+
+async def _bank_pilot_repository() -> InMemoryTenantConfigurationRepository:
+    repository = InMemoryTenantConfigurationRepository()
+    await _save_governance_policy(
+        repository,
+        tenant_id=BANK_TENANT_ID,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters={
+            "categories": [
+                {
+                    "id": "disputed_transaction",
+                    "label": "Disputed Transaction",
+                    "description": (
+                        "Customer disputes an unauthorized charge on their account."
+                    ),
+                    "recommended_actions": [
+                        {
+                            "type": "collect_context",
+                            "label": (
+                                "Acknowledge the dispute and gather transaction details"
+                            ),
+                            "requires_execution": False,
+                        },
+                        {
+                            "type": "file_dispute",
+                            "label": "File a transaction dispute for review",
+                            "requires_execution": True,
+                            "tool_name": "refund.request",
+                            "payload_template": {
+                                "dispute_reason": "unauthorized_charge"
+                            },
+                            "target_resource_id": "dispute:unauthorized_charge",
+                        },
+                    ],
+                },
+                {
+                    "id": "card_lost",
+                    "label": "Card Lost or Stolen",
+                    "description": (
+                        "Customer reports a lost or stolen card and needs a "
+                        "replacement."
+                    ),
+                    "recommended_actions": [
+                        {
+                            "type": "collect_context",
+                            "label": "Confirm card block and replacement timeline",
+                            "requires_execution": False,
+                        },
+                    ],
+                },
+            ],
+            "monetary_commitment": {
+                "remedy_keywords": [],
+                "currency_symbols": [],
+                "currency_codes": [],
+            },
+            "unsupported_commitment_patterns": ["we will reverse the charge"],
+        },
+    )
+    await _save_governance_policy(
+        repository,
+        tenant_id=BANK_TENANT_ID,
+        policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+        parameters={
+            "reply_auto_send": {
+                "category_allowlist": ["card_lost"],
+                "monetary_commitment_threshold_cents": 0,
+            }
+        },
+    )
+    return repository
 
 
 async def _ensure_committed_tenants(
@@ -299,7 +571,11 @@ async def _ensure_resolution_fk_targets(session: AsyncSession) -> None:
 async def test_safe_charging_issue_creates_send_eligible_proposal() -> None:
     persistence = InMemoryResolutionProposalPersistence()
     gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
-    runtime = ResolutionRuntime(persistence=persistence, governance_gate=gate)
+    runtime = ResolutionRuntime(
+        persistence=persistence,
+        governance_gate=gate,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
+    )
 
     record = await runtime.create_proposal(_request())
 
@@ -317,10 +593,345 @@ async def test_safe_charging_issue_creates_send_eligible_proposal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_monetary_commitment_in_reply_requires_human_approval() -> None:
+    persistence = InMemoryResolutionProposalPersistence()
+    gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
+    draft = GroundedReplyDraft(
+        language="en",
+        segments=(
+            GroundedReplySegment(
+                kind="claim",
+                text="We can offer a $250 replacement for your unit.",
+                citation_ranks=(1,),
+            ),
+        ),
+    )
+    runtime = ResolutionRuntime(
+        persistence=persistence,
+        governance_gate=gate,
+        conversation_generator=_StaticConversationGenerator(draft),
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
+    )
+
+    record = await runtime.create_proposal(_request())
+
+    assert record.resolution_category == "charging_issue"
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_unclassified_category_proposal_requires_human_approval_and_no_executable_action() -> (
+    None
+):
+    """An `unclassified` diagnostic category must never auto-send and must
+    never carry an executable recommended action - the customer always gets
+    a human-reviewed, collect-context response.
+    """
+    persistence = InMemoryResolutionProposalPersistence()
+    gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
+    runtime = ResolutionRuntime(
+        persistence=persistence,
+        governance_gate=gate,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
+    )
+
+    record = await runtime.create_proposal(_request(category=UNCLASSIFIED_CATEGORY_ID))
+
+    assert record.resolution_category == UNCLASSIFIED_CATEGORY_ID
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.autonomy_decision is not ResolutionAutonomyDecision.AUTO_APPROVED
+    assert record.recommended_actions == (_COLLECT_CONTEXT_FALLBACK_ACTION,)
+    assert all(
+        not action.get("requires_execution") for action in record.recommended_actions
+    )
+
+
+def test_unclassified_category_forces_human_approval_even_if_allowlisted() -> None:
+    """LOAD-BEARING defense-in-depth: even if a future bug ever placed
+    "unclassified" into autonomy_policy.reply_auto_send_categories, the gate
+    must still force human approval rather than auto-sending an unclassified
+    reply. Without the explicit `category == UNCLASSIFIED_CATEGORY_ID` check
+    in `_evaluate_gate`, this gate would return AUTO_APPROVED purely because
+    "unclassified" is (incorrectly) allowlisted here.
+    """
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({UNCLASSIFIED_CATEGORY_ID}),
+        monetary_commitment_threshold_cents=10_000,
+    )
+
+    gate = _evaluate_gate(
+        category=UNCLASSIFIED_CATEGORY_ID,
+        original_content="Something is wrong with my order.",
+        reply="We have reviewed your request and confirmed the details below.",
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert gate.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert "unclassified_category_requires_human_approval" in gate.reasons
+
+
+def test_money_guard_blocks_auto_send_even_when_category_is_allowlisted() -> None:
+    """LOAD-BEARING: a category allowlist alone is not sufficient to permit
+    auto-send when the reply commits to a refund/replacement at or above the
+    tenant's monetary threshold. If the money-guard were removed, this reply
+    would be auto-approved purely because "refund_requested" is allowlisted.
+    """
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"refund_requested"}),
+        monetary_commitment_threshold_cents=5_000,
+    )
+    evidence = (_citation(),)
+
+    monetary_gate = _evaluate_gate(
+        category="refund_requested",
+        original_content="Customer asked about a refund for their order.",
+        reply="We can process a $200 refund for your order.",
+        evidence=evidence,
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert monetary_gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert "monetary_commitment_requires_approval" in monetary_gate.reasons
+
+    non_monetary_gate = _evaluate_gate(
+        category="refund_requested",
+        original_content="Customer asked about a refund for their order.",
+        reply="We have reviewed your order and confirmed the details below.",
+        evidence=evidence,
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert non_monetary_gate.status is ResolutionProposalStatus.AUTO_APPROVED
+
+
+def test_resolution_category_passthrough_for_known_category() -> None:
+    taxonomy = ResolutionTaxonomyPolicy(
+        categories=(
+            ResolutionTaxonomyCategory(
+                id="charging_issue",
+                label="Charging Issue",
+                description="Issues related to charging the device.",
+                recommended_actions=(_COLLECT_CONTEXT_FALLBACK_ACTION,),
+            ),
+        ),
+        monetary_remedy_keywords=frozenset(),
+        monetary_currency_symbols=frozenset(),
+        monetary_currency_codes=frozenset(),
+        unsupported_commitment_patterns=frozenset(),
+    )
+
+    assert (
+        _resolution_category(diagnostic_category="charging_issue", taxonomy=taxonomy)
+        == "charging_issue"
+    )
+
+
+def test_resolution_category_unclassified_passes_through_regardless_of_taxonomy() -> None:
+    assert (
+        _resolution_category(
+            diagnostic_category=UNCLASSIFIED_CATEGORY_ID, taxonomy=_EMPTY_TAXONOMY
+        )
+        == UNCLASSIFIED_CATEGORY_ID
+    )
+
+
+def test_resolution_category_out_of_taxonomy_is_defense_in_depth_unclassified() -> None:
+    assert (
+        _resolution_category(
+            diagnostic_category="some_other_category", taxonomy=_EMPTY_TAXONOMY
+        )
+        == UNCLASSIFIED_CATEGORY_ID
+    )
+
+
+def test_recommended_actions_returns_configured_actions_for_known_category() -> None:
+    action = {
+        "type": "dispatch_replacement",
+        "label": "Dispatch a replacement unit",
+        "requires_execution": True,
+        "tool_name": "replacement.order",
+        "payload_template": {},
+        "target_resource_id": "device-123",
+    }
+    taxonomy = ResolutionTaxonomyPolicy(
+        categories=(
+            ResolutionTaxonomyCategory(
+                id="warranty_replacement_inquiry",
+                label="Warranty Replacement Inquiry",
+                description="Customer asks about warranty replacement.",
+                recommended_actions=(action,),
+            ),
+        ),
+        monetary_remedy_keywords=frozenset(),
+        monetary_currency_symbols=frozenset(),
+        monetary_currency_codes=frozenset(),
+        unsupported_commitment_patterns=frozenset(),
+    )
+
+    assert _recommended_actions("warranty_replacement_inquiry", taxonomy) == (action,)
+
+
+def test_recommended_actions_falls_back_to_collect_context_when_category_unrecognized() -> None:
+    assert _recommended_actions(UNCLASSIFIED_CATEGORY_ID, _EMPTY_TAXONOMY) == (
+        _COLLECT_CONTEXT_FALLBACK_ACTION,
+    )
+    assert _recommended_actions("not_in_taxonomy", _EMPTY_TAXONOMY) == (
+        _COLLECT_CONTEXT_FALLBACK_ACTION,
+    )
+
+
+def test_monetary_commitment_exceeds_threshold_has_no_keyword_precondition() -> None:
+    assert (
+        _monetary_commitment_exceeds_threshold(
+            "we can offer $75 today", 5_000, _EMPTY_TAXONOMY
+        )
+        is True
+    )
+    assert (
+        _monetary_commitment_exceeds_threshold(
+            "we can offer $25 today", 5_000, _EMPTY_TAXONOMY
+        )
+        is False
+    )
+
+
+def test_unsupported_commitment_patterns_includes_baseline_for_empty_taxonomy() -> None:
+    assert "we will refund" in _unsupported_commitment_patterns(_EMPTY_TAXONOMY)
+
+
+@pytest.mark.asyncio
+async def test_bank_pilot_taxonomy_disputed_transaction_break_control() -> None:
+    """LOAD-BEARING: proves the tenant-defined taxonomy correctly classifies a
+    disputed-transaction ticket as "disputed_transaction" using its own
+    bank-specific category set, not the electronics-tenant's
+    "charging_issue" (which an old hardcoded keyword-matcher on the
+    substring "charge" would have produced).
+    """
+    repository = await _bank_pilot_repository()
+    taxonomy = await resolve_resolution_taxonomy_policy(
+        repository=repository, tenant_id=BANK_TENANT_ID
+    )
+    autonomy_policy = await resolve_resolution_autonomy_policy(
+        repository=repository, tenant_id=BANK_TENANT_ID
+    )
+
+    diagnostic_category = _validated_category("disputed_transaction", taxonomy)
+    assert diagnostic_category == "disputed_transaction"
+
+    category = _resolution_category(
+        diagnostic_category=diagnostic_category, taxonomy=taxonomy
+    )
+    assert category == "disputed_transaction"
+
+    actions = _recommended_actions(category, taxonomy)
+    action_types = {action["type"] for action in actions}
+    assert action_types == {"collect_context", "file_dispute"}
+    assert not any(
+        action.get("tool_name") in {"warranty.claim", "warehouse.repair.report"}
+        for action in actions
+    )
+
+    gate = _evaluate_gate(
+        category=category,
+        original_content="Customer reports an unrecognized transaction.",
+        reply="We've started a review of this transaction.",
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=taxonomy,
+    )
+    assert gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert "unsupported_auto_category" in gate.reasons
+
+
+@pytest.mark.asyncio
+async def test_bank_pilot_taxonomy_card_lost_proposal_is_auto_approved() -> None:
+    repository = await _bank_pilot_repository()
+    governance_repository = InMemoryGovernanceRepository()
+    draft = GroundedReplyDraft(
+        language="en",
+        segments=(
+            GroundedReplySegment(
+                kind="claim",
+                text=(
+                    "We've blocked your card; a replacement will arrive in "
+                    "5 business days."
+                ),
+                citation_ranks=(1,),
+            ),
+        ),
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=StaticGroundingChecker(allowed=True),
+                tenant_configuration_repository=repository,
+            )
+        ),
+        conversation_generator=_StaticConversationGenerator(draft),
+        tenant_configuration_repository=repository,
+    )
+
+    record = await runtime.create_proposal(
+        ResolutionProposalRequest(
+            tenant_id=BANK_TENANT_ID,
+            session_id=SESSION_ID,
+            execution_id=EXECUTION_ID,
+            dispatch_id=DISPATCH_ID,
+            diagnostic_event_id=DIAGNOSTIC_EVENT_ID,
+            diagnostic_summary="Card lost or stolen.",
+            diagnostic_category="card_lost",
+            diagnostic_confidence=0.93,
+            original_content="I lost my debit card and need a replacement.",
+            retrieved_citations=[_citation()],
+        )
+    )
+
+    assert record.resolution_category == "card_lost"
+    assert record.autonomy_decision is ResolutionAutonomyDecision.AUTO_APPROVED
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+
+
+def test_approval_rule_denies_when_category_not_in_autonomy_allowlist() -> None:
+    rule = _approval_rule(
+        category="charging_issue",
+        local_status="auto_approved",
+        local_autonomy="auto_approved",
+        local_governance="allow",
+        local_supervisor="pass",
+        autonomy_policy=ResolutionAutonomyPolicy(frozenset(), 0),
+    )
+
+    assert rule == "resolution_category_not_auto_safe"
+
+
+def test_approval_rule_allows_when_category_in_autonomy_allowlist() -> None:
+    rule = _approval_rule(
+        category="charging_issue",
+        local_status="auto_approved",
+        local_autonomy="auto_approved",
+        local_governance="allow",
+        local_supervisor="pass",
+        autonomy_policy=ResolutionAutonomyPolicy(frozenset({"charging_issue"}), 0),
+    )
+
+    assert rule is None
+
+
+@pytest.mark.asyncio
 async def test_concrete_gate_persists_allow_decision_and_proposal_stores_id() -> None:
     governance_repository = InMemoryGovernanceRepository()
     runtime = _governed_resolution_runtime(
-        governance_repository=governance_repository
+        governance_repository=governance_repository,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     )
 
     record = await runtime.create_proposal(_request())
@@ -395,6 +1006,7 @@ async def test_grounding_policy_denies_high_confidence_uncited_claim() -> None:
 @pytest.mark.asyncio
 async def test_resolvable_claim_span_is_send_eligible() -> None:
     governance_repository = InMemoryGovernanceRepository()
+    tenant_configuration_repository = await _resolution_autonomy_repository()
     runtime = ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence(),
         governance_gate=ResolutionGovernanceGate(
@@ -405,8 +1017,10 @@ async def test_resolvable_claim_span_is_send_eligible() -> None:
                         _approved_document()
                     )
                 ),
+                tenant_configuration_repository=tenant_configuration_repository,
             )
         ),
+        tenant_configuration_repository=tenant_configuration_repository,
         conversation_generator=_StaticConversationGenerator(
             GroundedReplyDraft(
                 language="en",
@@ -454,14 +1068,17 @@ async def test_grounding_checker_interface_can_swap_implementations() -> None:
     )
 
     async def run_with_checker(allowed: bool) -> ResolutionProposalStatus:
+        tenant_configuration_repository = await _resolution_autonomy_repository()
         runtime = ResolutionRuntime(
             persistence=InMemoryResolutionProposalPersistence(),
             governance_gate=ResolutionGovernanceGate(
                 governance_runtime=build_resolution_governance_runtime(
                     persistence=InMemoryGovernanceRepository(),
                     grounding_checker=StaticGroundingChecker(allowed=allowed),
+                    tenant_configuration_repository=tenant_configuration_repository,
                 )
             ),
+            tenant_configuration_repository=tenant_configuration_repository,
             conversation_generator=generator,
         )
         record = await runtime.create_proposal(
@@ -605,6 +1222,7 @@ async def test_confidence_is_recorded_but_not_used_as_send_gate() -> None:
         governance_gate=_StaticResolutionGovernanceGate(
             ResolutionGovernanceVerdict.ALLOW
         ),
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     ).create_proposal(_request(confidence=0.42))
 
     assert record.confidence == 0.42
@@ -619,7 +1237,8 @@ async def test_confidence_is_recorded_but_not_used_as_send_gate() -> None:
 async def test_concrete_gate_local_pending_state_blocks_send_eligibility() -> None:
     governance_repository = InMemoryGovernanceRepository()
     runtime = _governed_resolution_runtime(
-        governance_repository=governance_repository
+        governance_repository=governance_repository,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     )
 
     record = await runtime.create_proposal(_request(confidence=0.42))
@@ -708,30 +1327,61 @@ async def test_central_allow_cannot_override_unsupported_promise_denial() -> Non
 
 
 @pytest.mark.asyncio
-async def test_concrete_gate_refund_warranty_category_requires_approval() -> None:
+async def test_concrete_gate_informational_warranty_inquiry_is_auto_approved() -> None:
     governance_repository = InMemoryGovernanceRepository()
     runtime = _governed_resolution_runtime(
-        governance_repository=governance_repository
+        governance_repository=governance_repository,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     )
 
     record = await runtime.create_proposal(
         _request(
             content="I need a warranty replacement for this charger.",
+            category="warranty_replacement_inquiry",
             confidence=0.95,
         )
     )
 
     assert record.resolution_category == "warranty_replacement_inquiry"
-    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
-    assert record.governance_verdict is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
     assert record.governance_decision_id is not None
-    assert resolution_proposal_is_send_eligible(record) is False
+    assert resolution_proposal_is_send_eligible(record) is True
     decision = await governance_repository.get_decision(
         str(record.governance_decision_id),
         expected_tenant_id=TENANT_ID,
     )
     assert decision is not None
-    assert decision.decision == "require_approval"
+    assert decision.decision == "allow"
+
+
+@pytest.mark.asyncio
+async def test_concrete_gate_warranty_inquiry_with_safety_keyword_still_escalates() -> None:
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = _governed_resolution_runtime(
+        governance_repository=governance_repository,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
+    )
+
+    record = await runtime.create_proposal(
+        _request(
+            content=(
+                "I need a warranty replacement, the charger started smoking "
+                "and caused a burn."
+            ),
+            category="warranty_replacement_inquiry",
+            confidence=0.95,
+        )
+    )
+
+    assert record.resolution_category == "warranty_replacement_inquiry"
+    # The local gate would route this to human approval, but the safety
+    # keyword is a severe central-governance risk: it is denied outright and
+    # (per the escalation dead-end fix) every DENY routes to a human handoff.
+    assert record.status is ResolutionProposalStatus.DENIED
+    assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert record.autonomy_decision is ResolutionAutonomyDecision.DENIED
+    assert resolution_proposal_is_send_eligible(record) is False
 
 
 @pytest.mark.asyncio
@@ -806,6 +1456,7 @@ async def test_resolution_timeline_payload_is_customer_safe_handoff() -> None:
     record = await ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence(),
         governance_gate=gate,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     ).create_proposal(_request())
 
     payload = resolution_proposal_timeline_payload(record)
@@ -828,6 +1479,7 @@ async def test_send_eligible_helper_requires_governance_decision_id() -> None:
         governance_gate=_StaticResolutionGovernanceGate(
             ResolutionGovernanceVerdict.ALLOW
         ),
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     ).create_proposal(_request())
 
     old_row_shape = replace(record, governance_decision_id=None)
@@ -846,6 +1498,7 @@ async def test_ready_outbound_draft_for_governance_backed_send_eligible_proposal
         governance_gate=_StaticResolutionGovernanceGate(
             ResolutionGovernanceVerdict.ALLOW
         ),
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     ).create_proposal(_request())
 
     draft = await ResolutionOutboundDraftRuntime(
@@ -914,6 +1567,7 @@ async def test_old_send_eligible_proposal_without_governance_id_creates_pending_
         governance_gate=_StaticResolutionGovernanceGate(
             ResolutionGovernanceVerdict.ALLOW
         ),
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     ).create_proposal(_request())
     old_row_shape = replace(proposal, governance_decision_id=None)
 

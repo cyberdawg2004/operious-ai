@@ -28,14 +28,21 @@ from app.knowledge import (
     KnowledgeRuntime,
 )
 from app.knowledge.persistence import InMemoryKnowledgeRepository
+from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
+from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
+    TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
 )
-from app.tenant.identity import derive_knowledge_document_id
+from app.tenant.identity import (
+    derive_governance_policy_version_id,
+    derive_knowledge_document_id,
+)
 from app.tenant.persistence import (
     InMemoryTenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
 )
 
@@ -252,6 +259,11 @@ async def _runtime(
         tenant_id=_TENANT_ID,
         document_id=document.document_id,
     )
+    await _save_resolution_taxonomy_policy(
+        tenant_repo,
+        tenant_id=_TENANT_ID,
+        category_ids=frozenset({"charging_issue"}),
+    )
     return (
         DiagnosticCognitionRuntime(
             knowledge_runtime=knowledge_runtime,
@@ -261,9 +273,69 @@ async def _runtime(
                 context_top_k=4,
                 context_token_budget=96,
             ),
+            tenant_configuration_repository=tenant_repo,
         ),
         usage_repo,
     )
+
+
+async def _save_resolution_taxonomy_policy(
+    repository: InMemoryTenantConfigurationRepository,
+    *,
+    tenant_id: str,
+    category_ids: frozenset[str],
+    version: int = 1,
+) -> None:
+    parameters: dict[str, object] = {
+        "categories": [
+            {
+                "id": category_id,
+                "label": category_id.replace("_", " ").title(),
+                "description": f"Issues classified as {category_id}.",
+                "recommended_actions": [
+                    {
+                        "type": "collect_context",
+                        "label": "Gather additional details from the customer "
+                        "before proceeding",
+                        "requires_execution": False,
+                    }
+                ],
+            }
+            for category_id in sorted(category_ids)
+        ],
+    }
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": "policy-admin",
+            "effective_from": now.isoformat(),
+            "source_approval_id": "approval-resolution-taxonomy",
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by="policy-admin",
+        effective_from=now,
+        created_at=now,
+        source_approval_id="approval-resolution-taxonomy",
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
 
 
 def _document() -> TenantKnowledgeDocumentRecord:

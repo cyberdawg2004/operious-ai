@@ -60,6 +60,8 @@ from app.resolution.persistence import (
     ResolutionOutboundDraftRecord,
     ResolutionProposalRecord,
 )
+from app.runtime.resolution_autonomy_policy import RESOLUTION_AUTONOMY_POLICY_TYPE
+from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
 from app.runtime.resolution_governance_gate import (
     ResolutionCommunicationPolicy,
     _communication_subject,
@@ -77,6 +79,13 @@ from app.runtime.resolution_runtime import (
 from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import as_session_id, derive_event_id
 from app.session.models.timeline_event import SessionTimelineEvent
+from app.tenant.chronology import canonical_sha256
+from app.tenant.enums import TenantGovernancePolicyStatus
+from app.tenant.identity import derive_governance_policy_version_id
+from app.tenant.persistence import (
+    InMemoryTenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
+)
 from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.workers import agent_tasks
 from app.workers.agent_tasks import (
@@ -88,6 +97,9 @@ from app.workers.agent_tasks import (
 
 
 TENANT_ID = "tenant-contract"
+_POLICY_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_POLICY_APPROVED_BY = "policy-admin"
+_POLICY_APPROVAL_ID = "approval-resolution-autonomy"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 EXECUTION_ID = "22222222-2222-4222-8222-222222222222"
 DISPATCH_ID = "33333333-3333-4333-8333-333333333333"
@@ -169,12 +181,124 @@ def _proposal_request(
     )
 
 
+async def _resolution_autonomy_repository(
+    *,
+    category_allowlist: frozenset[str] = frozenset({"charging_issue"}),
+    monetary_commitment_threshold_cents: int = 10_000,
+    tenant_id: str = TENANT_ID,
+    version: int = 1,
+) -> InMemoryTenantConfigurationRepository:
+    repository = InMemoryTenantConfigurationRepository()
+    parameters: dict[str, object] = {
+        "reply_auto_send": {
+            "category_allowlist": sorted(category_allowlist),
+            "monetary_commitment_threshold_cents": monetary_commitment_threshold_cents,
+        }
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_AUTONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+    await _save_resolution_taxonomy_policy(
+        repository,
+        tenant_id=tenant_id,
+        category_ids=category_allowlist | {"charging_issue"},
+    )
+    return repository
+
+
+async def _save_resolution_taxonomy_policy(
+    repository: InMemoryTenantConfigurationRepository,
+    *,
+    tenant_id: str,
+    category_ids: frozenset[str],
+    version: int = 1,
+) -> None:
+    parameters: dict[str, object] = {
+        "categories": [
+            {
+                "id": category_id,
+                "label": category_id.replace("_", " ").title(),
+                "description": f"Issues classified as {category_id}.",
+                "recommended_actions": [
+                    {
+                        "type": "collect_context",
+                        "label": "Gather additional details from the customer "
+                        "before proceeding",
+                        "requires_execution": False,
+                    }
+                ],
+            }
+            for category_id in sorted(category_ids)
+        ],
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+
+
 async def _send_eligible_proposal(
 ) -> tuple[ResolutionProposalRecord, _StaticResolutionGovernanceGate]:
     gate = _StaticResolutionGovernanceGate(ResolutionGovernanceVerdict.ALLOW)
     record = await ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence(),
         governance_gate=gate,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
     ).create_proposal(_proposal_request(citations=[_immutable_citation()]))
     return record, gate
 
@@ -405,6 +529,7 @@ def test_diagnostic_worker_task_kwargs_align_with_work_item_contract() -> None:
             "conversation_turn_id",
             "source_channel",
             "reply_recipient",
+            "reply_recipient_display_name",
             "reply_source",
             "reply_subject",
             "reply_thread_context",

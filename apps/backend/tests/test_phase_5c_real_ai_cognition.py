@@ -23,7 +23,6 @@ from app.cognition.llm import DiagnosticLLMMessage
 from app.cognition.models import (
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
-    DiagnosticCategory,
     DiagnosticLLMCompletion,
     DiagnosticLLMOutput,
     DiagnosticLLMUsage,
@@ -46,14 +45,21 @@ from app.knowledge import (
     KnowledgeRuntime,
 )
 from app.knowledge.persistence import InMemoryKnowledgeRepository
+from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
+from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
+    TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
 )
-from app.tenant.identity import derive_knowledge_document_id
+from app.tenant.identity import (
+    derive_governance_policy_version_id,
+    derive_knowledge_document_id,
+)
 from app.tenant.persistence import (
     InMemoryTenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
 )
 from tests.conftest import requires_postgres
@@ -166,6 +172,11 @@ async def _runtime(
         tenant_id=_TENANT_ID,
         document_id=document.document_id,
     )
+    await _save_resolution_taxonomy_policy(
+        tenant_repo,
+        tenant_id=_TENANT_ID,
+        category_ids=frozenset({"charging_issue", "refund_issue", "product_defect"}),
+    )
     return (
         DiagnosticCognitionRuntime(
             knowledge_runtime=knowledge_runtime,
@@ -179,11 +190,71 @@ async def _runtime(
                 input_token_micro_usd=3,
                 output_token_micro_usd=15,
             ),
+            tenant_configuration_repository=tenant_repo,
         ),
         tenant_repo,
         usage_repo,
         document,
     )
+
+
+async def _save_resolution_taxonomy_policy(
+    repository: InMemoryTenantConfigurationRepository,
+    *,
+    tenant_id: str,
+    category_ids: frozenset[str],
+    version: int = 1,
+) -> None:
+    parameters: dict[str, object] = {
+        "categories": [
+            {
+                "id": category_id,
+                "label": category_id.replace("_", " ").title(),
+                "description": f"Issues classified as {category_id}.",
+                "recommended_actions": [
+                    {
+                        "type": "collect_context",
+                        "label": "Gather additional details from the customer "
+                        "before proceeding",
+                        "requires_execution": False,
+                    }
+                ],
+            }
+            for category_id in sorted(category_ids)
+        ],
+    }
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": "policy-admin",
+            "effective_from": now.isoformat(),
+            "source_approval_id": "approval-resolution-taxonomy",
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by="policy-admin",
+        effective_from=now,
+        created_at=now,
+        source_approval_id="approval-resolution-taxonomy",
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
 
 
 @pytest.mark.asyncio
@@ -338,8 +409,7 @@ def test_product_defect_category_is_canonical_and_accepted() -> None:
         }
     )
 
-    assert DiagnosticCategory.PRODUCT_DEFECT.value == "product_defect"
-    assert parsed.category is DiagnosticCategory.PRODUCT_DEFECT
+    assert parsed.category == "product_defect"
 
 
 def test_confidence_label_is_normalized_to_numeric_score() -> None:
@@ -501,7 +571,13 @@ async def test_llm_output_with_unknown_key_is_stripped_before_validation() -> No
 
 
 @pytest.mark.asyncio
-async def test_llm_output_with_invalid_category_is_semantic_rejection() -> None:
+async def test_llm_output_with_category_outside_taxonomy_is_clamped_to_unclassified() -> None:
+    """LOAD-BEARING: a category outside the tenant's resolution taxonomy is a
+    non-fatal classification issue, not a semantic-validation rejection. The
+    diagnostic clamps it to "unclassified" so downstream resolution always
+    falls back to human review for the category, while the LLM usage is still
+    accepted and audited normally.
+    """
     client = _ScriptedLLMClient(
         text=(
             '{"summary":"Charging diagnosis.",'
@@ -511,16 +587,14 @@ async def test_llm_output_with_invalid_category_is_semantic_rejection() -> None:
     )
     runtime, _tenant_repo, usage_repo, _document = await _runtime(client=client)
 
-    with pytest.raises(CognitionSemanticValidationError) as raised:
-        await runtime.reason_about_ticket(
-            tenant_id=_TENANT_ID,
-            execution_id="execution-5c-invalid-category",
-            dispatch_id="dispatch-5c-invalid-category",
-            session_id="session-5c-invalid-category",
-            content="Customer says charging failed.",
-        )
-    assert "category='invented_issue'" in str(raised.value)
-    assert "RuntimeError" not in str(raised.value)
+    result = await runtime.reason_about_ticket(
+        tenant_id=_TENANT_ID,
+        execution_id="execution-5c-invalid-category",
+        dispatch_id="dispatch-5c-invalid-category",
+        session_id="session-5c-invalid-category",
+        content="Customer says charging failed.",
+    )
+    assert result.category == "unclassified"
 
     usage_id = derive_llm_usage_id(
         tenant_id=_TENANT_ID,
@@ -532,12 +606,7 @@ async def test_llm_output_with_invalid_category_is_semantic_rejection() -> None:
         expected_tenant_id=_TENANT_ID,
     )
     assert usage is not None
-    assert usage.status is CognitionLLMUsageStatus.REJECTED
-    assert usage.metadata["error_type"] == "CognitionSemanticValidationError"
-    assert "category='invented_issue'" in str(usage.metadata["message"])
-    assert usage.metadata["raw_completion_sha256"] == hashlib.sha256(
-        client.text.encode("utf-8")
-    ).hexdigest()
+    assert usage.status is CognitionLLMUsageStatus.ACCEPTED
 
 
 @pytest.mark.asyncio

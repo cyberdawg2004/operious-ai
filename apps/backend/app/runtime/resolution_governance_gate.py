@@ -32,11 +32,16 @@ from app.runtime.grounding import (
     GroundingChecker,
     GroundingCheckRequest,
 )
+from app.runtime.resolution_autonomy_policy import (
+    ResolutionAutonomyPolicy,
+    resolve_resolution_autonomy_policy,
+)
 from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateProtocol,
     ResolutionGovernanceGateRequest,
     ResolutionGovernanceGateResult,
 )
+from app.tenant.persistence import TenantConfigurationRepository
 
 _CHAIN_ID = "resolution.communication.pre_execution"
 _ACTION = "resolution.proposal.prepare"
@@ -45,23 +50,6 @@ _CHANNEL = "resolution/proposal"
 _SUMMARY_MAX_CHARS = 480
 _CORRELATION_NAMESPACE = uuid.UUID("2b7b4f5a-0002-4b01-9001-000000000001")
 
-_SAFE_AUTO_CATEGORIES = frozenset(
-    {
-        "charging_issue",
-        "generic_troubleshooting",
-        "connectivity_issue",
-        "power_issue",
-    }
-)
-_REQUIRES_APPROVAL_CATEGORY_TOKENS = frozenset(
-    {
-        "refund",
-        "return",
-        "warranty",
-        "replacement",
-        "replace",
-    }
-)
 _SEVERE_LOCAL_REASONS = frozenset(
     {
         "safety_risk",
@@ -81,6 +69,13 @@ class ResolutionCommunicationPolicy(BaseGovernancePolicy):
     applicable_subject_kinds: ClassVar[FrozenSet[SubjectKind]] = frozenset(
         {SubjectKind.COMMUNICATION}
     )
+
+    def __init__(
+        self,
+        *,
+        tenant_configuration_repository: TenantConfigurationRepository | None = None,
+    ) -> None:
+        self._repository = tenant_configuration_repository
 
     async def evaluate(
         self,
@@ -136,12 +131,17 @@ class ResolutionCommunicationPolicy(BaseGovernancePolicy):
             )
 
         category = _metadata_str(metadata, "resolution_category") or ""
+        autonomy_policy = await resolve_resolution_autonomy_policy(
+            repository=self._repository,
+            tenant_id=subject.tenant_id,
+        )
         approval_rule = _approval_rule(
             category=category,
             local_status=local_status,
             local_autonomy=local_autonomy,
             local_governance=_metadata_str(metadata, "local_governance_verdict"),
             local_supervisor=_metadata_str(metadata, "local_supervisor_verdict"),
+            autonomy_policy=autonomy_policy,
         )
         if approval_rule is not None:
             return (_require_approval(approval_rule),)
@@ -267,6 +267,7 @@ def build_resolution_governance_runtime(
     *,
     persistence: BaseGovernanceRepository | None = None,
     grounding_checker: GroundingChecker | None = None,
+    tenant_configuration_repository: TenantConfigurationRepository | None = None,
 ) -> GovernanceRuntime:
     """Build the standard central governance runtime for resolution."""
 
@@ -288,7 +289,9 @@ def build_resolution_governance_runtime(
                 chain_id=_CHAIN_ID,
                 stage=EnforcementStage.PRE_EXECUTION,
                 policies=(
-                    ResolutionCommunicationPolicy(),
+                    ResolutionCommunicationPolicy(
+                        tenant_configuration_repository=tenant_configuration_repository,
+                    ),
                     GroundingPolicy(checker=grounding_checker),
                 ),
             )
@@ -392,6 +395,7 @@ def _approval_rule(
     local_autonomy: str,
     local_governance: str | None,
     local_supervisor: str | None,
+    autonomy_policy: ResolutionAutonomyPolicy,
 ) -> str | None:
     if local_status != "auto_approved":
         return "local_status_not_auto_approved"
@@ -401,16 +405,9 @@ def _approval_rule(
         return "local_governance_not_allow"
     if local_supervisor != "pass":
         return "local_supervisor_not_pass"
-    if _category_requires_approval(category):
-        return "resolution_category_requires_approval"
-    if category not in _SAFE_AUTO_CATEGORIES:
+    if category not in autonomy_policy.reply_auto_send_categories:
         return "resolution_category_not_auto_safe"
     return None
-
-
-def _category_requires_approval(category: str) -> bool:
-    category_text = category.casefold()
-    return any(token in category_text for token in _REQUIRES_APPROVAL_CATEGORY_TOKENS)
 
 
 def _deny(

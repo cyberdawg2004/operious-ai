@@ -16,10 +16,18 @@ from app.runtime.resolution_runtime import (
     ResolutionProposalRequest,
     ResolutionRuntime,
 )
+from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
 from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import SessionId
 from app.session.models.timeline import SessionTimeline
 from app.session.timeline.builder import build_event
+from app.tenant.chronology import canonical_sha256
+from app.tenant.enums import TenantGovernancePolicyStatus
+from app.tenant.identity import derive_governance_policy_version_id
+from app.tenant.persistence import (
+    InMemoryTenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
+)
 
 
 def test_envelope_roundtrip() -> None:
@@ -118,6 +126,63 @@ def test_timeline_api_projects_diagnostic_completed() -> None:
     assert payload["governance_decision_id"] == "gov-1"
 
 
+async def _resolution_taxonomy_repository(
+    *, tenant_id: str, category_ids: frozenset[str], version: int = 1
+) -> InMemoryTenantConfigurationRepository:
+    repository = InMemoryTenantConfigurationRepository()
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    parameters: dict[str, object] = {
+        "categories": [
+            {
+                "id": category_id,
+                "label": category_id.replace("_", " ").title(),
+                "description": f"Issues classified as {category_id}.",
+                "recommended_actions": [
+                    {
+                        "type": "collect_context",
+                        "label": "Gather additional details from the customer "
+                        "before proceeding",
+                        "requires_execution": False,
+                    }
+                ],
+            }
+            for category_id in sorted(category_ids)
+        ],
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": "policy-admin",
+            "effective_from": now.isoformat(),
+            "source_approval_id": "approval-resolution-taxonomy",
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by="policy-admin",
+        effective_from=now,
+        created_at=now,
+        source_approval_id="approval-resolution-taxonomy",
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+    return repository
+
+
 @pytest.mark.asyncio
 async def test_resolution_runtime_reads_via_envelope() -> None:
     stored_result = ExecutionResultEnvelope(
@@ -128,7 +193,10 @@ async def test_resolution_runtime_reads_via_envelope() -> None:
 
     envelope = ExecutionResultEnvelope.from_dict(stored_result)
     record = await ResolutionRuntime(
-        persistence=InMemoryResolutionProposalPersistence()
+        persistence=InMemoryResolutionProposalPersistence(),
+        tenant_configuration_repository=await _resolution_taxonomy_repository(
+            tenant_id="tenant-envelope", category_ids=frozenset({"charging_issue"})
+        ),
     ).create_proposal(
         ResolutionProposalRequest(
             tenant_id="tenant-envelope",

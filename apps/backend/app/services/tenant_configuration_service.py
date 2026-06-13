@@ -603,6 +603,17 @@ class TenantConfigurationService:
             ),
         )
 
+    async def resolve_active_governance_policy(
+        self,
+        *,
+        tenant_id: str,
+        policy_type: str,
+    ) -> TenantGovernancePolicyRecord | None:
+        return await self._runtime.resolve_active_governance_policy(
+            tenant_id=tenant_id,
+            policy_type=policy_type,
+        )
+
     async def configure_topology(
         self,
         *,

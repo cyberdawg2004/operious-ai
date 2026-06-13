@@ -17,6 +17,18 @@ from app.agents.tools.action_governance import (
     ActionPolicyParseError,
     validate_action_tools_policy_parameters,
 )
+from app.runtime.resolution_autonomy_policy import (
+    RESOLUTION_AUTONOMY_POLICY_TYPE,
+    ResolutionAutonomyPolicyParseError,
+    validate_resolution_autonomy_policy_parameters,
+)
+from app.runtime.resolution_taxonomy_policy import (
+    RESOLUTION_TAXONOMY_POLICY_TYPE,
+    UNCLASSIFIED_CATEGORY_ID,
+    ResolutionTaxonomyPolicyParseError,
+    parse_resolution_taxonomy_policy,
+    validate_resolution_taxonomy_policy_parameters,
+)
 from app.events import EventCausality, EventChronology, EventId, OperationalEvent
 from app.events.appender import OperationalEventAppender
 from app.events.substrates import OperationalSubstrate
@@ -82,7 +94,12 @@ class TenantConfigChangeRequestService:
     ) -> TenantConfigChangeRequestRecord:
         change = _change_type(change_type)
         proposed_payload = _versioned_payload(payload)
-        _validate_payload(change, proposed_payload)
+        await _validate_payload(
+            change,
+            proposed_payload,
+            tenant_configuration=self._tenant_configuration,
+            tenant_id=tenant_id,
+        )
         now = _utcnow()
         record = TenantConfigChangeRequestRecord(
             change_request_id=derive_tenant_config_change_request_id(
@@ -300,7 +317,12 @@ class TenantConfigChangeRequestService:
         approval = _approval_for_record(record)
         payload = dict(record.proposed_payload)
         change = record.change_type
-        _validate_payload(change, payload)
+        await _validate_payload(
+            change,
+            payload,
+            tenant_configuration=self._tenant_configuration,
+            tenant_id=record.tenant_id,
+        )
         if change is TenantConfigChangeType.KNOWLEDGE:
             return await self._apply_knowledge(record, payload, approval)
         if change is TenantConfigChangeType.POLICY:
@@ -788,9 +810,12 @@ def _versioned_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     return versioned
 
 
-def _validate_payload(
+async def _validate_payload(
     change_type: TenantConfigChangeType,
     payload: Mapping[str, Any],
+    *,
+    tenant_configuration: TenantConfigurationService,
+    tenant_id: str,
 ) -> None:
     if payload.get("_schema_version") != _SCHEMA_VERSION:
         raise TenantConfigChangeRequestLifecycleError(
@@ -810,6 +835,12 @@ def _validate_payload(
             else ("policy_id",)
         )
         _validate_action_policy_payload(payload)
+        await _validate_resolution_autonomy_policy_payload(
+            payload,
+            tenant_configuration=tenant_configuration,
+            tenant_id=tenant_id,
+        )
+        _validate_resolution_taxonomy_policy_payload(payload)
     elif change_type is TenantConfigChangeType.EXECUTION_GOVERNANCE:
         required = (
             "execution_quota",
@@ -870,6 +901,84 @@ def _validate_action_policy_payload(payload: Mapping[str, Any]) -> None:
     except ActionPolicyParseError as exc:
         raise TenantConfigChangeRequestLifecycleError(
             f"invalid action_tools policy parameters: {exc}"
+        ) from exc
+
+
+async def _validate_resolution_autonomy_policy_payload(
+    payload: Mapping[str, Any],
+    *,
+    tenant_configuration: TenantConfigurationService,
+    tenant_id: str,
+) -> None:
+    parameters = payload.get("parameters")
+    policy_type = payload.get("policy_type")
+    if policy_type != RESOLUTION_AUTONOMY_POLICY_TYPE:
+        return
+    if not isinstance(parameters, Mapping):
+        raise TenantConfigChangeRequestLifecycleError(
+            "resolution_autonomy policy parameters must be an object"
+        )
+    parameters_dict = _dict_from_mapping(cast(Mapping[Any, Any], parameters))
+    try:
+        validate_resolution_autonomy_policy_parameters(parameters_dict)
+    except ResolutionAutonomyPolicyParseError as exc:
+        raise TenantConfigChangeRequestLifecycleError(
+            f"invalid resolution_autonomy policy parameters: {exc}"
+        ) from exc
+
+    reply_auto_send = parameters_dict.get("reply_auto_send")
+    category_allowlist = (
+        reply_auto_send.get("category_allowlist")
+        if isinstance(reply_auto_send, Mapping)
+        else None
+    )
+    if not isinstance(category_allowlist, Sequence) or isinstance(
+        category_allowlist, str | bytes
+    ):
+        return
+
+    taxonomy_record = await tenant_configuration.resolve_active_governance_policy(
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+    )
+    if taxonomy_record is None:
+        return
+    try:
+        taxonomy = parse_resolution_taxonomy_policy(taxonomy_record)
+    except ResolutionTaxonomyPolicyParseError:
+        return
+
+    allowlist = {str(category) for category in category_allowlist}
+    if UNCLASSIFIED_CATEGORY_ID in allowlist:
+        raise TenantConfigChangeRequestLifecycleError(
+            "resolution_autonomy category_allowlist must not contain the "
+            f"reserved category {UNCLASSIFIED_CATEGORY_ID!r}"
+        )
+    unknown_categories = allowlist - taxonomy.category_ids()
+    if unknown_categories:
+        raise TenantConfigChangeRequestLifecycleError(
+            "resolution_autonomy category_allowlist contains categories not "
+            "present in the active resolution_taxonomy: "
+            + ", ".join(sorted(unknown_categories))
+        )
+
+
+def _validate_resolution_taxonomy_policy_payload(payload: Mapping[str, Any]) -> None:
+    parameters = payload.get("parameters")
+    policy_type = payload.get("policy_type")
+    if policy_type != RESOLUTION_TAXONOMY_POLICY_TYPE:
+        return
+    if not isinstance(parameters, Mapping):
+        raise TenantConfigChangeRequestLifecycleError(
+            "resolution_taxonomy policy parameters must be an object"
+        )
+    try:
+        validate_resolution_taxonomy_policy_parameters(
+            _dict_from_mapping(cast(Mapping[Any, Any], parameters))
+        )
+    except ResolutionTaxonomyPolicyParseError as exc:
+        raise TenantConfigChangeRequestLifecycleError(
+            f"invalid resolution_taxonomy policy parameters: {exc}"
         ) from exc
 
 

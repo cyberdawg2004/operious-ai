@@ -47,6 +47,7 @@ _DISPATCH_TOOL_NAMES = frozenset(
         "warranty.dispatch",
     }
 )
+KNOWN_ACTION_TOOL_NAMES = _REQUIRED_TOOL_RULES | _DISPATCH_TOOL_NAMES
 _POLICY_METADATA_KEYS = (
     "action_policy.policy_id",
     "action_policy.policy_type",
@@ -691,6 +692,7 @@ def _metadata_int(metadata: dict[str, object], key: str) -> int | None:
 
 __all__ = [
     "ACTION_TOOLS_POLICY_TYPE",
+    "KNOWN_ACTION_TOOL_NAMES",
     "ActionPolicyParseError",
     "TenantActionPolicy",
     "build_action_tool_governance_runtime",

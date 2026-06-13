@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping, cast
@@ -27,7 +28,6 @@ from app.cognition.models import (
     CognitionAuditRecord,
     CognitionLLMUsageRecord,
     CognitionLLMUsageStatus,
-    DiagnosticCategory,
     DiagnosticLLMCompletion,
     DiagnosticLLMOutput,
     DiagnosticReasoningResult,
@@ -62,6 +62,14 @@ from app.governance.subjects.execution import ExecutionGovernanceSubject
 from app.identity import coerce_tenant_id
 from app.knowledge.models import KnowledgeRetrievalResult
 from app.knowledge.runtime import KnowledgeRuntime
+from app.runtime.resolution_taxonomy_policy import (
+    ResolutionTaxonomyPolicy,
+    UNCLASSIFIED_CATEGORY_ID,
+    resolve_resolution_taxonomy_policy,
+)
+from app.tenant.persistence import TenantConfigurationRepository
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.agents.runtime.quota_runtime import TenantQuotaRuntime
@@ -74,17 +82,15 @@ not include keys outside the schema below.
 Required JSON schema:
 {
   "summary": "non-empty string, max 4000 characters",
-  "category": "one of: account_issue, charging_issue, connectivity_issue, product_defect, refund_issue, unknown_issue",
+  "category": "one of the tenant categories listed below",
   "confidence": "number between 0.0 and 1.0",
   "reasoning": "string, max 4000 characters"
 }
 
-The category value must be exactly one of: account_issue, charging_issue,
-connectivity_issue, product_defect, refund_issue, unknown_issue.
+The category value must be exactly one of the following tenant-defined
+categories (id - description):
+{category_taxonomy}
 The confidence value must be a JSON number between 0.0 and 1.0, not a word.
-Use charging_issue for charger, cable, battery, or device-not-charging
-symptoms. Use product_defect for physical/manufacturing defect evidence that
-is not primarily a charging or connectivity symptom.
 Use canonical English for all output.
 The customer's source language is: {source_language}.
 If source_language is not 'en', the customer will receive a translated
@@ -95,7 +101,6 @@ compliance, replacement, credit, or escalation terms that are not grounded in
 the input or citations."""
 
 _DIAGNOSTIC_OUTPUT_FIELDS = frozenset(DiagnosticLLMOutput.model_fields)
-_CATEGORY_VALUES = tuple(category.value for category in DiagnosticCategory)
 _CITATION_SCHEMA_VERSION = 2
 _SAFE_EXCERPT_MAX_CHARS = 420
 _SEMANTIC_DRIFT_MESSAGE = "model output drifted governance-significant terms"
@@ -147,6 +152,7 @@ class DiagnosticReasoningSnapshot:
     temperature: float
     prompt_sha256: str
     quota_state: Mapping[str, Any]
+    resolved_taxonomy: ResolutionTaxonomyPolicy
     provider_circuit_state: Mapping[str, Any] | None = None
 
     def with_provider_circuit_state(
@@ -179,11 +185,13 @@ class DiagnosticCognitionRuntime:
         redis_client: Any | None = None,
         config: DiagnosticCognitionRuntimeConfig | None = None,
         quota_runtime: TenantQuotaRuntime | None = None,
+        tenant_configuration_repository: TenantConfigurationRepository | None = None,
     ) -> None:
         self._knowledge_runtime = knowledge_runtime
         self._llm_client = llm_client
         self._usage_persistence = usage_persistence
         self._quota_runtime = quota_runtime
+        self._tenant_configuration_repository = tenant_configuration_repository
         self._governance = _governance_runtime(
             governance_repository=governance_repository,
             redis_client=redis_client,
@@ -257,12 +265,17 @@ class DiagnosticCognitionRuntime:
             max_tokens=self._config.context_token_budget,
         )
         retrieved_citations = _retrieved_citations_payload(retrieval)
+        resolved_taxonomy = await resolve_resolution_taxonomy_policy(
+            repository=self._tenant_configuration_repository,
+            tenant_id=tenant_id,
+        )
         prompt = _render_user_prompt(
             tenant_id=tenant_id,
             dispatch_id=dispatch_id,
             session_id=session_id,
             content=content,
             retrieval=retrieval,
+            taxonomy=resolved_taxonomy,
         )
         usage_id = derive_llm_usage_id(
             tenant_id=tenant_id,
@@ -271,7 +284,9 @@ class DiagnosticCognitionRuntime:
             attempt_id=attempt_id,
         )
         messages = (DiagnosticLLMMessage(role="user", content=prompt),)
-        system_prompt = _render_system_prompt(source_language)
+        system_prompt = _render_system_prompt(
+            source_language, taxonomy=resolved_taxonomy
+        )
         prompt_sha256 = _sha256_text(
             _full_prompt_snapshot(
                 system_prompt=system_prompt,
@@ -311,6 +326,7 @@ class DiagnosticCognitionRuntime:
                 "provider": self._llm_client.provider_name,
                 "model": self._llm_client.model_name,
             },
+            resolved_taxonomy=resolved_taxonomy,
         )
 
     async def complete_reasoning_snapshot(
@@ -365,6 +381,9 @@ class DiagnosticCognitionRuntime:
             completion = candidate.completion
             parsed = candidate.parsed
             semantic = candidate.semantic
+            validated_category = _validated_category(
+                parsed.category, snapshot.resolved_taxonomy
+            )
             audit_id = await self._save_cognition_audit(
                 snapshot=snapshot,
                 completion=completion,
@@ -422,7 +441,7 @@ class DiagnosticCognitionRuntime:
             await self._save_usage(record, tenant_id=snapshot.tenant_id)
             return DiagnosticReasoningResult(
                 summary=parsed.summary,
-                category=parsed.category.value,
+                category=validated_category,
                 confidence=parsed.confidence,
                 provider=completion.provider,
                 model=completion.model,
@@ -650,7 +669,7 @@ class DiagnosticCognitionRuntime:
             estimated_tokens=retrieval.total_tokens + completion.usage.total_tokens,
             grounding_strategy="tenant_sop_rag",
             metadata={
-                "category": parsed.category.value,
+                "category": parsed.category,
                 "confidence": parsed.confidence,
                 "provider": completion.provider,
                 "model": completion.model,
@@ -710,7 +729,7 @@ class DiagnosticCognitionRuntime:
                 tenant_id=tenant_id,
                 execution_id=execution_id,
                 decision=envelope.decision,
-                category=parsed.category.value,
+                category=parsed.category,
             )
         if (
             not envelope.is_ok
@@ -989,12 +1008,6 @@ def _parse_output(text: str) -> DiagnosticLLMOutput:
                 return DiagnosticLLMOutput.model_validate(stripped)
             except ValidationError as stripped_exc:
                 raise _diagnostic_schema_error(stripped_exc) from stripped_exc
-        if _category_value_is_unknown(raw_map, exc):
-            raise CognitionSemanticValidationError(
-                "diagnostic model output semantic rejection: "
-                f"category={_bounded_repr(raw_map.get('category'))} is not one of "
-                f"{', '.join(_CATEGORY_VALUES)}"
-            ) from exc
         raise _diagnostic_schema_error(exc) from exc
 
 
@@ -1013,7 +1026,7 @@ def _evaluate_semantic_candidate(
     parsed = _parse_output(completion.text)
     allowed_text = f"{snapshot.content}\n\n{_context_text(snapshot.retrieval)}"
     output_text = (
-        f"{parsed.summary}\n{parsed.category.value}\n{parsed.reasoning}"
+        f"{parsed.summary}\n{parsed.category}\n{parsed.reasoning}"
     )
     try:
         semantic = _validate_governance_candidate(
@@ -1105,7 +1118,7 @@ def _semantic_correction_messages(
                     (
                         "Return JSON only with keys summary, category, "
                         "confidence, reasoning. schema="
-                        f"{_schema_appendix()}"
+                        f"{_schema_appendix(snapshot.resolved_taxonomy)}"
                     ),
                 )
             ),
@@ -1212,19 +1225,6 @@ def _only_extra_field_errors(exc: ValidationError) -> bool:
     )
 
 
-def _category_value_is_unknown(
-    raw: Mapping[str, Any],
-    exc: ValidationError,
-) -> bool:
-    if "category" not in raw:
-        return False
-    return any(
-        tuple(error.get("loc", ())) == ("category",)
-        and str(error.get("type")) == "enum"
-        for error in exc.errors()
-    )
-
-
 def _validation_error_summary(exc: ValidationError) -> str:
     parts: list[str] = []
     for error in exc.errors():
@@ -1249,17 +1249,35 @@ def _bounded_repr(value: object) -> str:
     return f"{text[:117]}..."
 
 
-def _schema_appendix() -> str:
+def _schema_appendix(taxonomy: ResolutionTaxonomyPolicy) -> str:
     return json.dumps(
         {
             "summary": "non-empty string, max 4000 characters",
-            "category": list(_CATEGORY_VALUES),
+            "category": _category_values(taxonomy),
             "confidence": "number between 0.0 and 1.0",
             "reasoning": "string, max 4000 characters",
         },
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _category_values(taxonomy: ResolutionTaxonomyPolicy) -> list[str]:
+    return [c.id for c in taxonomy.categories] + [UNCLASSIFIED_CATEGORY_ID]
+
+
+def _validated_category(
+    raw_category: str, taxonomy: ResolutionTaxonomyPolicy
+) -> str:
+    if not taxonomy.categories:
+        return UNCLASSIFIED_CATEGORY_ID
+    if raw_category in taxonomy.category_ids():
+        return raw_category
+    logger.warning(
+        "diagnostic_category_outside_tenant_taxonomy",
+        extra={"raw_category": _bounded_repr(raw_category)},
+    )
+    return UNCLASSIFIED_CATEGORY_ID
 
 
 def _extract_json(text: str) -> str:
@@ -1278,11 +1296,30 @@ def _extract_json(text: str) -> str:
     return stripped[start : end + 1]
 
 
-def _render_system_prompt(source_language: str) -> str:
+def _render_system_prompt(
+    source_language: str, *, taxonomy: ResolutionTaxonomyPolicy
+) -> str:
     return _SYSTEM_PROMPT.replace(
         "{source_language}",
         _normalise_source_language(source_language),
+    ).replace(
+        "{category_taxonomy}",
+        _render_taxonomy_categories(taxonomy),
     )
+
+
+def _render_taxonomy_categories(taxonomy: ResolutionTaxonomyPolicy) -> str:
+    if not taxonomy.categories:
+        return (
+            f'"{UNCLASSIFIED_CATEGORY_ID}" - no tenant-specific category '
+            "taxonomy is configured; always use this value.\n"
+        )
+    lines = [f'"{c.id}" - {c.description}' for c in taxonomy.categories]
+    lines.append(
+        f'"{UNCLASSIFIED_CATEGORY_ID}" - use only if the ticket does not '
+        "match any of the categories above."
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _normalise_source_language(source_language: str) -> str:
@@ -1297,7 +1334,9 @@ def _render_user_prompt(
     session_id: str,
     content: str,
     retrieval: KnowledgeRetrievalResult,
+    taxonomy: ResolutionTaxonomyPolicy,
 ) -> str:
+    category_values = ", ".join(_category_values(taxonomy))
     return "\n\n".join(
         (
             f"tenant_id: {tenant_id}",
@@ -1312,11 +1351,10 @@ def _render_user_prompt(
             (
                 "Return JSON only. Required keys: summary, category, "
                 "confidence, reasoning. category must be exactly one of "
-                "account_issue, charging_issue, connectivity_issue, "
-                "product_defect, refund_issue, unknown_issue. Do not use "
+                f"{category_values}. Do not use "
                 "human-readable category labels. confidence must be a "
                 "number between 0.0 and 1.0, not a word. Do not include "
-                f"extra keys. schema={_schema_appendix()}"
+                f"extra keys. schema={_schema_appendix(taxonomy)}"
             ),
         )
     )

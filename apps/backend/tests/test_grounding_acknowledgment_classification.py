@@ -41,6 +41,8 @@ from app.runtime.grounding import (
     CitationCoverageGroundingChecker,
     GroundingCheckRequest,
 )
+from app.runtime.resolution_autonomy_policy import RESOLUTION_AUTONOMY_POLICY_TYPE
+from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
 from app.runtime.resolution_governance_gate import (
     ResolutionGovernanceGate,
     build_resolution_governance_runtime,
@@ -50,15 +52,27 @@ from app.runtime.resolution_runtime import (
     ResolutionRuntime,
     resolution_proposal_is_send_eligible,
 )
+from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
+    TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
 )
-from app.tenant.identity import as_knowledge_document_id
-from app.tenant.persistence import TenantKnowledgeDocumentRecord
+from app.tenant.identity import (
+    as_knowledge_document_id,
+    derive_governance_policy_version_id,
+)
+from app.tenant.persistence import (
+    InMemoryTenantConfigurationRepository,
+    TenantGovernancePolicyRecord,
+    TenantKnowledgeDocumentRecord,
+)
 
 TENANT_ID = "tenant-grounding-ack"
+_POLICY_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_POLICY_APPROVED_BY = "policy-admin"
+_POLICY_APPROVAL_ID = "approval-resolution-autonomy"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 EXECUTION_ID = "22222222-2222-4222-8222-222222222222"
 DISPATCH_ID = "33333333-3333-4333-8333-333333333333"
@@ -166,7 +180,119 @@ def _request() -> ResolutionProposalRequest:
     )
 
 
-def _runtime(generator: GroundedConversationGenerationRuntime) -> ResolutionRuntime:
+async def _resolution_autonomy_repository(
+    *,
+    category_allowlist: frozenset[str] = frozenset({"charging_issue"}),
+    monetary_commitment_threshold_cents: int = 10_000,
+    tenant_id: str = TENANT_ID,
+    version: int = 1,
+) -> InMemoryTenantConfigurationRepository:
+    repository = InMemoryTenantConfigurationRepository()
+    parameters: dict[str, object] = {
+        "reply_auto_send": {
+            "category_allowlist": sorted(category_allowlist),
+            "monetary_commitment_threshold_cents": monetary_commitment_threshold_cents,
+        }
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_AUTONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_AUTONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+    await _save_resolution_taxonomy_policy(
+        repository,
+        tenant_id=tenant_id,
+        category_ids=category_allowlist | {"charging_issue"},
+    )
+    return repository
+
+
+async def _save_resolution_taxonomy_policy(
+    repository: InMemoryTenantConfigurationRepository,
+    *,
+    tenant_id: str,
+    category_ids: frozenset[str],
+    version: int = 1,
+) -> None:
+    parameters: dict[str, object] = {
+        "categories": [
+            {
+                "id": category_id,
+                "label": category_id.replace("_", " ").title(),
+                "description": f"Issues classified as {category_id}.",
+                "recommended_actions": [
+                    {
+                        "type": "collect_context",
+                        "label": "Gather additional details from the customer "
+                        "before proceeding",
+                        "requires_execution": False,
+                    }
+                ],
+            }
+            for category_id in sorted(category_ids)
+        ],
+    }
+    content_sha256 = canonical_sha256(
+        {
+            "tenant_id": tenant_id,
+            "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+            "parameters": parameters,
+            "status": TenantGovernancePolicyStatus.ACTIVE.value,
+            "version": version,
+            "approved_by": _POLICY_APPROVED_BY,
+            "effective_from": _POLICY_NOW.isoformat(),
+            "source_approval_id": _POLICY_APPROVAL_ID,
+        }
+    )
+    record = TenantGovernancePolicyRecord(
+        policy_id=derive_governance_policy_version_id(
+            tenant_id=tenant_id,
+            policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+            version=version,
+        ),
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+        parameters=parameters,
+        status=TenantGovernancePolicyStatus.ACTIVE,
+        version=version,
+        approved_by=_POLICY_APPROVED_BY,
+        effective_from=_POLICY_NOW,
+        created_at=_POLICY_NOW,
+        source_approval_id=_POLICY_APPROVAL_ID,
+        content_sha256=content_sha256,
+        previous_version_sha256=None,
+    )
+    await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+
+
+async def _runtime(generator: GroundedConversationGenerationRuntime) -> ResolutionRuntime:
+    tenant_configuration_repository = await _resolution_autonomy_repository()
     return ResolutionRuntime(
         persistence=InMemoryResolutionProposalPersistence(),
         governance_gate=ResolutionGovernanceGate(
@@ -175,9 +301,11 @@ def _runtime(generator: GroundedConversationGenerationRuntime) -> ResolutionRunt
                 grounding_checker=CitationCoverageGroundingChecker(
                     document_repository=_FakeDocumentRepository(_approved_document())
                 ),
+                tenant_configuration_repository=tenant_configuration_repository,
             )
         ),
         conversation_generator=generator,
+        tenant_configuration_repository=tenant_configuration_repository,
     )
 
 
@@ -314,7 +442,7 @@ async def test_smuggled_factual_acknowledgment_denies_full_proposal() -> None:
     )
     generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
 
-    record = await _runtime(generator).create_proposal(_request())
+    record = await (await _runtime(generator)).create_proposal(_request())
 
     assert record.status is ResolutionProposalStatus.DENIED
     assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
@@ -345,7 +473,7 @@ async def test_greeting_acknowledgment_with_cited_claim_is_send_eligible() -> No
     )
     generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
 
-    record = await _runtime(generator).create_proposal(_request())
+    record = await (await _runtime(generator)).create_proposal(_request())
 
     assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
     assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
@@ -377,7 +505,7 @@ async def test_all_factual_reply_with_citations_still_send_eligible() -> None:
     )
     generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
 
-    record = await _runtime(generator).create_proposal(_request())
+    record = await (await _runtime(generator)).create_proposal(_request())
 
     assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
     assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW

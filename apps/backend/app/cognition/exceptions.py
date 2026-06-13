@@ -95,7 +95,7 @@ class CognitionParsingFailureError(CognitionSemanticValidationError):
 
 class CognitionSemanticRejectionError(CognitionSemanticValidationError):
     """
-    Valid JSON but category not in DiagnosticCategory enum.
+    Valid JSON but category fails semantic validation.
 
     Not retryable - semantic issue will not resolve.
     Goes directly to DLQ.

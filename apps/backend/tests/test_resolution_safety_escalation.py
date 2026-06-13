@@ -60,29 +60,33 @@ _NOW_DT = datetime.fromisoformat(_NOW)
 
 
 def test_resolution_denial_detection_escalates_human_review_categories() -> None:
+    # Every DENY decision must escalate to a human handoff: a denied
+    # resolution proposal means the customer gets no automatic reply, so
+    # escalation is the only remaining path regardless of which rule denied.
     assert agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(flags=("safety_risk",))
     )
-    # Fix 3 policy change: this used to assert NOT escalate. Legal/chargeback
-    # severe-resolution DENYs now create a human handoff like safety.
     assert agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(flags=("legal_or_chargeback_risk",))
     )
     assert agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(flags=("fraud_risk",))
     )
-    assert not agent_tasks._resolution_denial_should_escalate(
+    assert agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(rule_id="ungrounded_claim", flags=("safety_risk",))
     )
-    assert not agent_tasks._resolution_denial_should_escalate(
+    assert agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(rule_id="evidence_required")
     )
-    assert not agent_tasks._resolution_denial_should_escalate(
+    assert agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(
             policy_chain_id="cognition.diagnostic.terminal_block",
             flags=("safety_risk",),
         )
     )
+    # A proposal whose persisted governance_decision_id points at an ALLOW
+    # decision (local-denial-with-allowed-central-decision) is not a DENY
+    # lineage and must not be escalated.
     assert not agent_tasks._resolution_denial_should_escalate(
         _resolution_decision(decision="allow", flags=("safety_risk",))
     )
@@ -327,9 +331,24 @@ async def test_resolution_human_review_denial_prepares_handoff_and_outbox(
 
 
 @pytest.mark.asyncio
-async def test_resolution_routine_denial_is_not_selected_for_handoff() -> None:
+async def test_resolution_non_denied_proposal_is_not_selected_for_handoff() -> None:
     governance = InMemoryGovernanceRepository()
     await governance.record_decision(_resolution_decision(rule_id="evidence_required"))
+
+    selected = await agent_tasks._resolution_safety_escalation_governance_decision_id(
+        governance_repo=cast(PostgresGovernanceRepository, governance),
+        work_item=_work_item(),
+        proposal=_proposal(status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL),
+        draft=_draft(),
+    )
+
+    assert selected is None
+
+
+@pytest.mark.asyncio
+async def test_resolution_denial_with_allowed_central_decision_is_not_selected() -> None:
+    governance = InMemoryGovernanceRepository()
+    await governance.record_decision(_resolution_decision(decision="allow"))
 
     selected = await agent_tasks._resolution_safety_escalation_governance_decision_id(
         governance_repo=cast(PostgresGovernanceRepository, governance),

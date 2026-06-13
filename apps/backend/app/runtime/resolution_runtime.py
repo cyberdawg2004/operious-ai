@@ -45,18 +45,19 @@ from app.runtime.conversation_generation import (
     GroundedReplySegment,
     render_grounded_reply,
 )
+from app.runtime.resolution_autonomy_policy import (
+    ResolutionAutonomyPolicy,
+    resolve_resolution_autonomy_policy,
+)
+from app.runtime.resolution_taxonomy_policy import (
+    ResolutionTaxonomyPolicy,
+    UNCLASSIFIED_CATEGORY_ID,
+    resolve_resolution_taxonomy_policy,
+)
+from app.tenant.persistence import TenantConfigurationRepository
 
 _DEFAULT_AUTO_APPROVE_THRESHOLD = 0.80
 _DIAGNOSTIC_EVENT_TYPE = "diagnostic_analysis_completed"
-
-_SAFE_AUTO_CATEGORIES = frozenset(
-    {
-        "charging_issue",
-        "generic_troubleshooting",
-        "connectivity_issue",
-        "power_issue",
-    }
-)
 
 _SAFETY_KEYWORDS = frozenset(
     {
@@ -110,7 +111,7 @@ _POLICY_EXCEPTION_KEYWORDS = frozenset(
         "special case",
     }
 )
-_UNSUPPORTED_PROMISE_PATTERNS = frozenset(
+_BASELINE_UNSUPPORTED_PROMISE_PATTERNS = frozenset(
     {
         "we will refund",
         "we'll refund",
@@ -138,11 +139,6 @@ _OPTIONAL_EVIDENCE_INT_FIELDS = (
     "document_version",
     "char_start",
     "char_end",
-)
-_MONEY_PATTERN = re.compile(
-    r"(?:[$]\s*(?P<prefix>\d+(?:,\d{3})*(?:\.\d{1,2})?)|"
-    r"(?P<suffix>\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:usd|dollars))",
-    flags=re.IGNORECASE,
 )
 
 
@@ -233,6 +229,7 @@ class ResolutionRuntime:
         persistence: ResolutionProposalPersistenceProtocol,
         governance_gate: ResolutionGovernanceGateProtocol | None = None,
         conversation_generator: ConversationGenerationRuntimeProtocol | None = None,
+        tenant_configuration_repository: TenantConfigurationRepository | None = None,
         auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
     ) -> None:
         if auto_approve_threshold < 0 or auto_approve_threshold > 1:
@@ -240,6 +237,7 @@ class ResolutionRuntime:
         self._persistence = persistence
         self._governance_gate = governance_gate
         self._auto_approve_threshold = auto_approve_threshold
+        self._tenant_configuration_repository = tenant_configuration_repository
         self._conversation_generator = (
             conversation_generator or GroundedConversationGenerationRuntime()
         )
@@ -251,9 +249,13 @@ class ResolutionRuntime:
         """Persist and return the deterministic proposal for a diagnostic."""
 
         evidence = _normalise_evidence(request.retrieved_citations)
+        taxonomy = await resolve_resolution_taxonomy_policy(
+            repository=self._tenant_configuration_repository,
+            tenant_id=request.tenant_id,
+        )
         category = _resolution_category(
             diagnostic_category=request.diagnostic_category,
-            original_content=request.original_content,
+            taxonomy=taxonomy,
         )
         reply_draft = await self._generate_reply_draft(
             request=request,
@@ -262,12 +264,18 @@ class ResolutionRuntime:
         )
         reply_segments = tuple(segment.to_dict() for segment in reply_draft.segments)
         reply = render_grounded_reply(reply_draft)
-        recommended_actions = _recommended_actions(category)
+        recommended_actions = _recommended_actions(category, taxonomy)
+        autonomy_policy = await resolve_resolution_autonomy_policy(
+            repository=self._tenant_configuration_repository,
+            tenant_id=request.tenant_id,
+        )
         gate = _evaluate_gate(
             category=category,
             original_content=request.original_content,
             reply=reply,
             evidence=evidence,
+            autonomy_policy=autonomy_policy,
+            taxonomy=taxonomy,
         )
         proposal_id = derive_resolution_proposal_id(
             tenant_id=request.tenant_id,
@@ -679,151 +687,23 @@ def _fail_closed_gate_decision(
 def _resolution_category(
     *,
     diagnostic_category: str,
-    original_content: str,
+    taxonomy: ResolutionTaxonomyPolicy,
 ) -> str:
-    category = _slug(diagnostic_category)
-    content = original_content.lower()
-    if _contains_any(content, ("warranty", "replacement", "replace")):
-        return "warranty_replacement_inquiry"
-    if _contains_any(content, ("refund", "return", "chargeback")):
-        return "returns_refunds_inquiry"
-    if _contains_any(content, ("charge", "charging", "charger", "battery", "power")):
-        return "charging_issue"
-    if category in {"", "unknown", "unclear", "low_confidence"}:
-        return "unknown_low_confidence"
-    if _contains_any(content, ("troubleshoot", "error", "not working", "broken")):
-        return "generic_troubleshooting"
-    return category
+    if diagnostic_category == UNCLASSIFIED_CATEGORY_ID:
+        return UNCLASSIFIED_CATEGORY_ID
+    if diagnostic_category in taxonomy.category_ids():
+        return diagnostic_category
+    # Defense-in-depth: the diagnostic stage already clamps unrecognized
+    # categories to "unclassified", but a future caller that skips that step
+    # must not silently adopt an unvalidated category string.
+    return UNCLASSIFIED_CATEGORY_ID
 
 
 def _recommended_actions(
     category: str,
+    taxonomy: ResolutionTaxonomyPolicy,
 ) -> tuple[Mapping[str, Any], ...]:
-    if category == "charging_issue":
-        return (
-            {
-                "type": "customer_reply_draft",
-                "label": "Share cited charging troubleshooting steps",
-                "requires_execution": False,
-            },
-            {
-                "type": "warranty_claim",
-                "label": "Prepare a warranty claim for the charging issue",
-                "requires_execution": True,
-                "tool_name": "warranty.claim",
-                "payload": {
-                    "order_id": "unknown_order",
-                    "product_sku": "unknown_sku",
-                    "issue_category": "charging_issue",
-                    "customer_description": "Charging issue reported by customer.",
-                },
-                "target_resource_id": "warranty:charging_issue",
-            },
-            {
-                "type": "collect_context",
-                "label": "Collect model, order details, and indicator behavior",
-                "requires_execution": False,
-            },
-        )
-    if category == "product_defect":
-        return (
-            {
-                "type": "customer_reply_draft",
-                "label": "Draft a grounded product-defect response",
-                "requires_execution": False,
-            },
-            {
-                "type": "warranty_claim",
-                "label": "Prepare a warranty claim for the product defect",
-                "requires_execution": True,
-                "tool_name": "warranty.claim",
-                "payload": {
-                    "order_id": "unknown_order",
-                    "product_sku": "unknown_sku",
-                    "issue_category": "product_defect",
-                    "customer_description": "Product defect reported by customer.",
-                },
-                "target_resource_id": "warranty:product_defect",
-            },
-            {
-                "type": "warehouse_repair",
-                "label": "Create a warehouse repair report for defect review",
-                "requires_execution": True,
-                "tool_name": "warehouse.repair.report",
-                "payload": {
-                    "product_sku": "unknown_sku",
-                    "batch_id": None,
-                    "defect_description": "Product defect reported by customer.",
-                    "severity": "high",
-                    "session_id": "unknown_session",
-                },
-                "target_resource_id": "warehouse:repair:product_defect",
-            },
-            {
-                "type": "collect_context",
-                "label": "Ask for model number and defect evidence",
-                "requires_execution": False,
-            },
-        )
-    if category == "refund_requested":
-        return (
-            {
-                "type": "customer_reply_draft",
-                "label": "Draft a grounded refund response",
-                "requires_execution": False,
-            },
-            {
-                "type": "refund_request",
-                "label": "Prepare a refund request for policy review",
-                "requires_execution": True,
-                "tool_name": "refund.request",
-                "payload": {
-                    "order_id": "unknown_order",
-                    "product_sku": "unknown_sku",
-                    "refund_amount_cents": 5000,
-                    "refund_reason": "Customer requested refund.",
-                },
-                "target_resource_id": "refund:requested",
-            },
-            {
-                "type": "human_policy_review",
-                "label": "Route refund for policy review when needed",
-                "requires_execution": False,
-            },
-        )
-    if category == "warranty_replacement_inquiry":
-        return (
-            {
-                "type": "collect_context",
-                "label": "Collect warranty eligibility details",
-                "requires_execution": False,
-            },
-            {
-                "type": "human_policy_review",
-                "label": "Review replacement policy before any commitment",
-                "requires_execution": False,
-            },
-        )
-    if category == "returns_refunds_inquiry":
-        return (
-            {
-                "type": "collect_context",
-                "label": "Collect return or refund eligibility details",
-                "requires_execution": False,
-            },
-            {
-                "type": "human_policy_review",
-                "label": "Review refund policy before any commitment",
-                "requires_execution": False,
-            },
-        )
-    return (
-        {
-            "type": "collect_context",
-            "label": "Collect missing customer and product details",
-            "requires_execution": False,
-        },
-    )
+    return taxonomy.actions_for(category)
 
 
 def _evaluate_gate(
@@ -832,10 +712,17 @@ def _evaluate_gate(
     original_content: str,
     reply: str,
     evidence: tuple[Mapping[str, Any], ...],
+    autonomy_policy: ResolutionAutonomyPolicy,
+    taxonomy: ResolutionTaxonomyPolicy,
 ) -> _GateDecision:
     reasons: list[str] = []
     text = f"{original_content} {reply}".lower()
     evidence_empty = len(evidence) == 0
+    if category == UNCLASSIFIED_CATEGORY_ID:
+        # Defense-in-depth: even if a future misconfiguration ever placed
+        # "unclassified" into autonomy_policy.reply_auto_send_categories,
+        # an unclassified ticket must never auto-send.
+        reasons.append("unclassified_category_requires_human_approval")
     if evidence_empty:
         reasons.append("missing_citations")
     if _contains_any(text, _SAFETY_KEYWORDS):
@@ -846,11 +733,13 @@ def _evaluate_gate(
         reasons.append("fraud_risk")
     if _contains_any(text, _POLICY_EXCEPTION_KEYWORDS):
         reasons.append("policy_exception")
-    if _high_value_refund_or_replacement(text):
-        reasons.append("high_value_refund_or_replacement")
+    if _monetary_commitment_exceeds_threshold(
+        text, autonomy_policy.monetary_commitment_threshold_cents, taxonomy
+    ):
+        reasons.append("monetary_commitment_requires_approval")
     if _has_conflicting_evidence(evidence):
         reasons.append("conflicting_evidence")
-    if _contains_any(reply.lower(), _UNSUPPORTED_PROMISE_PATTERNS):
+    if _contains_any(reply.lower(), _unsupported_commitment_patterns(taxonomy)):
         return _GateDecision(
             supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
             governance_verdict=ResolutionGovernanceVerdict.DENY,
@@ -869,7 +758,7 @@ def _evaluate_gate(
             status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
             reasons=tuple(reasons),
         )
-    if reasons or category not in _SAFE_AUTO_CATEGORIES:
+    if reasons or category not in autonomy_policy.reply_auto_send_categories:
         return _GateDecision(
             supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
             governance_verdict=ResolutionGovernanceVerdict.REQUIRE_APPROVAL,
@@ -932,26 +821,46 @@ def _has_conflicting_evidence(
     return any(status not in {"", "active"} for status in statuses)
 
 
-def _high_value_refund_or_replacement(text: str) -> bool:
-    if not _contains_any(text, ("refund", "replacement", "replace", "warranty")):
-        return False
-    for match in _MONEY_PATTERN.finditer(text):
+def _monetary_commitment_exceeds_threshold(
+    text: str,
+    threshold_cents: int,
+    taxonomy: ResolutionTaxonomyPolicy,
+) -> bool:
+    money_pattern = _money_pattern_for(taxonomy)
+    for match in money_pattern.finditer(text):
         amount_text = match.group("prefix") or match.group("suffix")
         if amount_text is None:
             continue
-        amount = float(amount_text.replace(",", ""))
-        if amount >= 100:
+        amount_cents = round(float(amount_text.replace(",", "")) * 100)
+        if amount_cents >= threshold_cents:
             return True
     return False
 
 
+def _money_pattern_for(taxonomy: ResolutionTaxonomyPolicy) -> re.Pattern[str]:
+    symbols = sorted(
+        taxonomy.monetary_currency_symbols | {"$"}, key=len, reverse=True
+    )
+    codes = sorted(
+        taxonomy.monetary_currency_codes | {"usd", "dollars"}, key=len, reverse=True
+    )
+    symbol_pattern = "|".join(re.escape(symbol) for symbol in symbols)
+    code_pattern = "|".join(re.escape(code) for code in codes)
+    return re.compile(
+        rf"(?:(?:{symbol_pattern})\s*(?P<prefix>\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?)|"
+        rf"(?P<suffix>\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?)\s*(?:{code_pattern}))",
+        flags=re.IGNORECASE,
+    )
+
+
+def _unsupported_commitment_patterns(
+    taxonomy: ResolutionTaxonomyPolicy,
+) -> frozenset[str]:
+    return _BASELINE_UNSUPPORTED_PROMISE_PATTERNS | taxonomy.unsupported_commitment_patterns
+
+
 def _contains_any(text: str, needles: Iterable[str]) -> bool:
     return any(needle in text for needle in needles)
-
-
-def _slug(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
-    return slug
 
 
 def _clamp_confidence(value: float) -> float:

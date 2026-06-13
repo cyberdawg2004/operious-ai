@@ -17,6 +17,11 @@ from app.api.v1.schemas.tenant import TenantConfigChangeRequestResponse
 from app.core.config import get_settings
 from app.events import PostgresOperationalEventPersistence
 from app.events.appender import OperationalEventAppender
+from app.runtime.resolution_autonomy_policy import RESOLUTION_AUTONOMY_POLICY_TYPE
+from app.runtime.resolution_taxonomy_policy import (
+    RESOLUTION_TAXONOMY_POLICY_TYPE,
+    UNCLASSIFIED_CATEGORY_ID,
+)
 from app.services.tenant_config_change_request_service import (
     TenantConfigChangeRequestService,
 )
@@ -139,6 +144,45 @@ def _action_tools_policy_payload(parameters: dict[str, Any]) -> dict[str, Any]:
     return {
         "policy_type": ACTION_TOOLS_POLICY_TYPE,
         "parameters": parameters,
+        "status": TenantGovernancePolicyStatus.ACTIVE.value,
+        "effective_from": _ACTION_POLICY_EFFECTIVE_FROM.isoformat(),
+    }
+
+
+def _resolution_taxonomy_policy_payload() -> dict[str, Any]:
+    return {
+        "policy_type": RESOLUTION_TAXONOMY_POLICY_TYPE,
+        "parameters": {
+            "categories": [
+                {
+                    "id": "charging_issue",
+                    "label": "Charging Issue",
+                    "description": "Issues classified as charging_issue.",
+                    "recommended_actions": [
+                        {
+                            "type": "collect_context",
+                            "label": "Gather additional details from the "
+                            "customer before proceeding",
+                            "requires_execution": False,
+                        }
+                    ],
+                }
+            ],
+        },
+        "status": TenantGovernancePolicyStatus.ACTIVE.value,
+        "effective_from": _ACTION_POLICY_EFFECTIVE_FROM.isoformat(),
+    }
+
+
+def _resolution_autonomy_policy_payload(category_allowlist: list[str]) -> dict[str, Any]:
+    return {
+        "policy_type": RESOLUTION_AUTONOMY_POLICY_TYPE,
+        "parameters": {
+            "reply_auto_send": {
+                "category_allowlist": category_allowlist,
+                "monetary_commitment_threshold_cents": 10_000,
+            }
+        },
         "status": TenantGovernancePolicyStatus.ACTIVE.value,
         "effective_from": _ACTION_POLICY_EFFECTIVE_FROM.isoformat(),
     }
@@ -725,6 +769,50 @@ async def test_0072_slug_tenant_id_round_trips(pg_session: AsyncSession) -> None
     assert fetched is not None
     assert fetched.tenant_id == "anker-pilot"
     assert stored_tenant_id == "anker-pilot"
+
+
+@pytest.mark.asyncio
+async def test_resolution_autonomy_category_allowlist_rejects_unclassified(
+    pg_session: AsyncSession,
+) -> None:
+    """A `resolution_autonomy` policy proposal whose `category_allowlist`
+    contains the reserved `"unclassified"` category must be rejected at
+    `propose`, before it can ever reach approval/apply and let an
+    unclassified ticket auto-send.
+    """
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+
+    taxonomy_proposed = await service.propose(
+        tenant_id=tenant_id,
+        change_type="policy",
+        payload=_resolution_taxonomy_policy_payload(),
+        proposed_by="principal-a",
+    )
+    await service.approve(
+        change_request_id=taxonomy_proposed.change_request_id,
+        approved_by="principal-b",
+        expected_tenant_id=tenant_id,
+    )
+    await service.apply(
+        change_request_id=taxonomy_proposed.change_request_id,
+        expected_tenant_id=tenant_id,
+        applied_by="principal-b",
+    )
+
+    with pytest.raises(
+        TenantConfigChangeRequestLifecycleError,
+        match=f"must not contain the reserved category {UNCLASSIFIED_CATEGORY_ID!r}",
+    ):
+        await service.propose(
+            tenant_id=tenant_id,
+            change_type="policy",
+            payload=_resolution_autonomy_policy_payload(
+                ["charging_issue", UNCLASSIFIED_CATEGORY_ID]
+            ),
+            proposed_by="principal-a",
+        )
 
 
 def test_change_request_id_deterministic_uuid5() -> None:
