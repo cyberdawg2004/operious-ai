@@ -245,10 +245,15 @@ async def test_reject_on_db_pool_wait_reject() -> None:
 
 
 @pytest.mark.asyncio
-async def test_redis_memory_unavailable_defers_processing() -> None:
+async def test_redis_memory_unavailable_admits_when_otherwise_healthy() -> None:
+    """LOAD-BEARING: a Redis telemetry probe outage must not dead-letter
+    otherwise-healthy traffic. Telemetry is a monitoring signal, not
+    backpressure -- ``telemetry_unavailable`` stays true for observability,
+    but the decision must ADMIT so an idle queue doesn't drop customer mail.
+    """
     decision = await _decision(_AdmissionRedis(fail_info=True))
 
-    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.redis_memory_pct is None
     assert decision.redis_memory_available is False
@@ -257,10 +262,10 @@ async def test_redis_memory_unavailable_defers_processing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_queue_age_unavailable_defers_processing() -> None:
+async def test_queue_age_unavailable_admits_when_otherwise_healthy() -> None:
     decision = await _decision(_AdmissionRedis(fail_zrange=True))
 
-    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.queue_age_seconds is None
     assert decision.queue_age_available is False
@@ -271,10 +276,10 @@ async def test_queue_age_unavailable_defers_processing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_queue_depth_unavailable_is_not_silent_depth_zero() -> None:
+async def test_queue_depth_unavailable_admits_with_depth_zero() -> None:
     decision = await _decision(_AdmissionRedis(fail_llen=True))
 
-    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.queue_depth == 0
     assert decision.queue_depth_available is False
@@ -282,6 +287,42 @@ async def test_queue_depth_unavailable_is_not_silent_depth_zero() -> None:
     assert decision.unavailable_reasons == (
         f"queue_depth_unavailable:{QUEUE_DIAGNOSTIC_NORMAL}",
     )
+
+
+@pytest.mark.asyncio
+async def test_telemetry_unavailable_with_real_db_pool_pressure_still_defers() -> None:
+    """AD-2: telemetry being unavailable must not mask genuine backpressure.
+    A high db_pool_wait_ms (a real, directly-measured signal, independent of
+    the Redis telemetry probe) must still DEFER even when Redis telemetry is
+    also down.
+    """
+    decision = await AdmissionGate(
+        redis_client=_AdmissionRedis(fail_info=True),
+        thresholds=_thresholds(),
+    ).evaluate(
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+        tenant_id=TENANT_ID,
+        db_pool_wait_ms=300,
+    )
+
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.DB_POOL_PRESSURE
+    assert decision.telemetry_unavailable is True
+
+
+@pytest.mark.asyncio
+async def test_telemetry_unavailable_with_real_queue_depth_pressure_still_defers() -> None:
+    """AD-2: a real high queue depth (measured successfully) must still DEFER
+    even when other telemetry (queue age) is unavailable.
+    """
+    decision = await AdmissionGate(
+        redis_client=_AdmissionRedis(depth=10, fail_zrange=True),
+        thresholds=_thresholds(),
+    ).evaluate(queue_name=QUEUE_DIAGNOSTIC_NORMAL, tenant_id=TENANT_ID)
+
+    assert decision.outcome is AdmissionOutcome.DEFER
+    assert decision.reason is AdmissionReason.QUEUE_DEPTH_EXCEEDED
+    assert decision.telemetry_unavailable is True
 
 
 @pytest.mark.asyncio
@@ -509,8 +550,12 @@ async def test_webhook_redis_unavailable_preserves_captured_ingress() -> None:
         expected_tenant_id=TENANT_ID,
     )
     assert page.total == 1
+    # Redis telemetry is down but the admission decision still ADMITs (an
+    # otherwise-healthy queue must not be deferred to death). The admission
+    # record is still persisted for observability, with outcome=ADMIT and
+    # reason=telemetry_unavailable_processing.
     assert session_factory.commits == 1
-    assert session_factory.rows[0].outcome == AdmissionOutcome.DEFER.value
+    assert session_factory.rows[0].outcome == AdmissionOutcome.ADMIT.value
     assert (
         session_factory.rows[0].reason
         == AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING.value

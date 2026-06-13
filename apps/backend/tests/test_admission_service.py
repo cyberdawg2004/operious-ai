@@ -151,7 +151,7 @@ async def test_measure_db_pool_wait_ms_returns_benign_value_for_nullpool_path() 
     ),
 )
 @pytest.mark.asyncio
-async def test_telemetry_failure_defers_and_persists_for_processing_channels(
+async def test_telemetry_failure_admits_and_persists_for_processing_channels(
     channel: str,
     channel_class: AdmissionChannelClass,
 ) -> None:
@@ -170,13 +170,16 @@ async def test_telemetry_failure_defers_and_persists_for_processing_channels(
         channel=channel,
     )
 
-    assert decision.outcome is AdmissionOutcome.DEFER
+    # A telemetry-only outage must not defer an otherwise-healthy queue to
+    # death, but the decision is still persisted (telemetry_unavailable=True)
+    # for observability.
+    assert decision.outcome is AdmissionOutcome.ADMIT
     assert decision.reason is AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING
     assert decision.telemetry_unavailable is True
     assert decision.channel_class is channel_class
     assert session_factory.commits == 1
     row = session_factory.rows[0]
-    assert row.outcome == AdmissionOutcome.DEFER.value
+    assert row.outcome == AdmissionOutcome.ADMIT.value
     assert row.reason == AdmissionReason.TELEMETRY_UNAVAILABLE_PROCESSING.value
     assert row.telemetry_unavailable is True
     assert row.channel_class == channel_class.value
