@@ -19,7 +19,7 @@ primary_region = "iad"
   worker_beat = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
   worker_ingress = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q ingress.email,ingress.whatsapp,ingress.shopify --concurrency=2 --without-gossip --without-mingle --without-heartbeat"
   worker_outbound_send = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q outbound.send --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
-  worker_voice_realtime = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=8 --loglevel=info --without-gossip --without-mingle --without-heartbeat"
+  worker_voice_realtime = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=2 --loglevel=info --without-gossip --without-mingle --without-heartbeat"
 
 [env]
   # AUDIT_EXPORT_HMAC_SECRET is set through `fly secrets set`, never [env].
