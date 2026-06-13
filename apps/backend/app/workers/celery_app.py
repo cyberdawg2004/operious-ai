@@ -44,7 +44,6 @@ from app.queues import (
     QUEUE_SUPERVISOR,
     QUEUE_WEBHOOK_MAINTENANCE,
 )
-from app.services.alert_evaluator_factory import create_alert_evaluator
 from app.services.crisis_events import PostgresCrisisEventRepository
 from app.services.crisis_service import CrisisService
 
@@ -265,6 +264,13 @@ _initialize_worker_metrics_collector()
 
 
 def _initialize_worker_alert_evaluator() -> None:
+    # Imported lazily: app.services.alert_evaluator_factory transitively
+    # imports app.runtime, which imports app.workers.escalation_tasks, which
+    # imports celery_app from this module. A top-level import here would be
+    # circular (this module's `celery_app` isn't defined yet during its own
+    # import). By the time this function runs, the module is fully loaded.
+    from app.services.alert_evaluator_factory import create_alert_evaluator
+
     try:
         if get_alert_evaluator() is None:
             initialize_alert_evaluator(create_alert_evaluator())
@@ -276,9 +282,6 @@ def _initialize_worker_alert_evaluator() -> None:
             )
         except Exception:
             return
-
-
-_initialize_worker_alert_evaluator()
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
@@ -578,6 +581,12 @@ def on_task_retry(
 
 def enqueued_at_iso() -> str:
     return _utc_now().isoformat()
+
+
+# Deferred until enqueued_at_iso (and celery_app) are defined: the alert
+# evaluator factory transitively imports app.workers.escalation_tasks, which
+# imports both `celery_app` and `enqueued_at_iso` from this module.
+_initialize_worker_alert_evaluator()
 
 
 async def _collect_queue_depths() -> dict[str, int]:
