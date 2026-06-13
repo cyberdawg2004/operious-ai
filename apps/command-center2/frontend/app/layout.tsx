@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { GeistSans } from "geist/font/sans";
-import { GeistMono } from "geist/font/mono";
+import { Inter } from "next/font/google";
 import { Auth0Provider } from "@/components/auth0-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
+
+// Initialize Inter font for a softer, modern aesthetic
+const inter = Inter({ 
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://app.operious.com"),
@@ -25,7 +31,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased bg-canvas dark`}
+      className={`${inter.variable} h-full antialiased bg-canvas`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary font-sans">

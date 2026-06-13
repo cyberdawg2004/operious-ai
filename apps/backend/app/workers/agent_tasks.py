@@ -10,7 +10,7 @@ import os
 import sys
 import traceback
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Thread
@@ -262,13 +262,6 @@ _DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS = frozenset(
 _DIAGNOSTIC_TERMINAL_POLICY_NAME = "cognition.diagnostic_terminal_block"
 _DIAGNOSTIC_TERMINAL_POLICY_CHAIN_ID = "cognition.diagnostic.terminal_block"
 _DIAGNOSTIC_TERMINAL_GOVERNANCE_VERSION = "diagnostic-terminal-block.v1"
-_RESOLUTION_COMMUNICATION_POLICY_CHAIN_ID = (
-    "resolution.communication.pre_execution"
-)
-_RESOLUTION_SEVERE_RISK_RULE_ID = "severe_resolution_risk"
-_RESOLUTION_HUMAN_REVIEW_ESCALATION_FLAGS = frozenset(
-    {"safety_risk", "legal_or_chargeback_risk", "fraud_risk"}
-)
 
 logger = logging.getLogger(__name__)
 
@@ -411,6 +404,7 @@ class _DiagnosticExecutionWorkItem:
     source_language: str = "en"
     source_channel: str | None = None
     reply_recipient: str | None = None
+    reply_recipient_display_name: str | None = None
     reply_source: str | None = None
     reply_subject: str | None = None
     reply_thread_context: str | None = None
@@ -427,6 +421,7 @@ class _DispatchContentContext:
     source_language: str
     source_channel: str | None = None
     reply_recipient: str | None = None
+    reply_recipient_display_name: str | None = None
     reply_source: str | None = None
     reply_subject: str | None = None
     reply_thread_context: str | None = None
@@ -440,6 +435,7 @@ class _DispatchContentContext:
 class _OutboundReplyContext:
     source_channel: str | None = None
     recipient: str | None = None
+    recipient_display_name: str | None = None
     source: str | None = None
     subject: str | None = None
     thread_context: str | None = None
@@ -598,6 +594,9 @@ async def _prepare_diagnostic_execution(
             source_language=content_context.source_language,
             source_channel=content_context.source_channel,
             reply_recipient=content_context.reply_recipient,
+            reply_recipient_display_name=(
+                content_context.reply_recipient_display_name
+            ),
             reply_source=content_context.reply_source,
             reply_subject=content_context.reply_subject,
             reply_thread_context=content_context.reply_thread_context,
@@ -713,7 +712,7 @@ def _semantic_rejection_forensic_record(
     completion = draft.completion
     parsed = parse_diagnostic_output(completion.text)
     output_text = (
-        f"{parsed.summary}\n{parsed.category.value}\n"
+        f"{parsed.summary}\n{parsed.category}\n"
         f"{parsed.reasoning}"
     )
     semantic = inspect_governance_terms(
@@ -1493,6 +1492,7 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
                 source_language=source_language,
                 source_channel=reply_context.source_channel,
                 reply_recipient=reply_context.recipient,
+                reply_recipient_display_name=reply_context.recipient_display_name,
                 reply_source=reply_context.source,
                 reply_subject=reply_context.subject,
                 reply_thread_context=reply_context.thread_context,
@@ -1509,6 +1509,7 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
         source_language=source_language,
         source_channel=reply_context.source_channel,
         reply_recipient=reply_context.recipient,
+        reply_recipient_display_name=reply_context.recipient_display_name,
         reply_source=reply_context.source,
         reply_subject=reply_context.subject,
         reply_thread_context=reply_context.thread_context,
@@ -1537,6 +1538,11 @@ def _extract_outbound_reply_context(
     return _OutboundReplyContext(
         source_channel=channel,
         recipient=_payload_text(payload, "from"),
+        recipient_display_name=(
+            _payload_text(payload, "from_display_name")
+            if channel == "email"
+            else None
+        ),
         source=source,
         subject=(
             _reply_subject(_payload_text(payload, "subject"))
@@ -1692,6 +1698,10 @@ async def _append_resolution_proposal_after_diagnostic(
             data_protection = _data_protection_service(session)
             resolution_persistence = PostgresResolutionProposalPersistence(session)
             governance_repo = PostgresGovernanceRepository(session)
+            tenant_configuration_repository = PostgresTenantConfigurationRepository(
+                session,
+                data_protection=data_protection,
+            )
             proposal = await ResolutionRuntime(
                 persistence=resolution_persistence,
                 governance_gate=ResolutionGovernanceGate(
@@ -1700,18 +1710,15 @@ async def _append_resolution_proposal_after_diagnostic(
                     governance_runtime=build_resolution_governance_runtime(
                         persistence=governance_repo,
                         grounding_checker=CitationCoverageGroundingChecker(
-                            document_repository=(
-                                PostgresTenantConfigurationRepository(
-                                    session,
-                                    data_protection=data_protection,
-                                )
-                            )
+                            document_repository=tenant_configuration_repository,
                         ),
+                        tenant_configuration_repository=tenant_configuration_repository,
                     )
                 ),
                 conversation_generator=GroundedConversationGenerationRuntime(
                     llm_client=_diagnostic_llm_client()
                 ),
+                tenant_configuration_repository=tenant_configuration_repository,
             ).create_proposal(
                 ResolutionProposalRequest(
                     tenant_id=work_item.tenant_id,
@@ -1952,6 +1959,10 @@ def _outbound_send_target_for_work_item(
     metadata: dict[str, Any] = {}
     if work_item.reply_phone_number_id is not None:
         metadata["phone_number_id"] = work_item.reply_phone_number_id
+    if work_item.reply_recipient_display_name is not None:
+        metadata["recipient_display_name"] = (
+            work_item.reply_recipient_display_name
+        )
     return OutboundSendTarget(
         channel=work_item.source_channel,
         recipient=work_item.reply_recipient,
@@ -2128,40 +2139,11 @@ async def _resolution_safety_escalation_governance_decision_id(
 def _resolution_denial_should_escalate(
     decision: GovernanceDecisionRecord,
 ) -> bool:
-    if decision.decision != Decision.DENY.value:
-        return False
-    if decision.policy_chain_id != _RESOLUTION_COMMUNICATION_POLICY_CHAIN_ID:
-        return False
-    return bool(
-        _RESOLUTION_HUMAN_REVIEW_ESCALATION_FLAGS
-        & _resolution_denial_flags(decision)
-    )
-
-
-def _resolution_denial_flags(
-    decision: GovernanceDecisionRecord,
-) -> frozenset[str]:
-    flags: set[str] = set()
-    for record in (*decision.evaluated_rules, *decision.violations):
-        if record.rule_id != _RESOLUTION_SEVERE_RISK_RULE_ID:
-            continue
-        flags.update(_metadata_flags(record.metadata.get("flags")))
-    return frozenset(flags)
-
-
-def _metadata_flags(value: object) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        return (value,) if value else ()
-    if isinstance(value, (list, tuple, set, frozenset)):
-        flags: list[str] = []
-        for item in cast(Iterable[object], value):
-            text = str(item)
-            if text:
-                flags.append(text)
-        return tuple(flags)
-    return ()
+    # Every denied resolution proposal must reach a human: governance DENY
+    # means the customer gets no automatic reply, so a handoff is the only
+    # remaining path. Local-denial-with-allowed-central-decision proposals
+    # carry a non-DENY governance_decision_id and are excluded here.
+    return decision.decision == Decision.DENY.value
 
 
 async def _publish_resolution_safety_escalation_if_present(
@@ -3658,6 +3640,7 @@ def _diagnostic_cognition_runtime(
         governance_repository=PostgresGovernanceRepository(session),
         redis_client=get_redis_client(),
         quota_runtime=get_initialized_quota_runtime(),
+        tenant_configuration_repository=tenant_repository,
         config=DiagnosticCognitionRuntimeConfig(
             max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,
             temperature=settings.ANTHROPIC_TEMPERATURE,

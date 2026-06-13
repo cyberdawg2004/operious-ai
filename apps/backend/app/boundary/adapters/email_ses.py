@@ -283,7 +283,9 @@ def parse_email_mime(raw_email: bytes) -> dict[str, Any]:
 
     message = BytesParser(policy=policy.default).parsebytes(raw_email)
     message_id = _decoded_header_value(message, "Message-ID")
-    from_address = _first_address(_decoded_header_value(message, "From"))
+    from_header = _decoded_header_value(message, "From")
+    from_address = _first_address(from_header)
+    from_display_name = _first_display_name(from_header)
     to_address = _first_address(_decoded_header_value(message, "To"))
     subject = _decoded_header_value(message, "Subject")
     in_reply_to = _decoded_header_value(message, "In-Reply-To")
@@ -302,6 +304,7 @@ def parse_email_mime(raw_email: bytes) -> dict[str, Any]:
             references=references,
         ),
         "from": from_address,
+        "from_display_name": from_display_name,
         "to": to_address,
         "subject": subject,
         "text": text,
@@ -587,6 +590,17 @@ def _first_address(value: str | None) -> str | None:
         if address:
             return address
     return value.strip() or None
+
+
+def _first_display_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    addresses = getaddresses([value])
+    for name, _ in addresses:
+        cleaned = name.strip()
+        if cleaned:
+            return cleaned
+    return None
 
 
 def _nested(value: Mapping[str, Any], *keys: str) -> Any:

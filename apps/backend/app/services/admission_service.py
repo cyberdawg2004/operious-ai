@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 
@@ -216,9 +217,11 @@ async def measure_db_pool_wait_ms(
 def _resolve_engine(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncEngine | object | None:
-    bind = getattr(session_factory, "bind", None)
-    if bind is None and hasattr(session_factory, "kw"):
-        bind = getattr(session_factory.kw, "get", lambda *_: None)("bind")
+    bind: object | None = getattr(session_factory, "bind", None)
+    if bind is None:
+        kw = getattr(session_factory, "kw", None)
+        if isinstance(kw, Mapping):
+            bind = cast(Mapping[str, object], kw).get("bind")
     if bind is None:
         return None
     if hasattr(bind, "pool"):

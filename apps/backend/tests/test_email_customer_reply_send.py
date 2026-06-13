@@ -155,6 +155,45 @@ async def test_governed_allow_email_transmits_once_and_ledgers_provider_id() -> 
 
 
 @pytest.mark.asyncio
+async def test_governed_email_is_wrapped_in_professional_template() -> None:
+    service, sender, _deliveries = await _service()
+
+    result = await service.send_draft(
+        draft_id=str(DRAFT_ID),
+        tenant_id=TENANT_ID,
+        expected_tenant_id=TENANT_ID,
+        recipient_email_address=RECIPIENT,
+        subject=SUBJECT,
+    )
+
+    assert result.transmitted is True
+    sent = sender.requests[0]
+    assert sent.subject == f"{SUBJECT} [Ticket #OP-0E3B663B]"
+    assert sent.body_text.startswith("Dear Customer,\n")
+    assert REPLY in sent.body_text
+    assert "Ticket #" not in sent.body_text
+    assert "ticket number: OP-0E3B663B" in sent.body_text
+    assert sent.body_text.endswith("The Tenant Support Team")
+
+
+@pytest.mark.asyncio
+async def test_governed_email_uses_customer_display_name_when_provided() -> None:
+    service, sender, _deliveries = await _service()
+
+    await service.send_draft(
+        draft_id=str(DRAFT_ID),
+        tenant_id=TENANT_ID,
+        expected_tenant_id=TENANT_ID,
+        recipient_email_address=RECIPIENT,
+        subject=SUBJECT,
+        customer_display_name="Jordan Smith",
+    )
+
+    sent = sender.requests[0]
+    assert sent.body_text.startswith("Dear Jordan Smith,\n")
+
+
+@pytest.mark.asyncio
 async def test_reprocessing_same_allowed_email_does_not_double_send() -> None:
     service, sender, _deliveries = await _service()
 

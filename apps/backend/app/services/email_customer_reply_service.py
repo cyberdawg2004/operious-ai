@@ -19,6 +19,11 @@ from app.boundary.outbound import (
     SesV2SendError,
     derive_email_customer_reply_delivery_id,
 )
+from app.runtime.customer_email_template import (
+    derive_ticket_reference,
+    render_customer_email_body,
+    render_customer_email_subject,
+)
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.governance.enums import Decision
 from app.governance.persistence import BaseGovernanceRepository
@@ -146,6 +151,7 @@ class EmailCustomerReplySendService:
         expected_governance_decision_id: uuid.UUID | str | None = None,
         expected_draft_body_sha256: str | None = None,
         allow_failed_delivery_retry: bool = False,
+        customer_display_name: str | None = None,
     ) -> EmailCustomerReplySendResult:
         if tenant_id != expected_tenant_id:
             raise ValueError("tenant_id does not match expected_tenant_id")
@@ -164,6 +170,7 @@ class EmailCustomerReplySendService:
                 expected_governance_decision_id=expected_governance_decision_id,
                 expected_draft_body_sha256=expected_draft_body_sha256,
                 allow_failed_delivery_retry=allow_failed_delivery_retry,
+                customer_display_name=customer_display_name,
             )
         except Exception:
             await self._rollback()
@@ -185,6 +192,7 @@ class EmailCustomerReplySendService:
         expected_governance_decision_id: uuid.UUID | str | None,
         expected_draft_body_sha256: str | None,
         allow_failed_delivery_retry: bool,
+        customer_display_name: str | None,
     ) -> EmailCustomerReplySendResult:
         recipient = _required_text("recipient_email_address", recipient_email_address)
         subject_text = _required_text("subject", subject)
@@ -286,6 +294,17 @@ class EmailCustomerReplySendService:
                 )
 
         if should_transmit:
+            ticket_reference = derive_ticket_reference(draft.session_id)
+            email_subject = render_customer_email_subject(
+                subject=subject_text,
+                ticket_reference=ticket_reference,
+            )
+            email_body = render_customer_email_body(
+                body=draft.draft_body,
+                ticket_reference=ticket_reference,
+                tenant_id=tenant_id,
+                customer_display_name=customer_display_name,
+            )
             try:
                 response = await self._sender.send_email(
                     SesEmailSendRequest(
@@ -297,8 +316,8 @@ class EmailCustomerReplySendService:
                         configuration_set_name=credentials.configuration_set_name,
                         from_email_address=credentials.source_email_address,
                         recipient_email_address=recipient,
-                        subject=subject_text,
-                        body_text=draft.draft_body,
+                        subject=email_subject,
+                        body_text=email_body,
                         in_reply_to_message_id=_optional_text(in_reply_to_message_id),
                         references_header=_optional_text(references_header),
                         timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,

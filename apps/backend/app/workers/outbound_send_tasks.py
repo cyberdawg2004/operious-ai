@@ -440,6 +440,7 @@ async def _send_email_outbox(
         expected_governance_decision_id=outbox.governance_decision_id,
         expected_draft_body_sha256=outbox.draft_body_sha256,
         allow_failed_delivery_retry=True,
+        customer_display_name=_metadata_text(outbox, "recipient_display_name"),
     )
     return _send_result_from_delivery_result(
         status=result.status,
