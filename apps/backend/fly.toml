@@ -10,16 +10,16 @@ primary_region = "iad"
 
 [processes]
   web = "scripts/prepare_google_credentials.sh uvicorn app.main:app --host 0.0.0.0 --port 8000"
-  worker_diagnostic = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=4"
-  worker_escalation = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q escalation --concurrency=1"
-  worker_supervisor = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q supervisor,qa --concurrency=1"
-  worker_sme_approval = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sme_approval --concurrency=1"
-  worker_sop = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=1"
-  worker_maintenance = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=1"
+  worker_diagnostic = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q diagnostic.high,diagnostic.normal,diagnostic.retry --concurrency=4 --without-gossip --without-mingle --without-heartbeat"
+  worker_escalation = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q escalation --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
+  worker_supervisor = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q supervisor,qa --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
+  worker_sme_approval = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sme_approval --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
+  worker_sop = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
+  worker_maintenance = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
   worker_beat = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
-  worker_ingress = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q ingress.email,ingress.whatsapp,ingress.shopify --concurrency=2"
-  worker_outbound_send = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q outbound.send --concurrency=1"
-  worker_voice_realtime = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=8 --loglevel=info"
+  worker_ingress = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q ingress.email,ingress.whatsapp,ingress.shopify --concurrency=2 --without-gossip --without-mingle --without-heartbeat"
+  worker_outbound_send = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q outbound.send --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
+  worker_voice_realtime = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=8 --loglevel=info --without-gossip --without-mingle --without-heartbeat"
 
 [env]
   # AUDIT_EXPORT_HMAC_SECRET is set through `fly secrets set`, never [env].
