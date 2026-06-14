@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.knowledge import (
@@ -135,7 +136,12 @@ def _data_protection_service(session: AsyncSession) -> DataProtectionService | N
         and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
     ):
         return None
-    return DataProtectionService.from_settings(session, settings)
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+        legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+    )
 
 
 async def _set_db_tenant_context(session: AsyncSession, tenant_id: str) -> None:

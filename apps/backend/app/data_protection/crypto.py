@@ -134,9 +134,15 @@ class DataProtectionLegalHoldRecord:
 class MasterKeyRing:
     """Versioned platform master-key ring used to wrap random data keys."""
 
-    __slots__ = ("_active_version", "_keys")
+    __slots__ = ("_active_version", "_keys", "_legacy_keys")
 
-    def __init__(self, *, keys: Mapping[str, str | bytes], active_version: str) -> None:
+    def __init__(
+        self,
+        *,
+        keys: Mapping[str, str | bytes],
+        active_version: str,
+        legacy_keys: Mapping[str, str | bytes] | None = None,
+    ) -> None:
         if not active_version.strip():
             raise DataProtectionError("active master key version is required")
         decoded: dict[str, bytes] = {}
@@ -149,6 +155,13 @@ class MasterKeyRing:
             raise DataProtectionError("active master key version is not in the ring")
         self._active_version = active_version
         self._keys = decoded
+        legacy_decoded: dict[str, bytes] = {}
+        for version, raw_key in (legacy_keys or {}).items():
+            normalized_version = version.strip()
+            if not normalized_version:
+                raise DataProtectionError("master key version must be non-empty")
+            legacy_decoded[normalized_version] = _decode_key(raw_key)
+        self._legacy_keys = legacy_decoded
 
     @classmethod
     def from_settings(
@@ -156,6 +169,7 @@ class MasterKeyRing:
         settings: Settings,
         *,
         master_key_unwrap: "MasterKeyUnwrap | None" = None,
+        legacy_credential_key: str | bytes | None = None,
     ) -> "MasterKeyRing":
         """Build the ring from settings.
 
@@ -163,6 +177,14 @@ class MasterKeyRing:
         ``DATA_PROTECTION_KMS_BACKEND=gcp``: each entry's material is base64
         KMS-wrapped ciphertext that is unwrapped to the plaintext KEK. When
         ``None`` (local backend), materials are plaintext key material.
+
+        ``legacy_credential_key`` is the platform's ``TENANT_CREDENTIAL_MASTER_KEY``,
+        which ``DataProtectionService`` historically used as an implicit "v1" KEK
+        before a dedicated ``DATA_PROTECTION_MASTER_KEYS`` was configured (#54/#55).
+        Data keys wrapped during that window still carry ``master_key_version="v1"``
+        but were sealed under this credential key, not the dedicated one. When a
+        dedicated ring is configured, this is registered as a fallback candidate for
+        the active version label so those older rows continue to unwrap.
         """
         raw_ring = getattr(settings, "DATA_PROTECTION_MASTER_KEYS", "")
         active = getattr(settings, "DATA_PROTECTION_ACTIVE_MASTER_KEY_VERSION", "")
@@ -182,7 +204,10 @@ class MasterKeyRing:
                 else:
                     keys[version.strip()] = stripped
             active_version = active.strip() or next(iter(keys))
-            return cls(keys=keys, active_version=active_version)
+            legacy_keys: dict[str, str | bytes] = {}
+            if legacy_credential_key and str(legacy_credential_key).strip():
+                legacy_keys[active_version] = legacy_credential_key
+            return cls(keys=keys, active_version=active_version, legacy_keys=legacy_keys)
         if master_key_unwrap is not None:
             raise DataProtectionError(
                 "DATA_PROTECTION_KMS_BACKEND=gcp requires "
@@ -242,13 +267,48 @@ class MasterKeyRing:
         try:
             return AESGCM(master).decrypt(nonce, ciphertext, aad)
         except InvalidTag as exc:
-            raise DataProtectionError("data key could not be authenticated") from exc
+            legacy_master = self._legacy_keys.get(row.master_key_version)
+            if legacy_master is None:
+                raise DataProtectionError("data key could not be authenticated") from exc
+            try:
+                return AESGCM(legacy_master).decrypt(nonce, ciphertext, aad)
+            except InvalidTag as legacy_exc:
+                raise DataProtectionError("data key could not be authenticated") from legacy_exc
 
     def _master(self, version: str) -> bytes:
         try:
             return self._keys[version]
         except KeyError as exc:
             raise DataProtectionError(f"master key version {version!r} is unavailable") from exc
+
+
+async def check_master_key_ring_compatibility(
+    session: AsyncSession, ring: MasterKeyRing
+) -> bool:
+    """Return ``False`` if any persisted master key version no longer unwraps.
+
+    Samples one row per distinct ``master_key_version`` in
+    ``data_protection_data_keys`` and attempts ``ring.unwrap_key``. A label
+    that previously unwrapped but no longer does indicates the key material
+    behind that version label has changed (see the 2026-06-11 "v1" label
+    collision) — every other row sharing that label is now at risk of the
+    same fate.
+    """
+    stmt = select(DataProtectionDataKeyRow).order_by(
+        DataProtectionDataKeyRow.master_key_version,
+        DataProtectionDataKeyRow.created_at,
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    seen_versions: set[str] = set()
+    for row in rows:
+        if row.master_key_version in seen_versions:
+            continue
+        seen_versions.add(row.master_key_version)
+        try:
+            ring.unwrap_key(row)
+        except DataProtectionError:
+            return False
+    return True
 
 
 class DataProtectionService:
@@ -267,12 +327,14 @@ class DataProtectionService:
         settings: Settings,
         *,
         master_key_unwrap: "MasterKeyUnwrap | None" = None,
+        legacy_credential_key: str | bytes | None = None,
     ) -> "DataProtectionService":
         return cls(
             session,
             master_key_ring=MasterKeyRing.from_settings(
                 settings,
                 master_key_unwrap=master_key_unwrap,
+                legacy_credential_key=legacy_credential_key,
             ),
         )
 
@@ -1046,4 +1108,5 @@ __all__ = [
     "LegalHoldBlockedError",
     "LegalHoldNotFoundError",
     "MasterKeyRing",
+    "check_master_key_ring_compatibility",
 ]

@@ -285,6 +285,7 @@ def _data_protection_service(
         session,
         settings,
         master_key_unwrap=build_master_key_unwrap(settings),
+        legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
     )
 
 

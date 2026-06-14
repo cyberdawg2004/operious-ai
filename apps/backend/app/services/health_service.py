@@ -46,6 +46,12 @@ from app.core.queue_depth import (
     RedisQueueDepthProvider,
     get_queue_depth_provider,
 )
+from app.data_protection.crypto import (
+    DataProtectionError,
+    MasterKeyRing,
+    check_master_key_ring_compatibility,
+)
+from app.data_protection.kms import build_master_key_unwrap
 from app.core.queue_admission import (
     QueueDepthReport,
     aggregate_queue_status,
@@ -230,8 +236,13 @@ class HealthService(BaseService):
                     error="TimeoutError",
                 ),
             )
-        overall = aggregate_status(list(checks))
-        dependencies = tuple(DependencyReport.from_check(c) for c in checks)
+        all_checks = list(checks)
+        ring_check = await self._probe_master_key_ring(timeout=probe_timeout)
+        if ring_check is not None:
+            all_checks.append(ring_check)
+
+        overall = aggregate_status(all_checks)
+        dependencies = tuple(DependencyReport.from_check(c) for c in all_checks)
 
         if overall != "ok":
             self.logger.warning(
@@ -274,6 +285,43 @@ class HealthService(BaseService):
         """Run a bounded Redis readiness probe."""
 
         return await check_redis(self._redis_provider(), timeout=timeout)
+
+    async def _probe_master_key_ring(self, *, timeout: float) -> DependencyCheck | None:
+        """Verify persisted data keys still unwrap under the configured ring.
+
+        Returns ``None`` (skipped) when data protection is not configured.
+        A failure here means a ``master_key_version`` label was reused for
+        different key material (as happened on 2026-06-11), leaving every
+        data key under that label permanently undecryptable.
+        """
+        settings = self._settings
+        if (
+            not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+            and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+        ):
+            return None
+
+        async def _check() -> None:
+            ring = MasterKeyRing.from_settings(
+                settings,
+                master_key_unwrap=build_master_key_unwrap(settings),
+                legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+            )
+            session_factory = self._session_factory_provider()
+            async with session_factory() as session:
+                compatible = await check_master_key_ring_compatibility(session, ring)
+            if not compatible:
+                raise DataProtectionError(
+                    "a master_key_version label no longer unwraps with the "
+                    "configured ring (possible key-material change under a "
+                    "reused version label)"
+                )
+
+        return await run_with_timeout(
+            name="data_protection_master_key_ring",
+            coro_factory=_check,
+            timeout=timeout,
+        )
 
     async def _probe_queue_depths(self) -> dict[str, QueueDepthReport]:
         """Return bounded Celery queue depth health reports."""
