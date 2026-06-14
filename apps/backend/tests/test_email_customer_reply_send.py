@@ -193,6 +193,86 @@ async def test_governed_email_uses_customer_display_name_when_provided() -> None
     assert sent.body_text.startswith("Dear Jordan Smith,\n")
 
 
+@pytest.mark.parametrize(
+    "display_name",
+    [
+        None,
+        "",
+        "imad.baraja123",
+        "noreply",
+        "support",
+        "j.doe@example.net",
+        "12345",
+        "Jordan_Smith",
+    ],
+)
+@pytest.mark.asyncio
+async def test_governed_email_falls_back_to_dear_customer_for_unclean_names(
+    display_name: str | None,
+) -> None:
+    service, sender, _deliveries = await _service()
+
+    await service.send_draft(
+        draft_id=str(DRAFT_ID),
+        tenant_id=TENANT_ID,
+        expected_tenant_id=TENANT_ID,
+        recipient_email_address=RECIPIENT,
+        subject=SUBJECT,
+        customer_display_name=display_name,
+    )
+
+    sent = sender.requests[0]
+    assert sent.body_text.startswith("Dear Customer,\n")
+
+
+@pytest.mark.asyncio
+async def test_governed_email_strips_citation_marks_but_draft_keeps_them() -> None:
+    """Break-control (a): rendered email loses "[1]"-style marks; the
+    governed draft (and its checksum) used by grounding governance keeps
+    them, untouched by this seam."""
+
+    cited_reply = (
+        "Try resetting the device once [1]. This often resolves charging "
+        "issues [2, 3] and is the recommended first step [12]."
+    )
+    service, sender, _deliveries, resolution = await _service_with_reply(
+        cited_reply
+    )
+
+    result = await service.send_draft(
+        draft_id=str(DRAFT_ID),
+        tenant_id=TENANT_ID,
+        expected_tenant_id=TENANT_ID,
+        recipient_email_address=RECIPIENT,
+        subject=SUBJECT,
+    )
+
+    assert result.transmitted is True
+    sent = sender.requests[0]
+    assert "[1]" not in sent.body_text
+    assert "[2, 3]" not in sent.body_text
+    assert "[12]" not in sent.body_text
+    assert "Try resetting the device once. This often resolves charging " in (
+        sent.body_text
+    )
+    assert " ." not in sent.body_text
+    assert (
+        "Try resetting the device once. This often resolves charging "
+        "issues and is the recommended first step.\n"
+    ) in sent.body_text
+
+    draft = await resolution.get_resolution_outbound_draft(
+        str(DRAFT_ID),
+        expected_tenant_id=TENANT_ID,
+    )
+    assert draft is not None
+    assert draft.draft_body == cited_reply
+    assert "[1]" in draft.draft_body
+    assert "[2, 3]" in draft.draft_body
+    assert "[12]" in draft.draft_body
+    assert draft.draft_body_sha256 == _sha256(cited_reply)
+
+
 @pytest.mark.asyncio
 async def test_reprocessing_same_allowed_email_does_not_double_send() -> None:
     service, sender, _deliveries = await _service()
@@ -346,10 +426,57 @@ async def _service(
     )
 
 
+async def _service_with_reply(
+    reply: str,
+) -> tuple[
+    EmailCustomerReplySendService,
+    _Sender,
+    InMemoryEmailDeliveryRepository,
+    InMemoryResolutionProposalPersistence,
+]:
+    resolution = InMemoryResolutionProposalPersistence()
+    await resolution.create_resolution_proposal(
+        _proposal(
+            status=ResolutionProposalStatus.SEND_ELIGIBLE,
+            governance_decision_id=DECISION_ID,
+            reply=reply,
+        ),
+        expected_tenant_id=TENANT_ID,
+    )
+    await resolution.create_resolution_outbound_draft(
+        _draft(
+            status=ResolutionOutboundDraftStatus.READY,
+            governance_decision_id=DECISION_ID,
+            reply=reply,
+        ),
+        expected_tenant_id=TENANT_ID,
+    )
+    governance = InMemoryGovernanceRepository()
+    await governance.record_decision(
+        _decision(DECISION_ID, decision=Decision.ALLOW, reply=reply)
+    )
+    deliveries = InMemoryEmailDeliveryRepository()
+    sender = _Sender()
+    return (
+        EmailCustomerReplySendService(
+            draft_repository=resolution,
+            proposal_repository=resolution,
+            governance_repository=governance,
+            tenant_runtime=_TenantRuntime(),
+            delivery_repository=deliveries,
+            sender=sender,
+        ),
+        sender,
+        deliveries,
+        resolution,
+    )
+
+
 def _proposal(
     *,
     status: ResolutionProposalStatus,
     governance_decision_id: uuid.UUID | None,
+    reply: str = REPLY,
 ) -> ResolutionProposalRecord:
     return ResolutionProposalRecord(
         proposal_id=as_resolution_proposal_id(PROPOSAL_ID),
@@ -358,7 +485,7 @@ def _proposal(
         execution_id=EXECUTION_ID,
         dispatch_id=DISPATCH_ID,
         diagnostic_event_id=None,
-        proposed_customer_reply=REPLY,
+        proposed_customer_reply=reply,
         resolution_category="technical_support",
         confidence=0.91,
         supervisor_verdict=ResolutionSupervisorVerdict.PASS,
@@ -386,6 +513,7 @@ def _draft(
     *,
     status: ResolutionOutboundDraftStatus,
     governance_decision_id: uuid.UUID | None,
+    reply: str = REPLY,
 ) -> ResolutionOutboundDraftRecord:
     return ResolutionOutboundDraftRecord(
         draft_id=as_resolution_outbound_draft_id(DRAFT_ID),
@@ -397,13 +525,13 @@ def _draft(
         diagnostic_event_id=None,
         governance_decision_id=governance_decision_id,
         status=status,
-        draft_body=REPLY,
-        draft_body_sha256=_sha256(REPLY),
+        draft_body=reply,
+        draft_body_sha256=_sha256(reply),
         resolution_category="technical_support",
         confidence=0.91,
         created_at=NOW,
         updated_at=NOW,
-        metadata={"canonical_reply": REPLY, "localized_reply": REPLY},
+        metadata={"canonical_reply": reply, "localized_reply": reply},
     )
 
 
@@ -411,6 +539,7 @@ def _decision(
     decision_id: uuid.UUID,
     *,
     decision: Decision,
+    reply: str = REPLY,
 ) -> GovernanceDecisionRecord:
     return GovernanceDecisionRecord(
         decision_id=str(decision_id),
@@ -423,7 +552,7 @@ def _decision(
         subject_kind="communication",
         metadata={
             "proposal_id": str(PROPOSAL_ID),
-            "proposed_reply_sha256": _sha256(REPLY),
+            "proposed_reply_sha256": _sha256(reply),
         },
     )
 
