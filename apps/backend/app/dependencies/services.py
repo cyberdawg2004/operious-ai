@@ -428,7 +428,9 @@ def get_ticket_ingress_service(
         db_pool_wait_provider=lambda: measure_db_pool_wait_ms(session_factory),
     )
     return TicketIngressService(
-        persistence=PostgresBoundaryPersistence(session),
+        persistence=PostgresBoundaryPersistence(
+            session, data_protection=_data_protection_service(session)
+        ),
         session=session,
         tenant_configuration_runtime=tenant_runtime,
         admission_service=admission_service,
@@ -1235,7 +1237,9 @@ def get_tenant_production_hardening_runtime(
     )
     return runtime.bind_persistence(
         event_persistence=PostgresOperationalEventPersistence(session),
-        boundary_persistence=PostgresBoundaryPersistence(session),
+        boundary_persistence=PostgresBoundaryPersistence(
+            session, data_protection=_data_protection_service(session)
+        ),
     )
 
 

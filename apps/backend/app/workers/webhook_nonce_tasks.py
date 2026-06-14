@@ -9,13 +9,32 @@ from datetime import datetime, timezone
 from threading import Thread
 from typing import Any, TypeVar
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.boundary.persistence import PostgresBoundaryPersistence
+from app.core.config import get_settings
+from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_owner_session_factory
 from app.workers.celery_app import celery_app
 from app.queues import QUEUE_WEBHOOK_MAINTENANCE
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+
+
+def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
+    settings = get_settings()
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        return None
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+    )
 
 
 def cleanup_batch_is_backlogged(*, deleted_count: int, limit: int) -> bool:
@@ -77,7 +96,9 @@ async def cleanup_expired_webhook_nonces_runtime(
     # by design, must never read or return tenant data to caller
     session_factory = get_owner_session_factory()
     async with session_factory() as session:
-        repo = PostgresBoundaryPersistence(session)
+        repo = PostgresBoundaryPersistence(
+            session, data_protection=_data_protection_service(session)
+        )
         deleted = await repo.delete_expired_webhook_nonces(
             now=now,
             limit=limit,

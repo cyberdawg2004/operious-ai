@@ -24,6 +24,9 @@ from app.boundary.outbound_send_publisher import (
     enqueue_outbound_send_outbox,
     queue_for_outbound_send_channel,
 )
+from app.core.config import get_settings
+from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.queues import QUEUE_OUTBOUND_SEND, QUEUE_WEBHOOK_MAINTENANCE
@@ -35,6 +38,20 @@ from app.workers.dead_letter_persistence import (
 
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+
+
+def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
+    settings = get_settings()
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        return None
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,7 +420,6 @@ async def _send_email_outbox(
     outbox: OutboundSendOutboxRecord,
 ) -> OutboundSendExecutionResult:
     from app.boundary.outbound import PostgresEmailDeliveryRepository
-    from app.core.config import get_settings
     from app.governance.persistence import PostgresGovernanceRepository
     from app.resolution.persistence import PostgresResolutionProposalPersistence
     from app.services.email_customer_reply_service import (
@@ -413,7 +429,9 @@ async def _send_email_outbox(
     from app.tenant.persistence import PostgresTenantConfigurationRepository
     from app.tenant.runtime import TenantConfigurationRuntime
 
-    repository = PostgresResolutionProposalPersistence(session)
+    repository = PostgresResolutionProposalPersistence(
+        session, data_protection=_data_protection_service(session)
+    )
     tenant_runtime = TenantConfigurationRuntime(
         repository=PostgresTenantConfigurationRepository(session),
         credential_encryptor=build_tenant_credential_encryptor_from_settings(
@@ -454,7 +472,6 @@ async def _send_whatsapp_outbox(
     outbox: OutboundSendOutboxRecord,
 ) -> OutboundSendExecutionResult:
     from app.boundary.outbound import PostgresWhatsAppDeliveryRepository
-    from app.core.config import get_settings
     from app.governance.persistence import PostgresGovernanceRepository
     from app.resolution.persistence import PostgresResolutionProposalPersistence
     from app.services.whatsapp_customer_reply_service import (
@@ -464,7 +481,9 @@ async def _send_whatsapp_outbox(
     from app.tenant.persistence import PostgresTenantConfigurationRepository
     from app.tenant.runtime import TenantConfigurationRuntime
 
-    repository = PostgresResolutionProposalPersistence(session)
+    repository = PostgresResolutionProposalPersistence(
+        session, data_protection=_data_protection_service(session)
+    )
     tenant_runtime = TenantConfigurationRuntime(
         repository=PostgresTenantConfigurationRepository(session),
         credential_encryptor=build_tenant_credential_encryptor_from_settings(

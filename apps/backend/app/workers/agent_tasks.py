@@ -1704,7 +1704,9 @@ async def _append_resolution_proposal_after_diagnostic(
     try:
         async with session.begin_nested():
             data_protection = _data_protection_service(session)
-            resolution_persistence = PostgresResolutionProposalPersistence(session)
+            resolution_persistence = PostgresResolutionProposalPersistence(
+                session, data_protection=data_protection
+            )
             governance_repo = PostgresGovernanceRepository(session)
             tenant_configuration_repository = PostgresTenantConfigurationRepository(
                 session,
