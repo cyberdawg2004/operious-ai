@@ -506,7 +506,9 @@ async def _prepare_diagnostic_execution(
             persistence=PostgresExecutionPersistence(session)
         )
         session_repo = PostgresSessionPersistence(session)
-        coordination_repo = PostgresCoordinationPersistence(session)
+        coordination_repo = PostgresCoordinationPersistence(
+            session, data_protection=_data_protection_service(session)
+        )
         timeline = TimelineRuntime(persistence=session_repo)
         claim = await execution_runtime.claim_execution(
             execution_id=execution_id,
