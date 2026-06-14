@@ -1643,17 +1643,23 @@ def _extract_conversation_history(
 
 
 def _extract_text(payload: Mapping[str, Any]) -> str:
-    for key in (
-        "comment",
-        "subject",
-        "text",
-        "message",
-        "description",
-        "transcript",
-    ):
+    subject = _payload_text(payload, "subject")
+    body: str | None = None
+    for key in ("comment", "text", "message", "description", "transcript"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            body = value.strip()
+            break
+
+    if subject and body:
+        if subject == body:
+            return subject
+        return f"{subject}\n\n{body}"
+    if subject:
+        return subject
+    if body:
+        return body
+
     text_values = [
         value.strip()
         for value in payload.values()

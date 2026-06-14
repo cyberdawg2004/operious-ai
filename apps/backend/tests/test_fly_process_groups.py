@@ -34,7 +34,7 @@ EXPECTED_CONCURRENCY = {
     "worker_maintenance": 1,
     "worker_ingress": 2,
     "worker_outbound_send": 1,
-    "worker_voice_realtime": 8,
+    "worker_voice_realtime": 2,
 }
 
 EXPECTED_VM_PROFILES = {
