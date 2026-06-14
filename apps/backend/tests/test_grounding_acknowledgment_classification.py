@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 import pytest
@@ -29,6 +29,7 @@ import pytest
 from app.governance.persistence import InMemoryGovernanceRepository
 from app.resolution.enums import (
     ResolutionGovernanceVerdict,
+    ResolutionOutboundDraftStatus,
     ResolutionProposalStatus,
 )
 from app.resolution.persistence import InMemoryResolutionProposalPersistence
@@ -48,6 +49,7 @@ from app.runtime.resolution_governance_gate import (
     build_resolution_governance_runtime,
 )
 from app.runtime.resolution_runtime import (
+    ResolutionOutboundDraftRuntime,
     ResolutionProposalRequest,
     ResolutionRuntime,
     resolution_proposal_is_send_eligible,
@@ -85,6 +87,16 @@ _GREETING = (
 _CLAIM_TEXT = (
     "Approved support guidance says to check the USB-C cable fit before "
     "warranty triage."
+)
+
+# G4: the customer's inbound message names their own product/model number.
+_PRODUCT_MODEL_CONTENT = (
+    "I've tried two different cables and three wall adapters, and the LED "
+    "indicator on my PowerCore 10000 stays off completely."
+)
+_PRODUCT_MODEL_GREETING = (
+    "Thank you for reaching out -- sorry to hear about the trouble with "
+    "your PowerCore 10000."
 )
 
 
@@ -178,6 +190,10 @@ def _request() -> ResolutionProposalRequest:
         original_content="My PowerCore stopped charging.",
         retrieved_citations=[_immutable_citation()],
     )
+
+
+def _request_with_product_model() -> ResolutionProposalRequest:
+    return replace(_request(), original_content=_PRODUCT_MODEL_CONTENT)
 
 
 async def _resolution_autonomy_repository(
@@ -331,7 +347,9 @@ def test_acknowledgment_kind_is_accepted_without_citations() -> None:
         }
     )
 
-    draft = parse_grounded_reply_draft(raw, expected_language="en")
+    draft = parse_grounded_reply_draft(
+        raw, expected_language="en", original_content=_request().original_content
+    )
 
     assert draft.segments[0].kind == "acknowledgment"
     assert draft.segments[0].text == _GREETING
@@ -356,7 +374,9 @@ def test_acknowledgment_with_citations_is_rejected() -> None:
     )
 
     with pytest.raises(ValueError, match="cannot carry citations"):
-        parse_grounded_reply_draft(raw, expected_language="en")
+        parse_grounded_reply_draft(
+            raw, expected_language="en", original_content=_request().original_content
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -368,13 +388,26 @@ def test_acknowledgment_with_citations_is_rejected() -> None:
 
 
 def test_is_safe_acknowledgment_distinguishes_courtesy_from_factual_text() -> None:
-    assert _is_safe_acknowledgment(_GREETING) is True
+    original_content = _request().original_content
+    assert _is_safe_acknowledgment(_GREETING, original_content) is True
     assert (
-        _is_safe_acknowledgment("Sorry to hear that — you're eligible for a full refund.")
+        _is_safe_acknowledgment(
+            "Sorry to hear that — you're eligible for a full refund.", original_content
+        )
         is False
     )
-    assert _is_safe_acknowledgment("We'll send a replacement unit within 30 days.") is False
-    assert _is_safe_acknowledgment("Thanks, your $50 credit has been applied.") is False
+    assert (
+        _is_safe_acknowledgment(
+            "We'll send a replacement unit within 30 days.", original_content
+        )
+        is False
+    )
+    assert (
+        _is_safe_acknowledgment(
+            "Thanks, your $50 credit has been applied.", original_content
+        )
+        is False
+    )
 
 
 def test_factual_claim_mislabeled_as_acknowledgment_is_reclassified_to_claim() -> None:
@@ -392,7 +425,9 @@ def test_factual_claim_mislabeled_as_acknowledgment_is_reclassified_to_claim() -
         }
     )
 
-    draft = parse_grounded_reply_draft(raw, expected_language="en")
+    draft = parse_grounded_reply_draft(
+        raw, expected_language="en", original_content=_request().original_content
+    )
 
     smuggled = draft.segments[0]
     assert smuggled.kind == "claim"
@@ -510,3 +545,178 @@ async def test_all_factual_reply_with_citations_still_send_eligible() -> None:
     assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
     assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
     assert "[1]" in record.proposed_customer_reply
+
+
+# ---------------------------------------------------------------------------
+# G4 (LOAD-BEARING): the digit-echo narrowing of the G2 guard.
+#
+# Before this fix, _is_safe_acknowledgment failed closed on ANY digit, so a
+# greeting that echoes the customer's own product/model number (e.g. "your
+# PowerCore 10000") was reclassified to "claim" with no citations,
+# GroundingPolicy denied it as "uncited_claim", the proposal was DENIED, and
+# OutboundAutoSendService then reported a "governance_miss" / "missed exact
+# proposal/draft lineage" refusal -- a downstream artifact of the DENY, not
+# an independent lineage bug.
+#
+# (a) echo case: a digit-bearing acknowledgment that only restates a digit
+#     the customer themselves used must stay "acknowledgment" and reach
+#     SEND_ELIGIBLE / draft status READY -- the governance_miss resolves
+#     automatically because _draft_and_proposal_are_exact's status checks
+#     now pass.
+# (b) attack case: a digit-bearing acknowledgment asserting a NEW monetary
+#     commitment must still be reclassified to "claim" and DENIED, even if
+#     the customer's own message happens to contain the same digits.
+# (c) attack case (no keyword, no currency/%): a digit-bearing
+#     acknowledgment asserting a new numeric fact that the customer never
+#     stated must still be reclassified to "claim" -- this is the case the
+#     NEW echo-phrase check (rather than the unchanged keyword/commitment
+#     checks) is responsible for catching.
+# ---------------------------------------------------------------------------
+
+
+def test_is_safe_acknowledgment_allows_echoed_product_model_number() -> None:
+    assert (
+        _is_safe_acknowledgment(_PRODUCT_MODEL_GREETING, _PRODUCT_MODEL_CONTENT)
+        is True
+    )
+
+
+def test_is_safe_acknowledgment_still_denies_dollar_commitment_even_if_digits_echoed() -> (
+    None
+):
+    # The customer's own message contains "500" -- but "$500 refund" is a
+    # NEW commitment, not an echo of the customer's identifier, and must
+    # still fail closed regardless.
+    original_content = "I paid 500 dollars for this and it broke after a week."
+    assert (
+        _is_safe_acknowledgment(
+            "Good news -- your $500 refund is approved.", original_content
+        )
+        is False
+    )
+
+
+def test_is_safe_acknowledgment_denies_unechoed_numeric_commitment_with_no_keyword() -> (
+    None
+):
+    # No currency/percent symbol and no _UNSAFE_ACKNOWLEDGMENT_PATTERN
+    # keyword -- this is the case the NEW echo-phrase check must catch on
+    # its own. The customer never said "500 balance" (or "500" at all), so
+    # the digit-bearing phrase is not echoed and the segment must be
+    # reclassified to "claim".
+    original_content = _request().original_content
+    assert "500" not in original_content
+    assert (
+        _is_safe_acknowledgment(
+            "Good news -- your account now shows a 500 balance.", original_content
+        )
+        is False
+    )
+
+
+def test_acknowledgment_echoing_customer_product_model_stays_exempt_and_send_eligible() -> (
+    None
+):
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "acknowledgment",
+                    "text": _PRODUCT_MODEL_GREETING,
+                    "citation_ranks": [],
+                },
+                {"kind": "claim", "text": _CLAIM_TEXT, "citation_ranks": [1]},
+                {
+                    "kind": "question",
+                    "text": "Please confirm which wall adapter you tried last.",
+                    "citation_ranks": [],
+                },
+            ],
+        }
+    )
+
+    draft = parse_grounded_reply_draft(
+        raw, expected_language="en", original_content=_PRODUCT_MODEL_CONTENT
+    )
+
+    assert draft.segments[0].kind == "acknowledgment"
+    assert draft.segments[0].citation_ranks == ()
+
+
+@pytest.mark.asyncio
+async def test_acknowledgment_echoing_customer_product_model_reaches_send_eligible_and_ready_draft() -> (
+    None
+):
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "acknowledgment",
+                    "text": _PRODUCT_MODEL_GREETING,
+                    "citation_ranks": [],
+                },
+                {"kind": "claim", "text": _CLAIM_TEXT, "citation_ranks": [1]},
+                {
+                    "kind": "question",
+                    "text": "Please confirm which wall adapter you tried last.",
+                    "citation_ranks": [],
+                },
+            ],
+        }
+    )
+    generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
+    request = _request_with_product_model()
+
+    proposal = await (await _runtime(generator)).create_proposal(request)
+
+    assert proposal.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert proposal.governance_verdict is ResolutionGovernanceVerdict.ALLOW
+    assert proposal.governance_decision_id is not None
+    assert resolution_proposal_is_send_eligible(proposal) is True
+    assert "PowerCore 10000" in proposal.proposed_customer_reply
+
+    # The governance_miss reported by OutboundAutoSendService is a downstream
+    # artifact of a non-SEND_ELIGIBLE proposal/draft pair (see
+    # _draft_and_proposal_are_exact). With the proposal now SEND_ELIGIBLE,
+    # the draft status flips to READY -- the auto-send "missed exact
+    # proposal/draft lineage" refusal resolves automatically, with no
+    # separate fix to OutboundAutoSendService required.
+    draft = await ResolutionOutboundDraftRuntime(
+        persistence=InMemoryResolutionProposalPersistence()
+    ).create_draft_for_proposal(proposal)
+    assert draft.status is ResolutionOutboundDraftStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_acknowledgment_with_dollar_commitment_still_denied_even_if_digits_echoed() -> (
+    None
+):
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "acknowledgment",
+                    "text": "Good news -- your $500 refund is approved.",
+                    "citation_ranks": [],
+                },
+                {"kind": "claim", "text": _CLAIM_TEXT, "citation_ranks": [1]},
+            ],
+        }
+    )
+    generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
+    # The customer's own message contains "500" -- the attack must still be
+    # denied, proving the echo allowance cannot be exploited by a customer
+    # message that happens to share digits with a smuggled commitment.
+    request = replace(
+        _request(),
+        original_content="I paid 500 dollars for this and it broke after a week.",
+    )
+
+    record = await (await _runtime(generator)).create_proposal(request)
+
+    assert record.status is ResolutionProposalStatus.DENIED
+    assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert resolution_proposal_is_send_eligible(record) is False

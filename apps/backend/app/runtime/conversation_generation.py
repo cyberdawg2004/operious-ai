@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import string
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
@@ -59,20 +60,50 @@ _UNSAFE_ACKNOWLEDGMENT_PATTERN = re.compile(
 )
 _DIGIT_PATTERN = re.compile(r"\d")
 
+# A digit adjacent to a currency symbol or percent sign is always a
+# quantitative commitment (amount, discount, fee) -- never exempt, even if
+# the same digits appear in the customer's own message.
+_COMMITMENT_DIGIT_PATTERN = re.compile(r"[$€£¥]\s*\d|\d\s*%")
 
-def _is_safe_acknowledgment(text: str) -> bool:
+
+def _is_safe_acknowledgment(text: str, original_content: str) -> bool:
     """Conservative check for non-factual courtesy/empathy text.
 
     Returns False (unsafe) if the text contains any signal of a verifiable
-    factual assertion -- policy, eligibility, compensation, shipping, or a
-    numeric detail. Callers must fail closed by reclassifying unsafe
-    "acknowledgment" segments to "claim".
+    factual assertion -- policy, eligibility, compensation, shipping, a
+    monetary/percentage commitment, or a numeric detail that the customer
+    did not themselves state. Callers must fail closed by reclassifying
+    unsafe "acknowledgment" segments to "claim".
+
+    A bare digit (e.g. a product/model number like "PowerCore 10000") is
+    permitted only when it -- together with its immediate neighboring word
+    -- appears verbatim in the customer's own message: echoing what the
+    customer told us is not a new factual assertion.
     """
 
-    if _DIGIT_PATTERN.search(text):
-        return False
     if _UNSAFE_ACKNOWLEDGMENT_PATTERN.search(text):
         return False
+    if _COMMITMENT_DIGIT_PATTERN.search(text):
+        return False
+    if _DIGIT_PATTERN.search(text):
+        return _all_digit_phrases_echoed(text, original_content)
+    return True
+
+
+def _all_digit_phrases_echoed(text: str, original_content: str) -> bool:
+    """True only if every digit-bearing token, plus an adjacent word, is a
+    verbatim (case/whitespace-insensitive) substring of the customer's
+    original message."""
+
+    normalized_source = " ".join(original_content.lower().split())
+    tokens = [token.strip(string.punctuation) for token in text.split()]
+    for index, token in enumerate(tokens):
+        if not token or not _DIGIT_PATTERN.search(token):
+            continue
+        window = [part for part in tokens[max(0, index - 1) : index + 2] if part]
+        phrase = " ".join(window).lower()
+        if phrase not in normalized_source:
+            return False
     return True
 
 
@@ -174,6 +205,7 @@ class GroundedConversationGenerationRuntime:
         draft = parse_grounded_reply_draft(
             completion.text,
             expected_language=request.target_language,
+            original_content=request.original_content,
         )
         return ConversationGenerationResult(
             draft=draft,
@@ -202,6 +234,7 @@ def parse_grounded_reply_draft(
     raw_text: str,
     *,
     expected_language: str,
+    original_content: str,
 ) -> GroundedReplyDraft:
     data = _json_object(raw_text)
     language = str(data.get("language") or "").strip().lower()
@@ -224,7 +257,9 @@ def parse_grounded_reply_draft(
         ranks = _citation_ranks(segment.get("citation_ranks"))
         if kind in {"question", "acknowledgment"} and ranks:
             raise ValueError("question/acknowledgment segments cannot carry citations")
-        if kind == "acknowledgment" and not _is_safe_acknowledgment(text):
+        if kind == "acknowledgment" and not _is_safe_acknowledgment(
+            text, original_content
+        ):
             # Fail closed: the LLM cannot self-grant a grounding exemption by
             # mislabeling a factual claim as an acknowledgment. Reclassify to
             # "claim" with no citations so GroundingPolicy denies it.
