@@ -192,6 +192,16 @@ async def process_outbound_send_outbox_runtime(
     previous_tenant = get_current_tenant()
     set_current_tenant(outbox.tenant_id)
     try:
+        # Best-effort marker written BEFORE the provider call. If the worker
+        # crashes after this point but before mark_sent, the reconciler
+        # treats this row as ambiguous (NEEDS_RECONCILIATION) rather than
+        # blindly requeuing it for a possible duplicate send (#16a).
+        await _mark_send_attempted_best_effort(
+            outbox_runtime=outbox_runtime,
+            outbox=outbox,
+            attempted_at=ts,
+            session=session,
+        )
         sender = executor or _ComposedOutboundSendExecutor(session=session)
         result = await sender.send(outbox)
         if result.status == "pending":
@@ -208,6 +218,18 @@ async def process_outbound_send_outbox_runtime(
                 fallback_outbox_id=outbox.outbox_id,
             )
         provider_message_id = result.provider_message_id or "already-sent"
+        # Record evidence that the provider call completed IMMEDIATELY,
+        # independent of (and before) mark_sent. If the worker crashes
+        # before mark_sent below, the reconciler sees provider_message_id
+        # set and transitions the stale CLAIMED row straight to SENT
+        # without resending (#16a core fix).
+        await _record_provider_message_id_best_effort(
+            outbox_runtime=outbox_runtime,
+            outbox=outbox,
+            provider_message_id=provider_message_id,
+            recorded_at=ts,
+            session=session,
+        )
         sent = await outbox_runtime.mark_sent(
             outbox_id=outbox.outbox_id,
             claim_id=outbox.claim_id,
@@ -261,6 +283,21 @@ async def reconcile_outbound_send_outbox_runtime(
             limit=limit,
             tenant_id=tenant_id,
         )
+        for outbox in stale.needs_reconciliation:
+            await _record_dead_letter_visibility(
+                outbox=outbox,
+                reason=(
+                    "NEEDS_RECONCILIATION: do-not-resend, verify-first -- "
+                    "outbound send claim went stale after the provider call "
+                    "may have been attempted, with no confirmation it "
+                    "completed. Check the delivery record for this draft "
+                    "before taking any action."
+                ),
+                session=session,
+                dead_letter_sink=None,
+                created_at=ts,
+                task_name="outbound_send_needs_reconciliation",
+            )
         exhausted = await runtime.dead_letter_exhausted_pending(
             now=ts,
             limit=limit,
@@ -309,6 +346,62 @@ async def reconcile_outbound_send_outbox_runtime(
         }
 
 
+async def _mark_send_attempted_best_effort(
+    *,
+    outbox_runtime: OutboundSendOutboxRuntime,
+    outbox: OutboundSendOutboxRecord,
+    attempted_at: datetime,
+    session: AsyncSession | None,
+) -> None:
+    if outbox.claim_id is None:
+        raise RuntimeError("claimed outbound send outbox missing claim_id")
+    try:
+        await outbox_runtime.mark_send_attempted(
+            outbox_id=outbox.outbox_id,
+            claim_id=outbox.claim_id,
+            attempted_at=attempted_at,
+        )
+        await _commit_if_present(session)
+    except Exception:
+        logger.warning(
+            "failed to record send_attempted_at for outbound send outbox %s; "
+            "proceeding (falls back to safe PENDING requeue on crash)",
+            outbox.outbox_id,
+            exc_info=True,
+        )
+        if session is not None and session.in_transaction():
+            await session.rollback()
+
+
+async def _record_provider_message_id_best_effort(
+    *,
+    outbox_runtime: OutboundSendOutboxRuntime,
+    outbox: OutboundSendOutboxRecord,
+    provider_message_id: str,
+    recorded_at: datetime,
+    session: AsyncSession | None,
+) -> None:
+    if outbox.claim_id is None:
+        raise RuntimeError("claimed outbound send outbox missing claim_id")
+    try:
+        await outbox_runtime.record_provider_message_id(
+            outbox_id=outbox.outbox_id,
+            claim_id=outbox.claim_id,
+            provider_message_id=provider_message_id,
+            recorded_at=recorded_at,
+        )
+        await _commit_if_present(session)
+    except Exception:
+        logger.warning(
+            "failed to record provider_message_id for outbound send outbox %s; "
+            "mark_sent below will still attempt to persist it",
+            outbox.outbox_id,
+            exc_info=True,
+        )
+        if session is not None and session.in_transaction():
+            await session.rollback()
+
+
 async def _reschedule_or_dead_letter(
     *,
     outbox_runtime: OutboundSendOutboxRuntime,
@@ -354,6 +447,7 @@ async def _record_dead_letter_visibility(
     session: AsyncSession | None,
     dead_letter_sink: DeadLetterSinkProtocol | None,
     created_at: datetime,
+    task_name: str = "send_outbound_draft",
 ) -> None:
     metadata = {
         "outbox_id": str(outbox.outbox_id),
@@ -367,7 +461,7 @@ async def _record_dead_letter_visibility(
     if dead_letter_sink is not None:
         await dead_letter_sink.record(
             tenant_id=outbox.tenant_id,
-            task_name="send_outbound_draft",
+            task_name=task_name,
             task_id=str(outbox.outbox_id),
             queue=queue_for_outbound_send_channel(outbox.channel),
             reason=reason,
@@ -380,13 +474,13 @@ async def _record_dead_letter_visibility(
                 dead_letter_task_id=uuid.uuid5(
                     uuid.NAMESPACE_URL,
                     (
-                        "dlq:outbound_send:"
+                        f"dlq:outbound_send:{task_name}:"
                         f"{outbox.tenant_id}:{outbox.outbox_id}:"
                         f"{outbox.attempt_count}"
                     ),
                 ),
                 tenant_id=outbox.tenant_id,
-                task_name="send_outbound_draft",
+                task_name=task_name,
                 task_id=str(outbox.outbox_id),
                 execution_id=None,
                 queue=queue_for_outbound_send_channel(outbox.channel),

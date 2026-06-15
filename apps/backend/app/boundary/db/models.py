@@ -772,6 +772,10 @@ class OutboundSendOutboxRow(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    send_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     provider_message_id: Mapped[str | None] = mapped_column(
         String(_HANDLE_WIDTH),
         nullable=True,
@@ -826,7 +830,7 @@ class OutboundSendOutboxRow(Base):
             name="ck_outbound_send_outbox_draft_body_sha256_valid",
         ),
         CheckConstraint(
-            "status IN ('pending', 'claimed', 'sent', 'dead_lettered')",
+            "status IN ('pending', 'claimed', 'sent', 'dead_lettered', 'needs_reconciliation')",
             name="ck_outbound_send_outbox_status_valid",
         ),
         CheckConstraint(

@@ -35,6 +35,10 @@ class OutboundSendOutboxStatus(StrEnum):
     CLAIMED = "claimed"
     SENT = "sent"
     DEAD_LETTERED = "dead_lettered"
+    # Stale CLAIMED row with ambiguous send outcome (crash between the
+    # provider send and mark_sent). Operator surface: do-not-resend,
+    # verify-first. Never auto-requeued by the reconciler.
+    NEEDS_RECONCILIATION = "needs_reconciliation"
 
 
 def _empty_metadata() -> dict[str, Any]:
@@ -60,6 +64,7 @@ class OutboundSendOutboxRecord:
     next_attempt_at: datetime | None = None
     claimed_at: datetime | None = None
     sent_at: datetime | None = None
+    send_attempted_at: datetime | None = None
     claim_id: OutboundSendClaimId | None = None
     worker_id: str | None = None
     attempt_count: int = 0
@@ -110,6 +115,8 @@ class OutboundSendOutboxSweepResult:
     requeued: tuple[OutboundSendOutboxRequeueResult, ...] = ()
     refused: tuple[OutboundSendOutboxRequeueResult, ...] = ()
     dead_lettered: tuple[OutboundSendOutboxRecord, ...] = ()
+    sent_from_evidence: tuple[OutboundSendOutboxRecord, ...] = ()
+    needs_reconciliation: tuple[OutboundSendOutboxRecord, ...] = ()
 
     @property
     def requeued_count(self) -> int:
@@ -118,6 +125,14 @@ class OutboundSendOutboxSweepResult:
     @property
     def dead_lettered_count(self) -> int:
         return len(self.dead_lettered)
+
+    @property
+    def sent_from_evidence_count(self) -> int:
+        return len(self.sent_from_evidence)
+
+    @property
+    def needs_reconciliation_count(self) -> int:
+        return len(self.needs_reconciliation)
 
 
 class OutboundSendOutboxPersistenceProtocol(Protocol):
@@ -193,6 +208,40 @@ class OutboundSendOutboxPersistenceProtocol(Protocol):
         outbox_id: OutboundSendOutboxId,
         stale_before: datetime,
         requeued_at: datetime,
+        reason: str,
+    ) -> OutboundSendOutboxRecord | None: ...
+
+    async def mark_outbound_send_outbox_attempted(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        claim_id: OutboundSendClaimId,
+        attempted_at: datetime,
+    ) -> OutboundSendOutboxRecord | None: ...
+
+    async def record_outbound_send_outbox_provider_message_id(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        claim_id: OutboundSendClaimId,
+        provider_message_id: str,
+        recorded_at: datetime,
+    ) -> OutboundSendOutboxRecord | None: ...
+
+    async def transition_stale_claimed_outbound_send_outbox_to_sent(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        stale_before: datetime,
+        sent_at: datetime,
+    ) -> OutboundSendOutboxRecord | None: ...
+
+    async def transition_stale_claimed_outbound_send_outbox_to_needs_reconciliation(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        stale_before: datetime,
+        marked_at: datetime,
         reason: str,
     ) -> OutboundSendOutboxRecord | None: ...
 
@@ -325,6 +374,46 @@ class OutboundSendOutboxRuntime:
             sent_at=sent_at or datetime.now(tz=timezone.utc),
         )
 
+    async def mark_send_attempted(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId | str | uuid.UUID,
+        claim_id: OutboundSendClaimId | str | uuid.UUID,
+        attempted_at: datetime | None = None,
+    ) -> OutboundSendOutboxRecord | None:
+        """Best-effort marker written immediately BEFORE the provider call.
+
+        If the worker crashes after this write but before ``mark_sent``,
+        the reconciler can distinguish "never reached the provider" (this
+        field unset, safe to requeue) from "may have reached the provider"
+        (this field set, ambiguous -> NEEDS_RECONCILIATION unless
+        ``provider_message_id`` also confirms SENT).
+        """
+        return await self._persistence.mark_outbound_send_outbox_attempted(
+            outbox_id=as_outbound_send_outbox_id(outbox_id),
+            claim_id=as_outbound_send_claim_id(claim_id),
+            attempted_at=attempted_at or datetime.now(tz=timezone.utc),
+        )
+
+    async def record_provider_message_id(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId | str | uuid.UUID,
+        claim_id: OutboundSendClaimId | str | uuid.UUID,
+        provider_message_id: str,
+        recorded_at: datetime | None = None,
+    ) -> OutboundSendOutboxRecord | None:
+        """Best-effort marker written immediately AFTER the provider call
+        returns, independent of (and before) ``mark_sent``. This is the
+        evidence the reconciler uses to refuse to resend a stale CLAIMED
+        row that was actually sent."""
+        return await self._persistence.record_outbound_send_outbox_provider_message_id(
+            outbox_id=as_outbound_send_outbox_id(outbox_id),
+            claim_id=as_outbound_send_claim_id(claim_id),
+            provider_message_id=provider_message_id,
+            recorded_at=recorded_at or datetime.now(tz=timezone.utc),
+        )
+
     async def reschedule(
         self,
         *,
@@ -371,6 +460,22 @@ class OutboundSendOutboxRuntime:
         tenant_id: str | None = None,
         reason: str = "outbound send claim expired",
     ) -> OutboundSendOutboxSweepResult:
+        """Resolve stale CLAIMED rows, biased against resending.
+
+        Three cases, distinguished by evidence captured during the send
+        attempt:
+
+        1. ``provider_message_id`` is set -> the provider call already
+           completed (the crash happened before ``mark_sent``). Transition
+           straight to SENT; never requeue, never call the provider again.
+        2. ``send_attempted_at`` is unset -> the worker crashed before
+           reaching the provider. Safe to requeue to PENDING for a normal
+           retry (today's behavior, at-least-once preserved).
+        3. ``send_attempted_at`` is set but ``provider_message_id`` is not
+           -> ambiguous: the provider call may or may not have completed.
+           Transition to NEEDS_RECONCILIATION (operator: do-not-resend,
+           verify-first). Never auto-requeued.
+        """
         page = await self.list_outbox(
             OutboundSendOutboxQuery(
                 tenant_id=tenant_id,
@@ -382,26 +487,71 @@ class OutboundSendOutboxRuntime:
         ts = requeued_at or datetime.now(tz=timezone.utc)
         requeued: list[OutboundSendOutboxRequeueResult] = []
         refused: list[OutboundSendOutboxRequeueResult] = []
+        sent_from_evidence: list[OutboundSendOutboxRecord] = []
+        needs_reconciliation: list[OutboundSendOutboxRecord] = []
         for outbox in page.records:
-            updated = await self._persistence.requeue_stale_outbound_send_outbox(
-                outbox_id=outbox.outbox_id,
-                stale_before=stale_before,
-                requeued_at=ts,
-                reason=reason,
+            if outbox.provider_message_id is not None:
+                updated = (
+                    await self._persistence.transition_stale_claimed_outbound_send_outbox_to_sent(
+                        outbox_id=outbox.outbox_id,
+                        stale_before=stale_before,
+                        sent_at=ts,
+                    )
+                )
+                if updated is not None:
+                    sent_from_evidence.append(updated)
+                else:
+                    refused.append(
+                        OutboundSendOutboxRequeueResult(
+                            requeued=False,
+                            outbox=await self.get_outbox(outbox.outbox_id),
+                            reason="outbox_not_stale",
+                        )
+                    )
+                continue
+            if outbox.send_attempted_at is None:
+                updated_record = await self._persistence.requeue_stale_outbound_send_outbox(
+                    outbox_id=outbox.outbox_id,
+                    stale_before=stale_before,
+                    requeued_at=ts,
+                    reason=reason,
+                )
+                result = OutboundSendOutboxRequeueResult(
+                    requeued=updated_record is not None,
+                    outbox=updated_record or await self.get_outbox(outbox.outbox_id),
+                    reason=None if updated_record is not None else "outbox_not_stale",
+                )
+                if result.requeued:
+                    requeued.append(result)
+                else:
+                    refused.append(result)
+                continue
+            # Ambiguous: provider call may have been made, but neither the
+            # outbox nor the final mark_sent has evidence it completed.
+            updated = (
+                await self._persistence.transition_stale_claimed_outbound_send_outbox_to_needs_reconciliation(
+                    outbox_id=outbox.outbox_id,
+                    stale_before=stale_before,
+                    marked_at=ts,
+                    reason=reason,
+                )
             )
-            result = OutboundSendOutboxRequeueResult(
-                requeued=updated is not None,
-                outbox=updated or await self.get_outbox(outbox.outbox_id),
-                reason=None if updated is not None else "outbox_not_stale",
-            )
-            if result.requeued:
-                requeued.append(result)
+            if updated is not None:
+                needs_reconciliation.append(updated)
             else:
-                refused.append(result)
+                refused.append(
+                    OutboundSendOutboxRequeueResult(
+                        requeued=False,
+                        outbox=await self.get_outbox(outbox.outbox_id),
+                        reason="outbox_not_stale",
+                    )
+                )
         return OutboundSendOutboxSweepResult(
             scanned=len(page.records),
             requeued=tuple(requeued),
             refused=tuple(refused),
+            sent_from_evidence=tuple(sent_from_evidence),
+            needs_reconciliation=tuple(needs_reconciliation),
         )
 
     async def dead_letter_exhausted_pending(
@@ -772,6 +922,119 @@ class PostgresOutboundSendOutboxPersistence(BaseRepository):
             return None
         return await self.get_outbound_send_outbox(outbox_id)
 
+    async def mark_outbound_send_outbox_attempted(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        claim_id: OutboundSendClaimId,
+        attempted_at: datetime,
+    ) -> OutboundSendOutboxRecord | None:
+        stmt = (
+            update(OutboundSendOutboxRow)
+            .where(
+                OutboundSendOutboxRow.outbox_id == outbox_id,
+                OutboundSendOutboxRow.status == OutboundSendOutboxStatus.CLAIMED.value,
+                OutboundSendOutboxRow.claim_id == claim_id,
+            )
+            .values(
+                send_attempted_at=attempted_at,
+                updated_at=attempted_at,
+            )
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
+        return await self.get_outbound_send_outbox(outbox_id)
+
+    async def record_outbound_send_outbox_provider_message_id(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        claim_id: OutboundSendClaimId,
+        provider_message_id: str,
+        recorded_at: datetime,
+    ) -> OutboundSendOutboxRecord | None:
+        stmt = (
+            update(OutboundSendOutboxRow)
+            .where(
+                OutboundSendOutboxRow.outbox_id == outbox_id,
+                OutboundSendOutboxRow.status == OutboundSendOutboxStatus.CLAIMED.value,
+                OutboundSendOutboxRow.claim_id == claim_id,
+            )
+            .values(
+                provider_message_id=provider_message_id,
+                updated_at=recorded_at,
+            )
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
+        return await self.get_outbound_send_outbox(outbox_id)
+
+    async def transition_stale_claimed_outbound_send_outbox_to_sent(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        stale_before: datetime,
+        sent_at: datetime,
+    ) -> OutboundSendOutboxRecord | None:
+        stmt = (
+            update(OutboundSendOutboxRow)
+            .where(
+                OutboundSendOutboxRow.outbox_id == outbox_id,
+                OutboundSendOutboxRow.status == OutboundSendOutboxStatus.CLAIMED.value,
+                OutboundSendOutboxRow.claimed_at.is_not(None),
+                OutboundSendOutboxRow.claimed_at <= stale_before,
+                OutboundSendOutboxRow.provider_message_id.is_not(None),
+            )
+            .values(
+                status=OutboundSendOutboxStatus.SENT.value,
+                sent_at=sent_at,
+                updated_at=sent_at,
+                last_error=None,
+            )
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
+        return await self.get_outbound_send_outbox(outbox_id)
+
+    async def transition_stale_claimed_outbound_send_outbox_to_needs_reconciliation(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        stale_before: datetime,
+        marked_at: datetime,
+        reason: str,
+    ) -> OutboundSendOutboxRecord | None:
+        existing = await self.get_outbound_send_outbox(outbox_id)
+        metadata = dict(existing.metadata) if existing is not None else {}
+        stmt = (
+            update(OutboundSendOutboxRow)
+            .where(
+                OutboundSendOutboxRow.outbox_id == outbox_id,
+                OutboundSendOutboxRow.status == OutboundSendOutboxStatus.CLAIMED.value,
+                OutboundSendOutboxRow.claimed_at.is_not(None),
+                OutboundSendOutboxRow.claimed_at <= stale_before,
+                OutboundSendOutboxRow.send_attempted_at.is_not(None),
+                OutboundSendOutboxRow.provider_message_id.is_(None),
+            )
+            .values(
+                status=OutboundSendOutboxStatus.NEEDS_RECONCILIATION.value,
+                updated_at=marked_at,
+                last_error=reason,
+                metadata_json={
+                    **metadata,
+                    "reconciliation.reason": reason,
+                    "reconciliation.flagged_at": marked_at.isoformat(),
+                },
+            )
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        if result.rowcount != 1:
+            return None
+        return await self.get_outbound_send_outbox(outbox_id)
+
 
 class InMemoryOutboundSendOutboxPersistence:
     """In-memory outbound send outbox for focused tests."""
@@ -1014,6 +1277,100 @@ class InMemoryOutboundSendOutboxPersistence:
             self._records[outbox_id] = updated
             return updated
 
+    async def mark_outbound_send_outbox_attempted(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        claim_id: OutboundSendClaimId,
+        attempted_at: datetime,
+    ) -> OutboundSendOutboxRecord | None:
+        async with self._lock:
+            current = self._matching_claim(outbox_id, claim_id)
+            if current is None:
+                return None
+            updated = replace(
+                current,
+                send_attempted_at=attempted_at,
+                updated_at=attempted_at,
+            )
+            self._records[outbox_id] = updated
+            return updated
+
+    async def record_outbound_send_outbox_provider_message_id(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        claim_id: OutboundSendClaimId,
+        provider_message_id: str,
+        recorded_at: datetime,
+    ) -> OutboundSendOutboxRecord | None:
+        async with self._lock:
+            current = self._matching_claim(outbox_id, claim_id)
+            if current is None:
+                return None
+            updated = replace(
+                current,
+                provider_message_id=provider_message_id,
+                updated_at=recorded_at,
+            )
+            self._records[outbox_id] = updated
+            return updated
+
+    async def transition_stale_claimed_outbound_send_outbox_to_sent(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        stale_before: datetime,
+        sent_at: datetime,
+    ) -> OutboundSendOutboxRecord | None:
+        async with self._lock:
+            current = self._records.get(outbox_id)
+            if current is None or current.status is not OutboundSendOutboxStatus.CLAIMED:
+                return None
+            if current.claimed_at is None or current.claimed_at > stale_before:
+                return None
+            if current.provider_message_id is None:
+                return None
+            updated = replace(
+                current,
+                status=OutboundSendOutboxStatus.SENT,
+                sent_at=sent_at,
+                updated_at=sent_at,
+                last_error=None,
+            )
+            self._records[outbox_id] = updated
+            return updated
+
+    async def transition_stale_claimed_outbound_send_outbox_to_needs_reconciliation(
+        self,
+        *,
+        outbox_id: OutboundSendOutboxId,
+        stale_before: datetime,
+        marked_at: datetime,
+        reason: str,
+    ) -> OutboundSendOutboxRecord | None:
+        async with self._lock:
+            current = self._records.get(outbox_id)
+            if current is None or current.status is not OutboundSendOutboxStatus.CLAIMED:
+                return None
+            if current.claimed_at is None or current.claimed_at > stale_before:
+                return None
+            if current.send_attempted_at is None or current.provider_message_id is not None:
+                return None
+            updated = replace(
+                current,
+                status=OutboundSendOutboxStatus.NEEDS_RECONCILIATION,
+                updated_at=marked_at,
+                last_error=reason,
+                metadata={
+                    **current.metadata,
+                    "reconciliation.reason": reason,
+                    "reconciliation.flagged_at": marked_at.isoformat(),
+                },
+            )
+            self._records[outbox_id] = updated
+            return updated
+
     def _matching_claim(
         self,
         outbox_id: OutboundSendOutboxId,
@@ -1149,6 +1506,7 @@ def _outbox_record_to_values(record: OutboundSendOutboxRecord) -> dict[str, Any]
         "next_attempt_at": record.next_attempt_at,
         "claimed_at": record.claimed_at,
         "sent_at": record.sent_at,
+        "send_attempted_at": record.send_attempted_at,
         "provider_message_id": record.provider_message_id,
         "last_error": record.last_error,
         "created_at": record.created_at,
@@ -1181,6 +1539,7 @@ def _row_to_outbox_record(row: OutboundSendOutboxRow) -> OutboundSendOutboxRecor
         next_attempt_at=row.next_attempt_at,
         claimed_at=row.claimed_at,
         sent_at=row.sent_at,
+        send_attempted_at=row.send_attempted_at,
         provider_message_id=row.provider_message_id,
         last_error=row.last_error,
         created_at=row.created_at,
