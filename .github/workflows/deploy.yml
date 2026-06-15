@@ -18,6 +18,9 @@ jobs:
   gate:
     name: Verify CI passed on target SHA
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
       ci_run_url: ${{ steps.check_ci.outputs.ci_run_url }}
