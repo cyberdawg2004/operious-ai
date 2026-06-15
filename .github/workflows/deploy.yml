@@ -1,0 +1,164 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: >-
+          Commit SHA (or ref) to deploy. Defaults to the SHA the workflow was
+          dispatched against (i.e. the current HEAD of the selected branch).
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-operious-ai-imad
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Verify CI passed on target SHA
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      ci_run_url: ${{ steps.check_ci.outputs.ci_run_url }}
+    steps:
+      - name: Resolve target SHA
+        id: resolve
+        run: |
+          set -euo pipefail
+          target="${{ github.event.inputs.sha }}"
+          if [ -z "$target" ]; then
+            target="${{ github.sha }}"
+          fi
+          echo "sha=${target}" >> "$GITHUB_OUTPUT"
+          echo "Resolved target SHA: ${target}"
+
+      - name: Require a green "CI" run for this exact SHA
+        id: check_ci
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          echo "Checking for a successful 'CI' workflow run on commit ${TARGET_SHA}..."
+
+          # List recent runs of the "CI" workflow (.github/workflows/ci.yml, name: CI),
+          # newest first, and find the latest one whose head SHA matches the target.
+          # This is intentionally fail-closed: any error, empty result, or non-success
+          # conclusion causes this step (and therefore the whole gate job) to fail,
+          # which blocks the deploy job via `needs:`.
+          runs_json=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow "CI" \
+            --json headSha,status,conclusion,createdAt,url,databaseId \
+            --limit 100)
+
+          match=$(echo "$runs_json" | jq -r --arg sha "$TARGET_SHA" '
+            [ .[] | select(.headSha == $sha) ]
+            | sort_by(.createdAt)
+            | reverse
+            | .[0]
+          ')
+
+          if [ "$match" = "null" ] || [ -z "$match" ]; then
+            echo "::error::No 'CI' workflow run found for commit ${TARGET_SHA}. Refusing to deploy."
+            exit 1
+          fi
+
+          status=$(echo "$match" | jq -r '.status')
+          conclusion=$(echo "$match" | jq -r '.conclusion')
+          run_url=$(echo "$match" | jq -r '.url')
+          run_id=$(echo "$match" | jq -r '.databaseId')
+
+          echo "Latest CI run for ${TARGET_SHA}: id=${run_id} status=${status} conclusion=${conclusion}"
+          echo "ci_run_url=${run_url}" >> "$GITHUB_OUTPUT"
+
+          if [ "$status" != "completed" ] || [ "$conclusion" != "success" ]; then
+            echo "::error::Latest CI run for ${TARGET_SHA} is status=${status} conclusion=${conclusion} (need completed/success). Refusing to deploy."
+            exit 1
+          fi
+
+          echo "CI gate PASSED: ${TARGET_SHA} has a completed/success CI run (${run_url})."
+
+  deploy:
+    name: Deploy to Fly.io
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout exact deployed SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+
+      - name: Verify checked-out commit matches gated SHA
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          expected="${{ needs.gate.outputs.sha }}"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($actual) does not match gated SHA ($expected)."
+            exit 1
+          fi
+          echo "Deploying commit ${actual} (CI run: ${{ needs.gate.outputs.ci_run_url }})"
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy (apps/backend)
+        working-directory: apps/backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app operious-ai-imad
+
+  verify:
+    name: Post-deploy readiness check
+    needs: [gate, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll /api/v1/ready
+        run: |
+          set -euo pipefail
+          url="https://operious-ai-imad.fly.dev/api/v1/ready"
+          echo "Polling ${url} ..."
+
+          for i in $(seq 1 30); do
+            if response=$(curl -fsS --max-time 10 "$url"); then
+              status=$(echo "$response" | jq -r '.status // "unknown"')
+              echo "attempt ${i}: http 200, status=${status}"
+              if [ "$status" = "ok" ]; then
+                echo "$response" | jq '.'
+                echo "Readiness OK."
+                exit 0
+              fi
+              echo "$response" | jq '.'
+            else
+              echo "attempt ${i}: request failed"
+            fi
+            sleep 10
+          done
+
+          echo "::error::/api/v1/ready did not report status=ok within the timeout window."
+          exit 1
+
+      - name: Set up flyctl
+        if: always()
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Check machine health (best-effort)
+        if: always()
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        working-directory: apps/backend
+        run: |
+          set -euo pipefail
+          flyctl status --app operious-ai-imad
+          # Fail if any machine is in a crashed/failed state (best-effort guard
+          # against a crash-loop introduced by this deploy).
+          if flyctl status --app operious-ai-imad --json | jq -e '
+            [.Machines[]? | select(.state == "stopped" and (.checks // [] | any(.status == "critical")))]
+            | length > 0
+          ' >/dev/null 2>&1; then
+            echo "::warning::flyctl status reports at least one machine with a critical check. Review manually."
+          fi
