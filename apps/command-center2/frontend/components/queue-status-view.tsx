@@ -8,6 +8,8 @@ import {
   RefreshCw,
   XCircle,
 } from "lucide-react";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BarChart, DonutChart } from "@/components/ui/chart";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import {
   formatApiError,
@@ -80,6 +82,13 @@ const statusConfig: Record<
   },
 };
 
+const statusChartColors: Record<QueueStatus, string> = {
+  ok: "var(--chart-green)",
+  warn: "var(--chart-amber)",
+  critical: "var(--chart-pink)",
+  unknown: "var(--chart-blue-soft)",
+};
+
 export function QueueStatusView() {
   const [data, setData] = useState<QueueStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +146,33 @@ export function QueueStatusView() {
     [data]
   );
 
+  const statusBreakdown = useMemo(() => {
+    const counts: Record<QueueStatus, number> = { ok: 0, warn: 0, critical: 0, unknown: 0 };
+    for (const row of rows) {
+      counts[row.status] += 1;
+    }
+    return (Object.keys(counts) as QueueStatus[])
+      .filter((status) => counts[status] > 0)
+      .map((status) => ({
+        label: statusConfig[status].label,
+        value: counts[status],
+        color: statusChartColors[status],
+      }));
+  }, [rows]);
+
+  const depthByQueue = useMemo(
+    () =>
+      [...rows]
+        .sort((a, b) => b.depth - a.depth)
+        .slice(0, 6)
+        .map((row) => ({
+          label: QUEUE_LABELS[row.queue_name]?.replace(/ \(.*\)/, "") ?? row.queue_name,
+          value: row.depth,
+          color: statusChartColors[row.status],
+        })),
+    [rows]
+  );
+
   return (
     <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
       <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
@@ -178,6 +214,32 @@ export function QueueStatusView() {
               Queue data unavailable. Showing the last successful snapshot.
             </div>
           )}
+
+          <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Queue health</CardTitle>
+                  <CardDescription>Status across all monitored queues</CardDescription>
+                </div>
+              </CardHeader>
+              <DonutChart
+                data={statusBreakdown}
+                centerValue={String(rows.length)}
+                centerLabel="queues"
+              />
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Deepest queues</CardTitle>
+                  <CardDescription>Top queues by pending depth</CardDescription>
+                </div>
+              </CardHeader>
+              <BarChart data={depthByQueue} />
+            </Card>
+          </div>
 
           <div className="overflow-hidden rounded-lg border border-border-subtle bg-surface">
             <div className="overflow-x-auto">

@@ -2,51 +2,62 @@
 
 /* ═══════════════════════════════════════════
    OPERIOUS COMMAND CENTER · DESIGN SYSTEM
-   Enterprise terminal aesthetic.
-   Light mode = institutional / Dark mode = operations.
+   Calm analytics dashboard aesthetic for support
+   managers — whitespace, card-based, soft shadows,
+   data-viz forward. Inter typography throughout;
+   monospace reserved for genuinely technical values.
 ═══════════════════════════════════════════ */
 :root {
-  /* Light mode — elevated surfaces (governance/admin reviews) */
-  --canvas: #F5F2EA;
+  /* Light mode — calm neutral canvas, white cards */
+  --canvas: #EEF0F3;
   --surface: #FFFFFF;
-  --surface-raised: #FBF8F1;
-  --surface-sunken: #EDE9DE;
-  --border-subtle: rgba(10, 15, 28, 0.06);
-  --border-defined: rgba(10, 15, 28, 0.12);
-  --border-strong: rgba(10, 15, 28, 0.20);
+  --surface-raised: #F6F7F9;
+  --surface-sunken: #E7E9ED;
+  --border-subtle: rgba(20, 24, 38, 0.06);
+  --border-defined: rgba(20, 24, 38, 0.10);
+  --border-strong: rgba(20, 24, 38, 0.18);
 
-  --ink-primary: #0A0F1C;
-  --ink-body: #1B2436;
-  --ink-secondary: #4A5468;
-  --ink-tertiary: #6A7488;
-  --ink-quaternary: #94A0B5;
+  --ink-primary: #14161F;
+  --ink-body: #2E323D;
+  --ink-secondary: #6E7280;
+  --ink-tertiary: #9CA0AC;
+  --ink-quaternary: #C4C7CE;
 
-  --gold-primary: #A8882C;
-  --gold-bright: #C9A84C;
-  --gold-muted: #8A7024;
-  --gold-bg: rgba(168, 136, 44, 0.08);
-  --gold-bg-strong: rgba(168, 136, 44, 0.16);
+  /* Accent — calm blue (formerly "gold" terminal accent) */
+  --gold-primary: #3D6FF2;
+  --gold-bright: #5C8AFF;
+  --gold-muted: #2E55C2;
+  --gold-bg: rgba(61, 111, 242, 0.08);
+  --gold-bg-strong: rgba(61, 111, 242, 0.14);
 
   --gold: var(--gold-primary);
-  --blue-system: #2A5CAA;
-  --blue-system-muted: #1E3F77;
-  --red-alert: #B83232;
-  --green-success: #2A7A4C;
-  --warning-amber: #B8821C;
+  --blue-system: #3D6FF2;
+  --blue-system-muted: #2E55C2;
+  --red-alert: #EF4763;
+  --green-success: #16A34A;
+  --warning-amber: #F59E0B;
 
-  --shadow-sm: 0 1px 2px rgba(10, 15, 28, 0.06);
-  --shadow-card: 0 1px 3px rgba(10, 15, 28, 0.06), 0 8px 20px rgba(10, 15, 28, 0.04);
-  --shadow-elevated: 0 4px 12px rgba(10, 15, 28, 0.08), 0 16px 36px rgba(10, 15, 28, 0.08);
-  --shadow-overlay: 0 8px 24px rgba(10, 15, 28, 0.12), 0 24px 64px rgba(10, 15, 28, 0.16);
+  /* Extra chart accents for multi-series data-viz */
+  --chart-blue: #3D6FF2;
+  --chart-blue-soft: #BFD3FB;
+  --chart-green: #16A34A;
+  --chart-amber: #F59E0B;
+  --chart-pink: #EF4763;
+  --chart-purple: #8B5CF6;
 
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 12px 28px -8px rgba(16, 24, 40, 0.10);
+  --shadow-elevated: 0 4px 12px rgba(16, 24, 40, 0.06), 0 24px 48px -16px rgba(16, 24, 40, 0.18);
+  --shadow-overlay: 0 12px 32px rgba(16, 24, 40, 0.12), 0 32px 64px -20px rgba(16, 24, 40, 0.28);
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
 
   --font-mono-technical: var(--font-geist-mono);
-  --type-geometric: var(--font-geist-sans), "Geist", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --type-geometric: var(--font-inter), var(--font-geist-sans), "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --type-technical: var(--font-mono-technical), var(--font-geist-mono), "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
   --font-cormorant-sc: var(--type-geometric);
 
@@ -54,39 +65,46 @@
   --foreground: var(--ink-primary);
 }
 
-/* Dark mode — strict operations terminal */
+/* Dark mode — calm slate canvas, same accent language */
 :root.dark,
 .dark {
-  --canvas: #050608;
-  --surface: #0A0B0E;
-  --surface-raised: #101115;
-  --surface-sunken: #020303;
+  --canvas: #0B0D12;
+  --surface: #12151C;
+  --surface-raised: #181C26;
+  --surface-sunken: #0E1016;
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-defined: rgba(255, 255, 255, 0.10);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.18);
 
-  --ink-primary: #F2EFE6;
-  --ink-body: #D6D2C8;
-  --ink-secondary: #9A968B;
-  --ink-tertiary: #6E6A60;
-  --ink-quaternary: #4A463E;
+  --ink-primary: #F1F2F6;
+  --ink-body: #D2D5DC;
+  --ink-secondary: #969CAA;
+  --ink-tertiary: #6B7180;
+  --ink-quaternary: #454A58;
 
-  --gold-primary: #C9A84C;
-  --gold-bright: #E8C76A;
-  --gold-muted: #B89938;
-  --gold-bg: rgba(201, 168, 76, 0.10);
-  --gold-bg-strong: rgba(201, 168, 76, 0.18);
+  --gold-primary: #5C8AFF;
+  --gold-bright: #82A6FF;
+  --gold-muted: #3D6FF2;
+  --gold-bg: rgba(92, 138, 255, 0.14);
+  --gold-bg-strong: rgba(92, 138, 255, 0.22);
 
-  --blue-system: #5A8AD8;
-  --blue-system-muted: #3D6BB8;
-  --red-alert: #E15555;
-  --green-success: #4A9F6A;
-  --warning-amber: #D4A03D;
+  --blue-system: #5C8AFF;
+  --blue-system-muted: #3D6FF2;
+  --red-alert: #FB7185;
+  --green-success: #34D399;
+  --warning-amber: #FBBF24;
+
+  --chart-blue: #5C8AFF;
+  --chart-blue-soft: #2A3A5C;
+  --chart-green: #34D399;
+  --chart-amber: #FBBF24;
+  --chart-pink: #FB7185;
+  --chart-purple: #A78BFA;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.35);
-  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.5), 0 16px 36px rgba(0, 0, 0, 0.45);
-  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55), 0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -8px rgba(0, 0, 0, 0.45);
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.5), 0 24px 48px -16px rgba(0, 0, 0, 0.5);
+  --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.55), 0 32px 64px -20px rgba(0, 0, 0, 0.6);
 
   --background: var(--canvas);
   --foreground: var(--ink-primary);
@@ -117,6 +135,12 @@
   --color-red-alert: var(--red-alert);
   --color-green-success: var(--green-success);
   --color-warning-amber: var(--warning-amber);
+  --color-chart-blue: var(--chart-blue);
+  --color-chart-blue-soft: var(--chart-blue-soft);
+  --color-chart-green: var(--chart-green);
+  --color-chart-amber: var(--chart-amber);
+  --color-chart-pink: var(--chart-pink);
+  --color-chart-purple: var(--chart-purple);
   --font-sans: var(--type-geometric);
   --font-mono: var(--type-technical);
   --font-serif: var(--type-geometric);
@@ -140,28 +164,32 @@ body {
 }
 
 /* ═══════════════════════════════════════════
-   ENTERPRISE TYPOGRAPHY SCALE
+   TYPOGRAPHY SCALE
+   Sans-serif (Inter) throughout. `.font-technical`
+   /`.font-mono` are opt-in only, for genuinely
+   technical inline values (IDs, hashes, payloads).
 ═══════════════════════════════════════════ */
 
-.font-display { font-family: var(--font-serif); letter-spacing: -0.01em; }
+.font-display { font-family: var(--font-serif); letter-spacing: -0.015em; }
 .font-technical { font-family: var(--font-technical); font-feature-settings: "tnum", "zero"; }
 .font-mono { font-family: var(--font-mono); font-feature-settings: "tnum", "zero"; }
+.tabular { font-feature-settings: "tnum", "zero"; font-variant-numeric: tabular-nums; }
 
 .eyebrow {
-  font-family: var(--font-technical);
+  font-family: var(--type-geometric);
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.08em;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink-tertiary);
 }
 
 .heading-page {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--ink-primary);
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .heading-section {
@@ -191,8 +219,12 @@ body {
 .cc-card {
   background: var(--surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+
+.cc-card-pad {
+  padding: 20px;
 }
 
 .cc-card-hover {
@@ -200,7 +232,7 @@ body {
 }
 .cc-card-hover:hover {
   border-color: var(--border-defined);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-elevated);
 }
 
 .cc-panel-tight {
@@ -213,17 +245,16 @@ body {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-family: var(--font-technical);
-  font-size: 12.5px;
-  font-feature-settings: "tnum", "zero";
+  font-family: var(--type-geometric);
+  font-size: 13px;
 }
 .cc-table thead th {
   text-align: left;
   padding: 10px 14px;
-  font-family: var(--font-technical);
+  font-family: var(--type-geometric);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-tertiary);
   background: var(--surface-raised);
@@ -288,13 +319,13 @@ body {
 
 .cc-btn-primary {
   background: var(--gold-primary);
-  color: #0A0F1C;
+  color: #FFFFFF;
   border: 1px solid transparent;
-  box-shadow: 0 1px 2px rgba(10, 15, 28, 0.12);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
 }
 .cc-btn-primary:hover {
   background: var(--gold-bright);
-  box-shadow: 0 4px 12px rgba(168, 136, 44, 0.30);
+  box-shadow: 0 4px 12px rgba(61, 111, 242, 0.30);
 }
 
 .cc-btn-secondary {
@@ -317,42 +348,57 @@ body {
   color: var(--ink-primary);
 }
 
-/* Status chips */
+/* Status chips — soft pills, sans-serif */
 .cc-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
-  padding: 0 8px;
+  height: 24px;
+  padding: 0 10px;
   border-radius: 999px;
-  font-family: var(--font-technical);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border: 1px solid var(--border-defined);
-  background: var(--surface);
+  font-family: var(--type-geometric);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  border: 1px solid transparent;
+  background: var(--surface-sunken);
   color: var(--ink-secondary);
 }
 .cc-chip-ok {
-  border-color: rgba(42, 122, 76, 0.30);
-  background: rgba(42, 122, 76, 0.10);
+  background: rgba(22, 163, 74, 0.12);
   color: var(--green-success);
 }
 .cc-chip-warn {
-  border-color: rgba(184, 130, 28, 0.30);
-  background: rgba(184, 130, 28, 0.12);
+  background: rgba(245, 158, 11, 0.14);
   color: var(--warning-amber);
 }
 .cc-chip-danger {
-  border-color: rgba(184, 50, 50, 0.30);
-  background: rgba(184, 50, 50, 0.10);
+  background: rgba(239, 71, 99, 0.12);
   color: var(--red-alert);
 }
 .cc-chip-info {
-  border-color: rgba(42, 92, 170, 0.28);
-  background: rgba(42, 92, 170, 0.10);
+  background: rgba(61, 111, 242, 0.10);
   color: var(--blue-system);
+}
+
+/* Small "+15%"-style delta pill */
+.cc-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cc-stat-pill-up {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--green-success);
+}
+.cc-stat-pill-down {
+  background: rgba(239, 71, 99, 0.12);
+  color: var(--red-alert);
 }
 
 /* Active nav indicator */
@@ -379,19 +425,6 @@ body {
   transition: background-color 160ms ease;
 }
 .hover-elevated:hover { background: var(--surface-raised); }
-
-/* Numeric/data-dense surfaces always use mono */
-.dark table,
-.dark .data-grid,
-.dark .data-cell,
-.dark .data-row,
-.dark code,
-.dark pre,
-.dark kbd,
-.dark .tabular {
-  font-family: var(--font-technical);
-  font-feature-settings: "tnum", "zero";
-}
 
 /* Mobile touch targets */
 @media (max-width: 640px) {

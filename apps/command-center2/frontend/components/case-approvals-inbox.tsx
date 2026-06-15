@@ -697,7 +697,7 @@ function DetailPanel({
                   type="button"
                   onClick={onGuide}
                   disabled={busy || !guidance.trim()}
-                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-gold-primary px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-bg-dark disabled:opacity-60"
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-gold-primary px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-white disabled:opacity-60"
                 >
                   <Sparkles className="h-4 w-4" strokeWidth={1.8} />
                   Submit guidance

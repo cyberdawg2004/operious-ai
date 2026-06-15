@@ -234,13 +234,13 @@ export function KnowledgeBase() {
                 placeholder="Search documents..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-11 w-full rounded-lg border border-border-subtle bg-surface pl-9 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary transition-colors focus:outline-none focus:border-gold-accent sm:h-9"
+                className="h-11 w-full rounded-lg border border-border-subtle bg-surface pl-9 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary transition-colors focus:outline-none focus:border-gold-primary sm:h-9"
               />
             </div>
 
             <button
               onClick={() => setModal({ type: "upload" })}
-              className="flex h-11 items-center justify-center gap-2 rounded bg-gold-accent px-4 font-sans text-[13px] font-medium text-ink-primary transition-colors duration-160 hover:bg-[#9A7A28] sm:h-9"
+              className="flex h-11 items-center justify-center gap-2 rounded bg-gold-primary px-4 font-sans text-[13px] font-medium text-white transition-colors duration-160 hover:bg-gold-bright sm:h-9"
             >
               <Upload className="w-3.5 h-3.5" strokeWidth={1.5} />
               Upload Document
@@ -318,7 +318,7 @@ export function KnowledgeBase() {
                     filteredDocs.length > 0
                   }
                   onChange={toggleAllSelection}
-                  className="w-4 h-4 rounded border-border-subtle accent-gold-accent"
+                  className="w-4 h-4 rounded border-border-subtle accent-gold-primary"
                 />
               </div>
               <HeaderCell className="flex-1">Title</HeaderCell>
@@ -355,7 +355,7 @@ export function KnowledgeBase() {
                         type="checkbox"
                         checked={selectedDocs.includes(doc.document_id)}
                         onChange={() => toggleDocSelection(doc.document_id)}
-                        className="w-4 h-4 rounded border-border-subtle accent-gold-accent"
+                        className="w-4 h-4 rounded border-border-subtle accent-gold-primary"
                       />
                     </div>
 
@@ -579,7 +579,7 @@ function DataCell({
 }) {
   return (
     <div className={className}>
-      <span className={cn("font-mono text-[11px]", accent ? "text-gold-accent tabular-nums" : "text-ink-secondary")}>
+      <span className={cn("font-mono text-[11px]", accent ? "text-gold-primary tabular-nums" : "text-ink-secondary")}>
         {children}
       </span>
     </div>

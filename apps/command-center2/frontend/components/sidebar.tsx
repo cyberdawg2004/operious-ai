@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Building2,
   ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   Inbox,
   LayoutDashboard,
@@ -73,14 +74,20 @@ const navItems: NavItem[] = [
   { id: "settings", href: dashboardRoutes.settings, label: "Settings", icon: Settings, group: "system" },
 ];
 
-const groupLabels: Record<NavItem["group"], string> = {
-  operations: "Operations",
+/**
+ * Daily-work surfaces for support managers — kept small and always visible
+ * so the primary view never feels cluttered with admin/config screens.
+ */
+const PRIMARY_ITEM_IDS = ["operations", "approvals", "escalations", "knowledge", "cognition"];
+
+const adminGroupLabels: Record<NavItem["group"], string> = {
+  operations: "Monitoring",
   intelligence: "Intelligence",
   platform: "Platform",
   system: "System",
 };
 
-const groupOrder: NavItem["group"][] = ["operations", "intelligence", "platform", "system"];
+const adminGroupOrder: NavItem["group"][] = ["operations", "intelligence", "platform", "system"];
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -133,6 +140,17 @@ export function Sidebar({
     window.localStorage.removeItem("operious_operator_label");
   };
 
+  const visibleItems = navItems.filter(
+    (item) =>
+      !item.requiresCapability || (capabilities ?? []).includes(item.requiresCapability)
+  );
+  const primaryItems = PRIMARY_ITEM_IDS
+    .map((id) => visibleItems.find((item) => item.id === id))
+    .filter((item): item is NavItem => Boolean(item));
+  const adminItems = visibleItems.filter((item) => !PRIMARY_ITEM_IDS.includes(item.id));
+  const activeIsAdmin = adminItems.some((item) => item.href === pathname);
+  const [adminOpen, setAdminOpen] = useState(activeIsAdmin);
+
   return (
     <aside
       className={cn(
@@ -140,7 +158,7 @@ export function Sidebar({
         "bg-[var(--surface)] border-r border-[var(--border-subtle)]",
         "overscroll-contain transition-[transform,width] duration-200 ease-out will-change-transform",
         mobileOpen ? "translate-x-0" : "-translate-x-full",
-        collapsed ? "lg:w-[68px]" : "lg:w-[232px]",
+        collapsed ? "lg:w-[68px]" : "lg:w-[240px]",
         "lg:sticky lg:top-0 lg:z-30 lg:h-screen lg:translate-x-0",
         className
       )}
@@ -173,7 +191,7 @@ export function Sidebar({
         <button
           onClick={onTenantClick}
           className={cn(
-            "mt-4 flex h-9 w-full items-center gap-2 rounded-md border border-border-subtle bg-surface-raised px-2.5 transition-all duration-200",
+            "mt-4 flex h-9 w-full items-center gap-2 rounded-lg border border-border-subtle bg-surface-raised px-2.5 transition-all duration-200",
             "hover:border-border-defined hover:bg-surface",
             collapsed && "lg:justify-center lg:px-0"
           )}
@@ -198,105 +216,83 @@ export function Sidebar({
 
       {/* Navigation */}
       <nav className={cn("flex-1 overflow-y-auto px-3 py-3", collapsed && "lg:px-2")}>
-        {groupOrder.map((groupKey, groupIdx) => {
-          const groupItems = navItems.filter(
-            (item) =>
-              item.group === groupKey &&
-              (!item.requiresCapability ||
-                (capabilities ?? []).includes(item.requiresCapability))
-          );
-          if (groupItems.length === 0) return null;
-          return (
-            <div key={groupKey} className={cn(groupIdx > 0 && "mt-5")}>
-              {!collapsed && (
-                <h4 className="mb-1.5 px-2 font-technical text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-quaternary">
-                  {groupLabels[groupKey]}
-                </h4>
-              )}
-              <ul className="space-y-0.5">
-                {groupItems.map((item) => {
-                  const isActive = pathname === item.href;
-                  const isHovered = hoveredItem === item.id;
-                  const Icon = item.icon;
+        {/* Primary — daily manager work */}
+        <div>
+          {!collapsed && (
+            <h4 className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-quaternary">
+              Daily Work
+            </h4>
+          )}
+          <ul className="space-y-1">
+            {primaryItems.map((item) => (
+              <NavLink
+                key={item.id}
+                item={item}
+                pathname={pathname}
+                collapsed={collapsed}
+                hoveredItem={hoveredItem}
+                setHoveredItem={setHoveredItem}
+                onMobileClose={onMobileClose}
+                approvalCount={approvalCount}
+                crisisActive={crisisActive}
+                fraudActive={fraudActive}
+                size="lg"
+              />
+            ))}
+          </ul>
+        </div>
 
-                  return (
-                    <li key={item.id}>
-                      <Link
-                        href={item.href}
-                        onClick={onMobileClose}
-                        onMouseEnter={() => setHoveredItem(item.id)}
-                        onMouseLeave={() => setHoveredItem(null)}
-                        className={cn(
-                          "relative flex h-8 w-full items-center gap-2.5 rounded-md px-2 transition-colors duration-150",
-                          isActive
-                            ? "bg-gold-bg text-ink-primary"
-                            : "text-ink-secondary hover:bg-surface-raised hover:text-ink-primary",
-                          collapsed && "lg:justify-center lg:px-0",
-                          isHovered && !isActive && "bg-surface-raised"
-                        )}
-                        title={item.label}
-                      >
-                        {isActive && (
-                          <span
-                            aria-hidden
-                            className={cn(
-                              "absolute bottom-1.5 left-0 top-1.5 w-[2px] rounded-sm bg-gold-primary",
-                              collapsed && "lg:hidden"
-                            )}
-                          />
-                        )}
-                        <Icon
-                          size={15}
-                          strokeWidth={1.7}
-                          className={cn(
-                            "shrink-0 transition-colors duration-150",
-                            isActive ? "text-gold-primary" : "text-ink-tertiary"
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            "truncate text-[12.5px] font-medium",
-                            collapsed && "lg:hidden"
-                          )}
-                        >
-                          {item.label}
-                        </span>
-                        {item.id === "approvals" && approvalCount !== null && approvalCount > 0 && (
-                          <span
-                            className={cn(
-                              "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-gold-primary px-1.5 font-technical text-[10px] font-semibold text-white",
-                              collapsed && "lg:hidden"
-                            )}
-                          >
-                            {approvalCount > 99 ? "99+" : approvalCount}
-                          </span>
-                        )}
-                        {(item.id === "governance" || item.id === "crisis") && crisisActive && (
-                          <span
-                            className={cn(
-                              "ml-auto h-2 w-2 rounded-full bg-red-alert",
-                              collapsed && "lg:absolute lg:right-2 lg:top-2"
-                            )}
-                            aria-label="Active crisis deployment"
-                          />
-                        )}
-                        {item.id === "fraud" && fraudActive && (
-                          <span
-                            className={cn(
-                              "ml-auto h-2 w-2 rounded-full bg-red-alert",
-                              collapsed && "lg:absolute lg:right-2 lg:top-2"
-                            )}
-                            aria-label="Semantic circuit tripped"
-                          />
-                        )}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          );
-        })}
+        {/* Admin — secondary, collapsible */}
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={() => setAdminOpen((open) => !open)}
+            className={cn(
+              "mb-1.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-quaternary transition-colors hover:text-ink-tertiary",
+              collapsed && "lg:justify-center"
+            )}
+            aria-expanded={adminOpen}
+          >
+            <ChevronRight
+              size={12}
+              strokeWidth={2}
+              className={cn("transition-transform duration-150", adminOpen && "rotate-90")}
+            />
+            {!collapsed && <span>Admin &amp; Configuration</span>}
+          </button>
+
+          {adminOpen &&
+            adminGroupOrder.map((groupKey) => {
+              const groupItems = adminItems.filter((item) => item.group === groupKey);
+              if (groupItems.length === 0) return null;
+              return (
+                <div key={groupKey} className="mb-3">
+                  {!collapsed && (
+                    <h5 className="mb-1 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-quaternary">
+                      {adminGroupLabels[groupKey]}
+                    </h5>
+                  )}
+                  <ul className="space-y-0.5">
+                    {groupItems.map((item) => (
+                      <NavLink
+                        key={item.id}
+                        item={item}
+                        pathname={pathname}
+                        collapsed={collapsed}
+                        hoveredItem={hoveredItem}
+                        setHoveredItem={setHoveredItem}
+                        onMobileClose={onMobileClose}
+                        approvalCount={approvalCount}
+                        crisisActive={crisisActive}
+                        fraudActive={fraudActive}
+                        size="sm"
+                      />
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+        </div>
       </nav>
 
       {/* Footer — profile + theme */}
@@ -315,7 +311,7 @@ export function Sidebar({
             window.location.assign(logoutUrl.toString());
           }}
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150",
+            "group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
             "hover:bg-surface-raised",
             collapsed && "lg:justify-center lg:px-0"
           )}
@@ -345,12 +341,12 @@ export function Sidebar({
         <button
           onClick={toggleTheme}
           className={cn(
-            "mt-1 flex h-8 w-full items-center justify-between gap-2 rounded-md px-2 text-[11px] text-ink-tertiary transition-colors duration-150 hover:bg-surface-raised hover:text-ink-secondary",
+            "mt-1 flex h-8 w-full items-center justify-between gap-2 rounded-lg px-2 text-[11px] text-ink-tertiary transition-colors duration-150 hover:bg-surface-raised hover:text-ink-secondary",
             collapsed && "lg:justify-center lg:px-0"
           )}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
         >
-          <span className={cn("font-technical uppercase tracking-[0.14em]", collapsed && "lg:hidden")}>
+          <span className={cn("font-medium uppercase tracking-[0.1em]", collapsed && "lg:hidden")}>
             {theme === "dark" ? "Dark" : "Light"}
           </span>
           {theme === "dark" ? (
@@ -361,5 +357,101 @@ export function Sidebar({
         </button>
       </div>
     </aside>
+  );
+}
+
+function NavLink({
+  item,
+  pathname,
+  collapsed,
+  hoveredItem,
+  setHoveredItem,
+  onMobileClose,
+  approvalCount,
+  crisisActive,
+  fraudActive,
+  size,
+}: {
+  item: NavItem;
+  pathname: string | null;
+  collapsed: boolean;
+  hoveredItem: string | null;
+  setHoveredItem: (id: string | null) => void;
+  onMobileClose?: () => void;
+  approvalCount: number | null;
+  crisisActive: boolean;
+  fraudActive: boolean;
+  size: "lg" | "sm";
+}) {
+  const isActive = pathname === item.href;
+  const isHovered = hoveredItem === item.id;
+  const Icon = item.icon;
+  const isLarge = size === "lg";
+
+  return (
+    <li>
+      <Link
+        href={item.href}
+        onClick={onMobileClose}
+        onMouseEnter={() => setHoveredItem(item.id)}
+        onMouseLeave={() => setHoveredItem(null)}
+        className={cn(
+          "relative flex w-full items-center gap-2.5 rounded-lg px-2 transition-colors duration-150",
+          isLarge ? "h-9" : "h-8",
+          isActive
+            ? "nav-active"
+            : "text-ink-secondary hover:bg-surface-raised hover:text-ink-primary",
+          collapsed && "lg:justify-center lg:px-0",
+          isHovered && !isActive && "bg-surface-raised"
+        )}
+        title={item.label}
+      >
+        <Icon
+          size={isLarge ? 16 : 15}
+          strokeWidth={1.7}
+          className={cn(
+            "shrink-0 transition-colors duration-150",
+            isActive ? "text-gold-primary" : "text-ink-tertiary"
+          )}
+        />
+        <span
+          className={cn(
+            "truncate font-medium",
+            isLarge ? "text-[13px]" : "text-[12.5px]",
+            collapsed && "lg:hidden"
+          )}
+        >
+          {item.label}
+        </span>
+        {item.id === "approvals" && approvalCount !== null && approvalCount > 0 && (
+          <span
+            className={cn(
+              "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-gold-primary px-1.5 text-[10px] font-semibold text-white",
+              collapsed && "lg:hidden"
+            )}
+          >
+            {approvalCount > 99 ? "99+" : approvalCount}
+          </span>
+        )}
+        {(item.id === "governance" || item.id === "crisis") && crisisActive && (
+          <span
+            className={cn(
+              "ml-auto h-2 w-2 rounded-full bg-red-alert",
+              collapsed && "lg:absolute lg:right-2 lg:top-2"
+            )}
+            aria-label="Active crisis deployment"
+          />
+        )}
+        {item.id === "fraud" && fraudActive && (
+          <span
+            className={cn(
+              "ml-auto h-2 w-2 rounded-full bg-red-alert",
+              collapsed && "lg:absolute lg:right-2 lg:top-2"
+            )}
+            aria-label="Semantic circuit tripped"
+          />
+        )}
+      </Link>
+    </li>
   );
 }

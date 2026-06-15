@@ -1,17 +1,23 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Eye,
   RefreshCw,
   Search,
   XCircle,
 } from "lucide-react";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import { BarChart, DonutChart } from "@/components/ui/chart";
+import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-data";
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { listSessions, type SessionRecord } from "@/lib/api";
 import { useApiResource } from "@/lib/use-api-resource";
@@ -21,68 +27,37 @@ const PAGE_SIZE = 100;
 const REFRESH_INTERVAL_MS = 30_000;
 
 type LifecycleFilter = "all" | "initiated" | "completed" | "suspended" | "failed";
+type QueueStatusId = Exclude<LifecycleFilter, "all">;
 
-type StatusDefinition = {
+type StatusMeta = {
   label: string;
+  tone: StatusTone;
   icon: typeof Activity;
-  color: string;
-  bgColor: string;
-  borderColor: string;
 };
 
 const lifecycleFilters: { id: LifecycleFilter; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "all", label: "All tickets" },
   { id: "initiated", label: "Processing" },
   { id: "completed", label: "Resolved" },
   { id: "suspended", label: "Suspended" },
   { id: "failed", label: "Failed" },
 ];
 
-const lifecycleConfig: Record<Exclude<LifecycleFilter, "all">, StatusDefinition> = {
-  initiated: {
-    label: "Processing",
-    icon: Clock,
-    color: "text-blue-system",
-    bgColor: "bg-blue-system/10",
-    borderColor: "border-blue-system/20",
-  },
-  completed: {
-    label: "Resolved",
-    icon: CheckCircle2,
-    color: "text-green-success",
-    bgColor: "bg-green-success/10",
-    borderColor: "border-green-success/20",
-  },
-  suspended: {
-    label: "Suspended",
-    icon: AlertTriangle,
-    color: "text-warning-amber",
-    bgColor: "bg-[#B8821C]/10",
-    borderColor: "border-[#B8821C]/25",
-  },
-  failed: {
-    label: "Failed",
-    icon: XCircle,
-    color: "text-red-alert",
-    bgColor: "bg-red-alert/10",
-    borderColor: "border-red-alert/20",
-  },
+const statusMetaByQueueId: Record<QueueStatusId, StatusMeta> = {
+  initiated: { label: "Processing", tone: "info", icon: Clock },
+  completed: { label: "Resolved", tone: "success", icon: CheckCircle2 },
+  suspended: { label: "Suspended", tone: "warning", icon: AlertTriangle },
+  failed: { label: "Failed", tone: "danger", icon: XCircle },
 };
 
-const timelineReadyStatus: StatusDefinition = {
-  label: "Timeline Ready",
-  icon: CheckCircle2,
-  color: "text-green-success",
-  bgColor: "bg-green-success/10",
-  borderColor: "border-green-success/20",
-};
+const timelineReadyMeta: StatusMeta = { label: "Timeline ready", tone: "success", icon: CheckCircle2 };
+const openedMeta: StatusMeta = { label: "Opened", tone: "neutral", icon: Clock };
 
-const openedStatus: StatusDefinition = {
-  label: "Opened",
-  icon: Clock,
-  color: "text-ink-tertiary",
-  bgColor: "bg-surface-sunken",
-  borderColor: "border-border-subtle",
+const statusBreakdownColors: Record<QueueStatusId, string> = {
+  initiated: "var(--chart-blue)",
+  completed: "var(--chart-green)",
+  suspended: "var(--chart-amber)",
+  failed: "var(--chart-pink)",
 };
 
 type OperationsData = {
@@ -99,6 +74,7 @@ interface OperationsQueueProps {
 export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps) {
   const [activeFilter, setActiveFilter] = useState<LifecycleFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
 
   const loadOperations = useCallback(async (): Promise<OperationsData> => {
     const page = await listSessions({ limit: PAGE_SIZE, offset: 0 });
@@ -129,7 +105,8 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
       const matchesQuery =
         !query ||
         session.session_id.toLowerCase().includes(query) ||
-        session.external_handle.toLowerCase().includes(query);
+        session.external_handle.toLowerCase().includes(query) ||
+        (session.context_notes ?? "").toLowerCase().includes(query);
 
       return matchesLifecycle && matchesQuery;
     });
@@ -144,24 +121,126 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
     [data?.sessions]
   );
 
+  const statusBreakdown = useMemo(() => {
+    const sessions = data?.sessions ?? [];
+    const counts: Record<QueueStatusId, number> = {
+      initiated: 0,
+      completed: 0,
+      suspended: 0,
+      failed: 0,
+    };
+    for (const session of sessions) {
+      counts[getQueueStatusId(session)] += 1;
+    }
+    return (Object.keys(counts) as QueueStatusId[]).map((id) => ({
+      label: statusMetaByQueueId[id].label,
+      value: counts[id],
+      color: statusBreakdownColors[id],
+    }));
+  }, [data?.sessions]);
+
+  const ticketVolume = useMemo(() => buildTicketVolume(data?.sessions ?? []), [data?.sessions]);
+  const todayCount = ticketVolume[ticketVolume.length - 1]?.value ?? 0;
+  const yesterdayCount = ticketVolume[ticketVolume.length - 2]?.value ?? 0;
+  const todayDelta = todayCount - yesterdayCount;
+
+  const columns: DataTableColumn<SessionRecord>[] = [
+    {
+      key: "customer",
+      header: "Customer",
+      width: "min-w-[260px]",
+      render: (session) => (
+        <div className="min-w-0">
+          <p className="truncate text-[13.5px] font-semibold text-ink-primary">
+            {session.external_handle}
+          </p>
+          <p className="mt-0.5 truncate text-meta">
+            {session.context_notes?.trim() || "No ticket summary provided yet."}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: "w-[150px]",
+      render: (session) => {
+        const meta = getQueueStatusMeta(session);
+        return <StatusBadge label={meta.label} tone={meta.tone} icon={meta.icon} />;
+      },
+    },
+    {
+      key: "opened",
+      header: "Opened",
+      width: "w-[170px]",
+      render: (session) => (
+        <span className="tabular text-[12.5px] text-ink-secondary" title={formatAbsoluteTime(session.opened_at)}>
+          {formatRelativeTime(session.opened_at)}
+        </span>
+      ),
+    },
+    {
+      key: "events",
+      header: "Events",
+      width: "w-[90px]",
+      numeric: true,
+      render: (session) => (
+        <span className="tabular text-[12.5px] text-ink-secondary">
+          {Math.max(0, session.sequence_head + 1)}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      width: "w-[200px]",
+      align: "right",
+      render: (session) => (
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenTrace?.(session.session_id)}
+            className="cc-btn cc-btn-secondary"
+            aria-label={`View trace for session ${session.session_id}`}
+          >
+            <Eye size={13} strokeWidth={1.8} />
+            View trace
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setExpandedSessionId((current) =>
+                current === session.session_id ? null : session.session_id
+              )
+            }
+            className="cc-btn cc-btn-ghost"
+            aria-label={`Toggle technical details for session ${session.session_id}`}
+            aria-expanded={expandedSessionId === session.session_id}
+          >
+            {expandedSessionId === session.session_id ? (
+              <ChevronDown size={14} strokeWidth={1.8} />
+            ) : (
+              <ChevronRight size={14} strokeWidth={1.8} />
+            )}
+            Details
+          </button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <main className={cn("min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8", className)}>
-      <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary">
-        OPERATIONS - PILOT DEPLOYMENT — CONSUMER ELECTRONICS
-      </div>
-
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <h1 className="font-display text-[32px] font-bold text-ink-primary">
-          Operations Queue
-        </h1>
+        <p className="text-meta">Pilot deployment &middot; Consumer electronics</p>
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <label className="flex flex-col gap-1">
-            <span className="sr-only">Lifecycle phase</span>
+            <span className="sr-only">Ticket status</span>
             <select
               value={activeFilter}
               onChange={(event) => setActiveFilter(event.target.value as LifecycleFilter)}
-              className="h-11 min-w-[180px] rounded border border-border-subtle bg-surface px-3 text-[13px] text-ink-primary outline-none transition-colors focus:border-border-defined sm:h-10"
+              className="cc-select h-10 min-w-[180px]"
             >
               {lifecycleFilters.map((filter) => (
                 <option key={filter.id} value={filter.id}>
@@ -174,39 +253,39 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
           <div className="relative">
             <Search
               size={14}
-              strokeWidth={1.5}
+              strokeWidth={1.8}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
             />
             <input
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Session ID or handle..."
-              className="h-11 w-full min-w-0 rounded border border-border-subtle bg-surface pl-9 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary transition-colors focus:border-border-defined focus:outline-none sm:h-10 md:w-[320px]"
+              placeholder="Search by customer or ticket ID..."
+              className="cc-input h-10 pl-9 md:w-[320px]"
             />
           </div>
 
           <button
             type="button"
             onClick={reload}
-            className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle bg-surface transition-all duration-160 hover:border-border-defined sm:h-10 sm:w-10"
-            aria-label="Refresh sessions"
+            className="cc-btn cc-btn-secondary h-10 w-10"
+            aria-label="Refresh tickets"
           >
             <RefreshCw
               size={14}
-              strokeWidth={1.5}
-              className={cn("text-ink-secondary", isLoading && "animate-spin")}
+              strokeWidth={1.8}
+              className={cn(isLoading && "animate-spin")}
             />
           </button>
         </div>
       </div>
 
-      {isLoading && <div className="mt-8"><LoadingState label="Loading sessions..." /></div>}
+      {isLoading && <div className="mt-8"><LoadingState label="Loading tickets..." /></div>}
 
       {error && !isLoading && (
         <div className="mt-8">
           <ErrorState
-            title="Unable to load sessions"
+            title="Unable to load tickets"
             message={`Sessions request failed: ${error}`}
             actionLabel="Retry"
             onAction={reload}
@@ -216,55 +295,111 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
 
       {data && !isLoading && !error && (
         <>
-          <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-            <SummaryCard label="TENANT SESSIONS" value={String(data.total)} />
-            <SummaryCard label="VISIBLE" value={String(filteredSessions.length)} />
-            <SummaryCard
-              label="TENANT EVENTS"
-              value={String(recordedEventCount)}
-              valueColor="text-gold-primary"
-            />
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.4fr)]">
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Tickets</CardTitle>
+                  <CardDescription>Across all open sessions</CardDescription>
+                </div>
+              </CardHeader>
+              <p className="heading-page tabular">{data.total}</p>
+              <div className="mt-4 flex items-center gap-2">
+                <span
+                  className={cn(
+                    "cc-stat-pill",
+                    todayDelta >= 0 ? "cc-stat-pill-up" : "cc-stat-pill-down"
+                  )}
+                >
+                  {todayDelta >= 0 ? "+" : ""}
+                  {todayDelta} today
+                </span>
+                <span className="text-meta">vs. yesterday ({yesterdayCount})</span>
+              </div>
+              <div className="mt-4 border-t border-border-subtle pt-3 text-meta">
+                {recordedEventCount} timeline events recorded across visible tickets
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Status breakdown</CardTitle>
+                  <CardDescription>Current lifecycle of all tickets</CardDescription>
+                </div>
+              </CardHeader>
+              <DonutChart
+                data={statusBreakdown}
+                centerValue={String(data.total)}
+                centerLabel="tickets"
+              />
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Ticket volume</CardTitle>
+                  <CardDescription>Opened per day, last 7 days</CardDescription>
+                </div>
+              </CardHeader>
+              <BarChart data={ticketVolume} />
+            </Card>
           </div>
 
-          <div className="mt-6 overflow-hidden rounded-lg border border-border-subtle bg-surface">
+          <div className="cc-card mt-6 overflow-hidden">
             {filteredSessions.length === 0 ? (
               <div className="p-6">
                 <EmptyState
-                  title="No sessions recorded yet."
-                  message="Sessions appear here once tickets are processed through the pipeline."
+                  title="No tickets match these filters."
+                  message="Tickets appear here once customer sessions are processed through the pipeline."
                   actionLabel="Refresh"
                   onAction={reload}
                 />
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <div className="min-w-[960px]">
-                  <div className="flex h-11 items-center border-b border-border-subtle bg-surface-raised px-3 sm:h-9">
-                    <TableHeader className="w-[132px]">SESSION ID</TableHeader>
-                    <TableHeader className="min-w-[260px] flex-1">HANDLE</TableHeader>
-                    <TableHeader className="w-[156px]">TIMELINE</TableHeader>
-                    <TableHeader className="w-[156px]">OPENED</TableHeader>
-                    <TableHeader className="w-[96px]">EVENTS</TableHeader>
-                    <TableHeader className="w-[140px] text-right">ACTION</TableHeader>
-                  </div>
-
-                  {filteredSessions.map((session, index) => (
-                    <SessionRow
-                      key={session.session_id}
-                      session={session}
-                      isOdd={index % 2 === 1}
-                      onOpenTrace={() => onOpenTrace?.(session.session_id)}
+              <DataTable
+                columns={columns}
+                rows={filteredSessions}
+                rowKey={(session) => session.session_id}
+                minWidth="880px"
+                expandedRowId={expandedSessionId}
+                renderExpanded={(session) => (
+                  <div className="px-4 py-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="heading-section text-[13px]">Technical details</h4>
+                      <DownloadableLog
+                        data={session}
+                        filename={`session-${session.session_id}.json`}
+                        label="Download session log"
+                      />
+                    </div>
+                    <CodeAsReadableText
+                      data={{
+                        session_id: session.session_id,
+                        lineage_id: session.lineage_id,
+                        root_session_id: session.root_session_id,
+                        parent_session_id: session.parent_session_id,
+                        ancestor_session_ids: session.ancestor_session_ids,
+                        lineage_depth: session.lineage_depth,
+                        revision: session.revision,
+                        tenant_id: session.tenant_id,
+                        principal_id: session.principal_id,
+                        context_environment: session.context_environment,
+                        context_labels: session.context_labels,
+                        lifecycle_phase: session.lifecycle_phase,
+                        lifecycle_reason: session.lifecycle_reason,
+                      }}
                     />
-                  ))}
-                </div>
-              </div>
+                  </div>
+                )}
+              />
             )}
 
             <div className="flex min-h-12 flex-col gap-2 border-t border-border-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-[12px] text-ink-tertiary">
-                Showing {filteredSessions.length} of {data.total} sessions
+              <span className="text-meta">
+                Showing {filteredSessions.length} of {data.total} tickets
               </span>
-              <span className="font-technical text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+              <span className="text-meta">
                 Last refreshed {formatRelativeTime(data.fetchedAt)}
               </span>
             </div>
@@ -275,157 +410,11 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  valueColor = "text-ink-primary",
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-}) {
-  return (
-    <div className="flex h-20 flex-col gap-1.5 rounded-lg border border-border-subtle bg-surface p-4">
-      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary">
-        {label}
-      </span>
-      <span className={cn("font-technical text-[26px] font-medium tabular-nums", valueColor)}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function TableHeader({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("px-2 font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary", className)}>
-      {children}
-    </div>
-  );
-}
-
-function SessionRow({
-  session,
-  isOdd,
-  onOpenTrace,
-}: {
-  session: SessionRecord;
-  isOdd: boolean;
-  onOpenTrace: () => void;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex min-h-14 items-center border-b border-border-subtle px-3 last:border-b-0 sm:min-h-11",
-        isOdd ? "bg-canvas/50" : "bg-surface",
-        "transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
-      )}
-    >
-      <DataCell className="w-[132px]" value={shortSessionId(session.session_id)} accent />
-      <div className="min-w-[260px] flex-1 px-2">
-        <span className="block truncate font-technical text-[12px] text-ink-primary">
-          {session.external_handle}
-        </span>
-        <span className="block truncate text-[11px] text-ink-tertiary">
-          tenant {session.tenant_id ?? "unscoped"}
-        </span>
-      </div>
-      <div className="w-[156px] px-2">
-        <StatusBadge status={getQueueStatusDefinition(session)} />
-      </div>
-      <div className="w-[156px] px-2">
-        <span
-          className="block truncate font-technical text-[12px] tabular-nums text-ink-secondary"
-          title={formatAbsoluteTime(session.opened_at)}
-        >
-          {formatAbsoluteTime(session.opened_at)}
-        </span>
-      </div>
-      <DataCell className="w-[96px]" value={String(Math.max(0, session.sequence_head + 1))} />
-      <div className="flex w-[140px] justify-end px-2">
-        <TraceButton sessionId={session.session_id} onOpenTrace={onOpenTrace} />
-      </div>
-    </div>
-  );
-}
-
-function TraceButton({
-  sessionId,
-  onOpenTrace,
-}: {
-  sessionId: string;
-  onOpenTrace: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpenTrace}
-      className="inline-flex h-11 items-center gap-2 rounded border border-border-subtle px-3 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary transition-all duration-160 hover:border-border-defined hover:bg-surface-raised hover:text-ink-primary sm:h-8"
-      aria-label={`View trace for session ${sessionId}`}
-    >
-      <Eye size={13} strokeWidth={1.5} />
-      View Trace
-    </button>
-  );
-}
-
-function StatusBadge({ status }: { status: StatusDefinition }) {
-  const StatusIcon = status.icon;
-
-  return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-2 py-1",
-        status.bgColor,
-        status.borderColor
-      )}
-    >
-      <StatusIcon size={12} strokeWidth={1.5} className={status.color} />
-      <span className={cn("font-technical text-[10px] font-medium tracking-wider", status.color)}>
-        {status.label}
-      </span>
-    </div>
-  );
-}
-
-function DataCell({
-  className,
-  value,
-  accent = false,
-}: {
-  className: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className={cn("px-2", className)}>
-      <span
-        className={cn(
-          "block truncate font-technical text-[12px] tabular-nums",
-          accent ? "text-blue-system" : "text-ink-secondary"
-        )}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function shortSessionId(value: string): string {
-  return value.slice(0, 8);
-}
-
 function compareSessionsByOpenedAtDesc(left: SessionRecord, right: SessionRecord): number {
   return new Date(right.opened_at).getTime() - new Date(left.opened_at).getTime();
 }
 
-function getQueueStatusId(session: SessionRecord): Exclude<LifecycleFilter, "all"> {
+function getQueueStatusId(session: SessionRecord): QueueStatusId {
   if (session.lifecycle_phase === "completed") return "completed";
   if (session.lifecycle_phase === "suspended") return "suspended";
   if (session.lifecycle_phase === "failed") return "failed";
@@ -433,23 +422,35 @@ function getQueueStatusId(session: SessionRecord): Exclude<LifecycleFilter, "all
   return "initiated";
 }
 
-function getQueueStatusDefinition(session: SessionRecord): StatusDefinition {
-  if (session.lifecycle_phase === "completed") return lifecycleConfig.completed;
-  if (session.lifecycle_phase === "suspended") return lifecycleConfig.suspended;
-  if (session.lifecycle_phase === "failed") return lifecycleConfig.failed;
-  if (session.sequence_head >= 2) return timelineReadyStatus;
-  if (session.sequence_head >= 0) return openedStatus;
-  return unknownStatus(session.lifecycle_phase);
+function getQueueStatusMeta(session: SessionRecord): StatusMeta {
+  if (session.lifecycle_phase === "completed") return statusMetaByQueueId.completed;
+  if (session.lifecycle_phase === "suspended") return statusMetaByQueueId.suspended;
+  if (session.lifecycle_phase === "failed") return statusMetaByQueueId.failed;
+  if (session.sequence_head >= 2) return timelineReadyMeta;
+  if (session.sequence_head >= 0) return openedMeta;
+  return { label: session.lifecycle_phase || "Unknown", tone: "neutral", icon: Activity };
 }
 
-function unknownStatus(label: string): StatusDefinition {
-  return {
-    label: label || "unknown",
-    icon: Activity,
-    color: "text-ink-tertiary",
-    bgColor: "bg-surface-sunken",
-    borderColor: "border-border-subtle",
-  };
+function buildTicketVolume(sessions: SessionRecord[]): { label: string; value: number }[] {
+  const days: { label: string; value: number; dateKey: string }[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i -= 1) {
+    const date = new Date(now);
+    date.setDate(now.getDate() - i);
+    days.push({
+      label: date.toLocaleDateString(undefined, { weekday: "short" }),
+      value: 0,
+      dateKey: date.toISOString().slice(0, 10),
+    });
+  }
+
+  for (const session of sessions) {
+    const dateKey = session.opened_at.slice(0, 10);
+    const day = days.find((entry) => entry.dateKey === dateKey);
+    if (day) day.value += 1;
+  }
+
+  return days.map(({ label, value }) => ({ label, value }));
 }
 
 function formatRelativeTime(value: string): string {
