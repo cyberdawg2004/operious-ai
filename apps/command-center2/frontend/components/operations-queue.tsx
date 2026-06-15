@@ -163,7 +163,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
     {
       key: "status",
       header: "Status",
-      width: "w-[150px]",
+      width: "w-[170px]",
       render: (session) => {
         const meta = getQueueStatusMeta(session);
         return <StatusBadge label={meta.label} tone={meta.tone} icon={meta.icon} />;
@@ -193,7 +193,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
     {
       key: "actions",
       header: "",
-      width: "w-[200px]",
+      width: "w-[230px]",
       align: "right",
       render: (session) => (
         <div className="flex items-center justify-end gap-2">
@@ -250,7 +250,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
             </select>
           </label>
 
-          <div className="relative">
+          <div className="relative w-full md:w-[320px]">
             <Search
               size={14}
               strokeWidth={1.8}
@@ -261,7 +261,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search by customer or ticket ID..."
-              className="cc-input h-10 pl-9 md:w-[320px]"
+              className="cc-input h-10 pl-9"
             />
           </div>
 

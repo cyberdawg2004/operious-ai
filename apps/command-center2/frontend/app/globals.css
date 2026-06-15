@@ -312,6 +312,7 @@ body {
   font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
+  white-space: nowrap;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease,
     box-shadow 160ms ease, transform 120ms ease;
 }
@@ -360,6 +361,7 @@ body {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
+  white-space: nowrap;
   border: 1px solid transparent;
   background: var(--surface-sunken);
   color: var(--ink-secondary);
