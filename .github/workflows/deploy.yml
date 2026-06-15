@@ -153,7 +153,6 @@ jobs:
         if: always()
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        working-directory: apps/backend
         run: |
           set -euo pipefail
           flyctl status --app operious-ai-imad
