@@ -44,6 +44,13 @@ from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
 from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import dispose_engine, get_owner_session_factory
+# Side-effect imports: register the FK-target tables referenced by
+# ResolutionProposalRow/ResolutionOutboundDraftRow in Base.metadata, or
+# session.commit()'s flush-time table sort raises NoReferencedTableError.
+from app.execution.db.models import ExecutionRow  # noqa: F401
+from app.governance.db.models import GovernanceDecisionRow  # noqa: F401
+from app.session.db.models import SessionRow  # noqa: F401
+from app.tenant.db.models import TenantRow  # noqa: F401
 from app.resolution.db.models import ResolutionOutboundDraftRow, ResolutionProposalRow
 from app.resolution.persistence.postgres import (
     PostgresResolutionProposalPersistence,
