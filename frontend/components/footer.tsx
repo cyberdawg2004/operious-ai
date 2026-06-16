@@ -4,40 +4,11 @@ import Link from "next/link";
 import { Mail } from "lucide-react";
 
 const KernelSealLogo = ({ size = 48 }: { size?: number }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 48 48"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    {/* Outer hexagonal ring */}
-    <path
-      d="M24 2L44 13.5V36.5L24 48L4 36.5V13.5L24 2Z"
-      stroke="#A8882C"
-      strokeWidth="1.5"
-      fill="none"
-    />
-    {/* Inner hexagonal ring */}
-    <path
-      d="M24 8L38 16.5V33.5L24 42L10 33.5V16.5L24 8Z"
-      stroke="#0A0F1C"
-      strokeWidth="1"
-      fill="none"
-    />
-    {/* Center kernel glyph */}
-    <path
-      d="M24 14L32 19V29L24 34L16 29V19L24 14Z"
-      fill="#A8882C"
-      fillOpacity="0.3"
-    />
-    <path
-      d="M24 14L32 19V29L24 34L16 29V19L24 14Z"
-      stroke="#A8882C"
-      strokeWidth="1"
-      fill="none"
-    />
-    {/* Center dot */}
+  <svg width={size} height={size} viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M24 2L44 13.5V36.5L24 48L4 36.5V13.5L24 2Z" stroke="#A8882C" strokeWidth="1.5" fill="none" />
+    <path d="M24 8L38 16.5V33.5L24 42L10 33.5V16.5L24 8Z" stroke="#0A0F1C" strokeWidth="1" fill="none" />
+    <path d="M24 14L32 19V29L24 34L16 29V19L24 14Z" fill="#A8882C" fillOpacity="0.3" />
+    <path d="M24 14L32 19V29L24 34L16 29V19L24 14Z" stroke="#A8882C" strokeWidth="1" fill="none" />
     <circle cx="24" cy="24" r="2" fill="#A8882C" />
   </svg>
 );
@@ -114,27 +85,15 @@ const socialIcons = [
 
 export function Footer() {
   return (
-    <footer className="bg-[#05080F] pt-16 sm:pt-20 lg:pt-24 pb-6 sm:pb-8 px-4 sm:px-8 lg:px-16">
-      <div className="max-w-[1440px] mx-auto">
-        {/* Top section - Logo and tagline */}
+    <footer className="bg-[#05080F] px-4 pb-6 pt-16 sm:px-8 sm:pb-8 sm:pt-20 lg:px-16 lg:pt-24">
+      <div className="mx-auto max-w-[1440px]">
         <div className="flex items-center gap-3 sm:gap-4">
           <KernelSealLogo size={40} />
-          <span
-            className="text-[22px] sm:text-[26px] lg:text-[28px] font-semibold text-[#D8E4F4]"
-            style={{ fontFamily: "var(--font-cormorant-sc)" }}
-          >
-            Operious
-          </span>
+          <span className="text-[22px] font-semibold text-[#D8E4F4] sm:text-[26px] lg:text-[28px]" style={{ fontFamily: "var(--font-cormorant-sc)" }}>Operious</span>
         </div>
-        <p
-          className="mt-3 sm:mt-4 text-[10px] sm:text-[11px] uppercase tracking-[0.18em] text-[#C9A84C]"
-          style={{ fontFamily: "var(--font-ibm-plex-mono)" }}
-        >
-          DETERMINISTIC ENTERPRISE OPERATIONS
-        </p>
+        <p className="mt-3 text-[10px] uppercase tracking-[0.18em] text-[#C9A84C] sm:mt-4 sm:text-[11px]" style={{ fontFamily: "var(--font-ibm-plex-mono)" }}>DETERMINISTIC ENTERPRISE OPERATIONS</p>
 
-        {/* Five-column grid */}
-        <div className="mt-12 sm:mt-14 lg:mt-16 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8 sm:gap-10 lg:gap-12">
+        <div className="mt-12 grid grid-cols-2 gap-8 sm:mt-14 sm:grid-cols-3 sm:gap-10 lg:mt-16 lg:grid-cols-5 lg:gap-12">
           {footerColumns.map((column) => (
             <div key={column.title}>
               <h4
@@ -173,28 +132,16 @@ export function Footer() {
           ))}
         </div>
 
-        {/* Bottom strip */}
-        <div className="mt-16 sm:mt-20 lg:mt-24 pt-6 sm:pt-8 border-t border-[#1A2744]">
-          <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
-            {/* Left - Copyright */}
-            <p className="text-[12px] sm:text-[13px] text-[#7A90B4] text-center lg:text-left">
-              © 2026 Operious AI. All operational guarantees reserved.
-            </p>
+        <div className="mt-16 border-t border-[#1A2744] pt-6 sm:mt-20 sm:pt-8 lg:mt-24">
+          <div className="flex flex-col items-center justify-between gap-6 lg:flex-row">
+            <p className="text-center text-[12px] text-[#7A90B4] sm:text-[13px] lg:text-left">© 2026 Operious AI. All operational guarantees reserved.</p>
 
-            {/* Center - Links */}
             <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
               {bottomLinks.map((link) => (
-                <Link
-                  key={link}
-                  href="#"
-                  className="text-[12px] sm:text-[13px] text-[#7A90B4] hover:text-[#C9A84C] transition-colors duration-[160ms]"
-                >
-                  {link}
-                </Link>
+                <Link key={link} href="#" className="text-[12px] text-[#7A90B4] transition-colors duration-[160ms] hover:text-[#C9A84C] sm:text-[13px]">{link}</Link>
               ))}
             </div>
 
-            {/* Right - Social icons */}
             <div className="flex items-center gap-3 sm:gap-4">
               {socialIcons.map((social) => (
                 <a
