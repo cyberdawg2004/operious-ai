@@ -170,6 +170,7 @@ from app.runtime.resolution_runtime import (
     ResolutionOutboundDraftRuntime,
     ResolutionProposalRequest,
     ResolutionRuntime,
+    resolution_contains_safety_floor_keywords,
     resolution_outbound_draft_timeline_payload,
     resolution_proposal_timeline_payload,
     resolution_proposal_is_send_eligible,
@@ -453,6 +454,7 @@ class _ResolutionAppendResult:
     draft_id: str | None = None
     outbound_send_outbox_id: str | None = None
     safety_escalation_governance_decision_id: str | None = None
+    safety_floor_escalation_governance_decision_id: str | None = None
     post_commit_flushes: tuple[Callable[[], Awaitable[None]], ...] = ()
 
 
@@ -1247,21 +1249,24 @@ async def _persist_diagnostic_success(
                     session=session,
                     resolution_append=resolution_append,
                 )
+                _escalation_runtime = EscalationAgentRuntime(
+                    escalation_persistence=PostgresEscalationPersistence(session),
+                    governance_repository=PostgresGovernanceRepository(session),
+                    session_persistence=PostgresSessionPersistence(session),
+                )
                 resolution_escalation_published = (
                     await _publish_resolution_safety_escalation_if_present(
                         work_item=work_item,
                         resolution_append=resolution_append,
-                        escalation_runtime=EscalationAgentRuntime(
-                            escalation_persistence=PostgresEscalationPersistence(
-                                session
-                            ),
-                            governance_repository=PostgresGovernanceRepository(
-                                session
-                            ),
-                            session_persistence=PostgresSessionPersistence(
-                                session
-                            ),
-                        ),
+                        escalation_runtime=_escalation_runtime,
+                        commit=session.commit,
+                    )
+                )
+                safety_floor_escalation_published = (
+                    await _publish_safety_floor_escalation_if_present(
+                        work_item=work_item,
+                        resolution_append=resolution_append,
+                        escalation_runtime=_escalation_runtime,
                         commit=session.commit,
                     )
                 )
@@ -1291,6 +1296,10 @@ async def _persist_diagnostic_success(
                     **_resolution_safety_escalation_result_payload(
                         resolution_append,
                         published=resolution_escalation_published,
+                    ),
+                    **_safety_floor_escalation_result_payload(
+                        resolution_append,
+                        published=safety_floor_escalation_published,
                     ),
                 }
             except Exception:
@@ -1812,6 +1821,12 @@ async def _append_resolution_proposal_after_diagnostic(
                     draft=draft,
                 )
             )
+            safety_floor_escalation_governance_decision_id = (
+                await _resolve_safety_floor_escalation_governance_decision_id(
+                    governance_repo=governance_repo,
+                    work_item=work_item,
+                )
+            )
             if resolution_proposal_is_send_eligible(proposal):
                 action_runtime = await _action_orchestration_runtime(
                     session=session,
@@ -1842,6 +1857,9 @@ async def _append_resolution_proposal_after_diagnostic(
                 safety_escalation_governance_decision_id=(
                     safety_escalation_governance_decision_id
                 ),
+                safety_floor_escalation_governance_decision_id=(
+                    safety_floor_escalation_governance_decision_id
+                ),
                 post_commit_flushes=tuple(post_commit_flushes),
             )
         return _ResolutionAppendResult(
@@ -1860,6 +1878,9 @@ async def _append_resolution_proposal_after_diagnostic(
             ),
             safety_escalation_governance_decision_id=(
                 safety_escalation_governance_decision_id
+            ),
+            safety_floor_escalation_governance_decision_id=(
+                safety_floor_escalation_governance_decision_id
             ),
             post_commit_flushes=tuple(post_commit_flushes),
         )
@@ -2319,6 +2340,188 @@ def _resolution_safety_escalation_result_payload(
     return {
         "resolution_safety_escalation_governance_decision_id": decision_id,
         "resolution_safety_escalation_published": published,
+    }
+
+
+_SAFETY_FLOOR_POLICY_CHAIN_ID = "resolution.safety.keyword_floor"
+_SAFETY_FLOOR_RULE_ID = "safety_keyword_floor_detected"
+
+
+async def _resolve_safety_floor_escalation_governance_decision_id(
+    *,
+    governance_repo: PostgresGovernanceRepository,
+    work_item: _DiagnosticExecutionWorkItem,
+) -> str | None:
+    """Return a governance ESCALATE decision_id for a safety-floor hit.
+
+    Fires regardless of proposal status: even a SEND_ELIGIBLE reply gets a
+    P0/CRISIS escalation when the inbound content contains a physical-hazard
+    keyword.  Idempotent: the decision_id is deterministically derived from
+    the session so retries are safe.
+    """
+    if not resolution_contains_safety_floor_keywords(work_item.content):
+        return None
+
+    decision_id = str(
+        derive_decision_id(
+            seed=(
+                f"{_SAFETY_FLOOR_POLICY_CHAIN_ID}:"
+                f"{work_item.tenant_id}:{work_item.session_id}"
+            )
+        )
+    )
+    now = datetime.now(timezone.utc)
+    decision_record = GovernanceDecisionRecord(
+        decision_id=decision_id,
+        decision=Decision.ESCALATE.value,
+        stage=EnforcementStage.PRE_EXECUTION.value,
+        policy_chain_id=_SAFETY_FLOOR_POLICY_CHAIN_ID,
+        reason="safety_keyword_floor",
+        decided_at=now.isoformat(),
+        tenant_id=work_item.tenant_id,
+        subject_kind="communication",
+        violations=(
+            PolicyViolationRecord(
+                policy_name=f"crisis.{_SAFETY_FLOOR_POLICY_CHAIN_ID}",
+                rule_id=_SAFETY_FLOOR_RULE_ID,
+                decision=Decision.ESCALATE.value,
+                severity=100,
+                detail="physical-hazard keyword detected in inbound content",
+            ),
+        ),
+    )
+    try:
+        await governance_repo.record_decision(decision_record)
+    except ValueError:
+        pass  # Already recorded on a previous attempt — idempotent
+    return decision_id
+
+
+async def _publish_safety_floor_escalation_if_present(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    resolution_append: _ResolutionAppendResult,
+    escalation_runtime: EscalationAgentRuntime | None = None,
+    commit: Callable[[], Awaitable[None]] | None = None,
+) -> bool:
+    decision_id = resolution_append.safety_floor_escalation_governance_decision_id
+    if decision_id is None:
+        return False
+    if escalation_runtime is not None:
+        return await _publish_safety_floor_escalation_with_outbox(
+            work_item=work_item,
+            governance_decision_id=decision_id,
+            escalation_runtime=escalation_runtime,
+            commit=commit,
+        )
+    try:
+        await CeleryEscalationPublisher().publish_governance_escalation(
+            governance_decision_id=decision_id,
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "resolution_safety_floor_escalation_publish_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": decision_id,
+            },
+        )
+        return False
+
+
+async def _publish_safety_floor_escalation_with_outbox(
+    *,
+    work_item: _DiagnosticExecutionWorkItem,
+    governance_decision_id: str,
+    escalation_runtime: EscalationAgentRuntime,
+    commit: Callable[[], Awaitable[None]] | None,
+) -> bool:
+    prepared = await escalation_runtime.prepare_governance_escalation_outbox(
+        governance_decision_id=governance_decision_id,
+        expected_tenant_id=work_item.tenant_id,
+        session_id=work_item.session_id,
+        metadata={
+            "source": "resolution_safety_keyword_floor",
+            "source_decision": Decision.ESCALATE.value,
+            "execution_id": work_item.execution_id,
+            "attempt_id": work_item.attempt_id,
+            "dispatch_id": work_item.dispatch_id,
+        },
+    )
+    claim = await escalation_runtime.claim_outbox_for_escalation(
+        escalation_id=prepared.escalation.escalation_id,
+        publisher_id="worker:resolution-safety-keyword-floor",
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if not claim.claimed or claim.outbox is None:
+        if claim.reason == "outbox_not_publishable:published":
+            return True
+        logger.warning(
+            "resolution_safety_floor_escalation_outbox_claim_refused",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": governance_decision_id,
+                "escalation_id": prepared.escalation.escalation_id,
+                "reason": claim.reason,
+            },
+        )
+        return False
+    claim_id = _require_resolution_escalation_outbox_claim_id(claim.outbox.claim_id)
+    if commit is not None:
+        await commit()
+    try:
+        await CeleryEscalationPublisher().publish_governance_escalation(
+            governance_decision_id=governance_decision_id,
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await escalation_runtime.mark_outbox_failed(
+            outbox_id=claim.outbox.outbox_id,
+            claim_id=claim_id,
+            error=str(exc)[:240],
+            expected_tenant_id=work_item.tenant_id,
+        )
+        if commit is not None:
+            await commit()
+        logger.exception(
+            "resolution_safety_floor_escalation_publish_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "attempt_id": work_item.attempt_id,
+                "governance_decision_id": governance_decision_id,
+            },
+        )
+        return False
+    await escalation_runtime.mark_outbox_published(
+        outbox_id=claim.outbox.outbox_id,
+        claim_id=claim_id,
+        expected_tenant_id=work_item.tenant_id,
+    )
+    if commit is not None:
+        await commit()
+    return True
+
+
+def _safety_floor_escalation_result_payload(
+    result: _ResolutionAppendResult,
+    *,
+    published: bool,
+) -> dict[str, object]:
+    decision_id = result.safety_floor_escalation_governance_decision_id
+    if decision_id is None:
+        return {}
+    return {
+        "resolution_safety_floor_escalation_governance_decision_id": decision_id,
+        "resolution_safety_floor_escalation_published": published,
     }
 
 

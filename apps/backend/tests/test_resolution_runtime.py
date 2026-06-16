@@ -55,6 +55,7 @@ from app.runtime.resolution_runtime import (
     _recommended_actions,
     _resolution_category,
     _unsupported_commitment_patterns,
+    resolution_contains_safety_floor_keywords,
     resolution_outbound_draft_timeline_payload,
     resolution_proposal_is_send_eligible,
     resolution_proposal_timeline_payload,
@@ -1892,3 +1893,113 @@ def test_trace_inspector_renders_resolution_draft_and_old_proposals() -> None:
     assert "resolution_outbound_draft_created" in source
     assert "ResolutionDraftSummary" in source
     assert "draft_body_sha256" in source
+
+
+# ─── Safety floor keyword tests ───────────────────────────────────────────────
+
+
+def test_safety_floor_keywords_swollen_standalone_matches() -> None:
+    # Load-bearing: the original P0 bug was "swollen battery" (two-word phrase)
+    # not matching "swollen power bank".  After the fix, standalone "swollen"
+    # must fire the safety floor regardless of the surrounding noun.
+    assert resolution_contains_safety_floor_keywords("my swollen power bank") is True
+    assert resolution_contains_safety_floor_keywords("swollen battery") is True
+    assert resolution_contains_safety_floor_keywords("the battery is swollen") is True
+
+
+def test_safety_floor_keywords_comprehensive_set_all_match() -> None:
+    # Every keyword the user approved as part of the high-recall safety floor
+    # must trigger it; removing any term makes this test fail.
+    hazard_phrases = [
+        "the battery is bloated",
+        "bulging side panel",
+        "puffy pouch",
+        "the pack expanded",
+        "leaking electrolyte",
+        "leak from the cell",
+        "device is hot to touch",
+        "smoke coming from device",
+        "smoking charger",
+        "burst into fire",
+        "flame from the port",
+        "flames visible",
+        "burn mark",
+        "burning smell",
+        "burns on my hand",
+        "burnt plastic",
+        "spark when plugging in",
+        "sparks flew",
+        "sparking port",
+        "started to melt",
+        "melting casing",
+        "melted connector",
+        "explode on charging",
+        "exploded in my bag",
+        "exploding battery",
+        "caused an explosion",
+        "overheat during use",
+        "overheating constantly",
+        "injury from the battery",
+        "i was injured",
+        "multiple injuries reported",
+        "electric shock",
+        "chemical smell",
+        "toxic fumes",
+    ]
+    for phrase in hazard_phrases:
+        assert resolution_contains_safety_floor_keywords(phrase) is True, (
+            f"safety floor keyword not detected in: {phrase!r}"
+        )
+
+
+def test_safety_floor_keywords_case_insensitive() -> None:
+    assert resolution_contains_safety_floor_keywords("SWOLLEN BATTERY") is True
+    assert resolution_contains_safety_floor_keywords("Battery Is Bloated") is True
+    assert resolution_contains_safety_floor_keywords("FIRE RISK") is True
+
+
+def test_safety_floor_keywords_no_match_for_safe_content() -> None:
+    assert (
+        resolution_contains_safety_floor_keywords(
+            "My PowerCore stopped charging after a firmware update."
+        )
+        is False
+    )
+    assert resolution_contains_safety_floor_keywords("warranty replacement request") is False
+
+
+@pytest.mark.asyncio
+async def test_safety_floor_fires_for_swollen_power_bank_regardless_of_llm_category() -> None:
+    # Load-bearing break-control: the exact P0 scenario — "swollen power bank"
+    # ticket misclassified as charging_issue — must now trigger the safety floor
+    # keyword check.  This test verifies the keyword detection independently of
+    # the worker escalation so the contract is testable without a full worker.
+    # Removing "swollen" from _SAFETY_FLOOR_KEYWORDS makes this test fail.
+    original_content = (
+        "Hi, my swollen power bank is getting hot and won't charge. "
+        "It looks puffy. Please help."
+    )
+    assert resolution_contains_safety_floor_keywords(original_content) is True
+
+    # Option A: "swollen" and "hot" are floor-only keywords (not in the
+    # blocking _SAFETY_KEYWORDS set) so the proposal CAN be send-eligible —
+    # the reply reaches the customer immediately while the safety floor
+    # escalation is created independently in the worker.
+    governance_repository = InMemoryGovernanceRepository()
+    runtime = _governed_resolution_runtime(
+        governance_repository=governance_repository,
+        tenant_configuration_repository=await _resolution_autonomy_repository(),
+    )
+    record = await runtime.create_proposal(
+        _request(
+            content=original_content,
+            category="charging_issue",
+            confidence=0.95,
+        )
+    )
+    # The proposal is SEND_ELIGIBLE: "swollen"/"hot"/"puffy" are floor-only
+    # and do NOT raise safety_risk in _evaluate_gate.  The worker creates the
+    # P0/CRISIS escalation via _resolve_safety_floor_escalation_governance_decision_id
+    # after the proposal is persisted.  Removing "swollen" from
+    # _SAFETY_FLOOR_KEYWORDS breaks the keyword-floor invariant.
+    assert resolution_proposal_is_send_eligible(record) is True

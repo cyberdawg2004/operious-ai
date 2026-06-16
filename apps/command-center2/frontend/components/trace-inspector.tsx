@@ -724,6 +724,7 @@ function ResolutionProposalSummary({
   return (
     <div className={cn("mt-3 rounded border border-border-subtle bg-surface-sunken p-3", compact && "mt-0")}>
       <div className="mb-3 flex flex-wrap gap-2">
+        <ResolutionBadge label="Reply" value={replyDisposition(proposal.status).label} valueClassName={replyDisposition(proposal.status).className} />
         <ResolutionBadge label="Status" value={proposal.status} />
         <ResolutionBadge label="Autonomy" value={proposal.autonomy_decision} />
         <ResolutionBadge label="Confidence" value={formatConfidence(proposal.confidence)} />
@@ -767,13 +768,27 @@ function ResolutionProposalSummary({
   );
 }
 
-function ResolutionBadge({ label, value }: { label: string; value: string }) {
+function ResolutionBadge({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded border border-border-subtle px-2 py-1 font-technical text-[10px] uppercase tracking-[0.12em] text-ink-secondary">
       <span className="text-ink-tertiary">{label}</span>
-      <span>{formatEventLabel(value)}</span>
+      <span className={valueClassName}>{formatEventLabel(value)}</span>
     </span>
   );
+}
+
+function replyDisposition(status: string): { label: string; className: string } {
+  switch (status) {
+    case "send_eligible":
+    case "auto_approved":
+      return { label: "sent", className: "text-green-500" };
+    case "pending_human_approval":
+      return { label: "held", className: "text-amber-500" };
+    case "denied":
+      return { label: "denied", className: "text-red-500" };
+    default:
+      return { label: status, className: "" };
+  }
 }
 
 function ResolutionField({ label, value }: { label: string; value: string }) {

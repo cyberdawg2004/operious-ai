@@ -72,11 +72,66 @@ _SAFETY_KEYWORDS = frozenset(
         "exploded",
         "overheat",
         "overheating",
-        "swollen battery",
         "chemical",
         "fumes",
     }
 )
+
+# Broad physical-hazard signals for the worker-level safety floor.
+# Every hit creates a P0/CRISIS escalation record regardless of proposal status
+# or LLM category classification (Option A: reply sends if governance allows,
+# escalation is created independently via the post-proposal pipeline).
+# All existing _SAFETY_KEYWORDS are included so the floor fires for blocking
+# cases too.  False positives are explicitly accepted — a missed safety case
+# is not.
+_SAFETY_FLOOR_KEYWORDS = frozenset(
+    {
+        "swollen",
+        "bloated",
+        "bulging",
+        "puffy",
+        "expanded",
+        "leaking",
+        "leak",
+        "hot",
+        "smoke",
+        "smoking",
+        "fire",
+        "flame",
+        "flames",
+        "burn",
+        "burning",
+        "burns",
+        "burnt",
+        "spark",
+        "sparks",
+        "sparking",
+        "melt",
+        "melting",
+        "melted",
+        "explode",
+        "exploded",
+        "exploding",
+        "explosion",
+        "overheat",
+        "overheating",
+        "injury",
+        "injured",
+        "injuries",
+        "shock",
+        "chemical",
+        "fumes",
+    }
+)
+
+
+def resolution_contains_safety_floor_keywords(text: str) -> bool:
+    """Return True if text contains any safety-floor keyword.
+
+    Used by the worker to trigger a P0/CRISIS safety escalation
+    independently of the proposal status and LLM category assignment.
+    """
+    return _contains_any(text.lower(), _SAFETY_FLOOR_KEYWORDS)
 _LEGAL_KEYWORDS = frozenset(
     {
         "lawsuit",
