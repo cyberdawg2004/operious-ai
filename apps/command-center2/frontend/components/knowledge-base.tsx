@@ -64,6 +64,12 @@ const statusMeta: Record<TenantKnowledgeDocument["status"], { label: string; ton
   archived: { label: "Archived", tone: "neutral", color: "var(--chart-purple)" },
 };
 
+const reviewStatusMeta: Record<TenantKnowledgeDocument["review_status"], { label: string; tone: StatusTone }> = {
+  quarantined: { label: "Quarantined — not used by AI", tone: "warning" },
+  approved: { label: "Approved for use", tone: "success" },
+  rejected: { label: "Rejected", tone: "danger" },
+};
+
 type ModalState =
   | { type: "none" }
   | { type: "create" }
@@ -90,6 +96,7 @@ export function KnowledgeBase() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
+  const [busyApprovalDocId, setBusyApprovalDocId] = useState<string | null>(null);
 
   const loadDocuments = useCallback(
     () =>
@@ -236,6 +243,22 @@ export function KnowledgeBase() {
     }
   };
 
+  const handleApproveForUse = async (document: TenantKnowledgeDocument) => {
+    setBusyApprovalDocId(document.document_id);
+    try {
+      await updateKnowledgeDocument(document.document_id, { review_status: "approved" });
+      reload();
+    } catch (caught: unknown) {
+      setModal({
+        type: "notice",
+        title: "Approval failed",
+        message: formatApiError(caught),
+      });
+    } finally {
+      setBusyApprovalDocId(null);
+    }
+  };
+
   const handleUploadDocument = async (
     file: File,
     title: string,
@@ -283,10 +306,18 @@ export function KnowledgeBase() {
     {
       key: "status",
       header: "Status",
-      width: "w-[150px]",
+      width: "w-[200px]",
       render: (doc) => {
         const meta = statusMeta[doc.status];
-        return <StatusBadge label={meta.label} tone={meta.tone} />;
+        const reviewMeta = reviewStatusMeta[doc.review_status];
+        return (
+          <div className="flex flex-col gap-1">
+            <StatusBadge label={meta.label} tone={meta.tone} />
+            {doc.review_status !== "approved" && (
+              <StatusBadge label={reviewMeta.label} tone={reviewMeta.tone} />
+            )}
+          </div>
+        );
       },
     },
     {
@@ -309,10 +340,21 @@ export function KnowledgeBase() {
     {
       key: "actions",
       header: "",
-      width: "w-[220px]",
+      width: "w-[300px]",
       align: "right",
       render: (doc) => (
         <div className="flex items-center justify-end gap-2">
+          {doc.review_status === "quarantined" && (
+            <button
+              type="button"
+              onClick={() => void handleApproveForUse(doc)}
+              disabled={busyApprovalDocId === doc.document_id}
+              className="cc-btn cc-btn-secondary h-9 whitespace-nowrap text-[12px] disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={`Approve ${doc.title} for use by the AI`}
+            >
+              {busyApprovalDocId === doc.document_id ? "Approving..." : "Approve for use"}
+            </button>
+          )}
           <DocumentActionMenu
             onView={() => setModal({ type: "view", document: doc })}
             onEdit={() => setModal({ type: "edit", document: doc })}
@@ -490,6 +532,7 @@ export function KnowledgeBase() {
                         document_id: doc.document_id,
                         document_type: doc.document_type,
                         status: doc.status,
+                        review_status: doc.review_status,
                         version: doc.version,
                         uploaded_by: doc.uploaded_by,
                         vector_indexed_at: doc.vector_indexed_at,
@@ -759,16 +802,23 @@ function DocumentForm({
 
 function DocumentDetail({ document }: { document: TenantKnowledgeDocument }) {
   const meta = statusMeta[document.status];
+  const reviewMeta = reviewStatusMeta[document.review_status];
   return (
     <div className="space-y-4">
       <div>
         <h2 className="heading-section text-[18px]">{document.title}</h2>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <StatusBadge label={meta.label} tone={meta.tone} />
+          <StatusBadge label={reviewMeta.label} tone={reviewMeta.tone} />
           <span className="text-meta">{formatDocumentType(document.document_type)}</span>
           <span className="text-meta">v{document.version}</span>
           <span className="text-meta">Updated {formatDate(document.created_at)}</span>
         </div>
+        {document.review_status === "quarantined" && (
+          <p className="mt-2 text-[12px] text-amber-600">
+            This document is quarantined and cannot be used for AI grounding until approved for use.
+          </p>
+        )}
       </div>
 
       <div className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border border-border-subtle bg-surface-raised p-4 text-body leading-relaxed">

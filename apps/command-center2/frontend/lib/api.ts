@@ -320,6 +320,7 @@ export type TenantKnowledgeDocument = {
   content: string;
   document_type: "sop" | "policy" | "product_guide" | "faq" | "escalation_matrix";
   status: "active" | "archived" | "pending_index" | "indexing" | "index_failed";
+  review_status: "quarantined" | "approved" | "rejected";
   version: number;
   uploaded_by: string;
   vector_indexed_at: string | null;
@@ -716,6 +717,7 @@ export type TenantKnowledgeCreateRequest = {
 export type TenantKnowledgeUpdateRequest = {
   content?: string;
   status?: TenantKnowledgeDocument["status"];
+  review_status?: TenantKnowledgeDocument["review_status"];
 };
 
 export type KnowledgeIngestionResponse = {

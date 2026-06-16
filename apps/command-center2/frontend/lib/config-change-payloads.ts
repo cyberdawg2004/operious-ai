@@ -441,7 +441,7 @@ function dropBlankValues(values: Record<string, string>): Record<string, string>
  * PROPOSED requests and filter here. A server-side change_type filter is a
  * future backend optimization if the ledger grows.
  */
-export type ConfigChangeKind = "connector" | "action_policy";
+export type ConfigChangeKind = "connector" | "action_policy" | "knowledge";
 
 export function classifyConfigChange(item: {
   change_type: TenantConfigChangeType;
@@ -454,6 +454,7 @@ export function classifyConfigChange(item: {
   ) {
     return "action_policy";
   }
+  if (item.change_type === "knowledge") return "knowledge";
   return null;
 }
 

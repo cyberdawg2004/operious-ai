@@ -3,32 +3,36 @@
 import { useCallback, useState } from "react";
 import { ApprovalInbox } from "@/components/approval-inbox";
 import { CaseApprovalsInbox } from "@/components/case-approvals-inbox";
+import { ConfigChangeApprovals } from "@/components/config-change-approvals";
 import { EscalationsInbox } from "@/components/escalations-inbox";
 import { cn } from "@/lib/utils";
 
-type TabId = "action-approvals" | "reply-reviews" | "escalations";
+type TabId = "action-approvals" | "reply-reviews" | "escalations" | "knowledge-uploads";
 
-const TAB_ORDER: TabId[] = ["action-approvals", "reply-reviews", "escalations"];
+const TAB_ORDER: TabId[] = ["action-approvals", "reply-reviews", "escalations", "knowledge-uploads"];
 
 const TAB_LABELS: Record<TabId, string> = {
   "action-approvals": "Action Approvals",
   "reply-reviews": "Reply Reviews",
   escalations: "Escalations",
+  "knowledge-uploads": "Knowledge Uploads",
 };
 
 /**
- * "Needs Your Attention" — a presentation-only shell that composes the three
+ * "Needs Your Attention" — a presentation-only shell that composes the four
  * existing governance inboxes (action approvals, SME reply reviews,
- * escalations) behind tabs. Each tab keeps its own data source, actions, and
- * capability gating; this component does not merge endpoints or share action
- * handlers across tabs. All three tabs stay mounted (and polling) so their
- * counts stay live for the tab badges and switching tabs doesn't reset state.
+ * escalations, knowledge upload approvals) behind tabs. Each tab keeps its own
+ * data source, actions, and capability gating; this component does not merge
+ * endpoints or share action handlers across tabs. All tabs stay mounted (and
+ * polling) so their counts stay live for the tab badges and switching tabs
+ * doesn't reset state.
  */
 export function AttentionInbox() {
   const [counts, setCounts] = useState<Record<TabId, number | null>>({
     "action-approvals": null,
     "reply-reviews": null,
     escalations: null,
+    "knowledge-uploads": null,
   });
   const [activeTab, setActiveTab] = useState<TabId | null>(null);
 
@@ -40,6 +44,9 @@ export function AttentionInbox() {
   }, []);
   const setEscalationsCount = useCallback((count: number) => {
     setCounts((prev) => (prev.escalations === count ? prev : { ...prev, escalations: count }));
+  }, []);
+  const setKnowledgeUploadsCount = useCallback((count: number) => {
+    setCounts((prev) => (prev["knowledge-uploads"] === count ? prev : { ...prev, "knowledge-uploads": count }));
   }, []);
 
   // Default to whichever tab has the most pending items once all three counts
@@ -99,6 +106,9 @@ export function AttentionInbox() {
       </div>
       <div className={cn(currentTab !== "escalations" && "hidden")}>
         <EscalationsInbox embedded onCountChange={setEscalationsCount} />
+      </div>
+      <div className={cn(currentTab !== "knowledge-uploads" && "hidden")}>
+        <ConfigChangeApprovals embedded changeKind="knowledge" onCountChange={setKnowledgeUploadsCount} />
       </div>
     </div>
   );

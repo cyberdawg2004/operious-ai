@@ -227,7 +227,7 @@ test('action policy change payload includes policy_id only on update', () => {
 
 // ─── Constraint C: client-side change_type filter ─────────────────────────
 
-test('client-side filter keeps only connector and action_tools policy changes', () => {
+test('client-side filter keeps connector, action_tools policy, and knowledge upload changes', () => {
   const items = [
     { change_type: 'connector' as const, proposed_payload: {} },
     {
@@ -242,11 +242,12 @@ test('client-side filter keeps only connector and action_tools policy changes', 
     { change_type: 'knowledge' as const, proposed_payload: {} },
   ];
   const kept = payloads.filterConfigChangeRequests(items);
-  strictEqual(kept.length, 2);
+  strictEqual(kept.length, 3);
   strictEqual(payloads.classifyConfigChange(items[0]), 'connector');
   strictEqual(payloads.classifyConfigChange(items[1]), 'action_policy');
   strictEqual(payloads.classifyConfigChange(items[2]), null);
   strictEqual(payloads.classifyConfigChange(items[3]), null);
+  strictEqual(payloads.classifyConfigChange(items[4]), 'knowledge');
 });
 
 // ─── API client surface ───────────────────────────────────────────────────

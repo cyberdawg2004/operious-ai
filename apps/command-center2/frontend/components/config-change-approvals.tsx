@@ -33,7 +33,15 @@ const REFRESH_MS = 30_000;
  * controlled, not instant (constraint D). Approval must come from a different
  * principal than the proposer; the backend enforces that separation of duty.
  */
-export function ConfigChangeApprovals() {
+export function ConfigChangeApprovals({
+  embedded = false,
+  onCountChange,
+  changeKind,
+}: {
+  embedded?: boolean;
+  onCountChange?: (count: number) => void;
+  changeKind?: ConfigChangeKind;
+} = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -51,7 +59,17 @@ export function ConfigChangeApprovals() {
     return filterConfigChangeRequests([...proposed.items, ...approved.items]);
   }, []);
   const { data, error, isLoading, reload } = useApiResource(load);
-  const requests = useMemo(() => data ?? [], [data]);
+  const requests = useMemo(() => {
+    const all = data ?? [];
+    if (changeKind !== undefined) {
+      return all.filter((req) => classifyConfigChange(req) === changeKind);
+    }
+    return all;
+  }, [data, changeKind]);
+
+  useEffect(() => {
+    onCountChange?.(requests.length);
+  }, [requests.length, onCountChange]);
 
   useEffect(() => {
     const interval = window.setInterval(reload, REFRESH_MS);
@@ -88,22 +106,29 @@ export function ConfigChangeApprovals() {
     }
   };
 
+  const emptyMessage =
+    changeKind === "knowledge"
+      ? "Pending knowledge document uploads awaiting approval will appear here."
+      : "Proposed connector and action-policy changes awaiting approval will appear here.";
+
   return (
-    <div className="min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
-            Governance / Configuration Changes
-          </span>
-          <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
-            Configuration Approvals
-          </h2>
+    <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
+      {!embedded && (
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+              Governance / Configuration Changes
+            </span>
+            <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
+              Configuration Approvals
+            </h2>
+          </div>
+          <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
+            <Clock className="h-3.5 w-3.5 text-gold-primary" strokeWidth={1.8} />
+            {requests.length} pending changes
+          </div>
         </div>
-        <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
-          <Clock className="h-3.5 w-3.5 text-gold-primary" strokeWidth={1.8} />
-          {requests.length} pending changes
-        </div>
-      </div>
+      )}
 
       <div className="mb-4 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
         Dual control: a proposed change must be approved by a{" "}
@@ -132,7 +157,7 @@ export function ConfigChangeApprovals() {
       {!isLoading && !error && requests.length === 0 && (
         <EmptyState
           title="No pending config changes"
-          message="Proposed connector and action-policy changes awaiting approval will appear here."
+          message={emptyMessage}
           actionLabel="Refresh"
           onAction={reload}
         />
@@ -423,6 +448,7 @@ function StatusBadge({ status }: { status: TenantConfigChangeRequest["status"] }
 function kindLabel(kind: ConfigChangeKind | null): string {
   if (kind === "connector") return "Connector Config Change";
   if (kind === "action_policy") return "Action Policy Change";
+  if (kind === "knowledge") return "Knowledge Document Upload";
   return "Config Change";
 }
 
@@ -433,6 +459,11 @@ function changeSummary(request: TenantConfigChangeRequest): string {
   }
   if (request.change_type === "policy") {
     return String(payload.policy_type ?? "policy");
+  }
+  if (request.change_type === "knowledge") {
+    const title = String(payload.title ?? "(untitled)");
+    const docType = String(payload.document_type ?? "");
+    return docType ? `${title} · ${docType}` : title;
   }
   return request.change_type;
 }
