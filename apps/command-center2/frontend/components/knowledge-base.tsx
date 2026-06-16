@@ -96,7 +96,6 @@ export function KnowledgeBase() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
-  const [busyApprovalDocId, setBusyApprovalDocId] = useState<string | null>(null);
 
   const loadDocuments = useCallback(
     () =>
@@ -243,22 +242,6 @@ export function KnowledgeBase() {
     }
   };
 
-  const handleApproveForUse = async (document: TenantKnowledgeDocument) => {
-    setBusyApprovalDocId(document.document_id);
-    try {
-      await updateKnowledgeDocument(document.document_id, { review_status: "approved" });
-      reload();
-    } catch (caught: unknown) {
-      setModal({
-        type: "notice",
-        title: "Approval failed",
-        message: formatApiError(caught),
-      });
-    } finally {
-      setBusyApprovalDocId(null);
-    }
-  };
-
   const handleUploadDocument = async (
     file: File,
     title: string,
@@ -340,21 +323,10 @@ export function KnowledgeBase() {
     {
       key: "actions",
       header: "",
-      width: "w-[300px]",
+      width: "w-[220px]",
       align: "right",
       render: (doc) => (
         <div className="flex items-center justify-end gap-2">
-          {doc.review_status === "quarantined" && (
-            <button
-              type="button"
-              onClick={() => void handleApproveForUse(doc)}
-              disabled={busyApprovalDocId === doc.document_id}
-              className="cc-btn cc-btn-secondary h-9 whitespace-nowrap text-[12px] disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={`Approve ${doc.title} for use by the AI`}
-            >
-              {busyApprovalDocId === doc.document_id ? "Approving..." : "Approve for use"}
-            </button>
-          )}
           <DocumentActionMenu
             onView={() => setModal({ type: "view", document: doc })}
             onEdit={() => setModal({ type: "edit", document: doc })}
@@ -816,7 +788,7 @@ function DocumentDetail({ document }: { document: TenantKnowledgeDocument }) {
         </div>
         {document.review_status === "quarantined" && (
           <p className="mt-2 text-[12px] text-amber-600">
-            This document is quarantined and cannot be used for AI grounding until approved for use.
+            This document is quarantined and not used for AI grounding. Approve it via the Knowledge Uploads tab in Needs Your Attention.
           </p>
         )}
       </div>

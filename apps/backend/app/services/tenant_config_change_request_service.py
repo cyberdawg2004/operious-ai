@@ -386,6 +386,9 @@ class TenantConfigChangeRequestService:
                         or TenantKnowledgeDocumentStatus.PENDING_INDEX.value
                     )
                 ),
+                # Applying the governance flow (propose → approve → apply) is
+                # the two-person sign-off for the document; auto-approve here.
+                review_status=TenantKnowledgeReviewStatus.APPROVED,
                 uploaded_by=record.approved_by or record.proposed_by,
                 approval=approval,
                 bypass_direct_apply_gate=True,
