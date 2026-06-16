@@ -8,7 +8,9 @@ import {
   Clock,
   FileText,
   Play,
-  ShieldAlert,
+  RefreshCw,
+  Search,
+  Sparkles,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,6 +22,10 @@ import {
   type ApprovalRecord,
 } from "@/lib/api";
 import { useApiResource } from "@/lib/use-api-resource";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-data";
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
+import { TechnicalDetails } from "@/components/technical-details";
 import {
   EmptyState,
   ErrorState,
@@ -32,24 +38,31 @@ type ProposalSourceFilter = "all" | "quality" | "failure_pattern";
 type SortOption = "confidence" | "age" | "evidence";
 
 const sourceFilterOptions: { id: ProposalSourceFilter; label: string }[] = [
-  { id: "all", label: "All Proposals" },
-  { id: "quality", label: "Quality Improvements" },
-  { id: "failure_pattern", label: "From Failure Patterns" },
+  { id: "all", label: "All proposals" },
+  { id: "quality", label: "Quality improvements" },
+  { id: "failure_pattern", label: "From failure patterns" },
 ];
 
 const filterOptions: { id: FilterStatus; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "pending_review", label: "Pending" },
+  { id: "all", label: "All statuses" },
+  { id: "pending_review", label: "Pending review" },
   { id: "approved", label: "Approved" },
   { id: "rejected", label: "Rejected" },
   { id: "applied", label: "Applied" },
 ];
 
 const sortOptions: { id: SortOption; label: string }[] = [
-  { id: "confidence", label: "Confidence" },
-  { id: "age", label: "Age" },
-  { id: "evidence", label: "Evidence count" },
+  { id: "confidence", label: "Sort by confidence" },
+  { id: "age", label: "Sort by age" },
+  { id: "evidence", label: "Sort by evidence count" },
 ];
+
+const statusMeta: Record<ApprovalRecord["status"], { label: string; tone: StatusTone }> = {
+  pending_review: { label: "Pending review", tone: "warning" },
+  approved: { label: "Approved", tone: "info" },
+  rejected: { label: "Rejected", tone: "danger" },
+  applied: { label: "Applied", tone: "success" },
+};
 
 type CognitionHubProps = {
   onOpenTrace?: (traceId: string) => void;
@@ -61,7 +74,6 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
   const [activeSourceFilter, setActiveSourceFilter] =
     useState<ProposalSourceFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("confidence");
-  const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
@@ -111,8 +123,8 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
         approvals.length === 0
           ? "No data"
           : `${Math.round(
-              approvals.reduce((acc, record) => acc + record.confidence, 0) /
-                approvals.length *
+              (approvals.reduce((acc, record) => acc + record.confidence, 0) /
+                approvals.length) *
                 100
             )}%`,
     }),
@@ -141,80 +153,87 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
   };
 
   return (
-    <div className="flex-1 overflow-auto bg-[var(--canvas)] px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-      <div className="mb-6">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)]">
-          INTELLIGENCE · APPROVAL QUEUE
-        </span>
-      </div>
+    <main className="min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <p className="text-meta">Agent proposals from quality reviews and failure patterns</p>
 
-      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <h1 className="font-serif font-bold text-[32px] text-[var(--ink-primary)]">
-          AI Recommendations
-        </h1>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:gap-4">
-          <div className="flex w-full flex-wrap items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-1 sm:w-auto">
-            {filterOptions.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => setActiveFilter(option.id)}
-                className={cn(
-                  "min-h-11 rounded px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-160 sm:min-h-0",
-                  activeFilter === option.id
-                    ? "bg-[var(--gold-primary)] text-white"
-                    : "text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative">
-            <button
-              onClick={() => setShowSortDropdown(!showSortDropdown)}
-              className="flex min-h-11 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2 font-mono text-[11px] text-[var(--ink-secondary)] transition-colors duration-160 hover:bg-[var(--surface-hover)]"
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <label className="flex flex-col gap-1">
+            <span className="sr-only">Status</span>
+            <select
+              value={activeFilter}
+              onChange={(event) => setActiveFilter(event.target.value as FilterStatus)}
+              className="cc-select h-10 min-w-[160px]"
             >
-              Sort: {sortOptions.find((option) => option.id === sortBy)?.label}
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            {showSortDropdown && (
-              <div className="absolute top-full right-0 mt-1 w-40 bg-[var(--surface)] border border-[var(--border-subtle)] rounded shadow-lg z-10">
-                {sortOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    onClick={() => {
-                      setSortBy(option.id);
-                      setShowSortDropdown(false);
-                    }}
-                    className={cn(
-                      "min-h-11 w-full px-3 py-2 text-left font-mono text-[11px] transition-colors duration-160 hover:bg-[var(--surface-hover)]",
-                      sortBy === option.id
-                        ? "text-[var(--gold-primary)]"
-                        : "text-[var(--ink-secondary)]"
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+              {filterOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="sr-only">Source</span>
+            <select
+              value={activeSourceFilter}
+              onChange={(event) => setActiveSourceFilter(event.target.value as ProposalSourceFilter)}
+              className="cc-select h-10 min-w-[180px]"
+            >
+              {sourceFilterOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="sr-only">Sort</span>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as SortOption)}
+              className="cc-select h-10 min-w-[180px]"
+            >
+              {sortOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={reload}
+            className="cc-btn cc-btn-secondary h-10 w-10"
+            aria-label="Refresh recommendations"
+          >
+            <RefreshCw size={14} strokeWidth={1.8} className={cn(isLoading && "animate-spin")} />
+          </button>
+
+          <button
+            type="button"
+            disabled
+            title="Conversational knowledge-base analysis will be available in a future update"
+            className="cc-btn cc-btn-secondary h-10 opacity-50"
+          >
+            <Sparkles size={14} strokeWidth={1.8} />
+            Analyze knowledge base
+          </button>
         </div>
       </div>
 
-      {isLoading && <LoadingState label="Loading approval records..." />}
+      {isLoading && <div className="mt-8"><LoadingState label="Loading approval records..." /></div>}
 
       {error && !isLoading && (
-        <ErrorState
-          title="Approval records unavailable"
-          message={error}
-          onAction={reload}
-        />
+        <div className="mt-8">
+          <ErrorState title="Approval records unavailable" message={error} onAction={reload} />
+        </div>
       )}
 
       {pendingNotice && !isLoading && (
-        <div className="mb-6">
+        <div className="mt-6">
           <PendingIntegrationState
             title="Pending integration"
             message={pendingNotice}
@@ -225,7 +244,7 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
       )}
 
       {actionError && !isLoading && (
-        <div className="mb-6">
+        <div className="mt-6">
           <ErrorState
             title="Lifecycle action failed"
             message={actionError}
@@ -237,39 +256,24 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
 
       {data && !isLoading && !error && (
         <>
-          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="PENDING REVIEW" value={String(stats.pending)} />
-            <StatCard label="APPROVED" value={String(stats.approved)} />
-            <StatCard label="APPLIED" value={String(stats.applied)} />
-            <StatCard label="AVERAGE CONFIDENCE" value={stats.avgConfidence} />
-          </div>
-
-          <div className="mb-6 flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-1">
-            {sourceFilterOptions.map((option) => (
-              <button
-                key={option.id}
-                onClick={() => setActiveSourceFilter(option.id)}
-                className={cn(
-                  "min-h-11 rounded px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors duration-160 sm:min-h-0",
-                  activeSourceFilter === option.id
-                    ? "bg-[var(--gold-primary)] text-white"
-                    : "text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Pending review" value={String(stats.pending)} />
+            <StatCard label="Approved" value={String(stats.approved)} />
+            <StatCard label="Applied" value={String(stats.applied)} />
+            <StatCard label="Average confidence" value={stats.avgConfidence} />
           </div>
 
           {sortedRecords.length === 0 ? (
-            <EmptyState
-              title="No approval records"
-              message="The SOP intelligence endpoint returned no approval records for the current tenant and filter."
-              actionLabel="Refresh"
-              onAction={reload}
-            />
+            <div className="mt-6">
+              <EmptyState
+                title="No recommendations right now"
+                message="The SOP intelligence engine hasn't proposed any changes for the current tenant and filters."
+                actionLabel="Refresh"
+                onAction={reload}
+              />
+            </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
+            <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-6">
               {sortedRecords.map((record) => (
                 <ApprovalCard
                   key={record.approval_id}
@@ -290,7 +294,18 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
           )}
         </>
       )}
-    </div>
+    </main>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{label}</CardTitle>
+      </CardHeader>
+      <p className="heading-page tabular">{value}</p>
+    </Card>
   );
 }
 
@@ -312,97 +327,64 @@ function ApprovalCard({
   onOpenKnowledge: () => void;
 }) {
   const [expandedEvidence, setExpandedEvidence] = useState<string | null>(null);
-  const statusConfig = getStatusConfig(record.status);
+  const meta = statusMeta[record.status];
   const isFailurePattern = record.metadata?.failure_pattern === true;
+  const confidencePct = Math.round(record.confidence * 100);
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-4 sm:p-6">
-      <div className="flex items-center justify-between">
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "px-2.5 py-1 border rounded-full font-mono text-[10px] uppercase tracking-[0.08em]",
-              statusConfig.className
-            )}
-          >
-            {statusConfig.label}
-          </span>
+          <StatusBadge label={meta.label} tone={meta.tone} />
           {isFailurePattern && (
-            <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--ink-secondary)]">
-              🔍 From Failure Pattern
-            </span>
+            <StatusBadge label="From failure pattern" tone="neutral" icon={Search} />
           )}
         </div>
-        <span className="font-mono text-[13px] font-medium tabular-nums text-[var(--ink-secondary)]">
-          {Math.round(record.confidence * 100)}% confidence
-        </span>
+        <StatusBadge label={`${confidencePct}% confidence`} tone={confidenceTone(record.confidence)} />
       </div>
 
-      <h3 className="font-serif font-semibold text-lg leading-[1.3] text-[var(--ink-primary)]">
-        {record.proposed_change}
-      </h3>
+      <h3 className="mt-3 heading-section text-[15px] leading-snug">{record.proposed_change}</h3>
 
-      <div>
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)] block mb-1">
-          AFFECTED DOCUMENT
-        </span>
-        <button
-          onClick={onOpenKnowledge}
-          className="inline-flex min-h-11 items-center font-mono text-[13px] text-[var(--gold-primary)] hover:underline"
-        >
-          {record.document_id}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={onOpenKnowledge} className="cc-btn cc-btn-secondary">
+          <FileText size={13} strokeWidth={1.8} />
+          View affected document
         </button>
       </div>
 
-      <div>
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)] block mb-2">
-          PROPOSED CHANGE
-        </span>
-        <div className="border border-[var(--border-subtle)] rounded bg-[var(--surface-raised)] p-3">
-          <p className="font-mono text-[12px] leading-relaxed text-[var(--ink-secondary)]">
-            {record.proposed_change}
-          </p>
-        </div>
-      </div>
-
-      <div>
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)] block mb-2">
-          SUPPORTING EVIDENCE ({record.evidence_sessions.length})
-        </span>
+      <div className="mt-4">
+        <CardDescription>
+          Supporting evidence ({record.evidence_sessions.length} session{record.evidence_sessions.length === 1 ? "" : "s"})
+        </CardDescription>
         {record.evidence_sessions.length === 0 ? (
-          <p className="font-mono text-[12px] text-[var(--ink-tertiary)]">
-            No evidence sessions attached to this record.
-          </p>
+          <p className="mt-2 text-meta">No evidence sessions attached to this record.</p>
         ) : (
-          <div className="space-y-2">
-            {record.evidence_sessions.map((sessionId) => {
+          <div className="mt-2 space-y-2">
+            {record.evidence_sessions.map((sessionId, index) => {
               const isExpanded = expandedEvidence === sessionId;
               return (
-                <div
-                  key={sessionId}
-                  className="border border-[var(--border-subtle)] rounded bg-[var(--surface-raised)]"
-                >
+                <div key={sessionId} className="rounded-md border border-border-subtle bg-surface-raised">
                   <button
+                    type="button"
                     onClick={() => setExpandedEvidence(isExpanded ? null : sessionId)}
-                    className="flex min-h-11 w-full items-center gap-3 p-3 text-left transition-colors duration-160 hover:bg-[var(--surface-hover)]"
+                    className="flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface"
                   >
                     {isExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-[var(--ink-tertiary)] flex-shrink-0" />
+                      <ChevronDown size={14} strokeWidth={1.8} className="shrink-0 text-ink-tertiary" />
                     ) : (
-                      <ChevronRight className="w-4 h-4 text-[var(--ink-tertiary)] flex-shrink-0" />
+                      <ChevronRight size={14} strokeWidth={1.8} className="shrink-0 text-ink-tertiary" />
                     )}
-                    <FileText className="w-4 h-4 text-[var(--gold-primary)] flex-shrink-0" />
-                    <span className="font-mono text-[12px] text-[var(--ink-secondary)] truncate flex-1">
-                      {sessionId}
-                    </span>
+                    <span className="text-[13px] text-ink-secondary">Session {index + 1}</span>
+                    <span className="ml-auto truncate text-meta">{sessionId}</span>
                   </button>
                   {isExpanded && (
-                    <div className="px-3 pb-3 pt-0">
+                    <div className="px-3 pb-3">
                       <button
+                        type="button"
                         onClick={() => onOpenTrace?.(sessionId)}
-                        className="ml-7 inline-flex min-h-11 items-center gap-2 rounded border border-[var(--border-subtle)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--ink-secondary)] hover:border-[var(--gold-primary)] hover:text-[var(--gold-primary)]"
+                        className="cc-btn cc-btn-ghost"
                       >
-                        <Play className="h-3 w-3" strokeWidth={1.5} />
+                        <Play size={13} strokeWidth={1.8} />
                         Open trace
                       </button>
                     </div>
@@ -415,83 +397,58 @@ function ApprovalCard({
       </div>
 
       {record.status === "pending_review" && (
-        <div className="flex flex-col gap-3 border-t border-[var(--border-subtle)] pt-2 sm:flex-row sm:items-center">
-          <button
-            onClick={onApprove}
-            disabled={isBusy}
-            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded bg-[var(--green-success)] px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.08em] text-white transition-colors duration-160 hover:bg-[var(--green-success)]/90 disabled:opacity-50"
-          >
-            <Check className="w-4 h-4" strokeWidth={1.5} />
+        <div className="mt-4 flex flex-col gap-2 border-t border-border-subtle pt-3 sm:flex-row">
+          <button type="button" onClick={onApprove} disabled={isBusy} className="cc-btn cc-btn-primary flex-1">
+            <Check size={14} strokeWidth={1.8} />
             Approve
           </button>
-          <button
-            onClick={onReject}
-            disabled={isBusy}
-            className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded border border-[var(--red-alert)] bg-transparent px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.08em] text-[var(--red-alert)] transition-colors duration-160 hover:bg-[var(--red-alert)]/10 disabled:opacity-50"
-          >
-            <X className="w-4 h-4" strokeWidth={1.5} />
+          <button type="button" onClick={onReject} disabled={isBusy} className="cc-btn cc-btn-secondary flex-1">
+            <X size={14} strokeWidth={1.8} />
             Reject
           </button>
         </div>
       )}
 
       {record.status === "approved" && (
-        <button
-          onClick={onApply}
-          disabled={isBusy}
-          className="flex min-h-11 items-center justify-center gap-2 rounded bg-[var(--gold-primary)] px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.08em] text-white transition-colors duration-160 hover:bg-[var(--gold-primary)]/90 disabled:opacity-50"
-        >
-          <ShieldAlert className="w-4 h-4" strokeWidth={1.5} />
-          Apply to knowledge
-        </button>
+        <div className="mt-4 border-t border-border-subtle pt-3">
+          <button type="button" onClick={onApply} disabled={isBusy} className="cc-btn cc-btn-primary">
+            <Check size={14} strokeWidth={1.8} />
+            Apply to knowledge
+          </button>
+        </div>
       )}
 
-      <div className="flex items-center gap-2 text-[var(--ink-tertiary)]">
-        <Clock className="w-3 h-3" strokeWidth={1.5} />
-        <span className="font-mono text-[10px]">
-          Created {formatDateTime(record.created_at)}
-        </span>
+      <div className="mt-4 flex items-center gap-1.5 text-meta">
+        <Clock size={12} strokeWidth={1.8} />
+        Created {formatDateTime(record.created_at)}
       </div>
-    </div>
+
+      <TechnicalDetails label="Show details" openLabel="Hide details" className="mt-3">
+        <CodeAsReadableText
+          data={{
+            approval_id: record.approval_id,
+            document_id: record.document_id,
+            proposed_by: record.proposed_by,
+            reviewed_by: record.reviewed_by,
+            evidence_sessions: record.evidence_sessions,
+            metadata: record.metadata ?? {},
+          }}
+        />
+        <DownloadableLog
+          data={record}
+          filename={`approval-${record.approval_id}.json`}
+          label="Download approval record"
+          className="mt-3"
+        />
+      </TechnicalDetails>
+    </Card>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-[var(--surface)] border border-[var(--border-subtle)] rounded-lg p-4">
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--ink-tertiary)] block mb-1">
-        {label}
-      </span>
-      <span className="font-mono text-[28px] font-semibold tabular-nums text-[var(--ink-primary)]">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function getStatusConfig(status: ApprovalRecord["status"]) {
-  switch (status) {
-    case "pending_review":
-      return {
-        label: "PENDING REVIEW",
-        className: "border-[var(--warning-amber)] text-[var(--warning-amber)] bg-[var(--warning-amber)]/10",
-      };
-    case "approved":
-      return {
-        label: "APPROVED",
-        className: "border-[var(--green-success)] text-[var(--green-success)] bg-[var(--green-success)]/10",
-      };
-    case "rejected":
-      return {
-        label: "REJECTED",
-        className: "border-[var(--red-alert)] text-[var(--red-alert)] bg-[var(--red-alert)]/10",
-      };
-    case "applied":
-      return {
-        label: "APPLIED",
-        className: "border-[var(--gold-primary)] text-[var(--gold-primary)] bg-[var(--gold-primary)]/10",
-      };
-  }
+function confidenceTone(confidence: number): StatusTone {
+  if (confidence >= 0.8) return "success";
+  if (confidence >= 0.5) return "warning";
+  return "danger";
 }
 
 function formatDateTime(value: string): string {

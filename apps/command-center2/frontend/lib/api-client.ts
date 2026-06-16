@@ -70,6 +70,21 @@ export async function getAuth0AccessToken(): Promise<string> {
       payload && typeof payload.error === "string"
         ? payload.error
         : `Auth0 access token request failed (${response.status})`;
+
+    // With offline_access enabled, a 401 here means the SDK could not
+    // silently renew the access token (the refresh token itself is
+    // missing, expired, or revoked) — the session is genuinely over.
+    // Send the user back through login (often silent via the IdP's own
+    // session) instead of leaving every screen stuck on this error.
+    if (response.status === 401 && typeof window !== "undefined") {
+      const loginUrl = new URL("/api/auth/login", window.location.origin);
+      loginUrl.searchParams.set(
+        "returnTo",
+        `${window.location.pathname}${window.location.search}`
+      );
+      window.location.assign(loginUrl.toString());
+    }
+
     throw new Error(message);
   }
 

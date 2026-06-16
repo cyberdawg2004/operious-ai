@@ -49,6 +49,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: "overview", href: dashboardRoutes.overview, label: "Command Overview", icon: LayoutDashboard, group: "operations" },
+  { id: "attention", href: dashboardRoutes.attention, label: "Needs Your Attention", icon: Inbox, group: "operations" },
   { id: "operations", href: dashboardRoutes.operations, label: "Operations Queue", icon: LayoutList, group: "operations" },
   { id: "conversations", href: dashboardRoutes.conversations, label: "Conversations", icon: MessageSquare, group: "operations" },
   { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity, group: "operations" },
@@ -78,7 +79,7 @@ const navItems: NavItem[] = [
  * Daily-work surfaces for support managers — kept small and always visible
  * so the primary view never feels cluttered with admin/config screens.
  */
-const PRIMARY_ITEM_IDS = ["operations", "approvals", "escalations", "knowledge", "cognition"];
+const PRIMARY_ITEM_IDS = ["operations", "attention", "knowledge", "cognition"];
 
 const adminGroupLabels: Record<NavItem["group"], string> = {
   operations: "Monitoring",
@@ -306,9 +307,7 @@ export function Sidebar({
           type="button"
           onClick={() => {
             clearLocalAuthorityCache();
-            const logoutUrl = new URL("/api/auth/logout", window.location.origin);
-            logoutUrl.searchParams.set("returnTo", window.location.origin);
-            window.location.assign(logoutUrl.toString());
+            window.location.assign("/api/auth/logout-sign-in");
           }}
           className={cn(
             "group flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
@@ -423,7 +422,7 @@ function NavLink({
         >
           {item.label}
         </span>
-        {item.id === "approvals" && approvalCount !== null && approvalCount > 0 && (
+        {item.id === "attention" && approvalCount !== null && approvalCount > 0 && (
           <span
             className={cn(
               "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-gold-primary px-1.5 text-[10px] font-semibold text-white",

@@ -30,6 +30,11 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Command Overview",
     description: "Live snapshot of your AI workforce — operations handled, automation rate, pending decisions, and system health.",
   },
+  attention: {
+    eyebrow: "Governance",
+    title: "Needs Your Attention",
+    description: "Action approvals, SME reply reviews, and escalations awaiting human sign-off — in one place.",
+  },
   operations: {
     eyebrow: "Operations",
     title: "Operations Queue",

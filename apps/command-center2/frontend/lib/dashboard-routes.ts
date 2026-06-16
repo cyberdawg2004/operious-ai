@@ -1,5 +1,6 @@
 export const dashboardRoutes = {
   overview: "/dashboard/overview",
+  attention: "/dashboard/attention",
   operations: "/dashboard/queue",
   conversations: "/dashboard/conversations",
   "queue-status": "/dashboard/queue-status",

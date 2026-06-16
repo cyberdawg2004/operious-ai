@@ -14,10 +14,16 @@ export function getAuth0Client() {
   auth0Client ??= new Auth0Client({
     appBaseUrl: process.env.APP_BASE_URL || process.env.AUTH0_BASE_URL,
     domain: getAuth0Domain(),
+    // `offline_access` requests a refresh token so the SDK can silently
+    // renew the (short-lived) access token in the background instead of
+    // forcing the user to sign in again every time it expires.
     authorizationParameters: {
       audience: process.env.AUTH0_AUDIENCE || "https://api.operious.ai",
-      scope: process.env.AUTH0_SCOPE || "openid profile email",
+      scope: process.env.AUTH0_SCOPE || "openid profile email offline_access",
     },
+    // Refresh the access token slightly before it actually expires so a
+    // request started just before expiry doesn't race the renewal.
+    tokenRefreshBuffer: 60,
     routes: {
       login: "/api/auth/login",
       logout: "/api/auth/logout",

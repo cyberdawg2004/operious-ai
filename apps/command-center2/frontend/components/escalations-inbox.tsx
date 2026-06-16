@@ -36,7 +36,16 @@ type HandoffTone = "deny" | "escalate" | "crisis";
  * The queue is readable with `tenant.operations.read`; an empty queue is the
  * NORMAL state (this system replaces Tier-1/2 — escalations are rare).
  */
-export function EscalationsInbox() {
+export function EscalationsInbox({
+  embedded = false,
+  onCountChange,
+}: {
+  /** When true, renders without its own page chrome (title + count badge + outer
+   * page padding) so it can be composed as a tab inside another shell. */
+  embedded?: boolean;
+  /** Reports the current pending-escalation count, e.g. for a tab badge. */
+  onCountChange?: (count: number) => void;
+} = {}) {
   const { principal } = useAuthSession();
   const canApprove = (principal?.capabilities ?? []).includes(APPROVE_CAPABILITY);
 
@@ -67,6 +76,10 @@ export function EscalationsInbox() {
     const interval = window.setInterval(reload, REFRESH_MS);
     return () => window.clearInterval(interval);
   }, [reload]);
+
+  useEffect(() => {
+    onCountChange?.(escalations.length);
+  }, [escalations.length, onCountChange]);
 
   const selected = useMemo(
     () => escalations.find((item) => item.escalation_id === selectedId) ?? null,
@@ -115,21 +128,23 @@ export function EscalationsInbox() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
-            Governance / Escalations
-          </span>
-          <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
-            Escalation Queue
-          </h2>
+    <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
+      {!embedded && (
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+              Governance / Escalations
+            </span>
+            <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
+              Escalation Queue
+            </h2>
+          </div>
+          <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
+            <Clock className="h-3.5 w-3.5 text-gold-primary" strokeWidth={1.8} />
+            {escalations.length} pending
+          </div>
         </div>
-        <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
-          <Clock className="h-3.5 w-3.5 text-gold-primary" strokeWidth={1.8} />
-          {escalations.length} pending
-        </div>
-      </div>
+      )}
 
       <div className="mb-4 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
         Each escalation is a case the agent could not auto-resolve within
@@ -167,7 +182,7 @@ export function EscalationsInbox() {
       )}
       {!isLoading && !error && escalations.length === 0 && (
         <EmptyState
-          title="No escalations pending"
+          title="All caught up — no items need your attention"
           message="The agent is resolving cases within governance. Anything it cannot safely auto-resolve will appear here for human review."
           actionLabel="Refresh"
           onAction={reload}

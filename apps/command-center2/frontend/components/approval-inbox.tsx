@@ -19,13 +19,23 @@ import {
   type ActionApprovalSummary,
 } from "@/lib/api";
 import { TechnicalDetails } from "@/components/technical-details";
+import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-data";
 import { useApiResource } from "@/lib/use-api-resource";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 
 const REFRESH_MS = 30_000;
 
-export function ApprovalInbox() {
+export function ApprovalInbox({
+  embedded = false,
+  onCountChange,
+}: {
+  /** When true, renders without its own page chrome (title + count badge + outer
+   * page padding) so it can be composed as a tab inside another shell. */
+  embedded?: boolean;
+  /** Reports the current pending-approval count, e.g. for a tab badge. */
+  onCountChange?: (count: number) => void;
+} = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ActionApprovalDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -47,6 +57,10 @@ export function ApprovalInbox() {
     const interval = window.setInterval(reload, REFRESH_MS);
     return () => window.clearInterval(interval);
   }, [reload]);
+
+  useEffect(() => {
+    onCountChange?.(approvals.length);
+  }, [approvals.length, onCountChange]);
 
   useEffect(() => {
     if (selectedId === null) {
@@ -122,21 +136,23 @@ export function ApprovalInbox() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
-            Governance / Action Approvals
-          </span>
-          <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
-            Approval Inbox
-          </h2>
+    <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
+      {!embedded && (
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+              Governance / Action Approvals
+            </span>
+            <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
+              Approval Inbox
+            </h2>
+          </div>
+          <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
+            <Clock className="h-3.5 w-3.5 text-gold-primary" strokeWidth={1.8} />
+            {approvals.length} pending approvals
+          </div>
         </div>
-        <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">
-          <Clock className="h-3.5 w-3.5 text-gold-primary" strokeWidth={1.8} />
-          {approvals.length} pending approvals
-        </div>
-      </div>
+      )}
 
       {notice && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-border-subtle bg-surface px-3 py-2 text-[13px] text-ink-primary">
@@ -164,7 +180,7 @@ export function ApprovalInbox() {
 
       {!isLoading && !error && approvals.length === 0 && (
         <EmptyState
-          title="No pending approvals"
+          title="All caught up — no items need your attention"
           message="Pending manager action approvals will appear here."
           actionLabel="Refresh"
           onAction={reload}
@@ -335,7 +351,13 @@ function ApprovalDetailPanel({
                 <KeyValue label="Tool" value={toolLabel(detail.tool_name)} />
                 <KeyValue label="Payload" value={payloadSummary(detail.payload)} />
                 <TechnicalDetails label="Show full payload" openLabel="Hide full payload">
-                  <JsonBlock value={detail.payload} />
+                  <CodeAsReadableText data={detail.payload} className="mt-2" />
+                  <DownloadableLog
+                    data={detail.payload}
+                    filename={`approval-${detail.approval_id}-payload.json`}
+                    label="Download raw payload"
+                    className="mt-3"
+                  />
                 </TechnicalDetails>
               </DetailSection>
 
@@ -496,14 +518,6 @@ function KeyValue({ label, value }: { label: string; value: string }) {
       </span>
       <span className="break-words text-[13px] text-ink-primary">{value}</span>
     </div>
-  );
-}
-
-function JsonBlock({ value }: { value: Record<string, unknown> }) {
-  return (
-    <pre className="mt-3 max-h-56 overflow-auto rounded-md border border-border-subtle bg-surface p-3 text-[11px] leading-relaxed text-ink-secondary">
-      {JSON.stringify(value, null, 2)}
-    </pre>
   );
 }
 

@@ -59,7 +59,16 @@ const OPEN_STATUSES: ReadonlySet<CaseApprovalStatus> = new Set([
  *   - the GUIDE control is gated to `tenant.resolution.guide`;
  * controls are ABSENT (not merely disabled) without the capability.
  */
-export function CaseApprovalsInbox() {
+export function CaseApprovalsInbox({
+  embedded = false,
+  onCountChange,
+}: {
+  /** When true, renders without its own page chrome (title + count badge + outer
+   * page padding) so it can be composed as a tab inside another shell. */
+  embedded?: boolean;
+  /** Reports the current open-case count, e.g. for a tab badge. */
+  onCountChange?: (count: number) => void;
+} = {}) {
   const { principal } = useAuthSession();
   const capabilities = principal?.capabilities ?? [];
   const canRead = capabilities.includes(READ_CAPABILITY);
@@ -106,6 +115,10 @@ export function CaseApprovalsInbox() {
     const interval = window.setInterval(reload, REFRESH_MS);
     return () => window.clearInterval(interval);
   }, [reload, canRead]);
+
+  useEffect(() => {
+    onCountChange?.(cases.length);
+  }, [cases.length, onCountChange]);
 
   const openDetail = (record: CaseApprovalRecord) => {
     setSelectedId(record.approval_case_id);
@@ -180,8 +193,8 @@ export function CaseApprovalsInbox() {
 
   if (!canRead) {
     return (
-      <div className="min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-        <Header count={0} />
+      <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
+        {!embedded && <Header count={0} />}
         <div className="flex items-center gap-2 rounded-md border border-border-subtle bg-surface-raised px-3 py-3 font-technical text-[12px] text-ink-tertiary">
           <Lock className="h-3.5 w-3.5" strokeWidth={1.8} />
           Viewing the case-approval queue requires the{" "}
@@ -192,8 +205,8 @@ export function CaseApprovalsInbox() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-      <Header count={cases.length} />
+    <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
+      {!embedded && <Header count={cases.length} />}
 
       <div className="mb-4 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
         Each case is an <strong>SME-AI-recommended resolution awaiting human
@@ -231,7 +244,7 @@ export function CaseApprovalsInbox() {
       )}
       {!isLoading && !error && cases.length === 0 && (
         <EmptyState
-          title="No approval cases pending"
+          title="All caught up — no items need your attention"
           message="The agent is resolving cases within governance. Anything that needs human sign-off will appear here for review."
           actionLabel="Refresh"
           onAction={reload}
