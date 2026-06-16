@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -23,12 +23,14 @@ import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-da
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { TechnicalDetails } from "@/components/technical-details";
 import {
+  ApiError,
   createKnowledgeDocument,
   formatApiError,
   ingestKnowledgeDocument,
   listKnowledgeDocuments,
   listKnowledgeVersions,
   updateKnowledgeDocument,
+  uploadKnowledgeDocument,
   type KnowledgeDocumentVersion,
   type TenantKnowledgeDocument,
 } from "@/lib/api";
@@ -65,6 +67,7 @@ const statusMeta: Record<TenantKnowledgeDocument["status"], { label: string; ton
 type ModalState =
   | { type: "none" }
   | { type: "create" }
+  | { type: "upload" }
   | { type: "view"; document: TenantKnowledgeDocument }
   | { type: "edit"; document: TenantKnowledgeDocument }
   | {
@@ -233,6 +236,29 @@ export function KnowledgeBase() {
     }
   };
 
+  const handleUploadDocument = async (
+    file: File,
+    title: string,
+    documentType: string
+  ) => {
+    setIsSubmitting(true);
+    setFormError(null);
+    try {
+      await uploadKnowledgeDocument(file, title, documentType);
+      closeModal();
+      setModal({
+        type: "notice",
+        title: "Document submitted for review",
+        message:
+          "Your document has been uploaded and is awaiting review. A compliance reviewer must approve it before it can be indexed and used by the AI. Once approved, it will be queued for indexing automatically.",
+      });
+      reload();
+    } catch (caught: unknown) {
+      setFormError(_uploadErrorMessage(caught));
+      setIsSubmitting(false);
+    }
+  };
+
   const columns: DataTableColumn<TenantKnowledgeDocument>[] = [
     {
       key: "title",
@@ -380,9 +406,8 @@ export function KnowledgeBase() {
 
           <button
             type="button"
-            disabled
-            title="Document upload will be available in a future update"
-            className="cc-btn cc-btn-secondary h-10 opacity-50"
+            onClick={() => setModal({ type: "upload" })}
+            className="cc-btn cc-btn-secondary h-10"
           >
             <Upload size={14} strokeWidth={1.8} />
             Upload document
@@ -531,6 +556,13 @@ export function KnowledgeBase() {
               error={formError}
               isSubmitting={isSubmitting}
               onSubmit={handleCreateDocument}
+            />
+          )}
+          {modal.type === "upload" && (
+            <UploadForm
+              error={formError}
+              isSubmitting={isSubmitting}
+              onSubmit={handleUploadDocument}
             />
           )}
           {modal.type === "view" && <DocumentDetail document={modal.document} />}
@@ -853,4 +885,118 @@ function formatDate(value: string): string {
     day: "2-digit",
     year: "numeric",
   }).format(date);
+}
+
+function _uploadErrorMessage(caught: unknown): string {
+  if (caught instanceof ApiError) {
+    switch (caught.message) {
+      case "knowledge_upload_too_large":
+        return "File is too large. Please upload a file under 15 MB.";
+      case "knowledge_upload_type_rejected":
+        return "File type not supported. Accepted formats: PDF, DOCX, plain text (.txt), and Markdown (.md). Executables and unrecognised binary files are always rejected.";
+      case "knowledge_upload_unparsable":
+        return "Could not extract text from this file. It may be a scanned image with no text layer, or the file may be corrupted. Try a different file or format.";
+      case "knowledge_upload_invalid_document_type":
+        return "Invalid document type selected. Please choose one from the list.";
+    }
+  }
+  return formatApiError(caught);
+}
+
+const ACCEPTED_MIME =
+  ".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
+
+function UploadForm({
+  error,
+  isSubmitting,
+  onSubmit,
+}: {
+  error: string | null;
+  isSubmitting: boolean;
+  onSubmit: (file: File, title: string, documentType: string) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const title = String(form.get("title") || "").trim();
+    const documentType = String(form.get("document_type") || "sop");
+    if (!selectedFile) return;
+    onSubmit(selectedFile, title, documentType);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <h2 className="heading-section text-[18px]">Upload document</h2>
+        <p className="mt-1 text-meta">
+          Uploaded documents are quarantined until a reviewer approves them. They cannot be used by
+          the AI until approved and indexed.
+        </p>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-red-alert/30 bg-red-alert/10 px-3 py-2 text-[13px] text-red-alert">
+          {error}
+        </div>
+      )}
+
+      <div>
+        <span className="mb-1 block text-meta">File</span>
+        <input
+          ref={fileRef}
+          type="file"
+          accept={ACCEPTED_MIME}
+          className="sr-only"
+          onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+        />
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="cc-btn cc-btn-secondary h-10 shrink-0"
+          >
+            Choose file
+          </button>
+          <span className="truncate text-[13px] text-ink-secondary">
+            {selectedFile ? selectedFile.name : "No file chosen"}
+          </span>
+        </div>
+        <p className="mt-1 text-meta">Accepted: PDF, DOCX, TXT, Markdown — up to 15 MB</p>
+      </div>
+
+      <label className="block">
+        <span className="mb-1 block text-meta">Title</span>
+        <input
+          name="title"
+          required
+          placeholder="e.g. Refund Policy v3"
+          className="cc-input h-10 w-full"
+        />
+      </label>
+
+      <label className="block">
+        <span className="mb-1 block text-meta">Document type</span>
+        <select name="document_type" defaultValue="sop" className="cc-select h-10 w-full">
+          {documentTypes
+            .filter((type) => type.id !== "all")
+            .map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.label}
+              </option>
+            ))}
+        </select>
+      </label>
+
+      <button
+        type="submit"
+        disabled={isSubmitting || !selectedFile}
+        className="cc-btn cc-btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isSubmitting ? "Uploading..." : "Upload document"}
+      </button>
+    </form>
+  );
 }
