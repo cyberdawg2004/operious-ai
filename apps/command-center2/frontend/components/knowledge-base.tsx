@@ -58,7 +58,7 @@ const statusMeta: Record<TenantKnowledgeDocument["status"], { label: string; ton
   active: { label: "Active", tone: "success", color: "var(--chart-green)" },
   pending_index: { label: "Pending index", tone: "warning", color: "var(--chart-amber)" },
   indexing: { label: "Indexing", tone: "info", color: "var(--chart-blue)" },
-  index_failed: { label: "Index failed", tone: "error", color: "var(--chart-red)" },
+  index_failed: { label: "Index failed", tone: "danger", color: "var(--chart-red)" },
   archived: { label: "Archived", tone: "neutral", color: "var(--chart-purple)" },
 };
 
@@ -117,6 +117,7 @@ export function KnowledgeBase() {
       active: 0,
       pending_index: 0,
       indexing: 0,
+      index_failed: 0,
       archived: 0,
     };
     for (const doc of documents) {
