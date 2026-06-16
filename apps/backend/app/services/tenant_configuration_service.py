@@ -29,6 +29,7 @@ from app.tenant.identity import (
     TenantChannelConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantKnowledgeUploadId,
 )
 from app.tenant.exceptions import TenantConfigurationDirectApplyDisabledError
 from app.tenant.persistence import (
@@ -49,6 +50,7 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentQuery,
     TenantKnowledgeDocumentRecord,
+    TenantKnowledgeUploadRecord,
     TenantTopologyConfigurationPage,
     TenantTopologyConfigurationQuery,
     TenantTopologyConfigurationRecord,
@@ -386,6 +388,53 @@ class TenantConfigurationService:
         if commit:
             await self._session.commit()
         return record
+
+    async def create_knowledge_upload(
+        self,
+        *,
+        tenant_id: str,
+        filename: str,
+        content_type: str,
+        raw_content: bytes,
+        uploaded_by: str,
+        created_at: datetime,
+        commit: bool = True,
+    ) -> TenantKnowledgeUploadId:
+        """Construct, encrypt, and persist a new upload record; return its id."""
+        upload_id = TenantKnowledgeUploadId(uuid.uuid4())  # EPHEMERAL: new upload row
+        record = TenantKnowledgeUploadRecord(
+            upload_id=upload_id,
+            tenant_id=tenant_id,
+            filename=filename,
+            content_type=content_type,
+            byte_size=len(raw_content),
+            raw_content=raw_content,
+            uploaded_by=uploaded_by,
+            created_at=created_at,
+        )
+        await self._runtime.save_knowledge_upload(record, tenant_id=tenant_id)
+        if commit:
+            await self._session.commit()
+        return upload_id
+
+    async def save_knowledge_upload(
+        self,
+        record: TenantKnowledgeUploadRecord,
+        *,
+        tenant_id: str,
+        commit: bool = True,
+    ) -> None:
+        await self._runtime.save_knowledge_upload(record, tenant_id=tenant_id)
+        if commit:
+            await self._session.commit()
+
+    async def get_knowledge_upload(
+        self,
+        upload_id: TenantKnowledgeUploadId,
+        *,
+        tenant_id: str,
+    ) -> TenantKnowledgeUploadRecord | None:
+        return await self._runtime.get_knowledge_upload(upload_id, tenant_id=tenant_id)
 
     async def list_knowledge_documents(
         self,

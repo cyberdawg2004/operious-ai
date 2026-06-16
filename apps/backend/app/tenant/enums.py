@@ -52,6 +52,7 @@ class TenantKnowledgeDocumentStatus(StrEnum):
     ARCHIVED = "archived"
     PENDING_INDEX = "pending_index"
     INDEXING = "indexing"
+    INDEX_FAILED = "index_failed"
 
 
 class TenantKnowledgeReviewStatus(StrEnum):

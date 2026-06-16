@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from ipaddress import ip_address
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,6 +68,10 @@ _CHANGE_EVENT_NAMESPACE = uuid.UUID("01f77264-1518-5a56-9327-0472414e7dc0")
 _SCHEMA_VERSION = "1"
 
 
+class _KnowledgeReindexPublisherProtocol(Protocol):
+    def publish_reindex(self, *, document_id: str, tenant_id: str) -> None: ...
+
+
 class TenantConfigChangeRequestService:
     """Application service for durable propose/approve/apply config changes."""
 
@@ -78,11 +82,13 @@ class TenantConfigChangeRequestService:
         tenant_configuration_service: TenantConfigurationService,
         event_appender: OperationalEventAppender,
         session: AsyncSession,
+        knowledge_reindex_publisher: _KnowledgeReindexPublisherProtocol | None = None,
     ) -> None:
         self._repository = repository
         self._tenant_configuration = tenant_configuration_service
         self._events = event_appender
         self._session = session
+        self._knowledge_reindex_publisher = knowledge_reindex_publisher
 
     async def propose(
         self,
@@ -229,6 +235,26 @@ class TenantConfigChangeRequestService:
             await self._tenant_configuration.publish_governance_policy_invalidation(
                 tenant_id=expected_tenant_id
             )
+        elif (
+            record.change_type is TenantConfigChangeType.KNOWLEDGE
+            and outcome.get("operation") == "create"
+            and self._knowledge_reindex_publisher is not None
+        ):
+            try:
+                self._knowledge_reindex_publisher.publish_reindex(
+                    document_id=str(outcome["document_id"]),
+                    tenant_id=expected_tenant_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - reindex enqueue is best-effort
+                from app.core.logging import get_logger as _get_logger
+                _get_logger(__name__).warning(
+                    "knowledge_reindex_enqueue_failed",
+                    extra={
+                        "document_id": outcome.get("document_id"),
+                        "tenant_id": expected_tenant_id,
+                        "error": str(exc),
+                    },
+                )
         return persisted
 
     async def revoke(

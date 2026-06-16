@@ -274,6 +274,13 @@ class TenantKnowledgeDocumentRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    last_index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
@@ -367,6 +374,48 @@ class TenantKnowledgeDocumentVersionRow(Base):
             "ix_tenant_knowledge_document_versions_tenant_status",
             "tenant_id",
             "status",
+        ),
+    )
+
+
+class TenantKnowledgeUploadRow(Base):
+    """ORM row for ``tenant_knowledge_uploads``."""
+
+    __tablename__ = "tenant_knowledge_uploads"
+
+    upload_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenant_knowledge_documents.document_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    filename: Mapped[str] = mapped_column(String(_HANDLE_WIDTH * 2), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(_ENUM_WIDTH), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
+        CheckConstraint("byte_size >= 0", name="knowledge_upload_byte_size_nonnegative"),
+        Index(
+            "ix_tenant_knowledge_uploads_tenant_document",
+            "tenant_id",
+            "document_id",
         ),
     )
 

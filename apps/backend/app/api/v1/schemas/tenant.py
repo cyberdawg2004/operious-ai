@@ -425,6 +425,8 @@ class TenantKnowledgeDocumentResponse(BaseModel):
     uploaded_by: str
     vector_indexed_at: str | None = None
     created_at: str
+    updated_at: str | None = None
+    last_index_error: str | None = None
 
     @classmethod
     def from_record(
@@ -446,7 +448,25 @@ class TenantKnowledgeDocumentResponse(BaseModel):
                 else None
             ),
             created_at=record.created_at.isoformat(),
+            updated_at=(
+                record.updated_at.isoformat() if record.updated_at is not None else None
+            ),
+            last_index_error=record.last_index_error,
         )
+
+
+class TenantKnowledgeUploadResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    upload_id: str
+    tenant_id: str
+    filename: str
+    content_type: str
+    byte_size: int
+    uploaded_by: str
+    created_at: str
+    change_request_id: str
+    document_id: str | None = None
 
 
 class TenantKnowledgeDocumentPage(BaseModel):

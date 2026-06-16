@@ -15,6 +15,7 @@ from app.data_protection.crypto import DataProtectionService
 from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
+from app.core.logging import get_logger
 from app.knowledge import (
     DeterministicKnowledgeChunker,
     KnowledgeIngestionResult,
@@ -24,9 +25,12 @@ from app.knowledge import (
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.queues import QUEUE_KNOWLEDGE_INDEXING
+from app.tenant.enums import TenantKnowledgeDocumentStatus
 from app.tenant.identity import TenantKnowledgeDocumentId
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
+
+_logger = get_logger(__name__)
 
 _T = TypeVar("_T")
 
@@ -55,14 +59,44 @@ def reindex_knowledge_document(
     tenant_id: str,
 ) -> dict[str, object]:
     """Re-index one tenant knowledge document after an approved SOP update."""
-
-    return _run_async(
-        reindex_knowledge_document_runtime(
-            document_id=document_id,
+    try:
+        return _run_async(
+            reindex_knowledge_document_runtime(
+                document_id=document_id,
+                tenant_id=tenant_id,
+            ),
             tenant_id=tenant_id,
-        ),
-        tenant_id=tenant_id,
-    )
+        )
+    except Exception as exc:
+        if _self.request.retries >= _self.max_retries:
+            # Terminal failure — all retries exhausted; surface INDEX_FAILED.
+            _logger.error(
+                "knowledge_reindex_terminal_failure",
+                extra={
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                    "error": str(exc),
+                },
+            )
+            try:
+                _run_async(
+                    _persist_index_failed(
+                        document_id=document_id,
+                        tenant_id=tenant_id,
+                        error=str(exc),
+                    ),
+                    tenant_id=tenant_id,
+                )
+            except Exception as persist_exc:  # noqa: BLE001
+                _logger.warning(
+                    "knowledge_reindex_index_failed_persist_error",
+                    extra={
+                        "document_id": document_id,
+                        "tenant_id": tenant_id,
+                        "error": str(persist_exc),
+                    },
+                )
+        raise
 
 
 async def reindex_knowledge_document_runtime(
@@ -104,6 +138,39 @@ async def reindex_knowledge_document_runtime(
             return _result_payload(result)
     finally:
         set_current_tenant(previous_tenant)
+
+
+async def _persist_index_failed(
+    *,
+    document_id: str,
+    tenant_id: str,
+    error: str,
+) -> None:
+    from dataclasses import replace as dc_replace
+
+    parsed_document_id = as_document_id(document_id)
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        await _set_db_tenant_context(session, tenant_id)
+        repo = PostgresTenantConfigurationRepository(
+            session,
+            data_protection=_data_protection_service(session),
+        )
+        record = await repo.get_knowledge_document(
+            parsed_document_id,
+            expected_tenant_id=tenant_id,
+        )
+        if record is not None:
+            failed_record = dc_replace(
+                record,
+                status=TenantKnowledgeDocumentStatus.INDEX_FAILED,
+                last_index_error=error[:4096],
+            )
+            await repo.save_knowledge_document(
+                failed_record,
+                expected_tenant_id=tenant_id,
+            )
+            await session.commit()
 
 
 def _knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:

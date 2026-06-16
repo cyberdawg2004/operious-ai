@@ -909,6 +909,7 @@ def get_tenant_config_change_request_service(
             persistence=PostgresOperationalEventPersistence(session)
         ),
         session=session,
+        knowledge_reindex_publisher=CeleryKnowledgeReindexPublisher(),
     )
 
 

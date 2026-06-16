@@ -30,6 +30,7 @@ from app.tenant.persistence.records import (
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
+    TenantKnowledgeUploadRecord,
     TenantTopologyConfigurationRecord,
     TenantWebhookRoutingSecretRecord,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "TenantKnowledgeDocumentVersionPage",
     "TenantKnowledgeDocumentVersionQuery",
     "TenantKnowledgeDocumentVersionRecord",
+    "TenantKnowledgeUploadRecord",
     "TenantTopologyConfigurationPage",
     "TenantTopologyConfigurationQuery",
     "TenantTopologyConfigurationRecord",

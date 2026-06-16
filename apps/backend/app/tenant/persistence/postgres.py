@@ -20,6 +20,7 @@ from app.tenant.db.models import (
     TenantGovernancePolicyRow,
     TenantKnowledgeDocumentRow,
     TenantKnowledgeDocumentVersionRow,
+    TenantKnowledgeUploadRow,
     TenantRow,
     TenantTopologyConfigurationRow,
 )
@@ -45,6 +46,7 @@ from app.tenant.identity import (
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantKnowledgeDocumentVersionId,
+    TenantKnowledgeUploadId,
     TenantTopologyConfigurationId,
 )
 from app.tenant.persistence.models import (
@@ -73,6 +75,7 @@ from app.tenant.persistence.records import (
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
+    TenantKnowledgeUploadRecord,
     TenantTopologyConfigurationRecord,
     TenantWebhookRoutingSecretRecord,
 )
@@ -614,6 +617,62 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             record,
             content=await self._data_protection.decrypt_text(record.content),
         )
+
+    async def save_knowledge_upload(
+        self,
+        record: TenantKnowledgeUploadRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        protected = await self._protect_upload_record(record)
+        await self._ensure_tenant(expected_tenant_id)
+        try:
+            async with self.session.begin_nested():
+                self.session.add(_upload_record_to_row(protected))
+        except IntegrityError as exc:
+            raise TenantConfigurationPersistenceError(
+                "knowledge upload could not be persisted"
+            ) from exc
+
+    async def get_knowledge_upload(
+        self,
+        upload_id: TenantKnowledgeUploadId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantKnowledgeUploadRecord | None:
+        stmt = select(TenantKnowledgeUploadRow).where(
+            TenantKnowledgeUploadRow.upload_id == upload_id,
+            TenantKnowledgeUploadRow.tenant_id == expected_tenant_id,
+        )
+        row = (await self.session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        return await self._upload_row_to_record(row)
+
+    async def _protect_upload_record(
+        self,
+        record: TenantKnowledgeUploadRecord,
+    ) -> TenantKnowledgeUploadRecord:
+        if self._data_protection is None:
+            return record
+        encrypted = await self._data_protection.encrypt_bytes(
+            record.raw_content,
+            tenant_id=record.tenant_id,
+            subject_id=None,
+            field="tenant_knowledge_uploads.raw_content",
+            tenant_scoped=True,
+        )
+        return replace(record, raw_content=encrypted)
+
+    async def _upload_row_to_record(
+        self,
+        row: TenantKnowledgeUploadRow,
+    ) -> TenantKnowledgeUploadRecord:
+        raw = row.raw_content
+        if self._data_protection is not None:
+            raw = await self._data_protection.decrypt_bytes(raw)
+        return _upload_row_to_record(row, raw_content=raw)
 
     async def save_governance_policy(
         self,
@@ -1233,6 +1292,7 @@ def _update_document_row(
     row.uploaded_by = record.uploaded_by
     row.vector_indexed_at = record.vector_indexed_at
     row.created_at = record.created_at
+    row.last_index_error = record.last_index_error
 
 
 def _document_row_to_record(
@@ -1250,6 +1310,8 @@ def _document_row_to_record(
         uploaded_by=row.uploaded_by,
         vector_indexed_at=row.vector_indexed_at,
         created_at=row.created_at,
+        updated_at=getattr(row, "updated_at", None),
+        last_index_error=row.last_index_error,
     )
 
 
@@ -1529,6 +1591,42 @@ def _status_codes(value: Any) -> tuple[int, ...]:
     raw_items = cast(list[object], value)
     codes = [item for item in raw_items if isinstance(item, int)]
     return tuple(codes) or (200, 201, 202)
+
+
+def _upload_record_to_row(record: TenantKnowledgeUploadRecord) -> TenantKnowledgeUploadRow:
+    return TenantKnowledgeUploadRow(
+        upload_id=record.upload_id,
+        tenant_id=record.tenant_id,
+        document_id=record.document_id,
+        filename=record.filename,
+        content_type=record.content_type,
+        byte_size=record.byte_size,
+        raw_content=record.raw_content,
+        uploaded_by=record.uploaded_by,
+        created_at=record.created_at,
+    )
+
+
+def _upload_row_to_record(
+    row: TenantKnowledgeUploadRow,
+    *,
+    raw_content: bytes,
+) -> TenantKnowledgeUploadRecord:
+    return TenantKnowledgeUploadRecord(
+        upload_id=TenantKnowledgeUploadId(row.upload_id),
+        tenant_id=row.tenant_id,
+        document_id=(
+            TenantKnowledgeDocumentId(row.document_id)
+            if row.document_id is not None
+            else None
+        ),
+        filename=row.filename,
+        content_type=row.content_type,
+        byte_size=row.byte_size,
+        raw_content=raw_content,
+        uploaded_by=row.uploaded_by,
+        created_at=row.created_at,
+    )
 
 
 __all__ = ["PostgresTenantConfigurationRepository"]

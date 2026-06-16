@@ -56,6 +56,7 @@ from app.tenant.identity import (
     TenantExecutionCircuitBreakerId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantKnowledgeUploadId,
     TenantTopologyConfigurationId,
     derive_channel_configuration_id,
     derive_execution_circuit_breaker_id,
@@ -87,6 +88,7 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
     TenantKnowledgeDocumentVersionQuery,
+    TenantKnowledgeUploadRecord,
     TenantTopologyConfigurationPage,
     TenantTopologyConfigurationQuery,
     TenantTopologyConfigurationRecord,
@@ -667,6 +669,28 @@ class TenantConfigurationRuntime:
     ) -> TenantKnowledgeDocumentPage:
         return await self._repository.list_knowledge_documents(
             query,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def save_knowledge_upload(
+        self,
+        record: TenantKnowledgeUploadRecord,
+        *,
+        tenant_id: str,
+    ) -> None:
+        await self._repository.save_knowledge_upload(
+            record,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def get_knowledge_upload(
+        self,
+        upload_id: TenantKnowledgeUploadId,
+        *,
+        tenant_id: str,
+    ) -> TenantKnowledgeUploadRecord | None:
+        return await self._repository.get_knowledge_upload(
+            upload_id,
             expected_tenant_id=tenant_id,
         )
 

@@ -319,11 +319,25 @@ export type TenantKnowledgeDocument = {
   title: string;
   content: string;
   document_type: "sop" | "policy" | "product_guide" | "faq" | "escalation_matrix";
-  status: "active" | "archived" | "pending_index" | "indexing";
+  status: "active" | "archived" | "pending_index" | "indexing" | "index_failed";
   version: number;
   uploaded_by: string;
   vector_indexed_at: string | null;
   created_at: string;
+  updated_at: string | null;
+  last_index_error: string | null;
+};
+
+export type TenantKnowledgeUpload = {
+  upload_id: string;
+  tenant_id: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  uploaded_by: string;
+  created_at: string;
+  change_request_id: string;
+  document_id: string | null;
 };
 
 export type KnowledgeDocumentVersion = {
@@ -831,7 +845,7 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const { query, headers, body, ...init } = options;
   const requestHeaders = await buildHeaders(headers);
-  if (body && !requestHeaders.has("Content-Type")) {
+  if (body && !(body instanceof FormData) && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
   }
 
@@ -1179,6 +1193,21 @@ export function updateKnowledgeDocument(
       body: JSON.stringify(request),
     }
   );
+}
+
+export function uploadKnowledgeDocument(
+  file: File,
+  title: string,
+  documentType: string
+) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("title", title);
+  form.append("document_type", documentType);
+  return apiRequest<TenantKnowledgeUpload>("/tenant/knowledge/uploads", {
+    method: "POST",
+    body: form,
+  });
 }
 
 export function ingestKnowledgeDocument(documentId: string) {

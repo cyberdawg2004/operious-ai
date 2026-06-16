@@ -483,6 +483,10 @@ class Settings(BaseSettings):
     SURVIVABILITY_REQUEST_BODY_MAX_BYTES: int = 1_000_000  # 1 MiB
     SURVIVABILITY_READINESS_PROBE_TIMEOUT_SECONDS: float = 2.0
 
+    # ─── Knowledge upload ────────────────────────────────────────────
+    KNOWLEDGE_UPLOAD_MAX_BYTES: int = 15_728_640  # 15 MiB
+    KNOWLEDGE_UPLOAD_ALLOWED_TYPES: str = "pdf,docx,txt,md"
+
     # ─── HTTP transport (2.5-I) ──────────────────────────────────────
     # Comma-separated CORS allowlist. Empty string disables CORS at
     # the FastAPI level (production posture defaults to "no CORS";

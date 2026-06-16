@@ -13,6 +13,7 @@ TenantKnowledgeDocumentId = NewType("TenantKnowledgeDocumentId", uuid.UUID)
 TenantKnowledgeDocumentVersionId = NewType(
     "TenantKnowledgeDocumentVersionId", uuid.UUID
 )
+TenantKnowledgeUploadId = NewType("TenantKnowledgeUploadId", uuid.UUID)
 TenantGovernancePolicyId = NewType("TenantGovernancePolicyId", uuid.UUID)
 TenantExecutionGovernanceConfigurationId = NewType(
     "TenantExecutionGovernanceConfigurationId", uuid.UUID
@@ -169,6 +170,14 @@ def as_knowledge_document_version_id(
     value: uuid.UUID | str,
 ) -> TenantKnowledgeDocumentVersionId:
     return TenantKnowledgeDocumentVersionId(
+        value if isinstance(value, uuid.UUID) else uuid.UUID(value)
+    )
+
+
+def as_knowledge_upload_id(
+    value: uuid.UUID | str,
+) -> TenantKnowledgeUploadId:
+    return TenantKnowledgeUploadId(
         value if isinstance(value, uuid.UUID) else uuid.UUID(value)
     )
 

@@ -10,6 +10,7 @@ from app.tenant.identity import (
     TenantExecutionGovernanceConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantKnowledgeUploadId,
     TenantTopologyConfigurationId,
 )
 from app.tenant.persistence.models import (
@@ -38,6 +39,7 @@ from app.tenant.persistence.records import (
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
+    TenantKnowledgeUploadRecord,
     TenantTopologyConfigurationRecord,
     TenantWebhookRoutingSecretRecord,
 )
@@ -277,6 +279,20 @@ class TenantConfigurationRepository(Protocol):
         *,
         expected_tenant_id: str,
     ) -> TenantTopologyConfigurationRecord | None: ...
+
+    async def save_knowledge_upload(
+        self,
+        record: TenantKnowledgeUploadRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None: ...
+
+    async def get_knowledge_upload(
+        self,
+        upload_id: TenantKnowledgeUploadId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantKnowledgeUploadRecord | None: ...
 
 
 __all__ = ["TenantConfigurationRepository"]

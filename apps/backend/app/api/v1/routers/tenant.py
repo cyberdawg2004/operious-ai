@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Final
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from app.api.v1.schemas.tenant import (
     TenantAdminProvisionRequest,
@@ -34,6 +35,7 @@ from app.api.v1.schemas.tenant import (
     TenantKnowledgeDocumentPage,
     TenantKnowledgeDocumentResponse,
     TenantKnowledgeUpdateRequest,
+    TenantKnowledgeUploadResponse,
     TenantLifecycleCreateRequest,
     TenantLifecyclePage,
     TenantLifecycleResponse,
@@ -100,6 +102,13 @@ from app.tenant.exceptions import (
     TenantConfigurationError,
     TenantConfigurationNotFoundError,
     TenantTopologyCycleError,
+)
+from app.core.config import get_settings
+from app.tenant.file_ingestion import (
+    KnowledgeUploadEmptyTextError,
+    KnowledgeUploadTypeError,
+    KnowledgeUploadUnparsableError,
+    parse_uploaded_document,
 )
 from app.tenant.identity import (
     as_channel_configuration_id,
@@ -698,6 +707,94 @@ async def list_knowledge_documents(
         ],
         total=page.total,
         offset=page.offset,
+    )
+
+
+@router.post(
+    "/knowledge/uploads",
+    response_model=TenantKnowledgeUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_knowledge_document(
+    file: UploadFile = File(...),
+    title: str = Form(..., min_length=1),
+    document_type: str = Form(...),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_capability(TENANT_KNOWLEDGE_WRITE_CAPABILITY)),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+    change_request_service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantKnowledgeUploadResponse:
+    settings = get_settings()
+    max_bytes = settings.KNOWLEDGE_UPLOAD_MAX_BYTES
+
+    raw = await file.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "knowledge_upload_too_large",
+                "max_bytes": max_bytes,
+            },
+        )
+
+    filename = file.filename or "upload"
+    try:
+        canonical_type, extracted_text = parse_uploaded_document(
+            filename=filename,
+            raw_bytes=raw,
+        )
+    except KnowledgeUploadTypeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "knowledge_upload_type_rejected", "detail": str(exc)},
+        ) from exc
+    except (KnowledgeUploadUnparsableError, KnowledgeUploadEmptyTextError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "knowledge_upload_unparsable", "detail": str(exc)},
+        ) from exc
+
+    principal = _principal_or_400(authority)
+    now = datetime.now(tz=timezone.utc)
+    upload_id = await service.create_knowledge_upload(
+        tenant_id=expected_tenant_id,
+        filename=filename,
+        content_type=canonical_type,
+        raw_content=raw,
+        uploaded_by=principal,
+        created_at=now,
+    )
+
+    try:
+        doc_type = TenantKnowledgeDocumentType(document_type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "knowledge_upload_invalid_document_type"},
+        ) from exc
+
+    change_request = await change_request_service.propose(
+        tenant_id=expected_tenant_id,
+        change_type=TenantConfigChangeType.KNOWLEDGE,
+        payload={
+            "operation": "create",
+            "title": title,
+            "content": extracted_text,
+            "document_type": doc_type.value,
+        },
+        proposed_by=principal,
+    )
+    return TenantKnowledgeUploadResponse(
+        upload_id=str(upload_id),
+        tenant_id=expected_tenant_id,
+        filename=filename,
+        content_type=canonical_type,
+        byte_size=len(raw),
+        uploaded_by=principal,
+        created_at=now.isoformat(),
+        change_request_id=str(change_request.change_request_id),
     )
 
 

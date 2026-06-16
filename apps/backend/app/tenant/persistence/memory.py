@@ -22,6 +22,7 @@ from app.tenant.identity import (
     TenantExecutionGovernanceConfigurationId,
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
+    TenantKnowledgeUploadId,
     TenantTopologyConfigurationId,
 )
 from app.tenant.persistence.models import (
@@ -50,6 +51,7 @@ from app.tenant.persistence.records import (
     TenantGovernancePolicyRecord,
     TenantKnowledgeDocumentRecord,
     TenantKnowledgeDocumentVersionRecord,
+    TenantKnowledgeUploadRecord,
     TenantTopologyConfigurationRecord,
     TenantWebhookRoutingSecretRecord,
 )
@@ -67,6 +69,7 @@ class InMemoryTenantConfigurationRepository:
         "_execution_governance_configurations",
         "_policies",
         "_topologies",
+        "_uploads",
         "_lock",
     )
 
@@ -102,6 +105,10 @@ class InMemoryTenantConfigurationRepository:
         self._topologies: dict[
             TenantTopologyConfigurationId,
             TenantTopologyConfigurationRecord,
+        ] = {}
+        self._uploads: dict[
+            TenantKnowledgeUploadId,
+            TenantKnowledgeUploadRecord,
         ] = {}
         self._lock = asyncio.Lock()
 
@@ -665,6 +672,27 @@ class InMemoryTenantConfigurationRepository:
         if len(rows) != 1:
             return None
         return rows[0]
+
+    async def save_knowledge_upload(
+        self,
+        record: TenantKnowledgeUploadRecord,
+        *,
+        expected_tenant_id: str,
+    ) -> None:
+        _assert_write_tenant(record.tenant_id, expected_tenant_id)
+        async with self._lock:
+            self._uploads[record.upload_id] = record
+
+    async def get_knowledge_upload(
+        self,
+        upload_id: TenantKnowledgeUploadId,
+        *,
+        expected_tenant_id: str,
+    ) -> TenantKnowledgeUploadRecord | None:
+        record = self._uploads.get(upload_id)
+        if record is None or record.tenant_id != expected_tenant_id:
+            return None
+        return record
 
 
 def _assert_write_tenant(record_tenant_id: str, expected_tenant_id: str) -> None:

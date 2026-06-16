@@ -2,23 +2,26 @@
 
 import { useCallback, useMemo, useState } from "react";
 import {
-  AlertTriangle,
-  Check,
-  ChevronLeft,
+  ChevronDown,
   ChevronRight,
-  Clock,
   Eye,
   FileText,
-  Folder,
   History,
   MoreHorizontal,
   Pencil,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
+import { DonutChart } from "@/components/ui/chart";
+import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-data";
+import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
+import { TechnicalDetails } from "@/components/technical-details";
 import {
   createKnowledgeDocument,
   formatApiError,
@@ -43,17 +46,25 @@ const documentTypes: {
   id: "all" | TenantKnowledgeDocument["document_type"];
   label: string;
 }[] = [
-  { id: "all", label: "All Documents" },
+  { id: "all", label: "All documents" },
   { id: "sop", label: "SOPs" },
   { id: "policy", label: "Policies" },
-  { id: "product_guide", label: "Product Guides" },
+  { id: "product_guide", label: "Product guides" },
   { id: "faq", label: "FAQs" },
-  { id: "escalation_matrix", label: "Escalation Matrices" },
+  { id: "escalation_matrix", label: "Escalation matrices" },
 ];
+
+const statusMeta: Record<TenantKnowledgeDocument["status"], { label: string; tone: StatusTone; color: string }> = {
+  active: { label: "Active", tone: "success", color: "var(--chart-green)" },
+  pending_index: { label: "Pending index", tone: "warning", color: "var(--chart-amber)" },
+  indexing: { label: "Indexing", tone: "info", color: "var(--chart-blue)" },
+  index_failed: { label: "Index failed", tone: "error", color: "var(--chart-red)" },
+  archived: { label: "Archived", tone: "neutral", color: "var(--chart-purple)" },
+};
 
 type ModalState =
   | { type: "none" }
-  | { type: "upload" }
+  | { type: "create" }
   | { type: "view"; document: TenantKnowledgeDocument }
   | { type: "edit"; document: TenantKnowledgeDocument }
   | {
@@ -70,8 +81,8 @@ export function KnowledgeBase() {
   const [activeCategory, setActiveCategory] =
     useState<(typeof documentTypes)[number]["id"]>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>({ type: "none" });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -101,19 +112,29 @@ export function KnowledgeBase() {
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
-  const toggleDocSelection = (id: string) => {
-    setSelectedDocs((prev) =>
-      prev.includes(id) ? prev.filter((docId) => docId !== id) : [...prev, id]
-    );
-  };
-
-  const toggleAllSelection = () => {
-    if (selectedDocs.length === filteredDocs.length) {
-      setSelectedDocs([]);
-    } else {
-      setSelectedDocs(filteredDocs.map((doc) => doc.document_id));
+  const statusBreakdown = useMemo(() => {
+    const counts: Record<TenantKnowledgeDocument["status"], number> = {
+      active: 0,
+      pending_index: 0,
+      indexing: 0,
+      archived: 0,
+    };
+    for (const doc of documents) {
+      counts[doc.status] += 1;
     }
-  };
+    return (Object.keys(counts) as TenantKnowledgeDocument["status"][])
+      .filter((status) => counts[status] > 0)
+      .map((status) => ({
+        label: statusMeta[status].label,
+        value: counts[status],
+        color: statusMeta[status].color,
+      }));
+  }, [documents]);
+
+  const indexedCount = useMemo(
+    () => documents.filter((doc) => Boolean(doc.vector_indexed_at)).length,
+    [documents]
+  );
 
   const openVersions = async (document: TenantKnowledgeDocument) => {
     setModal({
@@ -211,125 +232,207 @@ export function KnowledgeBase() {
     }
   };
 
-  return (
-    <div className="flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8">
-      <div className="mb-8">
-        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary mb-2">
-          Knowledge · Document Management
-        </p>
-
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <h1 className="font-serif text-[32px] font-bold text-ink-primary">
-            Knowledge Base
-          </h1>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:w-[280px]">
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-tertiary"
-                strokeWidth={1.5}
-              />
-              <input
-                type="text"
-                placeholder="Search documents..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-11 w-full rounded-lg border border-border-subtle bg-surface pl-9 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary transition-colors focus:outline-none focus:border-gold-primary sm:h-9"
-              />
-            </div>
-
-            <button
-              onClick={() => setModal({ type: "upload" })}
-              className="flex h-11 items-center justify-center gap-2 rounded bg-gold-primary px-4 font-sans text-[13px] font-medium text-white transition-colors duration-160 hover:bg-gold-bright sm:h-9"
-            >
-              <Upload className="w-3.5 h-3.5" strokeWidth={1.5} />
-              Upload Document
-            </button>
+  const columns: DataTableColumn<TenantKnowledgeDocument>[] = [
+    {
+      key: "title",
+      header: "Document",
+      width: "min-w-[280px]",
+      render: (doc) => (
+        <div className="flex min-w-0 items-start gap-2">
+          <FileText size={16} strokeWidth={1.8} className="mt-0.5 shrink-0 text-ink-tertiary" />
+          <div className="min-w-0">
+            <p className="truncate text-[13.5px] font-semibold text-ink-primary">{doc.title}</p>
+            <p className="mt-0.5 truncate text-meta">Uploaded by {doc.uploaded_by}</p>
           </div>
+        </div>
+      ),
+    },
+    {
+      key: "type",
+      header: "Type",
+      width: "w-[160px]",
+      render: (doc) => <span className="text-[12.5px] text-ink-secondary">{formatDocumentType(doc.document_type)}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      width: "w-[150px]",
+      render: (doc) => {
+        const meta = statusMeta[doc.status];
+        return <StatusBadge label={meta.label} tone={meta.tone} />;
+      },
+    },
+    {
+      key: "version",
+      header: "Version",
+      width: "w-[90px]",
+      numeric: true,
+      render: (doc) => <span className="tabular text-[12.5px] text-ink-secondary">v{doc.version}</span>,
+    },
+    {
+      key: "updated",
+      header: "Updated",
+      width: "w-[140px]",
+      render: (doc) => (
+        <span className="tabular text-[12.5px] text-ink-secondary" title={doc.created_at}>
+          {formatDate(doc.created_at)}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      width: "w-[220px]",
+      align: "right",
+      render: (doc) => (
+        <div className="flex items-center justify-end gap-2">
+          <DocumentActionMenu
+            onView={() => setModal({ type: "view", document: doc })}
+            onEdit={() => setModal({ type: "edit", document: doc })}
+            onHistory={() => void openVersions(doc)}
+            onIngest={() => void handleIngestDocument(doc)}
+            ingestBusy={busyDocumentId === doc.document_id}
+            onDelete={() =>
+              setModal({
+                type: "pending",
+                message:
+                  "The backend exposes create, update, list, ingest, and version read operations for knowledge documents, but no delete endpoint is currently available.",
+              })
+            }
+          />
+          <button
+            type="button"
+            onClick={() =>
+              setExpandedDocId((current) => (current === doc.document_id ? null : doc.document_id))
+            }
+            className="cc-btn cc-btn-ghost"
+            aria-label={`Toggle technical details for ${doc.title}`}
+            aria-expanded={expandedDocId === doc.document_id}
+          >
+            {expandedDocId === doc.document_id ? (
+              <ChevronDown size={14} strokeWidth={1.8} />
+            ) : (
+              <ChevronRight size={14} strokeWidth={1.8} />
+            )}
+            Details
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <main className="min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <p className="text-meta">Tenant-scoped source material and SOP intelligence</p>
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <label className="flex flex-col gap-1">
+            <span className="sr-only">Document type</span>
+            <select
+              value={activeCategory}
+              onChange={(event) => {
+                setActiveCategory(event.target.value as (typeof documentTypes)[number]["id"]);
+                setCurrentPage(1);
+              }}
+              className="cc-select h-10 min-w-[180px]"
+            >
+              {documentTypes.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="relative w-full md:w-[280px]">
+            <Search
+              size={14}
+              strokeWidth={1.8}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
+            />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search documents..."
+              className="cc-input h-10 pl-9"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={reload}
+            className="cc-btn cc-btn-secondary h-10 w-10"
+            aria-label="Refresh documents"
+          >
+            <RefreshCw size={14} strokeWidth={1.8} className={cn(isLoading && "animate-spin")} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setModal({ type: "create" })}
+            className="cc-btn cc-btn-primary h-10"
+          >
+            New document
+          </button>
+
+          <button
+            type="button"
+            disabled
+            title="Document upload will be available in a future update"
+            className="cc-btn cc-btn-secondary h-10 opacity-50"
+          >
+            <Upload size={14} strokeWidth={1.8} />
+            Upload document
+          </button>
         </div>
       </div>
 
-      {isLoading && <LoadingState label="Loading tenant knowledge..." />}
+      {isLoading && <div className="mt-8"><LoadingState label="Loading tenant knowledge..." /></div>}
 
       {error && !isLoading && (
-        <ErrorState
-          title="Knowledge documents unavailable"
-          message={error}
-          onAction={reload}
-        />
+        <div className="mt-8">
+          <ErrorState title="Knowledge documents unavailable" message={error} onAction={reload} />
+        </div>
       )}
 
       {data && !isLoading && !error && (
-        <div className="flex flex-col gap-4 xl:flex-row xl:gap-6">
-          <div className="w-full flex-shrink-0 xl:w-60">
-            <div className="bg-surface border border-border-subtle rounded-lg p-4">
-              <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-tertiary mb-4">
-                Categories
-              </h2>
-
-              <div className="space-y-1">
-                {documentTypes.map((category) => (
-                  <button
-                    key={category.id}
-                    onClick={() => {
-                      setActiveCategory(category.id);
-                      setCurrentPage(1);
-                      setSelectedDocs([]);
-                    }}
-                    className={cn(
-                      "flex h-11 w-full items-center gap-2 rounded px-3 transition-colors duration-160 sm:h-9",
-                      activeCategory === category.id
-                        ? "bg-[var(--gold-bg)] border-l-4 border-l-[var(--gold-primary)] -ml-px"
-                        : "hover:bg-[var(--surface-sunken)]"
-                    )}
-                  >
-                    <Folder
-                      className={cn(
-                        "w-3.5 h-3.5",
-                        activeCategory === category.id
-                          ? "text-ink-primary"
-                          : "text-ink-tertiary"
-                      )}
-                      strokeWidth={1.5}
-                    />
-                    <span
-                      className={cn(
-                        "flex-1 text-left text-[13px] font-medium",
-                        activeCategory === category.id
-                          ? "text-ink-primary"
-                          : "text-ink-secondary"
-                      )}
-                    >
-                      {category.label}
-                    </span>
-                  </button>
-                ))}
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Documents</CardTitle>
+                  <CardDescription>{categoryLabel(activeCategory)}</CardDescription>
+                </div>
+              </CardHeader>
+              <p className="heading-page tabular">{data.total}</p>
+              <div className="mt-4 border-t border-border-subtle pt-3 text-meta">
+                {indexedCount} of {documents.length} documents on this page are indexed for retrieval
               </div>
-            </div>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Status breakdown</CardTitle>
+                  <CardDescription>Across documents on this page</CardDescription>
+                </div>
+              </CardHeader>
+              {statusBreakdown.length === 0 ? (
+                <p className="text-meta">No documents to summarize yet.</p>
+              ) : (
+                <DonutChart
+                  data={statusBreakdown}
+                  centerValue={String(documents.length)}
+                  centerLabel="documents"
+                />
+              )}
+            </Card>
           </div>
 
-          <div className="flex-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface">
-            <div className="flex h-11 min-w-[920px] items-center border-b border-border-subtle bg-surface-raised px-4 sm:h-10">
-              <div className="flex w-12 items-center justify-center sm:w-10">
-                <input
-                  type="checkbox"
-                  checked={
-                    selectedDocs.length === filteredDocs.length &&
-                    filteredDocs.length > 0
-                  }
-                  onChange={toggleAllSelection}
-                  className="w-4 h-4 rounded border-border-subtle accent-gold-primary"
-                />
-              </div>
-              <HeaderCell className="flex-1">Title</HeaderCell>
-              <HeaderCell className="w-[120px]">Type</HeaderCell>
-              <HeaderCell className="w-[80px]">Version</HeaderCell>
-              <HeaderCell className="w-[120px]">Status</HeaderCell>
-              <HeaderCell className="w-[80px] text-center">Indexed</HeaderCell>
-              <HeaderCell className="w-[120px]">Created</HeaderCell>
-              <div className="w-12 sm:w-10" />
-            </div>
-
+          <div className="cc-card mt-6 overflow-hidden">
             {filteredDocs.length === 0 ? (
               <div className="p-6">
                 <EmptyState
@@ -340,99 +443,71 @@ export function KnowledgeBase() {
                 />
               </div>
             ) : (
-              <div>
-                {filteredDocs.map((doc, index) => (
-                  <div
-                    key={doc.document_id}
-                    className={cn(
-                      "flex h-12 min-w-[920px] items-center border-b border-border-subtle px-4 transition-colors duration-160",
-                      index % 2 === 1 && "bg-[var(--surface-sunken)]/30",
-                      "hover:bg-[var(--surface-sunken)]"
-                    )}
-                  >
-                    <div className="flex w-12 items-center justify-center sm:w-10">
-                      <input
-                        type="checkbox"
-                        checked={selectedDocs.includes(doc.document_id)}
-                        onChange={() => toggleDocSelection(doc.document_id)}
-                        className="w-4 h-4 rounded border-border-subtle accent-gold-primary"
+              <DataTable
+                columns={columns}
+                rows={filteredDocs}
+                rowKey={(doc) => doc.document_id}
+                minWidth="880px"
+                expandedRowId={expandedDocId}
+                renderExpanded={(doc) => (
+                  <div className="px-4 py-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="heading-section text-[13px]">Technical details</h4>
+                      <DownloadableLog
+                        data={doc}
+                        filename={`knowledge-document-${doc.document_id}.json`}
+                        label="Download document record"
                       />
                     </div>
-
-                    <div className="flex-1 flex items-center gap-2 min-w-0">
-                      <FileText
-                        className="w-4 h-4 text-ink-tertiary"
-                        strokeWidth={1.5}
-                      />
-                      <span className="text-[13px] font-medium text-ink-primary truncate">
-                        {doc.title}
-                      </span>
-                    </div>
-
-                    <DataCell className="w-[120px]">{formatDocumentType(doc.document_type)}</DataCell>
-                    <DataCell className="w-[80px] accent">{`v${doc.version}`}</DataCell>
-                    <div className="w-[120px]">
-                      <StatusBadge status={doc.status} />
-                    </div>
-                    <div className="w-[80px] flex justify-center">
-                      <IndexedIndicator indexed={Boolean(doc.vector_indexed_at)} />
-                    </div>
-                    <DataCell className="w-[120px]">{formatDate(doc.created_at)}</DataCell>
-
-                    <div className="flex w-12 justify-center sm:w-10">
-                      <ActionMenu
-                        onView={() => setModal({ type: "view", document: doc })}
-                        onEdit={() => setModal({ type: "edit", document: doc })}
-                        onHistory={() => void openVersions(doc)}
-                        onIngest={() => void handleIngestDocument(doc)}
-                        ingestBusy={busyDocumentId === doc.document_id}
-                        onDelete={() =>
-                          setModal({
-                            type: "pending",
-                            message:
-                              "The backend exposes create, update, list, ingest, and version read operations for knowledge documents, but no delete endpoint is currently available.",
-                          })
-                        }
-                      />
-                    </div>
+                    <CodeAsReadableText
+                      data={{
+                        document_id: doc.document_id,
+                        document_type: doc.document_type,
+                        status: doc.status,
+                        version: doc.version,
+                        uploaded_by: doc.uploaded_by,
+                        vector_indexed_at: doc.vector_indexed_at,
+                        created_at: doc.created_at,
+                      }}
+                    />
                   </div>
-                ))}
-              </div>
+                )}
+              />
             )}
 
-            <div className="flex min-h-12 min-w-[920px] flex-col gap-3 border-t border-border-subtle bg-surface-raised px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-[13px] text-ink-secondary">
+            <div className="flex min-h-12 flex-col gap-3 border-t border-border-subtle px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-meta">
                 Showing {filteredDocs.length} of {data.total} documents
               </span>
 
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-secondary transition-colors hover:bg-[var(--surface-sunken)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                  className="cc-btn cc-btn-secondary h-9 w-9 disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Previous page"
                 >
-                  <ChevronLeft className="w-4 h-4" strokeWidth={1.5} />
+                  <ChevronRight size={14} strokeWidth={1.8} className="rotate-180" />
                 </button>
 
-                <span className="font-mono text-[11px] text-ink-secondary tabular-nums px-2">
+                <span className="tabular text-meta px-1">
                   {currentPage} / {totalPages}
                 </span>
 
                 <button
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-secondary transition-colors hover:bg-[var(--surface-sunken)] disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8"
+                  className="cc-btn cc-btn-secondary h-9 w-9 disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Next page"
                 >
-                  <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
+                  <ChevronRight size={14} strokeWidth={1.8} />
                 </button>
               </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {modal.type !== "none" && (
@@ -446,24 +521,18 @@ export function KnowledgeBase() {
             />
           )}
           {modal.type === "notice" && (
-            <NoticeState
-              title={modal.title}
-              message={modal.message}
-              onClose={closeModal}
-            />
+            <NoticeState title={modal.title} message={modal.message} onClose={closeModal} />
           )}
-          {modal.type === "upload" && (
+          {modal.type === "create" && (
             <DocumentForm
-              title="Upload Document"
+              title="New document"
               submitLabel="Create document"
               error={formError}
               isSubmitting={isSubmitting}
               onSubmit={handleCreateDocument}
             />
           )}
-          {modal.type === "view" && (
-            <DocumentDetail document={modal.document} />
-          )}
+          {modal.type === "view" && <DocumentDetail document={modal.document} />}
           {modal.type === "edit" && (
             <DocumentForm
               title={`Edit ${modal.document.title}`}
@@ -479,11 +548,11 @@ export function KnowledgeBase() {
           )}
         </Modal>
       )}
-    </div>
+    </main>
   );
 }
 
-function ActionMenu({
+function DocumentActionMenu({
   onView,
   onEdit,
   onHistory,
@@ -503,22 +572,23 @@ function ActionMenu({
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex h-11 w-11 items-center justify-center rounded transition-colors duration-160 hover:bg-[var(--gold-bg)] sm:h-8 sm:w-8"
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        className="cc-btn cc-btn-ghost h-9 w-9"
         aria-label="Document actions"
       >
-        <MoreHorizontal className="w-4 h-4 text-ink-tertiary" strokeWidth={1.5} />
+        <MoreHorizontal size={14} strokeWidth={1.8} />
       </button>
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-20 w-44 bg-surface border border-border-subtle rounded-lg shadow-lg overflow-hidden">
+          <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-border-subtle bg-surface shadow-elevated">
             <MenuAction icon={Eye} label="View" onClick={onView} close={() => setIsOpen(false)} />
             <MenuAction icon={Pencil} label="Edit" onClick={onEdit} close={() => setIsOpen(false)} />
-            <MenuAction icon={History} label="Version History" onClick={onHistory} close={() => setIsOpen(false)} />
+            <MenuAction icon={History} label="Version history" onClick={onHistory} close={() => setIsOpen(false)} />
             <MenuAction
               icon={Upload}
-              label={ingestBusy ? "Indexing" : "Ingest"}
+              label={ingestBusy ? "Indexing..." : "Ingest"}
               onClick={onIngest}
               close={() => setIsOpen(false)}
             />
@@ -545,112 +615,29 @@ function MenuAction({
 }) {
   return (
     <button
+      type="button"
       onClick={() => {
         onClick();
         close();
       }}
       className={cn(
-        "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--gold-bg)]",
-        danger ? "text-red-alert hover:bg-[rgba(220,38,38,0.06)]" : "text-ink-secondary"
+        "flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-surface-raised",
+        danger ? "text-red-alert" : "text-ink-secondary"
       )}
     >
-      <Icon className="w-4 h-4" strokeWidth={1.5} />
+      <Icon size={14} strokeWidth={1.8} />
       {label}
     </button>
-  );
-}
-
-function HeaderCell({ children, className }: { children: React.ReactNode; className: string }) {
-  return (
-    <div className={cn("font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary", className)}>
-      {children}
-    </div>
-  );
-}
-
-function DataCell({
-  children,
-  className,
-  accent = false,
-}: {
-  children: React.ReactNode;
-  className: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className={className}>
-      <span className={cn("font-mono text-[11px]", accent ? "text-gold-primary tabular-nums" : "text-ink-secondary")}>
-        {children}
-      </span>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: TenantKnowledgeDocument["status"] }) {
-  const config = {
-    active: {
-      icon: Check,
-      label: "Active",
-      bg: "bg-[rgba(22,163,74,0.08)]",
-      text: "text-green-success",
-    },
-    archived: {
-      icon: X,
-      label: "Archived",
-      bg: "bg-[rgba(107,114,128,0.08)]",
-      text: "text-ink-tertiary",
-    },
-    pending_index: {
-      icon: Clock,
-      label: "Pending",
-      bg: "bg-[rgba(184,130,28,0.08)]",
-      text: "text-warning-amber",
-    },
-    indexing: {
-      icon: AlertTriangle,
-      label: "Indexing",
-      bg: "bg-[rgba(59,130,246,0.08)]",
-      text: "text-blue-system",
-    },
-  };
-
-  const { icon: Icon, label, bg, text } = config[status];
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full",
-        "font-mono text-[11px] uppercase tracking-[0.12em]",
-        bg,
-        text
-      )}
-    >
-      <Icon className="w-3 h-3" strokeWidth={1.5} />
-      {label}
-    </span>
-  );
-}
-
-function IndexedIndicator({ indexed }: { indexed: boolean }) {
-  return (
-    <span
-      className={cn("w-2 h-2 rounded-full", indexed ? "bg-green-success" : "bg-ink-tertiary")}
-      title={indexed ? "Indexed" : "Not indexed"}
-    />
   );
 }
 
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
-      <div className="max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border-subtle bg-surface p-4 shadow-elevated sm:p-6">
+      <div className="max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border-subtle bg-surface p-5 shadow-elevated sm:p-6">
         <div className="mb-4 flex justify-end">
-          <button
-            onClick={onClose}
-            className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-tertiary hover:text-ink-primary"
-            aria-label="Close modal"
-          >
-            <X className="h-4 w-4" strokeWidth={1.5} />
+          <button type="button" onClick={onClose} className="cc-btn cc-btn-ghost h-9 w-9" aria-label="Close modal">
+            <X size={16} strokeWidth={1.8} />
           </button>
         </div>
         {children}
@@ -676,51 +663,43 @@ function DocumentForm({
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <h2 className="font-serif text-[28px] font-semibold text-ink-primary">{title}</h2>
+      <h2 className="heading-section text-[18px]">{title}</h2>
       {error && (
-        <div className="rounded border border-red-alert/30 bg-red-alert/10 px-3 py-2 text-[13px] text-red-alert">
+        <div className="rounded-md border border-red-alert/30 bg-red-alert/10 px-3 py-2 text-[13px] text-red-alert">
           {error}
         </div>
       )}
       <label className="block">
-        <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-          Title
-        </span>
+        <span className="mb-1 block text-meta">Title</span>
         <input
           name="title"
           defaultValue={document?.title ?? ""}
           disabled={Boolean(document)}
           required
-          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
+          className="cc-input h-10 w-full disabled:opacity-60"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-          Document type
-        </span>
+        <span className="mb-1 block text-meta">Document type</span>
         <select
           name="document_type"
           defaultValue={document?.document_type ?? "sop"}
           disabled={Boolean(document)}
-          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
+          className="cc-select h-10 w-full disabled:opacity-60"
         >
-          {documentTypes.filter((type) => type.id !== "all").map((type) => (
-            <option key={type.id} value={type.id}>
-              {type.label}
-            </option>
-          ))}
+          {documentTypes
+            .filter((type) => type.id !== "all")
+            .map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.label}
+              </option>
+            ))}
         </select>
       </label>
       {document && (
         <label className="block">
-          <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Status
-          </span>
-          <select
-            name="status"
-            defaultValue={document.status}
-            className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
-          >
+          <span className="mb-1 block text-meta">Status</span>
+          <select name="status" defaultValue={document.status} className="cc-select h-10 w-full">
             <option value="active">Active</option>
             <option value="pending_index">Pending index</option>
             <option value="indexing">Indexing</option>
@@ -729,22 +708,16 @@ function DocumentForm({
         </label>
       )}
       <label className="block">
-        <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-          Content
-        </span>
+        <span className="mb-1 block text-meta">Content</span>
         <textarea
           name="content"
           defaultValue={document?.content ?? ""}
           required
           rows={10}
-          className="w-full rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[14px] leading-relaxed text-ink-primary focus:outline-none focus:border-gold-primary"
+          className="cc-input w-full py-2 leading-relaxed"
         />
       </label>
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white hover:bg-gold-muted disabled:opacity-60"
-      >
+      <button type="submit" disabled={isSubmitting} className="cc-btn cc-btn-primary">
         {isSubmitting ? "Submitting..." : submitLabel}
       </button>
     </form>
@@ -752,20 +725,39 @@ function DocumentForm({
 }
 
 function DocumentDetail({ document }: { document: TenantKnowledgeDocument }) {
+  const meta = statusMeta[document.status];
   return (
     <div className="space-y-4">
-      <h2 className="font-serif text-[28px] font-semibold text-ink-primary">{document.title}</h2>
-      <div className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
-        <Detail label="Document ID" value={document.document_id} />
-        <Detail label="Type" value={formatDocumentType(document.document_type)} />
-        <Detail label="Version" value={`v${document.version}`} />
-        <Detail label="Status" value={document.status} />
-        <Detail label="Uploaded by" value={document.uploaded_by} />
-        <Detail label="Created" value={formatDate(document.created_at)} />
+      <div>
+        <h2 className="heading-section text-[18px]">{document.title}</h2>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <StatusBadge label={meta.label} tone={meta.tone} />
+          <span className="text-meta">{formatDocumentType(document.document_type)}</span>
+          <span className="text-meta">v{document.version}</span>
+          <span className="text-meta">Updated {formatDate(document.created_at)}</span>
+        </div>
       </div>
-      <div className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded border border-border-subtle bg-surface-raised p-4 text-[13px] leading-relaxed text-ink-body">
+
+      <div className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border border-border-subtle bg-surface-raised p-4 text-body leading-relaxed">
         {document.content}
       </div>
+
+      <TechnicalDetails label="Show details" openLabel="Hide details">
+        <CodeAsReadableText
+          data={{
+            document_id: document.document_id,
+            uploaded_by: document.uploaded_by,
+            vector_indexed_at: document.vector_indexed_at,
+            created_at: document.created_at,
+          }}
+        />
+        <DownloadableLog
+          data={document}
+          filename={`knowledge-document-${document.document_id}.json`}
+          label="Download document record"
+          className="mt-3"
+        />
+      </TechnicalDetails>
     </div>
   );
 }
@@ -781,20 +773,14 @@ function VersionHistoryState({
     return <LoadingState label="Loading document versions..." />;
   }
   if (modal.error) {
-    return (
-      <ErrorState
-        title="Version history unavailable"
-        message={modal.error}
-        onAction={onRetry}
-      />
-    );
+    return <ErrorState title="Version history unavailable" message={modal.error} onAction={onRetry} />;
   }
   return (
     <div className="space-y-4">
-      <h2 className="font-serif text-[28px] font-semibold text-ink-primary">
-        Version History
-      </h2>
-      <p className="text-[14px] text-ink-secondary">{modal.document.title}</p>
+      <div>
+        <h2 className="heading-section text-[18px]">Version history</h2>
+        <p className="mt-1 text-meta">{modal.document.title}</p>
+      </div>
       {modal.versions.length === 0 ? (
         <EmptyState
           title="No versions returned"
@@ -803,24 +789,30 @@ function VersionHistoryState({
       ) : (
         <div className="space-y-3">
           {modal.versions.map((version) => (
-            <div
-              key={version.version_id}
-              className="rounded border border-border-subtle bg-surface-raised p-4"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[12px] text-gold-primary">
-                  v{version.version}
-                </span>
-                <span className="font-mono text-[11px] text-ink-tertiary">
-                  {formatDate(version.created_at)}
-                </span>
+            <div key={version.version_id} className="rounded-md border border-border-subtle bg-surface-raised p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[13px] font-semibold text-ink-primary">v{version.version} &middot; {version.title}</span>
+                <span className="tabular text-meta">{formatDate(version.created_at)}</span>
               </div>
-              <p className="mt-2 text-[14px] font-medium text-ink-primary">
-                {version.title}
-              </p>
-              <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-ink-secondary">
-                {version.content}
-              </p>
+              <p className="mt-2 line-clamp-3 text-body leading-relaxed">{version.content}</p>
+              <TechnicalDetails label="Show details" openLabel="Hide details" className="mt-2">
+                <CodeAsReadableText
+                  data={{
+                    version_id: version.version_id,
+                    document_id: version.document_id,
+                    status: version.status,
+                    uploaded_by: version.uploaded_by,
+                    source_approval_id: version.source_approval_id,
+                    metadata: version.metadata,
+                  }}
+                />
+                <DownloadableLog
+                  data={version}
+                  filename={`knowledge-document-${version.document_id}-v${version.version}.json`}
+                  label="Download version record"
+                  className="mt-3"
+                />
+              </TechnicalDetails>
             </div>
           ))}
         </div>
@@ -829,38 +821,20 @@ function VersionHistoryState({
   );
 }
 
-function NoticeState({
-  title,
-  message,
-  onClose,
-}: {
-  title: string;
-  message: string;
-  onClose: () => void;
-}) {
+function NoticeState({ title, message, onClose }: { title: string; message: string; onClose: () => void }) {
   return (
     <div className="space-y-4">
-      <h2 className="font-serif text-[28px] font-semibold text-ink-primary">{title}</h2>
-      <p className="text-[14px] leading-relaxed text-ink-secondary">{message}</p>
-      <button
-        onClick={onClose}
-        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white hover:bg-gold-muted"
-      >
+      <h2 className="heading-section text-[18px]">{title}</h2>
+      <p className="text-body leading-relaxed">{message}</p>
+      <button type="button" onClick={onClose} className="cc-btn cc-btn-primary">
         Close
       </button>
     </div>
   );
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-border-subtle bg-surface-raised p-3">
-      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-        {label}
-      </div>
-      <div className="mt-1 break-words text-ink-primary">{value}</div>
-    </div>
-  );
+function categoryLabel(category: (typeof documentTypes)[number]["id"]): string {
+  return documentTypes.find((type) => type.id === category)?.label ?? "All documents";
 }
 
 function formatDocumentType(value: string): string {

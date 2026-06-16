@@ -24,6 +24,7 @@ from app.tenant.identity import (
     TenantGovernancePolicyId,
     TenantKnowledgeDocumentId,
     TenantKnowledgeDocumentVersionId,
+    TenantKnowledgeUploadId,
     TenantTopologyConfigurationId,
 )
 
@@ -101,6 +102,21 @@ class TenantKnowledgeDocumentRecord:
     review_status: TenantKnowledgeReviewStatus = (
         TenantKnowledgeReviewStatus.QUARANTINED
     )
+    updated_at: datetime | None = None
+    last_index_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TenantKnowledgeUploadRecord:
+    upload_id: TenantKnowledgeUploadId
+    tenant_id: str
+    filename: str
+    content_type: str
+    byte_size: int
+    raw_content: bytes
+    uploaded_by: str
+    created_at: datetime
+    document_id: TenantKnowledgeDocumentId | None = None
 
 
 @dataclass(frozen=True, slots=True)
