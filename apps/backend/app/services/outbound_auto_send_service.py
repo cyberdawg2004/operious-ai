@@ -117,6 +117,21 @@ class OutboundAutoSendService:
                     message="governed auto-send target is unsupported",
                 ),
             )
+        # Surface the upstream governance denial reason before the generic
+        # lineage check so operators see "severe_resolution_risk" (or similar)
+        # rather than the opaque "missed exact proposal/draft lineage" message.
+        if (
+            proposal.status is ResolutionProposalStatus.DENIED
+            and draft.status is ResolutionOutboundDraftStatus.DENIED
+        ):
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=await _governance_denied_reason(
+                    governance_repository=self._governance_repository,
+                    draft=draft,
+                    tenant_id=tenant_id,
+                ),
+            )
         if not _draft_and_proposal_are_exact(
             draft=draft,
             proposal=proposal,
@@ -189,6 +204,36 @@ class OutboundAutoSendService:
         )
         outbox = await self._outbox_persistence.create_outbound_send_outbox(record)
         return OutboundAutoSendRequestResult(outbox=outbox)
+
+
+async def _governance_denied_reason(
+    *,
+    governance_repository: BaseGovernanceRepository,
+    draft: ResolutionOutboundDraftRecord,
+    tenant_id: str,
+) -> OutboundAutoSendRefusalReason:
+    """Return a clearer refusal reason when the proposal was governance-DENIED.
+
+    Looks up the stored governance decision to surface the specific violation
+    rule (e.g. severe_resolution_risk) instead of the generic lineage-miss.
+    """
+    rule_ids: tuple[str, ...] = ()
+    if draft.governance_decision_id is not None:
+        decision = await governance_repository.get_decision(
+            str(draft.governance_decision_id),
+            expected_tenant_id=tenant_id,
+        )
+        if decision is not None:
+            rule_ids = tuple(
+                v.rule_id
+                for v in decision.violations
+                if v.decision == Decision.DENY.value
+            )
+    detail = ", ".join(rule_ids) if rule_ids else "governance denied"
+    return OutboundAutoSendRefusalReason(
+        code="proposal_governance_denied",
+        message=f"auto-send held for review: {detail}",
+    )
 
 
 def _draft_and_proposal_are_exact(

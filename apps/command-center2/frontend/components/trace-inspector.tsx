@@ -130,6 +130,11 @@ interface ResolutionOutboundDraftPayload {
   send_eligible: boolean;
 }
 
+interface AutoSendRefusalPayload {
+  reason_code: string;
+  reason_message: string;
+}
+
 type TraceInspectorProps = {
   initialTraceId?: string | null;
   initialLookup?: TraceLookup | null;
@@ -188,6 +193,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
   );
   const selectedResolutionDraft = useMemo(
     () => (selectedEvent ? resolutionDraftForEvent(selectedEvent) : null),
+    [selectedEvent]
+  );
+  const selectedAutoSendRefusal = useMemo(
+    () => (selectedEvent ? autoSendRefusalForEvent(selectedEvent) : null),
     [selectedEvent]
   );
   const metadata = useMemo(
@@ -350,6 +359,7 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                   const citations = citationsForEvent(event);
                   const resolutionProposal = resolutionProposalForEvent(event);
                   const resolutionDraft = resolutionDraftForEvent(event);
+                  const autoSendRefusal = autoSendRefusalForEvent(event);
 
                   return (
                     <div key={event.timeline_event_id} className="relative">
@@ -442,6 +452,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
                           <ResolutionDraftSummary draft={resolutionDraft} />
                         )}
 
+                        {autoSendRefusal && (
+                          <AutoSendRefusalSummary refusal={autoSendRefusal} />
+                        )}
+
                         {citations.length > 0 && (
                           <KnowledgeSources citations={citations} />
                         )}
@@ -508,6 +522,10 @@ export function TraceInspector({ initialTraceId, initialLookup }: TraceInspector
 
                   {selectedResolutionDraft && (
                     <ResolutionDraftSummary draft={selectedResolutionDraft} compact />
+                  )}
+
+                  {selectedAutoSendRefusal && (
+                    <AutoSendRefusalSummary refusal={selectedAutoSendRefusal} compact />
                   )}
 
                   {qaScore && <TraceQAScore score={qaScore} />}
@@ -616,6 +634,18 @@ function resolutionProposalForEvent(
   };
 }
 
+function autoSendRefusalForEvent(
+  event: TimelineEventView
+): AutoSendRefusalPayload | null {
+  if (event.event_type !== "AUTO_SEND_TERMINAL_REFUSAL") return null;
+  const reasonCode = stringField(event.payload.reason_code);
+  if (!reasonCode) return null;
+  return {
+    reason_code: reasonCode,
+    reason_message: stringField(event.payload.reason_message) || reasonCode,
+  };
+}
+
 function resolutionDraftForEvent(
   event: TimelineEventView
 ): ResolutionOutboundDraftPayload | null {
@@ -710,6 +740,33 @@ function ResolutionDraftSummary({
         <ResolutionField label="Draft hash" value={shortId(draft.draft_body_sha256)} />
         <ResolutionField label="Governance" value={draft.governance_decision_id ? shortId(draft.governance_decision_id) : "none"} />
       </div>
+    </div>
+  );
+}
+
+function AutoSendRefusalSummary({
+  refusal,
+  compact = false,
+}: {
+  refusal: AutoSendRefusalPayload;
+  compact?: boolean;
+}) {
+  const isGovernanceDenied = refusal.reason_code === "proposal_governance_denied";
+  return (
+    <div className={cn("mt-3 rounded border border-border-subtle bg-surface-sunken p-3", compact && "mt-0")}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <ResolutionBadge
+          label="Hold"
+          value={refusal.reason_code}
+          valueClassName={isGovernanceDenied ? "text-amber-500" : "text-red-400"}
+        />
+      </div>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
+        Auto-send Refusal
+      </div>
+      <p className="text-[13px] leading-relaxed text-ink-secondary">
+        {refusal.reason_message}
+      </p>
     </div>
   );
 }

@@ -19,6 +19,7 @@ from app.governance.enums import Decision, EnforcementStage
 from app.governance.persistence import (
     GovernanceDecisionRecord,
     InMemoryGovernanceRepository,
+    PolicyViolationRecord,
 )
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -189,6 +190,94 @@ async def test_non_exact_or_non_allow_governance_returns_terminal_refusal_reason
     assert result.outbox is None
     assert result.reason is not None
     assert result.reason.code == "governance_miss"
+
+
+@pytest.mark.asyncio
+async def test_governance_denied_proposal_surfaces_upstream_reason_not_lineage_miss() -> None:
+    """A DENIED proposal must return proposal_governance_denied (not governance_miss).
+
+    Verifies that the upstream denial rule (severe_resolution_risk) is surfaced
+    in the reason code and message, so operators see the real hold reason rather
+    than the misleading "missed exact proposal/draft lineage" message.
+    """
+    governance = InMemoryGovernanceRepository()
+    deny_decision = GovernanceDecisionRecord(
+        decision_id=str(DECISION_ID),
+        decision=Decision.DENY.value,
+        stage=EnforcementStage.PRE_EXECUTION.value,
+        policy_chain_id="resolution.standard",
+        reason="severe_resolution_risk",
+        decided_at=NOW.isoformat(),
+        tenant_id=TENANT_ID,
+        subject_kind="communication",
+        violations=(
+            PolicyViolationRecord(
+                policy_name="resolution.communication",
+                rule_id="severe_resolution_risk",
+                decision=Decision.DENY.value,
+                severity=100,
+                detail="safety keyword detected in local reasons",
+            ),
+        ),
+    )
+    await governance.record_decision(deny_decision)
+
+    denied_proposal = ResolutionProposalRecord(
+        proposal_id=as_resolution_proposal_id(PROPOSAL_ID),
+        tenant_id=TENANT_ID,
+        session_id=SESSION_ID,
+        execution_id=EXECUTION_ID,
+        dispatch_id=DISPATCH_ID,
+        diagnostic_event_id=None,
+        proposed_customer_reply=REPLY,
+        resolution_category="technical_support",
+        confidence=0.72,
+        supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+        governance_verdict=ResolutionGovernanceVerdict.DENY,
+        autonomy_decision=ResolutionAutonomyDecision.DENIED,
+        status=ResolutionProposalStatus.DENIED,
+        created_at=NOW,
+        updated_at=NOW,
+        governance_decision_id=DECISION_ID,
+        recommended_actions=(),
+        evidence=({"source": "manual", "rank": 1},),
+        source_language="en",
+    )
+    denied_draft = ResolutionOutboundDraftRecord(
+        draft_id=as_resolution_outbound_draft_id(DRAFT_ID),
+        tenant_id=TENANT_ID,
+        proposal_id=as_resolution_proposal_id(PROPOSAL_ID),
+        session_id=SESSION_ID,
+        execution_id=EXECUTION_ID,
+        dispatch_id=DISPATCH_ID,
+        diagnostic_event_id=None,
+        governance_decision_id=DECISION_ID,
+        status=ResolutionOutboundDraftStatus.DENIED,
+        draft_body=REPLY,
+        draft_body_sha256=_sha256(REPLY),
+        resolution_category="technical_support",
+        confidence=0.72,
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={},
+    )
+
+    service = OutboundAutoSendService(
+        governance_repository=governance,
+        outbox_persistence=InMemoryOutboundSendOutboxPersistence(),
+    )
+    result = await service.request_auto_send(
+        draft=denied_draft,
+        proposal=denied_proposal,
+        target=_target(),
+        expected_tenant_id=TENANT_ID,
+        created_at=NOW,
+    )
+
+    assert result.outbox is None
+    assert result.reason is not None
+    assert result.reason.code == "proposal_governance_denied"
+    assert "severe_resolution_risk" in result.reason.message
 
 
 @pytest.mark.asyncio
