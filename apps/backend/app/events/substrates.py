@@ -53,6 +53,7 @@ class OperationalSubstrate(StrEnum):
     QA = "qa"
     SESSION = "session"
     SUPERVISOR = "supervisor"
+    TENANT = "tenant"
 
 
 __all__ = ["OperationalSubstrate"]

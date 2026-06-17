@@ -81,6 +81,22 @@ class ConnectorProviderFields:
     provider_error: str | None = None
 
 
+class ConnectorResponseError(RuntimeError):
+    """Provider responded, but not with a configured success outcome."""
+
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        provider_fields: ConnectorProviderFields,
+    ) -> None:
+        self.status_code = status_code
+        self.provider_fields = provider_fields
+        super().__init__(
+            provider_fields.provider_error or f"http_status_{status_code}"
+        )
+
+
 class ConnectorTool(BaseTool):
     """BaseTool subclass that owns config, credentials, SSRF, and idempotency."""
 
@@ -119,17 +135,32 @@ class ConnectorTool(BaseTool):
                 message="connector invocation requires provider idempotency key",
             )
 
-        config = await self._load_config(tenant_id=tenant_id)
+        try:
+            config = await self._load_config(tenant_id=tenant_id)
+        except ConnectorConfigError as exc:
+            return _error_result(
+                code="connector_config_missing",
+                message=str(exc),
+                idempotency_key=provider_key,
+            )
         channel_type = _channel_type(config.connector_type)
         if channel_type is None:
             return _error_result(
                 code="invalid_connector_type",
                 message="connector_type must map to a tenant channel type",
+                idempotency_key=provider_key,
             )
-        credentials = await self._credential_runtime.load_channel_credentials(
-            tenant_id=tenant_id,
-            channel_type=channel_type,
-        )
+        try:
+            credentials = await self._credential_runtime.load_channel_credentials(
+                tenant_id=tenant_id,
+                channel_type=channel_type,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed on credential errors.
+            return _error_result(
+                code="credential_load_failed",
+                message=f"{type(exc).__name__}: {exc}",
+                idempotency_key=provider_key,
+            )
         outbound = self.build_request(
             payload=dict(request.payload),
             config=config,
@@ -155,39 +186,44 @@ class ConnectorTool(BaseTool):
             timeout_seconds=outbound.timeout_seconds,
             follow_redirects=False,
         ) as client:
-            response = await client.request(
-                outbound.method.upper(),
-                validated.url,
-                json=outbound.json_body,
-                headers=headers,
-                timeout=outbound.timeout_seconds,
-                follow_redirects=False,
-            )
+            try:
+                response = await client.request(
+                    outbound.method.upper(),
+                    validated.url,
+                    json=outbound.json_body,
+                    headers=headers,
+                    timeout=outbound.timeout_seconds,
+                    follow_redirects=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail closed on transport errors.
+                return _error_result(
+                    code="provider_transport_error",
+                    message=f"{type(exc).__name__}: {exc}",
+                    idempotency_key=provider_key,
+                )
 
-        success = response.status_code in set(config.success_status_codes)
-        fields = self.parse_response(response, config=config)
-        if success:
-            return ToolInvocationResult(
-                output={
-                    "status": "success",
-                    "provider_id": fields.provider_id,
-                    "provider_status": fields.provider_status or "success",
-                },
-                status="success",
+        try:
+            fields = self.parse_response(response, config=config)
+        except ConnectorResponseError as exc:
+            return _provider_error_result(
+                provider_fields=exc.provider_fields,
+                message=str(exc),
+                idempotency_key=provider_key,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed on parse errors.
+            return _error_result(
+                code="provider_response_parse_error",
+                message=f"{type(exc).__name__}: {exc}",
                 idempotency_key=provider_key,
             )
 
-        error = fields.provider_error or f"http_status_{response.status_code}"
         return ToolInvocationResult(
             output={
-                "status": "error",
+                "status": "success",
                 "provider_id": fields.provider_id,
-                "provider_status": fields.provider_status,
-                "provider_error": error,
+                "provider_status": fields.provider_status or "success",
             },
-            status="error",
-            error_code="provider_error",
-            error_message=error,
+            status="success",
             idempotency_key=provider_key,
         )
 
@@ -239,7 +275,7 @@ def _auth_headers(credentials: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
-async def _validate_url_off_loop(
+async def validate_connector_endpoint_url(
     *,
     validator: SSRFValidator,
     url: str,
@@ -251,6 +287,19 @@ async def _validate_url_off_loop(
         return await loop.run_in_executor(pool, call)
 
 
+async def _validate_url_off_loop(
+    *,
+    validator: SSRFValidator,
+    url: str,
+    allowed_hosts: tuple[str, ...],
+) -> ValidatedPublicHTTPSURL:
+    return await validate_connector_endpoint_url(
+        validator=validator,
+        url=url,
+        allowed_hosts=allowed_hosts,
+    )
+
+
 def _channel_type(value: str) -> TenantChannelType | None:
     try:
         return TenantChannelType(value)
@@ -258,12 +307,38 @@ def _channel_type(value: str) -> TenantChannelType | None:
         return None
 
 
-def _error_result(*, code: str, message: str) -> ToolInvocationResult:
+def _error_result(
+    *,
+    code: str,
+    message: str,
+    idempotency_key: str | None = None,
+) -> ToolInvocationResult:
     return ToolInvocationResult(
         output={"status": "error", "error_code": code},
         status="error",
         error_code=code,
         error_message=message,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _provider_error_result(
+    *,
+    provider_fields: ConnectorProviderFields,
+    message: str,
+    idempotency_key: str,
+) -> ToolInvocationResult:
+    return ToolInvocationResult(
+        output={
+            "status": "error",
+            "provider_id": provider_fields.provider_id,
+            "provider_status": provider_fields.provider_status,
+            "provider_error": message,
+        },
+        status="error",
+        error_code="provider_error",
+        error_message=message,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -277,7 +352,9 @@ __all__ = [
     "ConnectorHTTPResponse",
     "ConnectorHTTPRequest",
     "ConnectorProviderFields",
+    "ConnectorResponseError",
     "ConnectorTool",
     "SSRFValidator",
     "TenantCredentialRuntime",
+    "validate_connector_endpoint_url",
 ]

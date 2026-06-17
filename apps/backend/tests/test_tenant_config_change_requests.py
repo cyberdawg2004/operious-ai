@@ -43,7 +43,10 @@ from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
 )
-from app.tenant.exceptions import TenantConfigurationDirectApplyDisabledError
+from app.tenant.exceptions import (
+    TenantConfigurationDirectApplyDisabledError,
+    TenantConfigurationError,
+)
 from app.tenant.identity import derive_channel_configuration_id
 from app.tenant.persistence import (
     PostgresTenantConfigurationRepository,
@@ -147,6 +150,29 @@ def _action_tools_policy_payload(parameters: dict[str, Any]) -> dict[str, Any]:
         "status": TenantGovernancePolicyStatus.ACTIVE.value,
         "effective_from": _ACTION_POLICY_EFFECTIVE_FROM.isoformat(),
     }
+
+
+async def _apply_action_tools_policy(
+    service: TenantConfigChangeRequestService,
+    *,
+    tenant_id: str,
+) -> None:
+    proposed = await service.propose(
+        tenant_id=tenant_id,
+        change_type="policy",
+        payload=_action_tools_policy_payload(_valid_action_tools_parameters()),
+        proposed_by="principal-a",
+    )
+    await service.approve(
+        change_request_id=proposed.change_request_id,
+        approved_by="principal-b",
+        expected_tenant_id=tenant_id,
+    )
+    await service.apply(
+        change_request_id=proposed.change_request_id,
+        expected_tenant_id=tenant_id,
+        applied_by="principal-b",
+    )
 
 
 def _resolution_taxonomy_policy_payload() -> dict[str, Any]:
@@ -403,6 +429,7 @@ async def test_2_5a_2_connector_target_reconstruction_chain(
     await set_pg_rls_tenant(pg_session, tenant_id)
     service = _service(pg_session)
     repo = PostgresTenantConfigurationRepository(pg_session)
+    await _apply_action_tools_policy(service, tenant_id=tenant_id)
 
     first_payload = _connector_payload()
     first = await service.propose(
@@ -468,6 +495,37 @@ async def test_2_5a_2_connector_target_reconstruction_chain(
         source_approval_id=second_record.source_approval_id,
     )
     assert first_record.source_approval_id != second_record.source_approval_id
+
+
+@pytest.mark.asyncio
+async def test_connector_active_apply_requires_action_tools_policy(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+
+    proposed = await service.propose(
+        tenant_id=tenant_id,
+        change_type="connector",
+        payload=_connector_payload(),
+        proposed_by="principal-a",
+    )
+    await service.approve(
+        change_request_id=proposed.change_request_id,
+        approved_by="principal-b",
+        expected_tenant_id=tenant_id,
+    )
+
+    with pytest.raises(
+        TenantConfigurationError,
+        match="active connector requires an active action_tools policy",
+    ):
+        await service.apply(
+            change_request_id=proposed.change_request_id,
+            expected_tenant_id=tenant_id,
+            applied_by="principal-b",
+        )
 
 
 @pytest.mark.asyncio

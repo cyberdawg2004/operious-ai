@@ -14,6 +14,7 @@ from app.agents.tools.connectors.base import (
     ConnectorHTTPResponse,
     ConnectorHTTPRequest,
     ConnectorProviderFields,
+    ConnectorResponseError,
     ConnectorTool,
 )
 from app.agents.tools.connectors.config import (
@@ -215,11 +216,17 @@ class GenericRestRepairDispatchConnector(ConnectorTool):
         )
         provider_status = _text_at(body, _parse_path(config, "provider_status"))
         provider_error = _text_at(body, _parse_path(config, "provider_error"))
-        return ConnectorProviderFields(
+        fields = ConnectorProviderFields(
             provider_id=provider_id,
             provider_status=provider_status,
             provider_error=provider_error,
         )
+        if response.status_code not in set(config.success_status_codes):
+            raise ConnectorResponseError(
+                status_code=response.status_code,
+                provider_fields=fields,
+            )
+        return fields
 
     async def _reserve_work_order(
         self,

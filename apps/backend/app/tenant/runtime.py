@@ -98,6 +98,8 @@ from app.tenant.persistence import (
 if TYPE_CHECKING:
     from app.sop_intelligence import ApprovalRecord
 
+_ACTION_TOOLS_POLICY_TYPE = "action_tools"
+
 
 class TenantConfigurationRuntime:
     """Runtime authority for tenant-owned configuration records."""
@@ -480,6 +482,15 @@ class TenantConfigurationRuntime:
             "idempotency_header_name",
         )
         normalized_configured_by = _normalize_text(configured_by, "configured_by")
+        if normalized_status == "active":
+            action_policy = await self.resolve_active_governance_policy(
+                tenant_id=tenant_id,
+                policy_type=_ACTION_TOOLS_POLICY_TYPE,
+            )
+            if action_policy is None:
+                raise TenantConfigurationError(
+                    "active connector requires an active action_tools policy"
+                )
         content_sha256 = _connector_configuration_content_sha256(
             tenant_id=tenant_id,
             connector_type=normalized_connector_type,
@@ -547,6 +558,17 @@ class TenantConfigurationRuntime:
     ) -> TenantConnectorConfigurationPage:
         return await self._repository.list_connector_configurations(
             query,
+            expected_tenant_id=tenant_id,
+        )
+
+    async def resolve_active_connector_configuration(
+        self,
+        *,
+        tenant_id: str,
+        tool_name: str,
+    ) -> TenantConnectorConfigurationRecord | None:
+        return await self._repository.resolve_active_connector_configuration(
+            tool_name=tool_name,
             expected_tenant_id=tenant_id,
         )
 

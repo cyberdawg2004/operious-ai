@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from starlette.testclient import TestClient
@@ -20,6 +20,7 @@ from app.auth.providers.jwt import (
 from app.core.config import get_settings
 from app.dependencies.authority import (
     TENANT_CHANNEL_ADMIN_CAPABILITY,
+    TENANT_CONNECTOR_APPROVE_CAPABILITY,
     TENANT_CONNECTOR_WRITE_CAPABILITY,
     TENANT_CONFIG_APPROVE_CAPABILITY,
     TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES,
@@ -266,6 +267,21 @@ class _FakeChangeRequestService:
             offset=offset,
         )
 
+    async def get(
+        self,
+        *,
+        change_request_id: uuid.UUID | str,
+        expected_tenant_id: str,
+    ) -> TenantConfigChangeRequestRecord:
+        request_id = uuid.UUID(str(change_request_id))
+        for record in self.records:
+            if (
+                record.change_request_id == request_id
+                and record.tenant_id == expected_tenant_id
+            ):
+                return record
+        raise LookupError(change_request_id)
+
     async def approve(
         self,
         *,
@@ -298,7 +314,9 @@ class _Harness:
 
 
 @pytest.fixture
-def domain_client(monkeypatch: pytest.MonkeyPatch) -> _Harness:
+def domain_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[_Harness, None, None]:
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("TENANT_CONFIG_ALLOW_SELF_APPROVAL", "true")
     get_settings.cache_clear()
@@ -323,6 +341,7 @@ def domain_client(monkeypatch: pytest.MonkeyPatch) -> _Harness:
             "empty": _identity(),
             "read": _identity(TENANT_CONFIG_READ_CAPABILITY),
             "approver": _identity(
+                TENANT_CONNECTOR_APPROVE_CAPABILITY,
                 TENANT_CONFIG_APPROVE_CAPABILITY,
                 TENANT_CONFIG_READ_CAPABILITY,
             ),
@@ -334,7 +353,7 @@ def domain_client(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     )
     config_service = _FakeTenantConfigurationService()
     change_service = _FakeChangeRequestService()
-    app = create_app(auth_provider=provider)
+    app = create_app(auth_provider=cast(Any, provider))
     app.dependency_overrides[get_tenant_configuration_service] = (
         lambda: config_service
     )
@@ -579,7 +598,7 @@ def test_config_read_can_list_but_not_propose_or_approve(
     assert proposed.status_code == 403
     assert TENANT_CONNECTOR_WRITE_CAPABILITY in proposed.text
     assert approved.status_code == 403
-    assert TENANT_CONFIG_APPROVE_CAPABILITY in approved.text
+    assert TENANT_CONNECTOR_APPROVE_CAPABILITY in approved.text
 
 
 def test_auth0_role_maps_to_domain_capabilities() -> None:

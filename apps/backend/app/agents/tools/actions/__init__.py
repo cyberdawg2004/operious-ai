@@ -21,8 +21,10 @@ from app.agents.tools.connectors import (
     ConnectorConfigRepository,
     GenericRestRepairDispatchConnector,
     GenericRestRefundConnector,
+    ReplacementOrderConnector,
     SSRFValidator,
     TenantCredentialRuntime,
+    WarrantyClaimConnector,
 )
 from app.agents.tools.registry import ToolRegistry
 from app.work_orders.persistence.repository import WorkOrderRepositoryProtocol
@@ -72,20 +74,48 @@ async def build_tenant_action_tool_registry(
     """
 
     registry = ToolRegistry()
-    registry.register(
-        _stub_or_fail_closed(
-            WarrantyClaimTool,
-            allow_stub_actions=allow_stub_actions,
-            reason="warranty connector is not configured for this tenant",
+    if await config_repository.get_active_config(
+        tenant_id=tenant_id,
+        tool_name=WarrantyClaimConnector.name,
+        expected_tenant_id=tenant_id,
+    ):
+        registry.register(
+            WarrantyClaimConnector(
+                config_repository=config_repository,
+                credential_runtime=credential_runtime,
+                ssl_context=ssl_context,
+                ssrf_validator=ssrf_validator,
+            )
         )
-    )
-    registry.register(
-        _stub_or_fail_closed(
-            ReplacementOrderTool,
-            allow_stub_actions=allow_stub_actions,
-            reason="replacement connector is not configured for this tenant",
+    else:
+        registry.register(
+            _stub_or_fail_closed(
+                WarrantyClaimTool,
+                allow_stub_actions=allow_stub_actions,
+                reason="warranty connector is not configured for this tenant",
+            )
         )
-    )
+    if await config_repository.get_active_config(
+        tenant_id=tenant_id,
+        tool_name=ReplacementOrderConnector.name,
+        expected_tenant_id=tenant_id,
+    ):
+        registry.register(
+            ReplacementOrderConnector(
+                config_repository=config_repository,
+                credential_runtime=credential_runtime,
+                ssl_context=ssl_context,
+                ssrf_validator=ssrf_validator,
+            )
+        )
+    else:
+        registry.register(
+            _stub_or_fail_closed(
+                ReplacementOrderTool,
+                allow_stub_actions=allow_stub_actions,
+                reason="replacement connector is not configured for this tenant",
+            )
+        )
     if await config_repository.get_active_config(
         tenant_id=tenant_id,
         tool_name=GenericRestRefundConnector.name,

@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import ssl
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from app.agents.tools.connectors.base import (
+    SSRFValidator,
+    validate_connector_endpoint_url,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.ssrf import SSRFValidationError, validate_public_https_url
 from app.sop_intelligence import ApprovalRecord, ApprovalStatus
 from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
@@ -31,7 +39,10 @@ from app.tenant.identity import (
     TenantKnowledgeDocumentId,
     TenantKnowledgeUploadId,
 )
-from app.tenant.exceptions import TenantConfigurationDirectApplyDisabledError
+from app.tenant.exceptions import (
+    TenantConfigurationDirectApplyDisabledError,
+    TenantConfigurationNotFoundError,
+)
 from app.tenant.persistence import (
     TenantChannelConfigurationPage,
     TenantChannelConfigurationQuery,
@@ -60,6 +71,16 @@ from app.tenant.runtime import TenantConfigurationRuntime
 _SERVICE_APPROVAL_NAMESPACE = uuid.UUID("f4ff1200-0940-5537-9752-c7693db8b5f6")
 _POLICY_INVALIDATION_CHANNEL_PREFIX = "governance:policy:invalidate"
 _logger = get_logger(__name__)
+_CONNECTOR_TEST_TIMEOUT_SECONDS = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorTestResult:
+    reachable: bool
+    config_valid: bool
+    validated_host: str | None
+    tls_verified: bool
+    http_probe: str
 
 
 class TenantConfigurationService:
@@ -71,10 +92,16 @@ class TenantConfigurationService:
         runtime: TenantConfigurationRuntime,
         session: AsyncSession,
         redis_client: Any,
+        connector_test_ssl_context: ssl.SSLContext | None = None,
+        connector_test_ssrf_validator: SSRFValidator | None = None,
     ) -> None:
         self._runtime = runtime
         self._session = session
         self._redis_client = redis_client
+        self._connector_test_ssl_context = connector_test_ssl_context
+        self._connector_test_ssrf_validator = (
+            connector_test_ssrf_validator or validate_public_https_url
+        )
 
     async def configure_channel(
         self,
@@ -264,6 +291,50 @@ class TenantConfigurationService:
                 limit=limit,
                 offset=offset,
             ),
+        )
+
+    async def test_connector_connection(
+        self,
+        *,
+        tenant_id: str,
+        tool_name: str,
+    ) -> ConnectorTestResult:
+        configs = await self._runtime.list_connector_configurations(
+            tenant_id=tenant_id,
+            query=TenantConnectorConfigurationQuery(tool_name=tool_name),
+        )
+        if not configs.items:
+            raise TenantConfigurationNotFoundError(
+                "tenant connector configuration not found"
+            )
+        config = max(configs.items, key=lambda item: item.version)
+        try:
+            validated = await validate_connector_endpoint_url(
+                validator=self._connector_test_ssrf_validator,
+                url=config.endpoint_template,
+                allowed_hosts=(config.endpoint_host.lower(),),
+            )
+        except (SSRFValidationError, ValueError):
+            return ConnectorTestResult(
+                reachable=False,
+                config_valid=False,
+                validated_host=None,
+                tls_verified=False,
+                http_probe="skipped",
+            )
+
+        tls_verified = await _verify_connector_tls(
+            hostname=validated.hostname,
+            port=validated.port,
+            pinned_ip=validated.pinned_ip,
+            ssl_context=self._connector_test_ssl_context,
+        )
+        return ConnectorTestResult(
+            reachable=tls_verified,
+            config_valid=True,
+            validated_host=validated.hostname,
+            tls_verified=tls_verified,
+            http_probe="skipped",
         )
 
     async def list_channels(
@@ -706,6 +777,31 @@ class TenantConfigurationService:
         )
 
 
+async def _verify_connector_tls(
+    *,
+    hostname: str,
+    port: int,
+    pinned_ip: str,
+    ssl_context: ssl.SSLContext | None,
+) -> bool:
+    context = ssl_context or ssl.create_default_context()
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(
+                host=pinned_ip,
+                port=port,
+                ssl=context,
+                server_hostname=hostname,
+            ),
+            timeout=_CONNECTOR_TEST_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return False
+    writer.close()
+    await writer.wait_closed()
+    return True
+
+
 def _approved_configuration_change(
     *,
     tenant_id: str,
@@ -758,4 +854,4 @@ def _require_direct_apply_enabled(*, bypass: bool = False) -> None:
     )
 
 
-__all__ = ["TenantConfigurationService"]
+__all__ = ["ConnectorTestResult", "TenantConfigurationService"]

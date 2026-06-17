@@ -10,6 +10,7 @@ from app.agents.tools.connectors.base import (
     ConnectorHTTPResponse,
     ConnectorHTTPRequest,
     ConnectorProviderFields,
+    ConnectorResponseError,
     ConnectorTool,
 )
 from app.agents.tools.connectors.config import ConnectorConfigRecord
@@ -32,8 +33,8 @@ class GenericRestRefundConnector(ConnectorTool):
     ) -> ConnectorHTTPRequest:
         return ConnectorHTTPRequest(
             method=config.http_method,
-            url=_render_endpoint(config.endpoint_template, payload),
-            json_body=_mapped_body(payload, config.field_mappings),
+            url=render_endpoint(config.endpoint_template, payload),
+            json_body=mapped_body(payload, config.field_mappings),
         )
 
     def parse_response(
@@ -42,18 +43,10 @@ class GenericRestRefundConnector(ConnectorTool):
         *,
         config: ConnectorConfigRecord,
     ) -> ConnectorProviderFields:
-        body = _response_json(response)
-        provider_id = _text_at(body, _parse_path(config, "provider_id"))
-        provider_status = _text_at(body, _parse_path(config, "provider_status"))
-        provider_error = _text_at(body, _parse_path(config, "provider_error"))
-        return ConnectorProviderFields(
-            provider_id=provider_id,
-            provider_status=provider_status,
-            provider_error=provider_error,
-        )
+        return parse_generic_rest_response(response, config=config)
 
 
-def _render_endpoint(template: str, payload: Mapping[str, Any]) -> str:
+def render_endpoint(template: str, payload: Mapping[str, Any]) -> str:
     values: dict[str, str] = {}
     for _, field_name, _, _ in Formatter().parse(template):
         if field_name is None:
@@ -62,7 +55,7 @@ def _render_endpoint(template: str, payload: Mapping[str, Any]) -> str:
     return template.format(**values)
 
 
-def _mapped_body(
+def mapped_body(
     payload: Mapping[str, Any],
     mappings: Mapping[str, Any],
 ) -> JsonObject:
@@ -93,14 +86,14 @@ def _mapping_value(payload: Mapping[str, Any], source: object) -> Any:
     return source
 
 
-def _parse_path(config: ConnectorConfigRecord, key: str) -> str | None:
+def parse_response_path(config: ConnectorConfigRecord, key: str) -> str | None:
     value = config.response_parse.get(key)
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
 
 
-def _response_json(response: ConnectorHTTPResponse) -> Mapping[str, Any]:
+def response_json(response: ConnectorHTTPResponse) -> Mapping[str, Any]:
     try:
         decoded = response.json()
     except ValueError:
@@ -110,7 +103,26 @@ def _response_json(response: ConnectorHTTPResponse) -> Mapping[str, Any]:
     return {}
 
 
-def _text_at(body: Mapping[str, Any], path: str | None) -> str | None:
+def parse_generic_rest_response(
+    response: ConnectorHTTPResponse,
+    *,
+    config: ConnectorConfigRecord,
+) -> ConnectorProviderFields:
+    body = response_json(response)
+    fields = ConnectorProviderFields(
+        provider_id=text_at(body, parse_response_path(config, "provider_id")),
+        provider_status=text_at(body, parse_response_path(config, "provider_status")),
+        provider_error=text_at(body, parse_response_path(config, "provider_error")),
+    )
+    if response.status_code not in set(config.success_status_codes):
+        raise ConnectorResponseError(
+            status_code=response.status_code,
+            provider_fields=fields,
+        )
+    return fields
+
+
+def text_at(body: Mapping[str, Any], path: str | None) -> str | None:
     if path is None:
         return None
     value = _value_at(body, path)
@@ -137,4 +149,12 @@ def _mapping_get(value: object, key: str) -> object | None:
     return mapping.get(key)
 
 
-__all__ = ["GenericRestRefundConnector"]
+__all__ = [
+    "GenericRestRefundConnector",
+    "mapped_body",
+    "parse_generic_rest_response",
+    "parse_response_path",
+    "render_endpoint",
+    "response_json",
+    "text_at",
+]

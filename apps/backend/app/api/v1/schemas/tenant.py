@@ -395,6 +395,16 @@ class TenantConnectorConfigurationPage(BaseModel):
     offset: int
 
 
+class TenantConnectorTestResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    reachable: bool
+    config_valid: bool
+    validated_host: str | None = None
+    tls_verified: bool
+    http_probe: str
+
+
 class TenantKnowledgeCreateRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -792,6 +802,7 @@ __all__ = [
     "TenantChannelUpdateRequest",
     "TenantConnectorConfigurationPage",
     "TenantConnectorConfigurationResponse",
+    "TenantConnectorTestResponse",
     "TenantExecutionCircuitBreakerPage",
     "TenantExecutionCircuitBreakerResponse",
     "TenantExecutionGovernanceCreateRequest",

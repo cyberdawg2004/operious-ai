@@ -22,6 +22,7 @@ from app.api.v1.schemas.tenant import (
     TenantWhatsAppSelfServiceRequest,
     TenantConnectorConfigurationPage,
     TenantConnectorConfigurationResponse,
+    TenantConnectorTestResponse,
     TenantExecutionCircuitBreakerPage,
     TenantExecutionCircuitBreakerResponse,
     TenantExecutionGovernanceCreateRequest,
@@ -46,6 +47,7 @@ from app.api.v1.schemas.tenant import (
 from app.dependencies.authority import (
     ERROR_CODE_CAPABILITY_REQUIRED,
     TENANT_CHANNEL_ADMIN_CAPABILITY,
+    TENANT_CONNECTOR_APPROVE_CAPABILITY,
     TENANT_CONNECTOR_WRITE_CAPABILITY,
     TENANT_CONFIG_APPROVE_CAPABILITY,
     TENANT_CONFIG_READ_CAPABILITY,
@@ -128,6 +130,7 @@ router = APIRouter(tags=["tenant"])
 require_platform_lifecycle_admin = require_platform_tenant_admin
 require_tenant_config_read = require_capability(TENANT_CONFIG_READ_CAPABILITY)
 require_tenant_config_write = require_capability(TENANT_CONFIG_WRITE_CAPABILITY)
+require_tenant_connector_write = require_capability(TENANT_CONNECTOR_WRITE_CAPABILITY)
 require_tenant_config_approve = require_capability(TENANT_CONFIG_APPROVE_CAPABILITY)
 require_tenant_connector_config_read = require_tenant_connector_read
 require_tenant_channel_direct_apply = require_config_apply_authorization_for(
@@ -157,6 +160,12 @@ _CHANGE_REQUEST_DOMAIN_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] = 
         TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY
     ),
     TenantConfigChangeType.CONNECTOR: TENANT_CONNECTOR_WRITE_CAPABILITY,
+}
+
+# Connector config changes require a domain-specific approve capability instead of
+# the generic tenant.config.approve, enforcing connector-approval as a separate duty.
+_CHANGE_REQUEST_APPROVE_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] = {
+    TenantConfigChangeType.CONNECTOR: TENANT_CONNECTOR_APPROVE_CAPABILITY,
 }
 
 _MIN_LIMIT = 1
@@ -285,11 +294,21 @@ async def list_config_change_requests(
 async def approve_config_change_request(
     change_request_id: str,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_tenant_config_approve),
+    authority: AuthorityContext = Depends(require_authority),
     service: TenantConfigChangeRequestService = Depends(
         get_tenant_config_change_request_service
     ),
 ) -> TenantConfigChangeRequestResponse:
+    try:
+        existing = await service.get(
+            change_request_id=change_request_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+    except (ValueError, TenantConfigChangeRequestError) as exc:
+        raise _change_request_http_error(exc) from exc
+    _require_change_request_approve_capability(
+        change_type=existing.change_type, authority=authority
+    )
     try:
         record = await service.approve(
             change_request_id=change_request_id,
@@ -544,6 +563,41 @@ async def list_connector_configuration_history(
         ],
         total=page.total,
         offset=page.offset,
+    )
+
+
+@router.post(
+    "/{tenant_id}/connectors/{tool_name}/test",
+    response_model=TenantConnectorTestResponse,
+)
+async def test_connector_configuration(
+    tenant_id: str,
+    tool_name: str,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _writer: AuthorityContext = Depends(require_tenant_connector_write),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> TenantConnectorTestResponse:
+    if tenant_id != expected_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_connector_configuration_not_found"},
+        )
+    try:
+        result = await service.test_connector_connection(
+            tenant_id=expected_tenant_id,
+            tool_name=tool_name,
+        )
+    except TenantConfigurationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_connector_configuration_not_found"},
+        ) from exc
+    return TenantConnectorTestResponse(
+        reachable=result.reachable,
+        config_valid=result.config_valid,
+        validated_host=result.validated_host,
+        tls_verified=result.tls_verified,
+        http_probe=result.http_probe,
     )
 
 
@@ -1186,6 +1240,24 @@ def _require_change_request_domain_capability(
     authority: AuthorityContext,
 ) -> None:
     capability = _CHANGE_REQUEST_DOMAIN_CAPABILITIES[change_type]
+    if capability not in authority.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": ERROR_CODE_CAPABILITY_REQUIRED,
+                "capability": capability,
+            },
+        )
+
+
+def _require_change_request_approve_capability(
+    *,
+    change_type: TenantConfigChangeType,
+    authority: AuthorityContext,
+) -> None:
+    capability = _CHANGE_REQUEST_APPROVE_CAPABILITIES.get(
+        change_type, TENANT_CONFIG_APPROVE_CAPABILITY
+    )
     if capability not in authority.capabilities:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
