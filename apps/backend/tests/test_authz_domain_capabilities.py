@@ -13,6 +13,7 @@ from app.dependencies.authority import (
     TENANT_ACTIONS_APPROVE_CAPABILITY,
     TENANT_AUDIT_EXPORT_CAPABILITY,
     TENANT_COGNITION_READ_CAPABILITY,
+    TENANT_CONNECTOR_APPROVE_CAPABILITY,
     TENANT_CONNECTOR_READ_CAPABILITY,
     TENANT_GOVERNANCE_READ_CAPABILITY,
     TENANT_OBSERVABILITY_READ_CAPABILITY,
@@ -52,6 +53,7 @@ def test_capability_constant_values() -> None:
     assert TENANT_GOVERNANCE_READ_CAPABILITY == "tenant.governance.read"
     assert TENANT_COGNITION_READ_CAPABILITY == "tenant.cognition.read"
     assert TENANT_CONNECTOR_READ_CAPABILITY == "tenant.connector.read"
+    assert TENANT_CONNECTOR_APPROVE_CAPABILITY == "tenant.connector.approve"
     assert TENANT_ACTIONS_APPROVE_CAPABILITY == "tenant.actions.approve"
     assert TENANT_TRAINING_WRITE_CAPABILITY == "tenant.training.write"
     assert TENANT_PRIVACY_ADMIN_CAPABILITY == "tenant.privacy.admin"
@@ -148,6 +150,7 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
         ("TenantGovernanceViewer", "tenant.governance.read"),
         ("TenantCognitionViewer", "tenant.cognition.read"),
         ("TenantConnectorViewer", "tenant.connector.read"),
+        ("TenantConnectorApprover", ("tenant.connector.read", "tenant.connector.approve")),
         ("TenantActionApprover", "tenant.actions.approve"),
         ("TenantTrainingWriter", "tenant.training.write"),
         ("TenantPrivacyAdmin", "tenant.privacy.admin"),
@@ -175,6 +178,7 @@ def test_permission_map_audit() -> None:
         ("read:tenant_cognition", "tenant.cognition.read"),
         ("read:tenant_connector", "tenant.connector.read"),
         ("read:tenant_config", "tenant.config.read"),
+        ("approve:tenant_connector", ("tenant.connector.read", "tenant.connector.approve")),
         ("approve:tenant_actions", "tenant.actions.approve"),
         ("write:tenant_training", "tenant.training.write"),
         ("admin:tenant_privacy", "tenant.privacy.admin"),

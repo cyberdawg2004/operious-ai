@@ -96,6 +96,11 @@ TENANT_CONFIG_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.config.approve",
 )
 
+TENANT_CONNECTOR_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
+    "tenant.connector.read",
+    "tenant.connector.approve",
+)
+
 TENANT_CASE_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.approvals.read",
     "tenant.actions.approve",
@@ -126,6 +131,7 @@ PERMISSION_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "read:tenant_cognition": "tenant.cognition.read",
     "read:tenant_connector": "tenant.connector.read",
     "read:tenant_config": "tenant.config.read",
+    "approve:tenant_connector": TENANT_CONNECTOR_APPROVER_CAPABILITIES,
     "approve:tenant_actions": "tenant.actions.approve",
     "read:tenant_approvals": "tenant.approvals.read",
     "guide:tenant_resolution": "tenant.resolution.guide",
@@ -161,6 +167,7 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
         "tenant.connector.read",
         "tenant.config.read",
     ),
+    "TenantConnectorApprover": TENANT_CONNECTOR_APPROVER_CAPABILITIES,
     "TenantConnectorViewer": "tenant.connector.read",
     "TenantViewer": "tenant_read",
     # Separation of duties (S-03): the approve duty is a DISTINCT role so

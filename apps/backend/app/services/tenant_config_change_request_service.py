@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -56,10 +57,12 @@ from app.tenant.enums import (
     TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
+from app.tenant.credentials import validate_channel_credentials
 from app.tenant.identity import (
     as_channel_configuration_id,
     as_governance_policy_id,
     as_knowledge_document_id,
+    derive_channel_configuration_id,
 )
 from app.services.tenant_configuration_service import TenantConfigurationService
 
@@ -300,6 +303,14 @@ class TenantConfigChangeRequestService:
         await self._session.commit()
         return persisted
 
+    async def get(
+        self,
+        *,
+        change_request_id: uuid.UUID | str,
+        expected_tenant_id: str,
+    ) -> TenantConfigChangeRequestRecord:
+        return await self._require(change_request_id, expected_tenant_id=expected_tenant_id)
+
     async def list(
         self,
         *,
@@ -361,6 +372,8 @@ class TenantConfigChangeRequestService:
             return await self._apply_channel(record, payload)
         if change is TenantConfigChangeType.CONNECTOR:
             return await self._apply_connector(record, payload, approval)
+        if change is TenantConfigChangeType.CREDENTIAL_UPDATE:
+            return await self._apply_credential_update(record, payload)
         raise TenantConfigChangeRequestLifecycleError(
             f"unsupported tenant config change type: {change.value}"
         )
@@ -388,7 +401,6 @@ class TenantConfigChangeRequestService:
                 ),
                 # Applying the governance flow (propose → approve → apply) is
                 # the two-person sign-off for the document; auto-approve here.
-                review_status=TenantKnowledgeReviewStatus.APPROVED,
                 uploaded_by=record.approved_by or record.proposed_by,
                 approval=approval,
                 bypass_direct_apply_gate=True,
@@ -642,6 +654,84 @@ class TenantConfigChangeRequestService:
             f"unsupported channel change operation: {operation}"
         )
 
+    async def propose_oms_credential_update(
+        self,
+        *,
+        tenant_id: str,
+        credentials: Mapping[str, Any],
+        proposed_by: str,
+    ) -> TenantConfigChangeRequestRecord:
+        """Propose an OMS credential update through the dual-control workflow.
+
+        Credentials are encrypted immediately at propose time via OPCRED2 and
+        stored in tenant_channel_configurations with status=PENDING_VALIDATION.
+        The change-request proposed_payload stores ONLY a SHA-256 sentinel of
+        the ciphertext — never plaintext or the envelope itself.
+        """
+        # Shape-validate before touching any storage.
+        validate_channel_credentials(TenantChannelType.OMS, credentials)
+
+        # Guard: rotation (existing ACTIVE row) is not supported in PR 1.
+        config_id = derive_channel_configuration_id(
+            tenant_id=tenant_id,
+            channel_type=TenantChannelType.OMS,
+        )
+        existing = await self._tenant_configuration.get_channel_configuration(
+            tenant_id=tenant_id,
+            config_id=config_id,
+        )
+        if existing is not None and existing.status is TenantChannelStatus.ACTIVE:
+            raise TenantConfigChangeRequestLifecycleError(
+                "OMS credential rotation is not yet supported; "
+                "an active credential already exists for this tenant"
+            )
+
+        # Write encrypted envelope to tenant_channel_configurations.
+        # The runtime's configure_channel() calls encryptor.encrypt() internally,
+        # which runs validate_channel_credentials() again and produces the OPCRED2
+        # envelope stored in credentials_enc.
+        channel_record = await self._tenant_configuration.configure_channel(
+            tenant_id=tenant_id,
+            channel_type=TenantChannelType.OMS,
+            routing_address="",
+            credentials=dict(credentials),
+            webhook_secret="",
+            status=TenantChannelStatus.PENDING_VALIDATION,
+            bypass_direct_apply_gate=True,
+            commit=False,
+        )
+
+        # Hash the actually-stored ciphertext so apply() can verify integrity.
+        # Plaintext credentials are in memory only; never written to any table.
+        credential_hash = hashlib.sha256(channel_record.credentials_enc).hexdigest()
+        sentinel: dict[str, Any] = {
+            "channel": TenantChannelType.OMS.value,
+            "credential_hash": credential_hash,
+        }
+        now = _utcnow()
+        versioned = _versioned_payload(sentinel)
+        record = TenantConfigChangeRequestRecord(
+            change_request_id=derive_tenant_config_change_request_id(
+                tenant_id=tenant_id,
+                change_type=TenantConfigChangeType.CREDENTIAL_UPDATE,
+                proposed_payload=versioned,
+                proposed_by=proposed_by,
+            ),
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.CREDENTIAL_UPDATE,
+            proposed_payload=versioned,
+            status=TenantConfigChangeRequestStatus.PROPOSED,
+            proposed_by=proposed_by,
+            proposed_at=now,
+        )
+        persisted = await self._repository.create(
+            record,
+            expected_tenant_id=tenant_id,
+        )
+        await self._append_status_event(persisted)
+        await self._session.commit()
+        return persisted
+
     async def _apply_connector(
         self,
         record: TenantConfigChangeRequestRecord,
@@ -672,6 +762,66 @@ class TenantConfigChangeRequestService:
             "tool_name": result.tool_name,
             "version": result.version,
             "content_sha256": result.content_sha256,
+        }
+
+    async def _apply_credential_update(
+        self,
+        record: TenantConfigChangeRequestRecord,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        channel = _str(payload, "channel")
+        if channel != TenantChannelType.OMS.value:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"unsupported credential_update channel: {channel!r}"
+            )
+        expected_hash = _str(payload, "credential_hash")
+
+        # Load the pending OMS credential row written at propose time.
+        config_id = derive_channel_configuration_id(
+            tenant_id=record.tenant_id,
+            channel_type=TenantChannelType.OMS,
+        )
+        channel_record = await self._tenant_configuration.get_channel_configuration(
+            tenant_id=record.tenant_id,
+            config_id=config_id,
+        )
+        if channel_record is None:
+            raise TenantConfigChangeRequestLifecycleError(
+                "OMS channel configuration not found; "
+                "pending credential may have been cleared"
+            )
+        if channel_record.status is not TenantChannelStatus.PENDING_VALIDATION:
+            raise TenantConfigChangeRequestLifecycleError(
+                "OMS credential is not in pending state "
+                f"(status={channel_record.status.value})"
+            )
+
+        # Integrity: hash of stored ciphertext must match sentinel.
+        # Detects tampering between propose and apply.
+        actual_hash = hashlib.sha256(channel_record.credentials_enc).hexdigest()
+        if actual_hash != expected_hash:
+            raise TenantConfigChangeRequestLifecycleError(
+                "OMS credential hash mismatch; "
+                "stored ciphertext does not match proposal sentinel"
+            )
+
+        # Activate: update status to ACTIVE; credentials_enc is unchanged.
+        result = await self._tenant_configuration.update_channel(
+            tenant_id=record.tenant_id,
+            config_id=channel_record.config_id,
+            routing_address=None,
+            credentials=None,
+            webhook_secret=None,
+            status=TenantChannelStatus.ACTIVE,
+            bypass_direct_apply_gate=True,
+            commit=False,
+        )
+        return {
+            "kind": "oms_credential",
+            "operation": "activate",
+            "channel": TenantChannelType.OMS.value,
+            "config_id": str(result.config_id),
+            "status": result.status.value,
         }
 
     async def _append_status_event(
@@ -900,6 +1050,11 @@ async def _validate_payload(
             "success_status_codes",
         )
         _validate_connector_payload(payload)
+    elif change_type is TenantConfigChangeType.CREDENTIAL_UPDATE:
+        # Sentinel-only validation: payload must contain only the hash and channel.
+        # Plaintext credentials must never appear here.
+        required = ("channel", "credential_hash")
+        _validate_credential_update_sentinel(payload)
     else:
         required = (
             ("config_id",)
@@ -1068,6 +1223,53 @@ def _validate_connector_payload(payload: Mapping[str, Any]) -> None:
             "connector status must be active or disabled"
         )
     _success_status_codes(payload)
+
+
+_CREDENTIAL_UPDATE_SENTINEL_KEYS: frozenset[str] = frozenset(
+    {"channel", "credential_hash", "_schema_version"}
+)
+_CREDENTIAL_SENTINEL_FORBIDDEN_KEYS: tuple[str, ...] = (
+    "access_token",
+    "api_key",
+    "auth_header",
+    "bearer_token",
+    "credential",
+    "credentials",
+    "credentials_enc",
+    "password",
+    "token",
+    "webhook_secret",
+)
+
+
+def _validate_credential_update_sentinel(payload: Mapping[str, Any]) -> None:
+    forbidden = sorted(k for k in _CREDENTIAL_SENTINEL_FORBIDDEN_KEYS if k in payload)
+    if forbidden:
+        raise TenantConfigChangeRequestLifecycleError(
+            "credential_update payload must not contain credential fields; "
+            "forbidden field(s): " + ", ".join(forbidden)
+        )
+    unknown = sorted(
+        k for k in payload if k not in _CREDENTIAL_UPDATE_SENTINEL_KEYS
+    )
+    if unknown:
+        raise TenantConfigChangeRequestLifecycleError(
+            "credential_update payload contains unexpected field(s): "
+            + ", ".join(unknown)
+        )
+    channel = _str(payload, "channel")
+    if channel != TenantChannelType.OMS.value:
+        raise TenantConfigChangeRequestLifecycleError(
+            f"credential_update channel must be {TenantChannelType.OMS.value!r}; "
+            f"got {channel!r}"
+        )
+    credential_hash = _str(payload, "credential_hash")
+    if len(credential_hash) != 64 or not all(
+        c in "0123456789abcdef" for c in credential_hash
+    ):
+        raise TenantConfigChangeRequestLifecycleError(
+            "credential_update credential_hash must be a 64-character hex SHA-256"
+        )
 
 
 def _validate_public_host_shape(host: str) -> None:

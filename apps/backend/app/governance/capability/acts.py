@@ -76,6 +76,10 @@ class OperationalAct(StrEnum):
     TENANT_CONFIG_CHANGE_APPLY = "governance:tenant_config_change_apply"
     TENANT_CONFIG_CHANGE_REVOKE = "governance:tenant_config_change_revoke"
 
+    # ─── tenant connector config lifecycle ──────────────────────────
+    CONNECTOR_CONFIG_PROPOSE = "tenant:connector_config_propose"
+    CONNECTOR_CONFIG_APPROVE = "tenant:connector_config_approve"
+
     # ─── platform / hardening lifecycle ─────────────────────────────
     TENANT_CREATE = "hardening:tenant_create"
     TENANT_CONFIG_ACCESS_PROVISION = "hardening:tenant_config_access_provision"

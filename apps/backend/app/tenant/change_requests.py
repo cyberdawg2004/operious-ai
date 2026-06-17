@@ -27,6 +27,11 @@ class TenantConfigChangeType(StrEnum):
     TOPOLOGY = "topology"
     CHANNEL = "channel"
     CONNECTOR = "connector"
+    # CREDENTIAL_UPDATE: dual-control OMS credential lifecycle.
+    # proposed_payload stores ONLY a sentinel hash — never the ciphertext or
+    # plaintext credential. The encrypted envelope lives in
+    # tenant_channel_configurations.credentials_enc (FORCE RLS, OPCRED2).
+    CREDENTIAL_UPDATE = "credential_update"
 
 
 class TenantConfigChangeRequestStatus(StrEnum):

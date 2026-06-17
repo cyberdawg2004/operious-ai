@@ -728,6 +728,8 @@ def validate_channel_credentials(
         _validate_ses_credentials(normalized)
     elif channel == TenantChannelType.SHOPIFY.value:
         _required_credential_text(normalized, ("access_token",), "shopify")
+    elif channel == TenantChannelType.OMS.value:
+        _validate_oms_credentials(normalized)
     _credential_json(normalized)
     return normalized
 
@@ -840,6 +842,42 @@ def _maybe_legacy_encryptor(settings: Any) -> TenantCredentialEncryptor | None:
 
 def _credential_mapping(credentials: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): value for key, value in credentials.items()}
+
+
+_OMS_AUTH_TYPES: frozenset[str] = frozenset({"bearer", "api_key", "basic"})
+_OMS_BEARER_FIELDS: frozenset[str] = frozenset({"auth_type", "token"})
+_OMS_API_KEY_FIELDS: frozenset[str] = frozenset({"auth_type", "api_key"})
+_OMS_BASIC_FIELDS: frozenset[str] = frozenset({"auth_type", "username", "password"})
+
+
+def _validate_oms_credentials(credentials: Mapping[str, Any]) -> None:
+    auth_type = _required_credential_text(credentials, ("auth_type",), "oms")
+    if auth_type not in _OMS_AUTH_TYPES:
+        raise TenantCredentialEncryptionError(
+            "tenant oms credential auth_type must be bearer, api_key, or basic"
+        )
+    if auth_type == "bearer":
+        _required_credential_text(credentials, ("token",), "oms")
+        _reject_unknown_oms_fields(credentials, _OMS_BEARER_FIELDS)
+    elif auth_type == "api_key":
+        _required_credential_text(credentials, ("api_key",), "oms")
+        _reject_unknown_oms_fields(credentials, _OMS_API_KEY_FIELDS)
+    else:
+        _required_credential_text(credentials, ("username",), "oms")
+        _required_credential_text(credentials, ("password",), "oms")
+        _reject_unknown_oms_fields(credentials, _OMS_BASIC_FIELDS)
+
+
+def _reject_unknown_oms_fields(
+    credentials: Mapping[str, Any],
+    allowed: frozenset[str],
+) -> None:
+    unknown = sorted(k for k in credentials if k not in allowed)
+    if unknown:
+        raise TenantCredentialEncryptionError(
+            "tenant oms credential contains unknown field(s): "
+            + ", ".join(unknown)
+        )
 
 
 def _validate_whatsapp_credentials(credentials: Mapping[str, Any]) -> None:

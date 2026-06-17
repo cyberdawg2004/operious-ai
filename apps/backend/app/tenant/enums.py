@@ -19,6 +19,12 @@ class TenantChannelType(StrEnum):
     VOICE = "voice"
     JIRA = "jira"
     LINEAR = "linear"
+    # OMS: Outbound-only connector for executing refund/warranty/replacement
+    # actions against the tenant's order-management system.
+    # routing_address = "" (unused — OMS is outbound only)
+    # credentials_enc = OPCRED2 envelope (auth_type + token/api_key/username+password)
+    # webhook_secret = "" (unused)
+    OMS = "oms"
 
 
 class TenantStatus(StrEnum):
