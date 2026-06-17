@@ -141,6 +141,11 @@ TENANT_CONNECTOR_WRITE_CAPABILITY: Final[str] = "tenant.connector.write"
 #: Domain capability required to read outbound connector configuration.
 TENANT_CONNECTOR_READ_CAPABILITY: Final[str] = "tenant.connector.read"
 
+#: Domain capability required to APPROVE a connector config change request.
+#: Deliberately DISTINCT from TENANT_CONNECTOR_WRITE_CAPABILITY (propose) so
+#: organisations can enforce dual-control: different principals propose vs approve.
+TENANT_CONNECTOR_APPROVE_CAPABILITY: Final[str] = "tenant.connector.approve"
+
 #: Domain capability required to read the tenant config change-request ledger.
 TENANT_CONFIG_READ_CAPABILITY: Final[str] = "tenant.config.read"
 
@@ -292,6 +297,15 @@ def require_tenant_connector_read(request: Request) -> AuthorityContext:
     return _require_capability_from_request(
         request,
         capability=TENANT_CONNECTOR_READ_CAPABILITY,
+    )
+
+
+def require_tenant_connector_approve(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.connector.approve capability."""
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_CONNECTOR_APPROVE_CAPABILITY,
     )
 
 
@@ -608,6 +622,7 @@ __all__ = [
     "TENANT_AUDIT_EXPORT_CAPABILITY",
     "TENANT_CHANNEL_ADMIN_CAPABILITY",
     "TENANT_COGNITION_READ_CAPABILITY",
+    "TENANT_CONNECTOR_APPROVE_CAPABILITY",
     "TENANT_CONNECTOR_READ_CAPABILITY",
     "TENANT_CONNECTOR_WRITE_CAPABILITY",
     "TENANT_CONFIG_APPROVE_CAPABILITY",
@@ -639,6 +654,7 @@ __all__ = [
     "require_tenant_approvals_read",
     "require_tenant_audit_export",
     "require_tenant_cognition_read",
+    "require_tenant_connector_approve",
     "require_tenant_connector_read",
     "require_tenant_governance_read",
     "require_tenant_knowledge_write",
