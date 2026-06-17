@@ -303,11 +303,29 @@ test('connector editor drives the credential-free builder and a separate credent
   const src = readText(join(CC2, 'components', 'connector-config-views.tsx'));
   ok(src.includes('buildConnectorChangePayload'), 'connector form must use the safe builder');
   ok(
-    src.includes('buildChannelCredentialChangePayload'),
-    'credential rotation must use the channel credential path',
+    src.includes('OmsCredentialForm'),
+    'connector surface must keep a separate OMS credential step',
   );
-  // Write-only credential UX, mirrored from the channel form.
-  ok(src.includes('Leave blank to keep current value'));
+  ok(
+    src.includes('credential_update'),
+    'connector credential UX should reflect the credential_update dual-control flow',
+  );
+  ok(
+    src.includes('write-only'),
+    'credential step must remain explicitly write-only',
+  );
+  ok(
+    src.includes('testConnectorConfiguration'),
+    'connector surface should wire the safe test-connection endpoint',
+  );
+  ok(
+    src.includes('tenant.connector.write'),
+    'connector surface should capability-gate write actions',
+  );
+  ok(
+    !src.includes('buildChannelCredentialChangePayload'),
+    'connector credentials must no longer use the old channel credential path',
+  );
   // The connector config form must not contain credential input field keys.
   ok(!src.includes('credentials_enc'));
 });
