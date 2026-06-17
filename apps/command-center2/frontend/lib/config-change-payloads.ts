@@ -4,12 +4,10 @@
  * This module is intentionally React-free so the security-critical payload
  * shaping can be unit-tested in isolation (tests-frontend imports it directly).
  *
- * HARD CONSTRAINT A (Step 0): credentials are a SEPARATE path. The connector
- * config payload MUST NOT carry credentials/credentials_enc/webhook_secret —
- * the 2.5a ledger rejects those with "connector config credentials must use
- * the channel credential path". A connector credential is set via a CHANNEL
- * change request instead. `buildConnectorChangePayload` therefore strips any
- * forbidden key defensively, and exposes that guarantee for tests.
+ * HARD CONSTRAINT A (Step 0): credentials are a SEPARATE governed path. The
+ * connector config payload MUST NOT carry credentials/credentials_enc/
+ * webhook_secret. `buildConnectorChangePayload` therefore strips any forbidden
+ * key defensively, and exposes that guarantee for tests.
  */
 
 import type { TenantConfigChangeType } from "@/lib/api";
@@ -48,6 +46,7 @@ export const CONNECTOR_TYPE_OPTIONS = [
   "voice",
   "jira",
   "linear",
+  "oms",
 ] as const;
 
 export const HTTP_METHOD_OPTIONS = [
@@ -447,7 +446,9 @@ export function classifyConfigChange(item: {
   change_type: TenantConfigChangeType;
   proposed_payload: Record<string, unknown>;
 }): ConfigChangeKind | null {
-  if (item.change_type === "connector") return "connector";
+  if (item.change_type === "connector" || item.change_type === "credential_update") {
+    return "connector";
+  }
   if (
     item.change_type === "policy" &&
     item.proposed_payload.policy_type === ACTION_TOOLS_POLICY_TYPE

@@ -1,15 +1,37 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import {
+  ArrowUpRight,
+  CheckCircle2,
+  CircleAlert,
+  KeyRound,
+  Link2,
+  PlugZap,
+  RefreshCw,
+  Shield,
+  TestTubeDiagonal,
+  X,
+} from "lucide-react";
 import {
   formatApiError,
-  listConnectorConfigurations,
+  getConfiguredTenantId,
   listChannelConfigurations,
+  listConfigChangeRequests,
+  listConnectorConfigurationHistory,
   listGovernancePolicies,
   proposeConfigChangeRequest,
-  type ApiPage,
+  testConnectorConfiguration,
   type TenantChannelConfiguration,
+  type TenantConfigChangeRequest,
   type TenantConnectorConfiguration,
+  type TenantConnectorTestResponse,
   type TenantGovernancePolicy,
 } from "@/lib/api";
 import {
@@ -19,106 +41,376 @@ import {
   HTTP_METHOD_OPTIONS,
   POLICY_DECISION_VALUES,
   buildActionPolicyChangePayload,
-  buildChannelCredentialChangePayload,
   buildConnectorChangePayload,
+  classifyConfigChange,
   type PolicyDecision,
 } from "@/lib/config-change-payloads";
+import { useAuthSession } from "@/lib/use-auth-session";
 import { useApiResource } from "@/lib/use-api-resource";
+import { ConfigChangeApprovals } from "@/components/config-change-approvals";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { TechnicalDetails } from "@/components/technical-details";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CodeAsReadableText,
+  DownloadableLog,
+} from "@/components/ui/readable-data";
+import { StatusBadge } from "@/components/ui/status-badge";
 
-/**
- * Per-connector-type credential field. Credentials NEVER ride the connector
- * config payload (Step 0 constraint A) — they are rotated here via the channel
- * credential path, write-only: blank means keep the current value, and the
- * current value is never read back or displayed.
- */
-const CONNECTOR_CREDENTIAL_KEYS: Record<string, { key: string; label: string }[]> = {
-  email: [{ key: "smtp_password", label: "SMTP Password" }],
-  whatsapp: [{ key: "access_token", label: "Access Token" }],
-  voice: [{ key: "auth_token", label: "Auth Token" }],
-  zendesk: [{ key: "api_token", label: "API Token" }],
-  jira: [{ key: "api_token", label: "API Token" }],
-  linear: [{ key: "api_key", label: "API Key" }],
-  shopify: [{ key: "access_token", label: "Admin API Access Token" }],
-  shulex: [{ key: "api_key", label: "API Key" }],
-  lark: [{ key: "app_secret", label: "App Secret" }],
-};
+const TENANT_CONNECTOR_WRITE_CAPABILITY = "tenant.connector.write";
+const RESOLUTION_TAXONOMY_POLICY_TYPE = "resolution_taxonomy";
 
-const KEEP_CURRENT_PLACEHOLDER = "Leave blank to keep current value";
+const CONNECTOR_TOOLS = [
+  {
+    toolName: "refund.request",
+    label: "Refund Request",
+    summary: "Execute outbound refund remedies against the tenant's endpoint.",
+    defaultConnectorType: "oms",
+  },
+  {
+    toolName: "warranty.claim",
+    label: "Warranty Claim",
+    summary: "Create tenant-configured warranty claims through the generic connector.",
+    defaultConnectorType: "oms",
+  },
+  {
+    toolName: "replacement.order",
+    label: "Replacement Order",
+    summary: "Submit replacement orders through the tenant's configured connector.",
+    defaultConnectorType: "oms",
+  },
+  {
+    toolName: "repair.dispatch",
+    label: "Repair Dispatch",
+    summary: "Dispatch repair work to the tenant's selected repair provider endpoint.",
+    defaultConnectorType: "zendesk",
+  },
+] as const;
+
+const OMS_AUTH_TYPES = ["bearer", "api_key", "basic"] as const;
+
+type ConnectorToolDefinition = (typeof CONNECTOR_TOOLS)[number];
 
 type ConnectorModal =
   | { type: "none" }
-  | { type: "propose"; connector?: TenantConnectorConfiguration }
-  | { type: "credential"; connector: TenantConnectorConfiguration };
+  | {
+      type: "configure";
+      tool: ConnectorToolDefinition;
+      connector: TenantConnectorConfiguration | null;
+    }
+  | { type: "credential" };
 
-// ─── Connector-config editor ──────────────────────────────────────────────
+type KeyValueRow = {
+  id: string;
+  key: string;
+  value: string;
+};
+
+type ConnectorDashboardData = {
+  channels: TenantChannelConfiguration[];
+  policies: TenantGovernancePolicy[];
+  pendingRequests: TenantConfigChangeRequest[];
+  connectorHistory: Record<string, TenantConnectorConfiguration[]>;
+};
+
+type ConnectorCardStatus = "active" | "inactive" | "pending_approval";
+
+type GateState = {
+  connectorConfigured: boolean;
+  actionPolicyActive: boolean;
+  taxonomyRequiresExecution: boolean;
+  armed: boolean;
+  policyHint: string;
+  taxonomyHint: string;
+};
+
+type ConnectorCardView = {
+  tool: ConnectorToolDefinition;
+  connector: TenantConnectorConfiguration | null;
+  pendingRequestCount: number;
+  pendingProposal: Record<string, unknown> | null;
+  status: ConnectorCardStatus;
+  endpointPreview: string;
+  gateState: GateState;
+};
+
+type TestState = {
+  busy: boolean;
+  data: TenantConnectorTestResponse | null;
+  error: string | null;
+};
+
+type ExistingActionPolicy = {
+  warrantyConfidenceGte?: number;
+  warrantyIssueCategories?: string[];
+  warrantyElse?: PolicyDecision;
+  replacementAlways?: PolicyDecision;
+  refundAmountCentsLte?: number;
+  refundConfidenceGte?: number | null;
+  refundElse?: PolicyDecision;
+  warehouseAllowSeverities?: string[];
+  warehouseRequireApprovalSeverities?: string[];
+};
 
 export function ConnectorConfigView() {
+  const { principal } = useAuthSession();
   const [modal, setModal] = useState<ConnectorModal>({ type: "none" });
   const [notice, setNotice] = useState<string | null>(null);
-  const load = useCallback(() => listConnectorConfigurations({ status: "active" }), []);
+  const [testStates, setTestStates] = useState<Record<string, TestState>>({});
+
+  const tenantId = principal?.tenant_id ?? getConfiguredTenantId();
+  const canWrite = principal?.capabilities.includes(TENANT_CONNECTOR_WRITE_CAPABILITY) ?? false;
+
+  const load = useCallback(async (): Promise<ConnectorDashboardData> => {
+    const [channels, policies, proposed, approved, histories] = await Promise.all([
+      listChannelConfigurations(),
+      listGovernancePolicies(),
+      listConfigChangeRequests({ status: "PROPOSED", limit: 100, offset: 0 }),
+      listConfigChangeRequests({ status: "APPROVED", limit: 100, offset: 0 }),
+      Promise.all(
+        CONNECTOR_TOOLS.map(
+          async (tool): Promise<[string, TenantConnectorConfiguration[]]> => [
+            tool.toolName,
+            (
+              await listConnectorConfigurationHistory(tool.toolName, {
+                limit: 25,
+                offset: 0,
+              })
+            ).items,
+          ]
+        )
+      ),
+    ]);
+
+    return {
+      channels: channels.items,
+      policies: policies.items,
+      pendingRequests: [...proposed.items, ...approved.items].filter(
+        (request) => classifyConfigChange(request) === "connector"
+      ),
+      connectorHistory: Object.fromEntries(histories),
+    };
+  }, []);
+
   const { data, error, isLoading, reload } = useApiResource(load);
 
-  const closeModal = () => setModal({ type: "none" });
-  const onProposed = (message: string) => {
-    setNotice(message);
-    closeModal();
-    reload();
+  const cards = useMemo(() => {
+    const policies = data?.policies ?? [];
+    const pendingRequests = data?.pendingRequests ?? [];
+    const history = data?.connectorHistory ?? {};
+
+    return CONNECTOR_TOOLS.map((tool) =>
+      buildConnectorCardView({
+        tool,
+        history: history[tool.toolName] ?? [],
+        pendingRequests,
+        policies,
+      })
+    );
+  }, [data]);
+
+  const omsCredentialState = useMemo(
+    () => selectOmsCredentialState(data?.channels ?? []),
+    [data]
+  );
+  const omsCredentialPendingCount = useMemo(
+    () =>
+      (data?.pendingRequests ?? []).filter(
+        (request) => request.change_type === "credential_update"
+      ).length,
+    [data]
+  );
+
+  const runTest = async (toolName: string) => {
+    if (!tenantId) {
+      setTestStates((current) => ({
+        ...current,
+        [toolName]: {
+          busy: false,
+          data: null,
+          error: "Tenant scope is missing, so the safe connector test cannot run.",
+        },
+      }));
+      return;
+    }
+
+    setTestStates((current) => ({
+      ...current,
+      [toolName]: { busy: true, data: null, error: null },
+    }));
+    try {
+      const result = await testConnectorConfiguration(tenantId, toolName);
+      setTestStates((current) => ({
+        ...current,
+        [toolName]: { busy: false, data: result, error: null },
+      }));
+    } catch (caught: unknown) {
+      setTestStates((current) => ({
+        ...current,
+        [toolName]: {
+          busy: false,
+          data: null,
+          error: formatApiError(caught),
+        },
+      }));
+    }
   };
 
   return (
-    <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
-      <Header
-        eyebrow="BOUNDARY · CONNECTORS"
-        title="Connector Config"
-        actionLabel="Propose new connector"
-        onAction={() => setModal({ type: "propose" })}
-      />
-      <GovernedNotice />
+    <main className="min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8">
+      <Header eyebrow="BOUNDARY · CONNECTORS" title="Connector Command Center" />
+
+      <div className="mb-6 grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_1fr]">
+        <Card>
+          <CardHeader>
+            <div>
+              <CardTitle>Execution Safety</CardTitle>
+              <CardDescription>
+                Connector writes remain dual-controlled. A connector executes only
+                when configuration, action-policy authority, and taxonomy execution
+                intent are all present.
+              </CardDescription>
+            </div>
+            <StatusBadge
+              label={canWrite ? "Write enabled" : "Read only"}
+              tone={canWrite ? "success" : "warning"}
+              icon={canWrite ? Shield : CircleAlert}
+            />
+          </CardHeader>
+          <div className="grid gap-3 text-[13px] text-ink-secondary md:grid-cols-3">
+            <GateExplainer
+              title="Gate 1"
+              body="Active connector config exists for the action tool."
+            />
+            <GateExplainer
+              title="Gate 2"
+              body="An active action_tools policy rule exists for that tool."
+            />
+            <GateExplainer
+              title="Gate 3"
+              body="The active resolution taxonomy marks the action as requires_execution."
+            />
+          </div>
+          {!canWrite && (
+            <div className="mt-4 rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
+              This principal lacks <code>tenant.connector.write</code>. Config
+              proposals, OMS credential rotation, and safe test actions are
+              disabled in the UI.
+            </div>
+          )}
+        </Card>
+
+        <OmsCredentialCard
+          state={omsCredentialState}
+          pendingCount={omsCredentialPendingCount}
+          canWrite={canWrite}
+          onManage={() => setModal({ type: "credential" })}
+        />
+      </div>
+
       {notice && <ProposedNotice message={notice} onDismiss={() => setNotice(null)} />}
-      {isLoading && <LoadingState />}
+
+      {isLoading && <LoadingState label="Loading connector command center..." />}
       {error && !isLoading && (
-        <ErrorState title="Connector configs unavailable" message={error} onAction={reload} />
+        <ErrorState
+          title="Connector command center unavailable"
+          message={error}
+          onAction={reload}
+        />
       )}
-      {data && !isLoading && !error && data.items.length === 0 && (
+
+      {!isLoading && !error && cards.length === 0 && (
         <EmptyState
-          title="No active connector configs"
-          message="The tenant connector endpoint returned no active connector configurations."
+          title="No connector tools available"
+          message="No tenant-facing connector tools were found for this workspace."
           actionLabel="Refresh"
           onAction={reload}
         />
       )}
-      {data && !isLoading && !error && data.items.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-          {data.items.map((connector) => (
-            <ConnectorCard
-              key={`${connector.tool_name}:${connector.version}`}
-              connector={connector}
-              onProposeChange={() => setModal({ type: "propose", connector })}
-              onSetCredential={() => setModal({ type: "credential", connector })}
-            />
-          ))}
+
+      {!isLoading && !error && cards.length > 0 && (
+        <div className="space-y-6">
+          <section>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[20px] font-semibold text-ink-primary">
+                  Connector Tools
+                </h2>
+                <p className="text-[13px] text-ink-secondary">
+                  Each card shows the live governed state for a single autonomous
+                  execution tool.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={reload}
+                className="cc-btn cc-btn-secondary"
+              >
+                <RefreshCw size={14} strokeWidth={1.8} />
+                Refresh
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
+              {cards.map((card) => (
+                <ConnectorToolCard
+                  key={card.tool.toolName}
+                  card={card}
+                  canWrite={canWrite}
+                  testState={testStates[card.tool.toolName] ?? null}
+                  onConfigure={() =>
+                    setModal({
+                      type: "configure",
+                      tool: card.tool,
+                      connector: card.connector,
+                    })
+                  }
+                  onTest={() => runTest(card.tool.toolName)}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-3">
+              <h2 className="text-[20px] font-semibold text-ink-primary">
+                Pending Approvals
+              </h2>
+              <p className="text-[13px] text-ink-secondary">
+                Connector and OMS credential changes land here for a separate
+                approver. Server-side dual control still enforces the separation of
+                duty.
+              </p>
+            </div>
+            <Card className="p-0">
+              <ConfigChangeApprovals embedded changeKind="connector" />
+            </Card>
+          </section>
         </div>
       )}
 
-      {modal.type === "propose" && (
-        <Modal onClose={closeModal}>
+      {modal.type === "configure" && (
+        <Modal onClose={() => setModal({ type: "none" })}>
           <ConnectorProposeForm
+            tool={modal.tool}
             connector={modal.connector}
-            onProposed={() =>
-              onProposed("Connector config change proposed — pending approval by another principal.")
-            }
+            onProposed={() => {
+              setNotice(
+                `${modal.tool.label} change proposed. It now awaits approval in Pending Approvals.`
+              );
+              setModal({ type: "none" });
+              reload();
+            }}
           />
         </Modal>
       )}
+
       {modal.type === "credential" && (
-        <Modal onClose={closeModal}>
-          <ConnectorCredentialForm
-            connector={modal.connector}
-            onProposed={() =>
-              onProposed("Credential rotation proposed via the channel credential path — pending approval.")
-            }
+        <Modal onClose={() => setModal({ type: "none" })}>
+          <OmsCredentialForm
+            currentState={omsCredentialState}
+            canWrite={canWrite}
+            pendingCount={omsCredentialPendingCount}
           />
         </Modal>
       )}
@@ -126,97 +418,301 @@ export function ConnectorConfigView() {
   );
 }
 
-function ConnectorCard({
-  connector,
-  onProposeChange,
-  onSetCredential,
+function OmsCredentialCard({
+  state,
+  pendingCount,
+  canWrite,
+  onManage,
 }: {
-  connector: TenantConnectorConfiguration;
-  onProposeChange: () => void;
-  onSetCredential: () => void;
+  state: TenantChannelConfiguration | null;
+  pendingCount: number;
+  canWrite: boolean;
+  onManage: () => void;
 }) {
+  const configured = state !== null;
   return (
-    <article className="rounded-lg border border-border-subtle bg-surface p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="truncate text-[18px] font-semibold text-ink-primary">
-            {connector.tool_name}
-          </h2>
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-            {connector.connector_type}
-          </p>
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>OMS Credentials</CardTitle>
+          <CardDescription>
+            Write-only credential state for OMS-backed execution tools. Credential
+            values are never read back into the browser.
+          </CardDescription>
         </div>
-        <span className="shrink-0 rounded border border-border-subtle px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-          v{connector.version} · {connector.status}
-        </span>
-      </div>
-      <div className="mt-4 grid gap-2">
-        <Field label="Method" value={`${connector.http_method}`} />
-        <Field label="Endpoint" value={connector.endpoint_template} />
-        <Field label="Host" value={connector.endpoint_host} />
-        <Field label="Idempotency header" value={connector.idempotency_header_name} />
-        <Field label="Configured by" value={connector.configured_by} />
-        <Field label="Content sha256" value={connector.content_sha256} />
+        <StatusBadge
+          label={configured ? "Configured" : "Not configured"}
+          tone={configured ? "success" : "warning"}
+          icon={KeyRound}
+        />
+      </CardHeader>
+      <div className="grid gap-2 text-[13px] text-ink-secondary">
         <Field
-          label="Previous sha256"
-          value={connector.previous_version_sha256 ?? "Genesis version"}
+          label="Credential state"
+          value={configured ? "Configured" : "No OMS credential record"}
+        />
+        <Field
+          label="Last updated"
+          value={state?.credential_rotated_at ? formatDate(state.credential_rotated_at) : "Never"}
+        />
+        <Field label="Status" value={state?.status ?? "not_configured"} />
+        <Field
+          label="Pending approvals"
+          value={pendingCount > 0 ? `${pendingCount} awaiting approval` : "None"}
         />
       </div>
-      <div className="mt-4 flex flex-col gap-2 border-t border-border-subtle pt-4 sm:flex-row">
-        <div className="flex-1 rounded border border-border-subtle bg-surface-raised p-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Step 1 · Config
-          </p>
-          <button
-            onClick={onProposeChange}
-            className="mt-2 h-9 w-full rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
-          >
-            Propose config change
-          </button>
+      <div className="mt-4 rounded-lg border border-gold-primary/30 bg-gold-bg px-3 py-2 text-[12px] leading-relaxed text-ink-primary">
+        This UI is write-only by design. The current backend exposes OMS
+        credential lifecycle storage and apply logic, but the tenant propose route
+        for <code>credential_update</code> is not yet published at the HTTP layer,
+        so submission remains blocked from the browser.
+      </div>
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={onManage}
+          disabled={!canWrite}
+          className="cc-btn cc-btn-secondary disabled:opacity-50"
+        >
+          <KeyRound size={14} strokeWidth={1.8} />
+          Manage OMS credential
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function ConnectorToolCard({
+  card,
+  canWrite,
+  testState,
+  onConfigure,
+  onTest,
+}: {
+  card: ConnectorCardView;
+  canWrite: boolean;
+  testState: TestState | null;
+  onConfigure: () => void;
+  onTest: () => void;
+}) {
+  const statusMeta = connectorStatusMeta(card.status);
+  const connector = card.connector;
+
+  return (
+    <Card hover>
+      <CardHeader>
+        <div>
+          <CardTitle>{card.tool.label}</CardTitle>
+          <CardDescription>{card.tool.summary}</CardDescription>
         </div>
-        <div className="flex-1 rounded border border-border-subtle bg-surface-raised p-3">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Step 2 · Credential (separate path)
-          </p>
-          <button
-            onClick={onSetCredential}
-            className="mt-2 h-9 w-full rounded border border-gold-primary/40 px-3 text-[12px] text-gold-primary hover:bg-gold-primary/10"
-          >
-            Set credential
-          </button>
+        <StatusBadge
+          label={statusMeta.label}
+          tone={statusMeta.tone}
+          icon={statusMeta.icon}
+        />
+      </CardHeader>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Tool name" value={card.tool.toolName} />
+        <Field
+          label="Connector type"
+          value={connector?.connector_type ?? card.tool.defaultConnectorType}
+        />
+        <Field label="Endpoint host" value={card.endpointPreview} />
+        <Field label="HTTP method" value={connector?.http_method ?? "POST"} />
+        <Field
+          label="Idempotency header"
+          value={connector?.idempotency_header_name ?? "Idempotency-Key"}
+        />
+        <Field label="Version" value={connector ? `v${connector.version}` : "—"} />
+        <Field label="Last configured by" value={connector?.configured_by ?? "—"} />
+        <Field label="Source approval" value={connector?.source_approval_id ?? "—"} />
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-3">
+        <GateBadge
+          label="Connector configured"
+          active={card.gateState.connectorConfigured}
+        />
+        <GateBadge
+          label="Action policy active"
+          active={card.gateState.actionPolicyActive}
+        />
+        <GateBadge
+          label="Taxonomy requires execution"
+          active={card.gateState.taxonomyRequiresExecution}
+        />
+      </div>
+
+      <div className="mt-3 rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
+        <div className="font-medium text-ink-primary">
+          {card.gateState.armed ? "Execution armed" : "Execution not armed"}
+        </div>
+        <div className="mt-1">
+          {!card.gateState.actionPolicyActive
+            ? card.gateState.policyHint
+            : !card.gateState.taxonomyRequiresExecution
+              ? card.gateState.taxonomyHint
+              : card.gateState.connectorConfigured
+                ? "All three gates are present. Autonomous execution can proceed only within policy."
+                : "A live connector config is still required before autonomous execution can occur."}
         </div>
       </div>
-    </article>
+
+      {card.pendingRequestCount > 0 && (
+        <div className="mt-3 rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] text-ink-secondary">
+          {card.pendingRequestCount} connector change
+          {card.pendingRequestCount === 1 ? "" : "s"} awaiting separate approval.
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={onConfigure}
+          disabled={!canWrite}
+          className="cc-btn cc-btn-secondary disabled:opacity-50"
+        >
+          <PlugZap size={14} strokeWidth={1.8} />
+          Propose config change
+        </button>
+        <button
+          type="button"
+          onClick={onTest}
+          disabled={!canWrite || connector === null || testState?.busy === true}
+          className="cc-btn cc-btn-secondary disabled:opacity-50"
+        >
+          <TestTubeDiagonal size={14} strokeWidth={1.8} />
+          {testState?.busy ? "Testing..." : "Test Connection"}
+        </button>
+      </div>
+
+      {testState && <ConnectorTestResult result={testState} />}
+
+      <TechnicalDetails
+        label="Show connector details"
+        openLabel="Hide connector details"
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-[12px] font-medium text-ink-primary">
+              Field mappings
+            </p>
+            <CodeAsReadableText
+              data={connector?.field_mappings ?? asRecord(card.pendingProposal?.field_mappings)}
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-[12px] font-medium text-ink-primary">
+              Response parsing
+            </p>
+            <CodeAsReadableText
+              data={connector?.response_parse ?? asRecord(card.pendingProposal?.response_parse)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <DownloadableLog
+              data={connector ?? card.pendingProposal ?? {}}
+              filename={`${card.tool.toolName.replace(/\./g, "-")}-connector.json`}
+              label="Download connector detail"
+            />
+          </div>
+        </div>
+      </TechnicalDetails>
+    </Card>
+  );
+}
+
+function ConnectorTestResult({ result }: { result: TestState }) {
+  if (result.error) {
+    return (
+      <div className="mt-4 rounded-lg border border-red-alert/30 bg-red-alert/10 px-3 py-2 text-[13px] text-red-alert">
+        Safe test failed: {result.error}
+      </div>
+    );
+  }
+  if (!result.data) return null;
+
+  return (
+    <div className="mt-4 rounded-lg border border-border-subtle bg-surface-raised p-3">
+      <div className="mb-3 flex items-center gap-2">
+        <Shield className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
+        <span className="text-[13px] font-medium text-ink-primary">
+          Safe test result
+        </span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        <Field label="Reachable" value={result.data.reachable ? "Yes" : "No"} />
+        <Field
+          label="TLS verified"
+          value={result.data.tls_verified ? "Yes" : "No"}
+        />
+        <Field
+          label="Config valid"
+          value={result.data.config_valid ? "Yes" : "No"}
+        />
+        <Field label="HTTP probe" value={result.data.http_probe} />
+        <Field
+          label="Validated host"
+          value={result.data.validated_host ?? "No host validated"}
+        />
+      </div>
+    </div>
   );
 }
 
 function ConnectorProposeForm({
+  tool,
   connector,
   onProposed,
 }: {
-  connector?: TenantConnectorConfiguration;
+  tool: ConnectorToolDefinition;
+  connector: TenantConnectorConfiguration | null;
   onProposed: () => void;
 }) {
+  const [connectorType, setConnectorType] = useState(
+    connector?.connector_type ?? tool.defaultConnectorType
+  );
+  const [httpMethod, setHttpMethod] = useState(connector?.http_method ?? "POST");
+  const [endpointTemplate, setEndpointTemplate] = useState(
+    connector?.endpoint_template ?? ""
+  );
+  const [idempotencyHeader, setIdempotencyHeader] = useState(
+    connector?.idempotency_header_name ?? "Idempotency-Key"
+  );
+  const [successStatusCodes, setSuccessStatusCodes] = useState(
+    (connector?.success_status_codes ?? [200]).join(", ")
+  );
+  const [status, setStatus] = useState(connector?.status ?? "active");
+  const [fieldMappings, setFieldMappings] = useState(
+    recordToRows(connector?.field_mappings ?? {})
+  );
+  const [responseParse, setResponseParse] = useState(
+    recordToRows(connector?.response_parse ?? {})
+  );
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const endpointPreview = sanitizeEndpointDisplay(endpointTemplate);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
-    const form = new FormData(event.currentTarget);
+
     try {
+      const parsedUrl = parseHttpsUrl(endpointTemplate);
       const body = buildConnectorChangePayload({
-        connector_type: String(form.get("connector_type") || ""),
-        tool_name: String(form.get("tool_name") || ""),
-        http_method: String(form.get("http_method") || "POST"),
-        endpoint_template: String(form.get("endpoint_template") || ""),
-        endpoint_host: String(form.get("endpoint_host") || ""),
-        field_mappings: parseJsonObject(String(form.get("field_mappings") || "{}")),
-        idempotency_header_name: String(form.get("idempotency_header_name") || ""),
-        response_parse: parseJsonObject(String(form.get("response_parse") || "{}")),
-        success_status_codes: parseStatusCodes(String(form.get("success_status_codes") || "")),
-        status: String(form.get("status") || "active"),
+        connector_type: connectorType,
+        tool_name: tool.toolName,
+        http_method: httpMethod,
+        endpoint_template: endpointTemplate.trim(),
+        endpoint_host: parsedUrl.host,
+        field_mappings: rowsToRecord(fieldMappings),
+        response_parse: rowsToRecord(responseParse),
+        idempotency_header_name: idempotencyHeader.trim(),
+        success_status_codes: parseStatusCodes(successStatusCodes),
+        status,
       });
       await proposeConfigChangeRequest(body);
       onProposed();
@@ -228,167 +724,174 @@ function ConnectorProposeForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-        {connector ? "Propose Connector Change" : "Propose New Connector"}
-      </h2>
-      <p className="text-[13px] leading-relaxed text-ink-secondary">
-        This proposes a governed config change. It is <strong>not</strong> applied
-        until a different principal approves it. Credentials are set separately via
-        the channel credential path — never here.
-      </p>
+      <div>
+        <h2 className="font-display text-[24px] font-semibold text-ink-primary">
+          {connector ? `Update ${tool.label}` : `Configure ${tool.label}`}
+        </h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
+          This creates a governed connector change request. It is applied only
+          after approval by a different principal.
+        </p>
+      </div>
+
       {error && <FormError message={error} />}
-      <Select
-        name="connector_type"
-        label="Connector type"
-        defaultValue={connector?.connector_type ?? CONNECTOR_TYPE_OPTIONS[0]}
-        options={[...CONNECTOR_TYPE_OPTIONS]}
-      />
-      <Text name="tool_name" label="Tool name" defaultValue={connector?.tool_name ?? ""} required />
-      <Select
-        name="http_method"
-        label="HTTP method"
-        defaultValue={connector?.http_method ?? "POST"}
-        options={[...HTTP_METHOD_OPTIONS]}
-      />
-      <Text
-        name="endpoint_template"
-        label="Endpoint template (HTTPS)"
-        defaultValue={connector?.endpoint_template ?? ""}
-        required
-      />
-      <Text
-        name="endpoint_host"
-        label="Endpoint host"
-        defaultValue={connector?.endpoint_host ?? ""}
-        required
-      />
-      <Text
-        name="idempotency_header_name"
-        label="Idempotency header name"
-        defaultValue={connector?.idempotency_header_name ?? "Idempotency-Key"}
-        required
-      />
-      <Text
-        name="success_status_codes"
-        label="Success status codes (comma separated)"
-        defaultValue={(connector?.success_status_codes ?? [200]).join(", ")}
-        required
-      />
-      <Select
-        name="status"
-        label="Status"
-        defaultValue={connector?.status ?? "active"}
-        options={[...CONNECTOR_STATUS_OPTIONS]}
-      />
-      <JsonArea
-        name="field_mappings"
-        label="Field mappings (JSON)"
-        defaultValue={JSON.stringify(connector?.field_mappings ?? {}, null, 2)}
-      />
-      <JsonArea
-        name="response_parse"
-        label="Response parse (JSON)"
-        defaultValue={JSON.stringify(connector?.response_parse ?? {}, null, 2)}
-      />
+
+      <Fieldset legend="Identity">
+        <Field label="Tool name" value={tool.toolName} />
+        <Select
+          label="Connector type"
+          name="connector_type"
+          value={connectorType}
+          options={[...CONNECTOR_TYPE_OPTIONS]}
+          onChange={setConnectorType}
+        />
+      </Fieldset>
+
+      <Fieldset legend="Endpoint">
+        <Select
+          label="HTTP method"
+          name="http_method"
+          value={httpMethod}
+          options={[...HTTP_METHOD_OPTIONS]}
+          onChange={setHttpMethod}
+        />
+        <Text
+          label="Endpoint URL"
+          name="endpoint_template"
+          value={endpointTemplate}
+          onChange={setEndpointTemplate}
+          placeholder="https://api.tenant.example/remedies/refunds"
+          required
+        />
+        <Field label="Validated host preview" value={endpointPreview} />
+        <Text
+          label="Idempotency header"
+          name="idempotency_header_name"
+          value={idempotencyHeader}
+          onChange={setIdempotencyHeader}
+          required
+        />
+        <Text
+          label="Success status codes"
+          name="success_status_codes"
+          value={successStatusCodes}
+          onChange={setSuccessStatusCodes}
+          placeholder="200, 201, 202"
+          required
+        />
+        <Select
+          label="Record status"
+          name="status"
+          value={status}
+          options={[...CONNECTOR_STATUS_OPTIONS]}
+          onChange={setStatus}
+        />
+      </Fieldset>
+
+      <Fieldset legend="Field mappings">
+        <p className="text-[13px] text-ink-secondary">
+          Map Operious action payload fields to the tenant API schema using
+          dot-paths such as <code>payload.order_id</code>.
+        </p>
+        <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
+      </Fieldset>
+
+      <Fieldset legend="Response parsing">
+        <p className="text-[13px] text-ink-secondary">
+          Map tenant response fields used for provider id, provider status, and
+          provider errors.
+        </p>
+        <MappingEditor rows={responseParse} onChange={setResponseParse} />
+      </Fieldset>
+
       <Submit isSubmitting={isSubmitting} label="Propose config change" />
     </form>
   );
 }
 
-function ConnectorCredentialForm({
-  connector,
-  onProposed,
+function OmsCredentialForm({
+  currentState,
+  canWrite,
+  pendingCount,
 }: {
-  connector: TenantConnectorConfiguration;
-  onProposed: () => void;
+  currentState: TenantChannelConfiguration | null;
+  canWrite: boolean;
+  pendingCount: number;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const loadChannels = useCallback(() => listChannelConfigurations(), []);
-  const { data: channelPage, isLoading } = useApiResource<ApiPage<TenantChannelConfiguration>>(
-    loadChannels
-  );
-  const matchingChannels = useMemo(
-    () =>
-      (channelPage?.items ?? []).filter(
-        (channel) => channel.channel_type === connector.connector_type
-      ),
-    [channelPage, connector.connector_type]
-  );
-  const credentialKeys = CONNECTOR_CREDENTIAL_KEYS[connector.connector_type] ?? [];
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsSubmitting(true);
-    setError(null);
-    const form = new FormData(event.currentTarget);
-    const configId = String(form.get("config_id") || "");
-    if (!configId) {
-      setError("Select the channel whose credential to rotate.");
-      setIsSubmitting(false);
-      return;
-    }
-    const credentials: Record<string, string> = {};
-    for (const field of credentialKeys) {
-      credentials[field.key] = String(form.get(field.key) || "");
-    }
-    try {
-      // Credential rotation is a CHANNEL change request — never a connector one.
-      const body = buildChannelCredentialChangePayload({
-        configId,
-        credentials,
-        webhookSecret: String(form.get("webhook_secret") || ""),
-      });
-      await proposeConfigChangeRequest(body);
-      onProposed();
-    } catch (caught: unknown) {
-      setError(formatApiError(caught));
-      setIsSubmitting(false);
-    }
-  };
+  const [authType, setAuthType] = useState<(typeof OMS_AUTH_TYPES)[number]>("bearer");
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-        Set Connector Credential
-      </h2>
-      <div className="rounded border border-gold-primary/40 bg-gold-bg p-3 text-[13px] leading-relaxed text-ink-primary">
-        This is a <strong>separate step</strong> from the connector config. The
-        credential is rotated through the channel credential path as its own
-        governed change request. Existing values are never displayed — leave a
-        field blank to keep its current value.
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-display text-[24px] font-semibold text-ink-primary">
+          OMS Credential
+        </h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
+          The form is write-only. Existing values are never displayed, never
+          pre-populated, and never returned from the API.
+        </p>
       </div>
-      {error && <FormError message={error} />}
-      {isLoading && <LoadingState label="Loading channels..." />}
-      {!isLoading && matchingChannels.length === 0 && (
-        <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
-          No <strong>{connector.connector_type}</strong> channel is configured yet.
-          Create the channel first, then rotate its credential here.
+
+      <div className="rounded-lg border border-border-subtle bg-surface-raised p-4">
+        <div className="grid gap-2 md:grid-cols-3">
+          <Field
+            label="Configured"
+            value={currentState ? "Yes" : "No"}
+          />
+          <Field
+            label="Last updated"
+            value={
+              currentState?.credential_rotated_at
+                ? formatDate(currentState.credential_rotated_at)
+                : "Never"
+            }
+          />
+          <Field label="Status" value={currentState?.status ?? "not_configured"} />
         </div>
-      )}
-      {matchingChannels.length > 0 && (
-        <label className="block">
-          <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Target channel
-          </span>
-          <select
-            name="config_id"
-            className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
-          >
-            {matchingChannels.map((channel) => (
-              <option key={channel.config_id} value={channel.config_id}>
-                {channel.routing_address} ({channel.config_id.slice(0, 8)})
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {credentialKeys.map((field) => (
-        <WriteOnlyInput key={field.key} name={field.key} label={field.label} />
-      ))}
-      <WriteOnlyInput name="webhook_secret" label="Webhook secret" />
-      <Submit isSubmitting={isSubmitting} label="Propose credential rotation" />
-    </form>
+      </div>
+
+      <div className="rounded-lg border border-gold-primary/30 bg-gold-bg px-3 py-2 text-[13px] leading-relaxed text-ink-primary">
+        Pending approvals: {pendingCount}. Submission is intentionally disabled
+        until the backend exposes the tenant HTTP propose route for
+        <code>credential_update</code>. The storage/apply path exists, but the
+        browser cannot safely reach it yet without a dedicated endpoint.
+      </div>
+
+      <Fieldset legend="Credential">
+        <Select
+          label="Auth type"
+          name="auth_type"
+          value={authType}
+          options={[...OMS_AUTH_TYPES]}
+          onChange={(value) => setAuthType(value as (typeof OMS_AUTH_TYPES)[number])}
+        />
+        {authType === "bearer" && (
+          <WriteOnlyInput name="token" label="Bearer token" />
+        )}
+        {authType === "api_key" && (
+          <WriteOnlyInput name="api_key" label="API key" />
+        )}
+        {authType === "basic" && (
+          <>
+            <WriteOnlyInput name="username" label="Username" />
+            <WriteOnlyInput name="password" label="Password" />
+          </>
+        )}
+      </Fieldset>
+
+      <button
+        type="button"
+        disabled
+        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white opacity-50"
+        title={
+          canWrite
+            ? "Awaiting backend credential_update HTTP route exposure."
+            : "This principal lacks tenant.connector.write."
+        }
+      >
+        Propose credential update
+      </button>
+    </div>
   );
 }
 
@@ -400,7 +903,10 @@ export function ActionPolicyView() {
   const load = useCallback(() => listGovernancePolicies(), []);
   const { data, error, isLoading, reload } = useApiResource(load);
   const actionPolicy = useMemo(
-    () => (data?.items ?? []).find((policy) => policy.policy_type === ACTION_TOOLS_POLICY_TYPE) ?? null,
+    () =>
+      (data?.items ?? []).find(
+        (policy) => policy.policy_type === ACTION_TOOLS_POLICY_TYPE
+      ) ?? null,
     [data]
   );
 
@@ -433,7 +939,9 @@ export function ActionPolicyView() {
           <ActionPolicyForm
             policy={actionPolicy}
             onProposed={() => {
-              setNotice("Action policy change proposed — pending approval by another principal.");
+              setNotice(
+                "Action policy change proposed. It now awaits approval by another principal."
+              );
               setModal(false);
               reload();
             }}
@@ -446,23 +954,32 @@ export function ActionPolicyView() {
 
 function ActionPolicyCard({ policy }: { policy: TenantGovernancePolicy }) {
   return (
-    <article className="rounded-lg border border-border-subtle bg-surface p-4">
-      <div className="flex items-start justify-between gap-4">
-        <h2 className="text-[18px] font-semibold text-ink-primary">action_tools</h2>
-        <span className="shrink-0 rounded border border-border-subtle px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-          v{policy.version} · {policy.status}
-        </span>
-      </div>
-      <div className="mt-4 grid gap-2">
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>action_tools</CardTitle>
+          <CardDescription>
+            Governs whether autonomous execution is allowed, denied, or requires
+            approval for each action tool.
+          </CardDescription>
+        </div>
+        <StatusBadge label={`v${policy.version} · ${policy.status}`} tone="info" />
+      </CardHeader>
+      <div className="grid gap-2 md:grid-cols-2">
         <Field label="Approved by" value={policy.approved_by} />
-        <Field label="Effective from" value={policy.effective_from} />
+        <Field label="Effective from" value={formatDate(policy.effective_from)} />
       </div>
       <TechnicalDetails label="Show policy parameters" openLabel="Hide policy parameters">
-        <pre className="max-h-72 overflow-auto rounded border border-border-subtle bg-surface-raised p-3 text-[11px] leading-relaxed text-ink-secondary">
-          {JSON.stringify(policy.parameters, null, 2)}
-        </pre>
+        <CodeAsReadableText data={policy.parameters} />
+        <div className="mt-3">
+          <DownloadableLog
+            data={policy.parameters}
+            filename="action-tools-policy.json"
+            label="Download policy parameters"
+          />
+        </div>
       </TechnicalDetails>
-    </article>
+    </Card>
   );
 }
 
@@ -477,24 +994,39 @@ function ActionPolicyForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const existing = readExistingActionPolicy(policy);
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
     const form = new FormData(event.currentTarget);
     try {
-      const refundConfidenceRaw = String(form.get("refund_confidence_gte") || "").trim();
+      const refundConfidenceRaw = String(
+        form.get("refund_confidence_gte") || ""
+      ).trim();
       const body = buildActionPolicyChangePayload({
         policyId: policy?.policy_id,
-        effectiveFrom: policy ? undefined : new Date(String(form.get("effective_from") || "")).toISOString(),
+        effectiveFrom: policy
+          ? undefined
+          : new Date(String(form.get("effective_from") || "")).toISOString(),
         warrantyConfidenceGte: Number(form.get("warranty_confidence_gte")),
-        warrantyIssueCategories: parseList(String(form.get("warranty_issue_category_in") || "")),
-        warrantyElse: String(form.get("warranty_else") || "require_approval") as PolicyDecision,
-        replacementAlways: String(form.get("replacement_always") || "require_approval") as PolicyDecision,
+        warrantyIssueCategories: parseList(
+          String(form.get("warranty_issue_category_in") || "")
+        ),
+        warrantyElse: String(
+          form.get("warranty_else") || "require_approval"
+        ) as PolicyDecision,
+        replacementAlways: String(
+          form.get("replacement_always") || "require_approval"
+        ) as PolicyDecision,
         refundAmountCentsLte: Number(form.get("refund_amount_cents_lte")),
-        refundConfidenceGte: refundConfidenceRaw === "" ? null : Number(refundConfidenceRaw),
-        refundElse: String(form.get("refund_else") || "require_approval") as PolicyDecision,
-        warehouseAllowSeverities: parseList(String(form.get("warehouse_allow_severity_in") || "")),
+        refundConfidenceGte:
+          refundConfidenceRaw === "" ? null : Number(refundConfidenceRaw),
+        refundElse: String(
+          form.get("refund_else") || "require_approval"
+        ) as PolicyDecision,
+        warehouseAllowSeverities: parseList(
+          String(form.get("warehouse_allow_severity_in") || "")
+        ),
         warehouseRequireApprovalSeverities: parseList(
           String(form.get("warehouse_require_approval_severity_in") || "")
         ),
@@ -513,12 +1045,18 @@ function ActionPolicyForm({
         {policy ? "Propose Action Policy Change" : "Propose Action Policy"}
       </h2>
       <p className="text-[13px] leading-relaxed text-ink-secondary">
-        Governed change — applied only after a different principal approves. A
-        malformed policy is rejected at propose; the error appears below.
+        Governed change only. A different principal must approve it before it can
+        apply.
       </p>
       {error && <FormError message={error} />}
       {!policy && (
-        <Text name="effective_from" label="Effective from" type="datetime-local" defaultValue={nowLocal()} required />
+        <Text
+          name="effective_from"
+          label="Effective from"
+          type="datetime-local"
+          defaultValue={nowLocal()}
+          required
+        />
       )}
 
       <Fieldset legend="Refund">
@@ -533,7 +1071,11 @@ function ActionPolicyForm({
           name="refund_confidence_gte"
           label="Refund confidence threshold (0–1, optional)"
           type="number"
-          defaultValue={existing.refundConfidenceGte == null ? "" : String(existing.refundConfidenceGte)}
+          defaultValue={
+            existing.refundConfidenceGte == null
+              ? ""
+              : String(existing.refundConfidenceGte)
+          }
         />
         <Select
           name="refund_else"
@@ -596,31 +1138,6 @@ function ActionPolicyForm({
 
 // ─── Shared primitives ────────────────────────────────────────────────────
 
-function GovernedNotice() {
-  return (
-    <div className="mb-4 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
-      Edits here are <strong>governed</strong>: they become change requests that stay
-      pending until a different principal approves them, then apply. This is dual
-      control — not a direct write.
-    </div>
-  );
-}
-
-function ProposedNotice({ message, onDismiss }: { message: string; onDismiss: () => void }) {
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-gold-primary/40 bg-gold-bg px-3 py-2 text-[13px] text-ink-primary">
-      <span>{message}</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="h-7 rounded border border-border-subtle px-2 text-[12px] text-ink-secondary hover:text-ink-primary"
-      >
-        Dismiss
-      </button>
-    </div>
-  );
-}
-
 function Header({
   eyebrow,
   title,
@@ -629,45 +1146,77 @@ function Header({
 }: {
   eyebrow: string;
   title: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <>
-      <div className="eyebrow text-ink-tertiary mb-2">{eyebrow}</div>
+      <div className="eyebrow mb-2 text-ink-tertiary">{eyebrow}</div>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="font-display text-[32px] font-semibold text-ink-primary">{title}</h1>
-        <button
-          onClick={onAction}
-          className="h-11 rounded border border-border-subtle bg-surface px-4 text-[13px] text-ink-secondary hover:border-border-defined hover:text-ink-primary sm:h-10"
-        >
-          {actionLabel}
-        </button>
+        <h1 className="font-display text-[32px] font-semibold text-ink-primary">
+          {title}
+        </h1>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="cc-btn cc-btn-secondary"
+          >
+            {actionLabel}
+          </button>
+        )}
       </div>
     </>
+  );
+}
+
+function GateExplainer({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-3">
+      <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+        {title}
+      </div>
+      <div className="mt-1 text-[13px] text-ink-secondary">{body}</div>
+    </div>
+  );
+}
+
+function GateBadge({ label, active }: { label: string; active: boolean }) {
+  return (
+    <StatusBadge
+      label={`${label}: ${active ? "yes" : "no"}`}
+      tone={active ? "success" : "warning"}
+      icon={active ? CheckCircle2 : CircleAlert}
+      className="justify-center"
+    />
   );
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">{label}</div>
-      <div className="mt-1 break-words text-[13px] leading-relaxed text-ink-secondary">{value}</div>
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+        {label}
+      </div>
+      <div className="mt-1 break-words text-[13px] leading-relaxed text-ink-secondary">
+        {value || "—"}
+      </div>
     </div>
   );
 }
 
-function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6">
-      <div className="max-h-[88dvh] w-full max-w-3xl overflow-y-auto rounded-lg border border-border-subtle bg-surface p-4 shadow-elevated sm:p-6">
+      <div className="max-h-[88dvh] w-full max-w-4xl overflow-y-auto rounded-lg border border-border-subtle bg-surface p-4 shadow-elevated sm:p-6">
         <div className="mb-4 flex justify-end">
           <button
+            type="button"
             onClick={onClose}
             className="flex h-11 w-11 items-center justify-center rounded border border-border-subtle text-ink-tertiary hover:text-ink-primary"
             aria-label="Close modal"
           >
-            X
+            <X className="h-4 w-4" strokeWidth={1.8} />
           </button>
         </div>
         {children}
@@ -676,7 +1225,7 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
   );
 }
 
-function Fieldset({ legend, children }: { legend: string; children: React.ReactNode }) {
+function Fieldset({ legend, children }: { legend: string; children: ReactNode }) {
   return (
     <fieldset className="space-y-3 rounded-lg border border-border-subtle bg-surface-raised p-4">
       <legend className="px-1 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-tertiary">
@@ -691,13 +1240,19 @@ function Text({
   label,
   name,
   type = "text",
-  defaultValue = "",
+  value,
+  defaultValue,
+  onChange,
+  placeholder,
   required = false,
 }: {
   label: string;
   name: string;
   type?: string;
+  value?: string;
   defaultValue?: string;
+  onChange?: (value: string) => void;
+  placeholder?: string;
   required?: boolean;
 }) {
   return (
@@ -709,18 +1264,17 @@ function Text({
         name={name}
         type={type}
         step={type === "number" ? "any" : undefined}
+        value={value}
         defaultValue={defaultValue}
+        onChange={onChange ? (event) => onChange(event.target.value) : undefined}
+        placeholder={placeholder}
         required={required}
-        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+        className="h-11 w-full rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none sm:h-10"
       />
     </label>
   );
 }
 
-/**
- * Write-only credential input. Never receives a defaultValue — the current
- * credential is never read into the form, never displayed. Blank = keep.
- */
 function WriteOnlyInput({ name, label }: { name: string; label: string }) {
   return (
     <label className="block">
@@ -731,8 +1285,7 @@ function WriteOnlyInput({ name, label }: { name: string; label: string }) {
         name={name}
         type="password"
         autoComplete="new-password"
-        placeholder={KEEP_CURRENT_PLACEHOLDER}
-        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+        className="h-11 w-full rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none sm:h-10"
       />
     </label>
   );
@@ -741,13 +1294,17 @@ function WriteOnlyInput({ name, label }: { name: string; label: string }) {
 function Select({
   label,
   name,
+  value,
   defaultValue,
   options,
+  onChange,
 }: {
   label: string;
   name: string;
-  defaultValue: string;
+  value?: string;
+  defaultValue?: string;
   options: string[];
+  onChange?: (value: string) => void;
 }) {
   return (
     <label className="block">
@@ -756,8 +1313,10 @@ function Select({
       </span>
       <select
         name={name}
+        value={value}
         defaultValue={defaultValue}
-        className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary sm:h-10"
+        onChange={onChange ? (event) => onChange(event.target.value) : undefined}
+        className="h-11 w-full rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none sm:h-10"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -769,27 +1328,58 @@ function Select({
   );
 }
 
-function JsonArea({
-  label,
-  name,
-  defaultValue,
+function MappingEditor({
+  rows,
+  onChange,
 }: {
-  label: string;
-  name: string;
-  defaultValue: string;
+  rows: KeyValueRow[];
+  onChange: (rows: KeyValueRow[]) => void;
 }) {
+  const updateRow = (rowId: string, key: "key" | "value", value: string) => {
+    onChange(
+      rows.map((row) => (row.id === rowId ? { ...row, [key]: value } : row))
+    );
+  };
+
+  const addRow = () => {
+    onChange([...rows, createRow()]);
+  };
+
+  const removeRow = (rowId: string) => {
+    const remaining = rows.filter((row) => row.id !== rowId);
+    onChange(remaining.length > 0 ? remaining : [createRow()]);
+  };
+
   return (
-    <label className="block">
-      <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-        {label}
-      </span>
-      <textarea
-        name={name}
-        defaultValue={defaultValue}
-        rows={6}
-        className="w-full rounded border border-border-subtle bg-surface-raised px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-primary focus:outline-none focus:border-gold-primary"
-      />
-    </label>
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <div key={row.id} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+          <input
+            value={row.key}
+            onChange={(event) => updateRow(row.id, "key", event.target.value)}
+            placeholder="provider_field"
+            className="h-10 rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none"
+          />
+          <input
+            value={row.value}
+            onChange={(event) => updateRow(row.id, "value", event.target.value)}
+            placeholder="payload.order_id"
+            className="h-10 rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => removeRow(row.id)}
+            className="cc-btn cc-btn-secondary"
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={addRow} className="cc-btn cc-btn-secondary">
+        <Link2 size={14} strokeWidth={1.8} />
+        Add mapping
+      </button>
+    </div>
   );
 }
 
@@ -805,6 +1395,36 @@ function Submit({ isSubmitting, label }: { isSubmitting: boolean; label: string 
   );
 }
 
+function GovernedNotice() {
+  return (
+    <div className="mb-4 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+      Edits here are governed: they become change requests that stay pending
+      until a different principal approves them, then apply.
+    </div>
+  );
+}
+
+function ProposedNotice({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-gold-primary/40 bg-gold-bg px-3 py-2 text-[13px] text-ink-primary">
+      <span>{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="h-7 rounded border border-border-subtle px-2 text-[12px] text-ink-secondary hover:text-ink-primary"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 function FormError({ message }: { message: string }) {
   return (
     <div className="rounded border border-red-alert/30 bg-red-alert/10 px-3 py-2 text-[13px] text-red-alert">
@@ -815,12 +1435,210 @@ function FormError({ message }: { message: string }) {
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
-function parseJsonObject(value: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(value || "{}");
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Expected a JSON object");
+function buildConnectorCardView({
+  tool,
+  history,
+  pendingRequests,
+  policies,
+}: {
+  tool: ConnectorToolDefinition;
+  history: TenantConnectorConfiguration[];
+  pendingRequests: TenantConfigChangeRequest[];
+  policies: TenantGovernancePolicy[];
+}): ConnectorCardView {
+  const connector = selectLatestConnector(history);
+  const toolRequests = pendingRequests.filter(
+    (request) =>
+      request.change_type === "connector" &&
+      request.proposed_payload.tool_name === tool.toolName
+  );
+  const pendingProposal = toolRequests[0]?.proposed_payload ?? null;
+  const status = deriveConnectorStatus(connector, toolRequests.length);
+  const gateState = deriveGateState(tool.toolName, connector, policies);
+  const endpointPreview =
+    displayEndpointPreview(connector?.endpoint_template) ??
+    displayEndpointPreview(
+      typeof pendingProposal?.endpoint_template === "string"
+        ? pendingProposal.endpoint_template
+        : null
+    ) ??
+    "No endpoint configured";
+
+  return {
+    tool,
+    connector,
+    pendingRequestCount: toolRequests.length,
+    pendingProposal,
+    status,
+    endpointPreview,
+    gateState,
+  };
+}
+
+function deriveConnectorStatus(
+  connector: TenantConnectorConfiguration | null,
+  pendingRequestCount: number
+): ConnectorCardStatus {
+  if (pendingRequestCount > 0) return "pending_approval";
+  if (connector?.status === "active") return "active";
+  return "inactive";
+}
+
+function deriveGateState(
+  toolName: string,
+  connector: TenantConnectorConfiguration | null,
+  policies: TenantGovernancePolicy[]
+): GateState {
+  const connectorConfigured = connector?.status === "active";
+  const actionPolicy = policies.find(
+    (policy) =>
+      policy.policy_type === ACTION_TOOLS_POLICY_TYPE && policy.status === "active"
+  );
+  const actionPolicyActive = hasToolPolicyRule(actionPolicy, toolName);
+  const taxonomyRequiresExecution = hasTaxonomyExecutionRule(policies, toolName);
+
+  return {
+    connectorConfigured,
+    actionPolicyActive,
+    taxonomyRequiresExecution,
+    armed: connectorConfigured && actionPolicyActive && taxonomyRequiresExecution,
+    policyHint: actionPolicyActive
+      ? "Active action policy rule is present."
+      : "This connector needs an action policy before it can be armed.",
+    taxonomyHint: taxonomyRequiresExecution
+      ? "Resolution taxonomy currently marks this action for execution."
+      : "Resolution taxonomy does not currently mark this action as requires_execution.",
+  };
+}
+
+function hasToolPolicyRule(
+  policy: TenantGovernancePolicy | undefined,
+  toolName: string
+): boolean {
+  if (!policy) return false;
+  const tools = asRecord(asRecord(policy.parameters).tools);
+  return Object.prototype.hasOwnProperty.call(tools, toolName);
+}
+
+function hasTaxonomyExecutionRule(
+  policies: TenantGovernancePolicy[],
+  toolName: string
+): boolean {
+  const taxonomy = policies.find(
+    (policy) =>
+      policy.policy_type === RESOLUTION_TAXONOMY_POLICY_TYPE &&
+      policy.status === "active"
+  );
+  if (!taxonomy) return false;
+  const categories = Array.isArray(asRecord(taxonomy.parameters).categories)
+    ? (asRecord(taxonomy.parameters).categories as unknown[])
+    : [];
+
+  return categories.some((category) => {
+    const recommendedActions = Array.isArray(asRecord(category).recommended_actions)
+      ? (asRecord(category).recommended_actions as unknown[])
+      : [];
+    return recommendedActions.some((action) => {
+      const actionRecord = asRecord(action);
+      return (
+        actionRecord.tool_name === toolName &&
+        actionRecord.requires_execution === true
+      );
+    });
+  });
+}
+
+function selectLatestConnector(
+  records: TenantConnectorConfiguration[]
+): TenantConnectorConfiguration | null {
+  if (records.length === 0) return null;
+  return [...records].sort((left, right) => {
+    if (left.version !== right.version) return right.version - left.version;
+    return right.updated_at.localeCompare(left.updated_at);
+  })[0]!;
+}
+
+function selectOmsCredentialState(
+  channels: TenantChannelConfiguration[]
+): TenantChannelConfiguration | null {
+  const omsChannels = channels.filter((channel) => channel.channel_type === "oms");
+  if (omsChannels.length === 0) return null;
+  return [...omsChannels].sort((left, right) => {
+    const leftDate =
+      left.credential_rotated_at ?? left.verified_at ?? left.credential_rotation_expires_at ?? "";
+    const rightDate =
+      right.credential_rotated_at ?? right.verified_at ?? right.credential_rotation_expires_at ?? "";
+    return rightDate.localeCompare(leftDate);
+  })[0]!;
+}
+
+function connectorStatusMeta(status: ConnectorCardStatus): {
+  label: string;
+  tone: "success" | "warning" | "neutral";
+  icon: typeof CheckCircle2 | typeof CircleAlert | typeof ArrowUpRight;
+} {
+  if (status === "active") {
+    return { label: "Active", tone: "success", icon: CheckCircle2 };
   }
-  return parsed as Record<string, unknown>;
+  if (status === "pending_approval") {
+    return { label: "Pending approval", tone: "warning", icon: ArrowUpRight };
+  }
+  return { label: "Inactive", tone: "neutral", icon: CircleAlert };
+}
+
+function parseHttpsUrl(value: string): URL {
+  const parsed = new URL(value.trim());
+  if (parsed.protocol !== "https:") {
+    throw new Error("Endpoint URL must use https.");
+  }
+  return parsed;
+}
+
+function sanitizeEndpointDisplay(value: string): string {
+  try {
+    const parsed = parseHttpsUrl(value);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "Enter a valid https URL";
+  }
+}
+
+function displayEndpointPreview(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return null;
+  }
+}
+
+function recordToRows(record: Record<string, unknown>): KeyValueRow[] {
+  const entries = Object.entries(record).map(([key, value]) => ({
+    id: nextRowId(),
+    key,
+    value: String(value),
+  }));
+  return entries.length > 0 ? entries : [createRow()];
+}
+
+function rowsToRecord(rows: KeyValueRow[]): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    const value = row.value.trim();
+    if (!key || !value) continue;
+    record[key] = value;
+  }
+  return record;
+}
+
+function createRow(): KeyValueRow {
+  return { id: nextRowId(), key: "", value: "" };
+}
+
+function nextRowId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function parseStatusCodes(value: string): number[] {
@@ -828,7 +1646,10 @@ function parseStatusCodes(value: string): number[] {
     .split(",")
     .map((part) => Number(part.trim()))
     .filter((code) => Number.isInteger(code));
-  return codes.length > 0 ? codes : [200];
+  if (codes.length === 0) {
+    throw new Error("Enter at least one integer HTTP status code.");
+  }
+  return codes;
 }
 
 function parseList(value: string): string[] {
@@ -842,17 +1663,11 @@ function nowLocal(): string {
   return new Date().toISOString().slice(0, 16);
 }
 
-type ExistingActionPolicy = {
-  warrantyConfidenceGte?: number;
-  warrantyIssueCategories?: string[];
-  warrantyElse?: PolicyDecision;
-  replacementAlways?: PolicyDecision;
-  refundAmountCentsLte?: number;
-  refundConfidenceGte?: number | null;
-  refundElse?: PolicyDecision;
-  warehouseAllowSeverities?: string[];
-  warehouseRequireApprovalSeverities?: string[];
-};
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
 
 function readExistingActionPolicy(policy: TenantGovernancePolicy | null): ExistingActionPolicy {
   if (!policy) return {};
@@ -871,7 +1686,8 @@ function readExistingActionPolicy(policy: TenantGovernancePolicy | null): Existi
     warrantyElse: asDecision(warranty.else),
     replacementAlways: asDecision(replacement.always),
     refundAmountCentsLte:
-      asNumber(refundAllow.refund_amount_cents_lte) ?? asNumber(refundAllow.amount_cents_lte),
+      asNumber(refundAllow.refund_amount_cents_lte) ??
+      asNumber(refundAllow.amount_cents_lte),
     refundConfidenceGte: asNumber(refundAllow.confidence_gte) ?? null,
     refundElse: asDecision(refund.else),
     warehouseAllowSeverities: asStringList(warehouseAllow.severity_in),

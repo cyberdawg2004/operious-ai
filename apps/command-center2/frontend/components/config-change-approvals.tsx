@@ -109,7 +109,7 @@ export function ConfigChangeApprovals({
   const emptyMessage =
     changeKind === "knowledge"
       ? "Pending knowledge document uploads awaiting approval will appear here."
-      : "Proposed connector and action-policy changes awaiting approval will appear here.";
+      : "Proposed connector, credential, and action-policy changes awaiting approval will appear here.";
 
   return (
     <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
@@ -456,6 +456,9 @@ function changeSummary(request: TenantConfigChangeRequest): string {
   const payload = request.proposed_payload;
   if (request.change_type === "connector") {
     return `${String(payload.connector_type ?? "connector")} · ${String(payload.tool_name ?? "")}`;
+  }
+  if (request.change_type === "credential_update") {
+    return `${String(payload.channel ?? "connector")} · credential update`;
   }
   if (request.change_type === "policy") {
     return String(payload.policy_type ?? "policy");

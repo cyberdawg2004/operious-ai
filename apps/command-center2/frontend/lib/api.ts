@@ -545,6 +545,14 @@ export type TenantConnectorConfiguration = {
   updated_at: string;
 };
 
+export type TenantConnectorTestResponse = {
+  reachable: boolean;
+  config_valid: boolean;
+  validated_host: string | null;
+  tls_verified: boolean;
+  http_probe: string;
+};
+
 /** Mirrors backend TenantConfigChangeType (app/tenant/change_requests.py). */
 export type TenantConfigChangeType =
   | "knowledge"
@@ -552,7 +560,8 @@ export type TenantConfigChangeType =
   | "execution_governance"
   | "topology"
   | "channel"
-  | "connector";
+  | "connector"
+  | "credential_update";
 
 /** Mirrors backend TenantConfigChangeRequestStatus. */
 export type TenantConfigChangeRequestStatus =
@@ -1415,6 +1424,15 @@ export function listConnectorConfigurationHistory(
         limit: query.limit ?? 100,
         offset: query.offset ?? 0,
       },
+    }
+  );
+}
+
+export function testConnectorConfiguration(tenantId: string, toolName: string) {
+  return apiRequest<TenantConnectorTestResponse>(
+    `/tenant/${encodeURIComponent(tenantId)}/connectors/${encodeURIComponent(toolName)}/test`,
+    {
+      method: "POST",
     }
   );
 }
