@@ -257,6 +257,7 @@ test('api client exposes the connector reads + change-request ledger', () => {
   for (const fn of [
     'export function listConnectorConfigurations',
     'export function listConnectorConfigurationHistory',
+    'export function proposeConnectorCredentials',
     'export function proposeConfigChangeRequest',
     'export function listConfigChangeRequests',
     'export function approveConfigChangeRequest',
@@ -268,6 +269,7 @@ test('api client exposes the connector reads + change-request ledger', () => {
   }
   // Endpoints hit the proven 2.5a/2.5b-api routes.
   ok(api.includes('"/tenant/connectors"'));
+  ok(api.includes('/connectors/${encodeURIComponent(toolName)}/credentials'));
   ok(api.includes('"/tenant/config/change-requests"'));
   ok(api.includes('/approve'));
   ok(api.includes('/reject'));
@@ -319,13 +321,14 @@ test('connector editor drives the credential-free builder and a separate credent
     'connector surface should wire the safe test-connection endpoint',
   );
   ok(
+    src.includes('proposeConnectorCredentials'),
+    'connector surface should submit OMS credentials through the browser-facing route',
+  );
+  ok(
     src.includes('tenant.connector.write'),
     'connector surface should capability-gate write actions',
   );
-  ok(
-    !src.includes('buildChannelCredentialChangePayload'),
-    'connector credentials must no longer use the old channel credential path',
-  );
+  ok(!src.includes('Awaiting backend credential_update HTTP route exposure.'));
   // The connector config form must not contain credential input field keys.
   ok(!src.includes('credentials_enc'));
 });

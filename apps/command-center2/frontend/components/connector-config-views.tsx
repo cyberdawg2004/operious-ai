@@ -26,6 +26,7 @@ import {
   listConfigChangeRequests,
   listConnectorConfigurationHistory,
   listGovernancePolicies,
+  proposeConnectorCredentials,
   proposeConfigChangeRequest,
   testConnectorConfiguration,
   type TenantChannelConfiguration,
@@ -33,6 +34,7 @@ import {
   type TenantConnectorConfiguration,
   type TenantConnectorTestResponse,
   type TenantGovernancePolicy,
+  type TenantOmsCredentialRequest,
 } from "@/lib/api";
 import {
   ACTION_TOOLS_POLICY_TYPE,
@@ -88,6 +90,7 @@ const CONNECTOR_TOOLS = [
 ] as const;
 
 const OMS_AUTH_TYPES = ["bearer", "api_key", "basic"] as const;
+const OMS_CREDENTIAL_TOOL_NAME = "refund.request";
 
 type ConnectorToolDefinition = (typeof CONNECTOR_TOOLS)[number];
 
@@ -408,9 +411,17 @@ export function ConnectorConfigView() {
       {modal.type === "credential" && (
         <Modal onClose={() => setModal({ type: "none" })}>
           <OmsCredentialForm
+            tenantId={tenantId}
             currentState={omsCredentialState}
             canWrite={canWrite}
             pendingCount={omsCredentialPendingCount}
+            onProposed={() => {
+              setNotice(
+                "OMS credential update proposed. It now awaits approval in Pending Approvals."
+              );
+              setModal({ type: "none" });
+              reload();
+            }}
           />
         </Modal>
       )}
@@ -810,18 +821,57 @@ function ConnectorProposeForm({
 }
 
 function OmsCredentialForm({
+  tenantId,
   currentState,
   canWrite,
   pendingCount,
+  onProposed,
 }: {
+  tenantId: string | null;
   currentState: TenantChannelConfiguration | null;
   canWrite: boolean;
   pendingCount: number;
+  onProposed: () => void;
 }) {
   const [authType, setAuthType] = useState<(typeof OMS_AUTH_TYPES)[number]>("bearer");
+  const [token, setToken] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const rotationBlocked = currentState?.status === "active";
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!tenantId) {
+      setError("Tenant scope is missing, so OMS credential submission is unavailable.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const request = buildOmsCredentialRequest({
+        authType,
+        token,
+        apiKey,
+        username,
+        password,
+      });
+      await proposeConnectorCredentials(
+        tenantId,
+        OMS_CREDENTIAL_TOOL_NAME,
+        request
+      );
+      onProposed();
+    } catch (caught: unknown) {
+      setError(formatApiError(caught));
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div className="space-y-4">
+    <form onSubmit={submit} className="space-y-4">
       <div>
         <h2 className="font-display text-[24px] font-semibold text-ink-primary">
           OMS Credential
@@ -850,12 +900,22 @@ function OmsCredentialForm({
         </div>
       </div>
 
+      {error && <FormError message={error} />}
+
       <div className="rounded-lg border border-gold-primary/30 bg-gold-bg px-3 py-2 text-[13px] leading-relaxed text-ink-primary">
-        Pending approvals: {pendingCount}. Submission is intentionally disabled
-        until the backend exposes the tenant HTTP propose route for
-        <code>credential_update</code>. The storage/apply path exists, but the
-        browser cannot safely reach it yet without a dedicated endpoint.
+        Pending approvals: {pendingCount}. Submission creates a governed
+        <code>credential_update</code> proposal only. A separate approver still
+        approves it through the existing dual-control flow, and the credential
+        value is never read back to the browser.
       </div>
+
+      {rotationBlocked && (
+        <div className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
+          An active OMS credential already exists for this tenant. The existing
+          backend service still blocks active-credential rotation, so this form
+          only supports the pending-validation onboarding path.
+        </div>
+      )}
 
       <Fieldset legend="Credential">
         <Select
@@ -866,32 +926,54 @@ function OmsCredentialForm({
           onChange={(value) => setAuthType(value as (typeof OMS_AUTH_TYPES)[number])}
         />
         {authType === "bearer" && (
-          <WriteOnlyInput name="token" label="Bearer token" />
+          <WriteOnlyInput
+            name="token"
+            label="Bearer token"
+            value={token}
+            onChange={setToken}
+          />
         )}
         {authType === "api_key" && (
-          <WriteOnlyInput name="api_key" label="API key" />
+          <WriteOnlyInput
+            name="api_key"
+            label="API key"
+            value={apiKey}
+            onChange={setApiKey}
+          />
         )}
         {authType === "basic" && (
           <>
-            <WriteOnlyInput name="username" label="Username" />
-            <WriteOnlyInput name="password" label="Password" />
+            <WriteOnlyInput
+              name="username"
+              label="Username"
+              value={username}
+              onChange={setUsername}
+            />
+            <WriteOnlyInput
+              name="password"
+              label="Password"
+              value={password}
+              onChange={setPassword}
+            />
           </>
         )}
       </Fieldset>
 
       <button
-        type="button"
-        disabled
-        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white opacity-50"
+        type="submit"
+        disabled={!canWrite || !tenantId || rotationBlocked || isSubmitting}
+        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
         title={
-          canWrite
-            ? "Awaiting backend credential_update HTTP route exposure."
-            : "This principal lacks tenant.connector.write."
+          !canWrite
+            ? "This principal lacks tenant.connector.write."
+            : rotationBlocked
+              ? "Active OMS credential rotation is not yet supported by the backend service."
+              : undefined
         }
       >
-        Propose credential update
+        {isSubmitting ? "Proposing..." : "Propose credential update"}
       </button>
-    </div>
+    </form>
   );
 }
 
@@ -1275,7 +1357,17 @@ function Text({
   );
 }
 
-function WriteOnlyInput({ name, label }: { name: string; label: string }) {
+function WriteOnlyInput({
+  name,
+  label,
+  value,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <label className="block">
       <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
@@ -1285,6 +1377,8 @@ function WriteOnlyInput({ name, label }: { name: string; label: string }) {
         name={name}
         type="password"
         autoComplete="new-password"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         className="h-11 w-full rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none sm:h-10"
       />
     </label>
@@ -1639,6 +1733,33 @@ function createRow(): KeyValueRow {
 
 function nextRowId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function buildOmsCredentialRequest(input: {
+  authType: (typeof OMS_AUTH_TYPES)[number];
+  token: string;
+  apiKey: string;
+  username: string;
+  password: string;
+}): TenantOmsCredentialRequest {
+  const authType = input.authType;
+  if (authType === "bearer") {
+    return {
+      auth_type: authType,
+      token: input.token.trim(),
+    };
+  }
+  if (authType === "api_key") {
+    return {
+      auth_type: authType,
+      api_key: input.apiKey.trim(),
+    };
+  }
+  return {
+    auth_type: authType,
+    username: input.username.trim(),
+    password: input.password,
+  };
 }
 
 function parseStatusCodes(value: string): number[] {

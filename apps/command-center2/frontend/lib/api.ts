@@ -553,6 +553,14 @@ export type TenantConnectorTestResponse = {
   http_probe: string;
 };
 
+export type TenantOmsCredentialRequest = {
+  auth_type: "bearer" | "api_key" | "basic";
+  token?: string;
+  api_key?: string;
+  username?: string;
+  password?: string;
+};
+
 /** Mirrors backend TenantConfigChangeType (app/tenant/change_requests.py). */
 export type TenantConfigChangeType =
   | "knowledge"
@@ -1433,6 +1441,20 @@ export function testConnectorConfiguration(tenantId: string, toolName: string) {
     `/tenant/${encodeURIComponent(tenantId)}/connectors/${encodeURIComponent(toolName)}/test`,
     {
       method: "POST",
+    }
+  );
+}
+
+export function proposeConnectorCredentials(
+  tenantId: string,
+  toolName: string,
+  request: TenantOmsCredentialRequest
+) {
+  return apiRequest<void>(
+    `/tenant/${encodeURIComponent(tenantId)}/connectors/${encodeURIComponent(toolName)}/credentials`,
+    {
+      method: "POST",
+      body: JSON.stringify(request),
     }
   );
 }

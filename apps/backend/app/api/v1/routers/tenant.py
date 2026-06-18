@@ -5,7 +5,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Final
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 
 from app.api.v1.schemas.tenant import (
     TenantAdminProvisionRequest,
@@ -160,6 +171,7 @@ _CHANGE_REQUEST_DOMAIN_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] = 
         TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY
     ),
     TenantConfigChangeType.CONNECTOR: TENANT_CONNECTOR_WRITE_CAPABILITY,
+    TenantConfigChangeType.CREDENTIAL_UPDATE: TENANT_CONNECTOR_WRITE_CAPABILITY,
 }
 
 # Connector config changes require a domain-specific approve capability instead of
@@ -171,6 +183,9 @@ _CHANGE_REQUEST_APPROVE_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] =
 _MIN_LIMIT = 1
 _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 25
+_OMS_CREDENTIAL_TOOL_NAMES: Final[frozenset[str]] = frozenset(
+    {"refund.request", "warranty.claim", "replacement.order"}
+)
 
 
 @router.post(
@@ -599,6 +614,36 @@ async def test_connector_configuration(
         tls_verified=result.tls_verified,
         http_probe=result.http_probe,
     )
+
+
+@router.post(
+    "/{tenant_id}/connectors/{tool_name}/credentials",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def propose_connector_credentials(
+    tenant_id: str,
+    tool_name: str,
+    credentials: dict[str, object] = Body(...),
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_tenant_connector_write),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> Response:
+    if tenant_id != expected_tenant_id or tool_name not in _OMS_CREDENTIAL_TOOL_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_connector_configuration_not_found"},
+        )
+    try:
+        await service.propose_oms_credential_update(
+            tenant_id=expected_tenant_id,
+            credentials=credentials,
+            proposed_by=_principal_or_400(authority),
+        )
+    except TenantConfigChangeRequestError as exc:
+        raise _change_request_http_error(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.put(
