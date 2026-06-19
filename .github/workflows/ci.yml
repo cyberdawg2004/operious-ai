@@ -49,6 +49,10 @@ jobs:
       LOAD_SEED_STOP_THRESHOLD_SECONDS: "180"
       REDIS_HOST: localhost
       REDIS_PORT: "6379"
+      ATTACHMENTS_S3_BUCKET: ${{ secrets.ATTACHMENTS_S3_BUCKET }}
+      ATTACHMENTS_S3_REGION: ${{ secrets.ATTACHMENTS_S3_REGION }}
+      ATTACHMENTS_S3_ACCESS_KEY_ID: ${{ secrets.ATTACHMENTS_S3_ACCESS_KEY_ID }}
+      ATTACHMENTS_S3_SECRET_ACCESS_KEY: ${{ secrets.ATTACHMENTS_S3_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
