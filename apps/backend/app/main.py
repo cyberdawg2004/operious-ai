@@ -33,6 +33,8 @@ from app.agents.runtime.quota_runtime import (
 from app.api.router import build_api_router
 from app.auth import AuthProvider
 from app.auth.providers import ClaimMapping, JWKSAuthProvider
+from app.attachments.s3_client import AttachmentBlobStore
+from app.boundary.adapters.email_ses import S3SesRawEmailFetcher
 from app.boundary.translation import (
     InMemoryTranslationPersistence,
     TranslationEgressRuntime,
@@ -646,6 +648,22 @@ def create_app(
         window_seconds=settings.SEMANTIC_CIRCUIT_WINDOW_SECONDS,
         cluster_threshold=settings.SEMANTIC_CIRCUIT_CLUSTER_THRESHOLD,
         similarity_threshold=settings.SEMANTIC_CIRCUIT_SIMILARITY_THRESHOLD,
+    )
+
+    # PR-B1b: constructed once at boot (boto3 clients are cheap but
+    # network-touching dependencies live at the composition root per this
+    # module's doctrine, not in request-scoped providers). None when the
+    # respective credentials are unconfigured — callers degrade to today's
+    # metadata-only behavior rather than failing closed.
+    app.state.attachment_blob_store = (
+        AttachmentBlobStore.from_settings(settings)
+        if settings.ATTACHMENTS_S3_BUCKET.strip()
+        else None
+    )
+    app.state.ses_raw_email_fetcher = (
+        S3SesRawEmailFetcher.from_settings(settings)
+        if settings.LIVE_SES_ACCESS_KEY_ID.strip()
+        else None
     )
     logger.info("boundary_media_runtime_register_complete")
 

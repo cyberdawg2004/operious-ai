@@ -7,6 +7,7 @@ outside this package.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
@@ -21,12 +22,15 @@ from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
+import boto3
+from botocore.config import Config as BotoConfig
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.boundary.adapters.base import BaseIngressAdapter
+from app.core.config import Settings
 from app.boundary.adapters.channel_webhooks import (
     canonical_channel_payload_keys,
     normalize_routing_address,
@@ -74,6 +78,60 @@ class SesRawEmailFetcher(Protocol):
         object_key: str,
         tenant_id: str,
     ) -> bytes: ...
+
+
+class S3SesRawEmailFetcher:
+    """Fetch SES-routed raw email bytes from the bucket/key SES designates.
+
+    SES routes emails over its inline-SNS size limit to S3 instead of
+    embedding MIME in the notification; ``_s3_location()`` extracts which
+    bucket+key holds it. This is the first concrete implementation of
+    ``SesRawEmailFetcher`` — previously these emails (and any attachments
+    inside them) never reached MIME parsing at all (PR-B1a's gap).
+
+    boto3 is synchronous; ``fetch_raw_email`` wraps the blocking call with
+    ``asyncio.to_thread`` so it composes with the rest of this module's
+    async ingestion path without blocking the event loop.
+    """
+
+    __slots__ = ("_client",)
+
+    def __init__(
+        self,
+        *,
+        region: str,
+        access_key_id: str,
+        secret_access_key: str,
+    ) -> None:
+        self._client = boto3.client(
+            "s3",
+            region_name=region,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            config=BotoConfig(retries={"max_attempts": 3, "mode": "standard"}),
+        )
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "S3SesRawEmailFetcher":
+        return cls(
+            region=settings.LIVE_SES_REGION,
+            access_key_id=settings.LIVE_SES_ACCESS_KEY_ID,
+            secret_access_key=settings.LIVE_SES_SECRET_ACCESS_KEY,
+        )
+
+    async def fetch_raw_email(
+        self,
+        *,
+        bucket_name: str,
+        object_key: str,
+        tenant_id: str,
+    ) -> bytes:
+        del tenant_id  # bucket+key are already fully qualified by SES
+        return await asyncio.to_thread(self._get_object, bucket_name, object_key)
+
+    def _get_object(self, bucket_name: str, object_key: str) -> bytes:
+        response = self._client.get_object(Bucket=bucket_name, Key=object_key)
+        return cast(bytes, response["Body"].read())
 
 
 @dataclass(frozen=True, slots=True)
@@ -471,6 +529,20 @@ def _text_and_attachments(message: Message) -> tuple[str | None, list[dict[str, 
     return (text or None), attachments
 
 
+_ATTACHMENT_RAW_BYTES_KEY = "_raw_bytes"
+"""Internal-only key carrying the decoded attachment binary.
+
+This module is deliberately boundary-only (MIME parsing, no tenant
+lookup, no storage) — see the module docstring. The binary rides along
+in the parsed attachment dict so a tenant-aware caller (once tenant_id is
+resolved) can persist it via AttachmentStorageService, but it MUST be
+popped via ``pop_attachment_raw_bytes`` before the attachment dict is
+placed anywhere that gets JSON-serialized (e.g. a canonical payload
+persisted as JSONB) — raw bytes are not JSON-serializable and were never
+meant to reach that path.
+"""
+
+
 def _attachment_summary(part: Message) -> dict[str, Any]:
     payload = part.get_payload(decode=True)
     size = len(payload) if payload is not None else 0
@@ -483,7 +555,21 @@ def _attachment_summary(part: Message) -> dict[str, Any]:
         "content_id": _decoded_header_value(part, "Content-ID"),
         "disposition": part.get_content_disposition(),
         "size_bytes": size,
+        _ATTACHMENT_RAW_BYTES_KEY: payload if isinstance(payload, bytes) else None,
     }
+
+
+def pop_attachment_raw_bytes(attachment: dict[str, Any]) -> bytes | None:
+    """Extract and remove the decoded binary from a parsed attachment dict.
+
+    Callers that persist attachments (see
+    ``app.attachments.storage_service.AttachmentStorageService``) MUST call
+    this for every attachment before the attachment dict is placed into any
+    payload that gets JSON-serialized — the key is always stripped here,
+    regardless of whether a binary was present.
+    """
+    value = attachment.pop(_ATTACHMENT_RAW_BYTES_KEY, None)
+    return value if isinstance(value, bytes) else None
 
 
 def _part_text(part: Message) -> str | None:
@@ -639,10 +725,27 @@ def _first_sequence_text(value: Any) -> str | None:
 
 
 def _attachments(body: Mapping[str, Any]) -> tuple[object, ...]:
+    """Return attachment metadata with the internal raw-bytes key stripped.
+
+    Defensive: the production path (TicketIngressService) already pops
+    ``_raw_bytes`` via ``pop_attachment_raw_bytes`` before this normalize()
+    ever runs, but this guarantees the canonical payload — which gets
+    JSON-serialized into ``boundary_ingress.canonical_payload`` — can never
+    carry a raw ``bytes`` value even if some other caller skips that step.
+    """
     value = body.get("attachments")
-    if isinstance(value, list):
-        return tuple(cast(list[object], value))
-    return ()
+    if not isinstance(value, list):
+        return ()
+    cleaned: list[object] = []
+    for item in cast(list[object], value):
+        if isinstance(item, dict) and _ATTACHMENT_RAW_BYTES_KEY in item:
+            item = {
+                key: val
+                for key, val in cast(dict[str, Any], item).items()
+                if key != _ATTACHMENT_RAW_BYTES_KEY
+            }
+        cleaned.append(item)
+    return tuple(cleaned)
 
 
 def _unauthenticated_result(error: str) -> BoundaryNormalizationResult:
@@ -662,6 +765,7 @@ def _malformed_result(error: str) -> BoundaryNormalizationResult:
 __all__ = [
     "HttpSnsCertificateFetcher",
     "HttpSnsSubscriptionConfirmer",
+    "S3SesRawEmailFetcher",
     "SesEmailMimeError",
     "SesEmailWebhookAdapter",
     "SesRawEmailFetcher",
@@ -673,6 +777,7 @@ __all__ = [
     "SnsVerifiedMessage",
     "extract_ses_routing_address_from_sns_message",
     "parse_email_mime",
+    "pop_attachment_raw_bytes",
     "ses_sns_message_to_email_payload",
     "validate_aws_sns_url",
 ]

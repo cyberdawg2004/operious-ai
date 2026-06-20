@@ -467,6 +467,12 @@ def get_ticket_ingress_service(
             TenantChannelType.WHATSAPP: DIAGNOSTIC_QUEUE_PRIORITY,
         },
         ingress_dispatch_enqueue=enqueue_ingress_dispatch_outbox,
+        ses_raw_email_fetcher=getattr(
+            request.app.state, "ses_raw_email_fetcher", None
+        ),
+        attachment_blob_store=getattr(
+            request.app.state, "attachment_blob_store", None
+        ),
     )
 
 

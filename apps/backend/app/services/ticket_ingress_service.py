@@ -25,6 +25,10 @@ from app.boundary.adapters import (
     extract_routing_address,
     extract_webhook_security_context,
 )
+from app.attachments.records import AttachmentRecord
+from app.attachments.repository import AttachmentRepository
+from app.attachments.s3_client import AttachmentBlobStore
+from app.attachments.storage_service import AttachmentStorageService
 from app.boundary.adapters.email_ses import (
     HttpSnsSubscriptionConfirmer,
     SesEmailMimeError,
@@ -34,6 +38,7 @@ from app.boundary.adapters.email_ses import (
     SnsMessageVerifier,
     SnsSubscriptionConfirmer,
     SnsVerificationError,
+    pop_attachment_raw_bytes,
     ses_sns_message_to_email_payload,
 )
 from app.boundary.exceptions import WebhookFreshnessError, WebhookReplayError
@@ -70,6 +75,7 @@ from app.core.webhook_url import (
     CanonicalWebhookUrlError,
     derive_canonical_webhook_url,
 )
+from app.data_protection.crypto import DataProtectionService
 from app.db.tenant_context import set_current_tenant
 from app.governance.capability import OperationalAct
 from app.hardening.admission import (
@@ -140,6 +146,7 @@ class TicketIngressService:
         sns_message_verifier: SnsMessageVerifier | None = None,
         sns_subscription_confirmer: SnsSubscriptionConfirmer | None = None,
         ses_raw_email_fetcher: SesRawEmailFetcher | None = None,
+        attachment_blob_store: AttachmentBlobStore | None = None,
     ) -> None:
         self._persistence = persistence
         self._session = session
@@ -161,6 +168,7 @@ class TicketIngressService:
             sns_subscription_confirmer or HttpSnsSubscriptionConfirmer()
         )
         self._ses_raw_email_fetcher = ses_raw_email_fetcher
+        self._attachment_blob_store = attachment_blob_store
 
     async def process(
         self,
@@ -751,6 +759,11 @@ class TicketIngressService:
         )
         if not nonce_recorded:
             return WebhookDuplicateDeliveryResult()
+        await self._persist_email_attachments(
+            email_payload,
+            tenant_id=channel_config.tenant_id,
+            message_id=verified.message_id,
+        )
         source_language = "en"
         fingerprint_metadata: dict[str, object] = {}
         ticket_text = _extract_webhook_ticket_text(
@@ -858,6 +871,105 @@ class TicketIngressService:
             ingress_id=str(result.ingress_id),
             canonical_envelope_id=str(result.event_id),
         )
+
+    def _build_attachment_storage_service(self) -> AttachmentStorageService | None:
+        """Build a request-scoped AttachmentStorageService, or None if
+        attachment storage isn't configured (no S3 bucket, or no data
+        protection master key) — callers degrade to today's metadata-only
+        behavior rather than failing closed, since this is an additive
+        capability (PR-B1b), not a hard ingestion dependency."""
+        if self._attachment_blob_store is None:
+            return None
+        settings = get_settings()
+        if (
+            not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+            and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+        ):
+            return None
+        data_protection = DataProtectionService.from_settings(
+            self._session, settings
+        )
+        repository = AttachmentRepository(
+            self._session,
+            data_protection=data_protection,
+            blob_store=self._attachment_blob_store,
+        )
+        return AttachmentStorageService.from_settings(
+            settings,
+            repository=repository,
+            blob_store=self._attachment_blob_store,
+            data_protection=data_protection,
+        )
+
+    async def _persist_email_attachments(
+        self,
+        email_payload: dict[str, Any],
+        *,
+        tenant_id: str,
+        message_id: str,
+    ) -> None:
+        """Persist each email attachment's binary via AttachmentStorageService.
+
+        Fail-soft by design: a storage failure on ONE attachment (S3 down,
+        an unexpected exception) is recorded as ``storage_status: "failed"``
+        on that attachment's metadata and logged — it never raises, so it
+        can never drop the surrounding email/ticket. A sniff/size rejection
+        from the storage service itself is not a failure here; it is the
+        service's normal "rejected" outcome and is recorded the same way.
+
+        Mutates ``email_payload["attachments"]`` in place: every raw-bytes
+        payload is popped (via ``pop_attachment_raw_bytes``) before this
+        returns, regardless of outcome, since the dict is about to become
+        part of a canonical payload that gets JSON-serialized.
+        """
+        attachments = email_payload.get("attachments")
+        if not isinstance(attachments, list):
+            return
+        storage_service = self._build_attachment_storage_service()
+        conversation_id = email_payload.get("conversation_id")
+        for attachment in cast(list[dict[str, Any]], attachments):
+            raw_bytes = pop_attachment_raw_bytes(attachment)
+            if raw_bytes is None or storage_service is None:
+                continue
+            try:
+                record: AttachmentRecord = await storage_service.store(
+                    [raw_bytes],
+                    tenant_id=tenant_id,
+                    channel="email",
+                    external_message_id=message_id,
+                    conversation_id=(
+                        conversation_id
+                        if isinstance(conversation_id, str)
+                        else None
+                    ),
+                    content_type_declared=attachment.get("content_type"),
+                )
+            except Exception as exc:  # noqa: BLE001 — fail-soft by design
+                logger.warning(
+                    "email_attachment_storage_failed",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "message_id": message_id,
+                        "attachment_filename": attachment.get("filename"),
+                        "error": str(exc),
+                    },
+                )
+                attachment["storage_status"] = "failed"
+                attachment["storage_error"] = str(exc)[:500]
+                continue
+            attachment["storage_status"] = record.status
+            attachment["attachment_id"] = str(record.attachment_id)
+            if record.status == "rejected":
+                attachment["storage_rejection_reason"] = record.rejection_reason
+                logger.info(
+                    "email_attachment_rejected",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "message_id": message_id,
+                        "attachment_filename": attachment.get("filename"),
+                        "reason": record.rejection_reason,
+                    },
+                )
 
     async def verify_channel_webhook(
         self,

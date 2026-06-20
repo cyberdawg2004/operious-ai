@@ -502,6 +502,17 @@ class Settings(BaseSettings):
     ATTACHMENT_MAX_BYTES: int = 26_214_400  # 25 MiB — receipt/invoice photos
     ATTACHMENT_RETENTION_DAYS: int = 90
 
+    # ─── SES large-email raw fetch (Phase B1b) ───────────────────────
+    # SES routes emails over its inline-SNS size limit to S3 instead of
+    # embedding the MIME body in the notification; fetching that object
+    # requires its own bucket-region credentials (a DIFFERENT bucket from
+    # ATTACHMENTS_S3_BUCKET — SES tells us the bucket/key per-notification,
+    # see app.boundary.adapters.email_ses._s3_location). Without these,
+    # large inbound emails (and their attachments) are silently dropped.
+    LIVE_SES_REGION: str = ""
+    LIVE_SES_ACCESS_KEY_ID: str = ""
+    LIVE_SES_SECRET_ACCESS_KEY: str = ""
+
     # ─── HTTP transport (2.5-I) ──────────────────────────────────────
     # Comma-separated CORS allowlist. Empty string disables CORS at
     # the FastAPI level (production posture defaults to "no CORS";
