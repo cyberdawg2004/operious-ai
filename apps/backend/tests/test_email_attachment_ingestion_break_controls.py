@@ -50,7 +50,7 @@ from app.boundary.adapters.email_ses import (
 )
 from app.boundary.persistence import BoundaryIngressQuery, InMemoryBoundaryPersistence
 from app.core.config import Settings
-from app.data_protection.crypto import DataProtectionService, MasterKeyRing
+from app.data_protection.crypto import DataProtectionService
 from app.services.ticket_ingress_service import TicketIngressService
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
@@ -75,13 +75,6 @@ requires_s3 = pytest.mark.skipif(
 
 _PDF_BYTES = b"%PDF-1.4\nfake invoice pdf body for BC-1.\n" + b"x" * 200
 _EXE_BYTES = b"MZ\x90\x00" + b"\x00" * 256
-
-
-def _dp_service(session: Any) -> DataProtectionService:
-    return DataProtectionService(
-        session,
-        master_key_ring=MasterKeyRing(keys={"v1": b"a" * 32}, active_version="v1"),
-    )
 
 
 async def _ensure_tenant_row(
@@ -372,9 +365,13 @@ async def test_email_attachment_end_to_end_stored_and_retrievable(
     attachment_id = attachments[0]["attachment_id"]
     assert record.canonical_payload["message_id"] == f"<{message_id}@example.net>"
 
+    # Use the SAME key-derivation path as the write (DataProtectionService
+    # .from_settings, reading real settings) — TicketIngressService wrote
+    # via that path, not the hardcoded-test-key _dp_service() helper, so
+    # verification must match or decryption fails authentication.
     repository = AttachmentRepository(
         pg_session,
-        data_protection=_dp_service(pg_session),
+        data_protection=DataProtectionService.from_settings(pg_session, settings),
         blob_store=blob_store,
     )
     fetched = await repository.get(AttachmentId(uuid.UUID(attachment_id)), tenant_id=tenant_id)
