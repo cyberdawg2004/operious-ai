@@ -20,6 +20,48 @@ NOW = datetime(2026, 5, 23, 13, 0, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
+async def test_anthropic_client_strips_whitespace_from_header_bound_config() -> None:
+    """A trailing newline in ANTHROPIC_API_KEY (a common artifact of how
+    secrets get pasted into env vars / CI secret stores) must never reach
+    the x-api-key HTTP header — h11 raises LocalProtocolError ("illegal
+    header value") for any header value containing \\r or \\n, which a
+    real Anthropic call hit in CI the first time a real key was used."""
+    captured_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_headers.update(request.headers)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = AnthropicMessagesClient(
+            api_key="secret-test-key\n",
+            model="claude-test\n",
+            base_url="https://anthropic.test",
+            anthropic_version="2023-06-01\n",
+            http_client=http,
+            default_tenant_id=TENANT_ID,
+        )
+        completion = await client.complete(
+            system_prompt="Return JSON.",
+            messages=(DiagnosticLLMMessage(role="user", content="hello"),),
+            max_output_tokens=128,
+            temperature=0.0,
+        )
+
+    assert completion.text == "ok"
+    assert captured_headers["x-api-key"] == "secret-test-key"
+    assert captured_headers["anthropic-version"] == "2023-06-01"
+    assert client.model_name == "claude-test"
+
+
+@pytest.mark.asyncio
 async def test_anthropic_429_transitions_circuit_open() -> None:
     breaker = ProviderCircuitBreaker()
     seen_requests = 0

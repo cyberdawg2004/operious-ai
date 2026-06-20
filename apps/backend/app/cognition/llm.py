@@ -175,10 +175,16 @@ class AnthropicMessagesClient:
             raise CognitionLLMConfigurationError("Anthropic model must be non-empty")
         if not default_tenant_id.strip():
             raise CognitionLLMConfigurationError("default_tenant_id must be non-empty")
-        self._api_key = api_key
-        self.model_name = model
+        # Stripped defensively: api_key/anthropic_version are sent verbatim as
+        # HTTP header VALUES (x-api-key, anthropic-version below) — a stray
+        # trailing newline or whitespace (a common artifact of how secrets get
+        # pasted into env vars / CI secret stores) is invisible in the
+        # emptiness check above but raises h11.LocalProtocolError ("illegal
+        # header value") the moment a real request is sent.
+        self._api_key = api_key.strip()
+        self.model_name = model.strip()
         self._base_url = base_url.rstrip("/")
-        self._anthropic_version = anthropic_version
+        self._anthropic_version = anthropic_version.strip()
         self._timeout_seconds = timeout_seconds
         self._http_client = http_client
         self._provider_circuit_breaker = provider_circuit_breaker
