@@ -54,6 +54,10 @@ jobs:
       ATTACHMENTS_S3_ACCESS_KEY_ID: ${{ secrets.ATTACHMENTS_S3_ACCESS_KEY_ID }}
       ATTACHMENTS_S3_SECRET_ACCESS_KEY: ${{ secrets.ATTACHMENTS_S3_SECRET_ACCESS_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Not a secret — just overrides config.py's stale hardcoded default
+      # (claude-sonnet-4-20250514, retired) with the model id actually
+      # deployed on Fly. Without this CI 404s on every real Anthropic call.
+      ANTHROPIC_DEFAULT_MODEL: claude-sonnet-4-6
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
