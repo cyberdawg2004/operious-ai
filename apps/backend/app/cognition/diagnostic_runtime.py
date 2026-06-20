@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from pydantic import ValidationError
 
+from app.attachments.exceptions import AttachmentNotFoundError
+from app.attachments.identity import AttachmentId
+from app.attachments.records import AttachmentRecord
+from app.attachments.repository import AttachmentRepository
 from app.cognition.exceptions import (
     CognitionGovernanceRejectionError,
     CognitionLLMProviderError,
@@ -23,7 +29,14 @@ from app.cognition.identity import (
     derive_cognition_audit_id,
     derive_llm_usage_id,
 )
-from app.cognition.llm import DiagnosticLLMClient, DiagnosticLLMMessage
+from app.cognition.llm import (
+    DiagnosticContentBlock,
+    DiagnosticDocumentBlock,
+    DiagnosticImageBlock,
+    DiagnosticLLMClient,
+    DiagnosticLLMMessage,
+    DiagnosticTextBlock,
+)
 from app.cognition.models import (
     CognitionAuditRecord,
     CognitionLLMUsageRecord,
@@ -126,6 +139,17 @@ class DiagnosticCognitionRuntimeConfig:
     # chargeback/compliance/reject).
     authorized_governance_terms: frozenset[str] = DEFAULT_AUTHORIZED_GOVERNANCE_TERMS
     semantic_self_correction_enabled: bool = True
+    # ─── Vision wiring caps (Phase B2) ────────────────────────────────
+    # Reject-based, not transform-based: pillow (and any image-resize
+    # library) is constitutionally forbidden, so an over-cap attachment is
+    # simply skipped from vision — never resized, never blocking the
+    # ticket. See app.attachments for the storage-side caps (B1a); these
+    # are vision-specific and stricter, since image/PDF content costs
+    # tokens proportional to size/page-count on every call.
+    max_attachments_per_call: int = 4
+    max_image_bytes_for_vision: int = 5_242_880  # 5 MiB — Anthropic's own per-image limit
+    max_pdf_pages_for_vision: int = 20  # well under Claude's 100-page ceiling
+    max_vision_payload_bytes: int = 15_728_640  # 15 MiB combined backstop
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,12 +210,18 @@ class DiagnosticCognitionRuntime:
         config: DiagnosticCognitionRuntimeConfig | None = None,
         quota_runtime: TenantQuotaRuntime | None = None,
         tenant_configuration_repository: TenantConfigurationRepository | None = None,
+        attachment_repository: AttachmentRepository | None = None,
     ) -> None:
         self._knowledge_runtime = knowledge_runtime
         self._llm_client = llm_client
         self._usage_persistence = usage_persistence
         self._quota_runtime = quota_runtime
         self._tenant_configuration_repository = tenant_configuration_repository
+        # None when attachment storage isn't configured (no S3 bucket, no
+        # data-protection key) — load_reasoning_snapshot degrades to
+        # text-only in that case rather than failing closed, matching B1b's
+        # posture for optional capability wiring.
+        self._attachment_repository = attachment_repository
         self._governance = _governance_runtime(
             governance_repository=governance_repository,
             redis_client=redis_client,
@@ -214,6 +244,7 @@ class DiagnosticCognitionRuntime:
         attempt_number: int | None = None,
         worker_id: str | None = None,
         source_language: str = "en",
+        attachment_ids: tuple[str, ...] = (),
     ) -> DiagnosticReasoningResult:
         snapshot = await self.load_reasoning_snapshot(
             tenant_id=tenant_id,
@@ -225,6 +256,7 @@ class DiagnosticCognitionRuntime:
             attempt_number=attempt_number,
             worker_id=worker_id,
             source_language=source_language,
+            attachment_ids=attachment_ids,
         )
         try:
             completion = await self.complete_reasoning_snapshot(snapshot)
@@ -257,6 +289,7 @@ class DiagnosticCognitionRuntime:
         attempt_number: int | None = None,
         worker_id: str | None = None,
         source_language: str = "en",
+        attachment_ids: tuple[str, ...] = (),
     ) -> DiagnosticReasoningSnapshot:
         retrieval = await self._knowledge_runtime.retrieve(
             tenant_id=tenant_id,
@@ -283,7 +316,16 @@ class DiagnosticCognitionRuntime:
             model=self._llm_client.model_name,
             attempt_id=attempt_id,
         )
-        messages = (DiagnosticLLMMessage(role="user", content=prompt),)
+        attachment_blocks = await self._load_attachment_blocks(
+            attachment_ids,
+            tenant_id=tenant_id,
+        )
+        user_content: str | tuple[DiagnosticContentBlock, ...] = (
+            prompt
+            if not attachment_blocks
+            else (*attachment_blocks, DiagnosticTextBlock(text=prompt))
+        )
+        messages = (DiagnosticLLMMessage(role="user", content=user_content),)
         system_prompt = _render_system_prompt(
             source_language, taxonomy=resolved_taxonomy
         )
@@ -328,6 +370,106 @@ class DiagnosticCognitionRuntime:
             },
             resolved_taxonomy=resolved_taxonomy,
         )
+
+    async def _load_attachment_blocks(
+        self,
+        attachment_ids: tuple[str, ...],
+        *,
+        tenant_id: str,
+    ) -> tuple[DiagnosticContentBlock, ...]:
+        """Resolve stored attachments into vision content blocks.
+
+        Fail-soft at every step: a missing/invalid id, an over-cap
+        attachment, or an ineligible content type is skipped, never
+        raised — one bad attachment must never block diagnostic reasoning
+        on the ticket itself. Only bytes returned by
+        AttachmentRepository.get() ever reach this method — that
+        repository only returns rows with status="stored", i.e. already
+        B1a-validated (magic-byte sniffed, size-capped) at ingestion time.
+        """
+        if self._attachment_repository is None or not attachment_ids:
+            return ()
+        blocks: list[DiagnosticContentBlock] = []
+        total_bytes = 0
+        for raw_id in attachment_ids[: self._config.max_attachments_per_call]:
+            try:
+                parsed_id = AttachmentId(uuid.UUID(raw_id))
+            except ValueError:
+                logger.warning(
+                    "diagnostic_attachment_id_malformed",
+                    extra={"tenant_id": tenant_id, "attachment_id": raw_id},
+                )
+                continue
+            try:
+                record = await self._attachment_repository.get(
+                    parsed_id, tenant_id=tenant_id
+                )
+            except AttachmentNotFoundError:
+                logger.info(
+                    "diagnostic_attachment_not_found_skipped",
+                    extra={"tenant_id": tenant_id, "attachment_id": raw_id},
+                )
+                continue
+            block = self._build_block(record)
+            if block is None:
+                continue
+            if total_bytes + len(record.content or b"") > self._config.max_vision_payload_bytes:
+                logger.info(
+                    "diagnostic_attachment_skipped_payload_cap",
+                    extra={"tenant_id": tenant_id, "attachment_id": raw_id},
+                )
+                continue
+            total_bytes += len(record.content or b"")
+            blocks.append(block)
+        return tuple(blocks)
+
+    def _build_block(
+        self,
+        record: AttachmentRecord,
+    ) -> DiagnosticContentBlock | None:
+        """Select the vision block type by content_type_sniffed — the
+        DB-validated type from B1a's magic-byte sniff, NEVER the caller-
+        declared content_type sitting in a canonical payload. Returns None
+        (skip) for ineligible types (docx, text/plain — out of B2 scope)
+        or attachments that fail a size/page cap."""
+        content = record.content
+        if content is None:
+            return None
+        content_type = record.content_type_sniffed
+        if content_type in ("image/jpeg", "image/png"):
+            if len(content) > self._config.max_image_bytes_for_vision:
+                logger.info(
+                    "diagnostic_attachment_skipped_image_too_large",
+                    extra={
+                        "attachment_id": str(record.attachment_id),
+                        "size_bytes": len(content),
+                    },
+                )
+                return None
+            return DiagnosticImageBlock(
+                media_type=content_type,
+                base64_data=base64.b64encode(content).decode("ascii"),
+                attachment_id=str(record.attachment_id),
+                sha256_digest=record.sha256_digest,
+            )
+        if content_type == "application/pdf":
+            page_count = _pdf_page_count(content)
+            if page_count is None or page_count > self._config.max_pdf_pages_for_vision:
+                logger.info(
+                    "diagnostic_attachment_skipped_pdf_too_long",
+                    extra={
+                        "attachment_id": str(record.attachment_id),
+                        "page_count": page_count,
+                    },
+                )
+                return None
+            return DiagnosticDocumentBlock(
+                media_type=content_type,
+                base64_data=base64.b64encode(content).decode("ascii"),
+                attachment_id=str(record.attachment_id),
+                sha256_digest=record.sha256_digest,
+            )
+        return None
 
     async def complete_reasoning_snapshot(
         self,
@@ -1474,13 +1616,64 @@ def _full_prompt_snapshot(
         {
             "system": system_prompt,
             "messages": [
-                {"role": message.role, "content": message.content}
+                {"role": message.role, "content": _snapshot_content(message.content)}
                 for message in messages
             ],
         },
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _snapshot_content(
+    content: "str | tuple[DiagnosticContentBlock, ...]",
+) -> Any:
+    """Audit-safe rendering of a message's content.
+
+    Text is stored inline (unchanged). Image/document blocks are reduced
+    to {type, attachment_id, sha256} — NEVER base64 — so prompt_full
+    (persisted to CognitionAuditRecord, see _save_cognition_audit) can
+    never duplicate a decrypted customer attachment in the clear. The
+    reference still resolves: a reconstructor with attachment_id +
+    tenant_id can call AttachmentRepository.get() to refetch the exact
+    bytes that were sent, so auditability isn't lost — only the plaintext
+    duplication is.
+    """
+    if isinstance(content, str):
+        return content
+    rendered: list[dict[str, Any]] = []
+    for block in content:
+        if isinstance(block, DiagnosticTextBlock):
+            rendered.append({"type": "text", "text": block.text})
+        elif isinstance(block, DiagnosticImageBlock):
+            rendered.append(
+                {
+                    "type": "image",
+                    "attachment_id": block.attachment_id,
+                    "sha256": block.sha256_digest,
+                }
+            )
+        else:
+            rendered.append(
+                {
+                    "type": "document",
+                    "attachment_id": block.attachment_id,
+                    "sha256": block.sha256_digest,
+                }
+            )
+    return rendered
+
+
+def _pdf_page_count(raw: bytes) -> int | None:
+    """Count PDF pages without rasterizing (pypdf is already a dependency
+    for the text-PDF knowledge-upload path — no new dependency here)."""
+    import pypdf  # deferred: not imported at module level to keep startup cheap
+    import io
+
+    try:
+        return len(pypdf.PdfReader(io.BytesIO(raw)).pages)
+    except Exception:  # noqa: BLE001 — a corrupt/unreadable PDF just skips vision
+        return None
 
 
 def _estimate_cost(

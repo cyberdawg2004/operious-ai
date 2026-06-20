@@ -41,9 +41,99 @@ _GOVERNANCE_TERMS = (
 
 
 @dataclass(frozen=True, slots=True)
+class DiagnosticTextBlock:
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticImageBlock:
+    """A B1a-stored, B1a-validated image attached to a diagnostic call.
+
+    ``attachment_id``/``sha256_digest`` are carried alongside the bytes so
+    the audit snapshot can reference this block without ever persisting
+    ``base64_data`` — see ``_snapshot_content`` in diagnostic_runtime.py.
+    """
+
+    media_type: str  # "image/jpeg" | "image/png"
+    base64_data: str
+    attachment_id: str
+    sha256_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticDocumentBlock:
+    """A B1a-stored PDF attached to a diagnostic call (Claude reads the
+    rendered pages natively — this is the OCR path, no rasterizer needed)."""
+
+    media_type: str  # "application/pdf"
+    base64_data: str
+    attachment_id: str
+    sha256_digest: str
+
+
+DiagnosticContentBlock = DiagnosticTextBlock | DiagnosticImageBlock | DiagnosticDocumentBlock
+
+
+@dataclass(frozen=True, slots=True)
 class DiagnosticLLMMessage:
     role: str
-    content: str
+    # str is the original, still-dominant shape — every existing call site
+    # that passes a plain string is unaffected by this union. A tuple of
+    # content blocks is the new vision path (see DiagnosticCognitionRuntime
+    # ._load_attachment_blocks).
+    content: "str | tuple[DiagnosticContentBlock, ...]"
+
+
+def message_text(content: "str | tuple[DiagnosticContentBlock, ...]") -> str:
+    """Return the text-only portion of a message's content.
+
+    For the str form this is a no-op (the common case). For the block-tuple
+    form, image/document blocks are dropped — callers that need the
+    rendered content's text (the deterministic test client, token
+    estimation) never need bytes.
+    """
+    if isinstance(content, str):
+        return content
+    return "\n".join(
+        block.text for block in content if isinstance(block, DiagnosticTextBlock)
+    )
+
+
+def to_anthropic_content(
+    content: "str | tuple[DiagnosticContentBlock, ...]",
+) -> "str | list[dict[str, Any]]":
+    """Render a message's content into the shape the Anthropic Messages API
+    expects. Anthropic accepts a bare string OR a content-block array per
+    message — this maps directly onto that, it isn't a workaround."""
+    if isinstance(content, str):
+        return content
+    blocks: list[dict[str, Any]] = []
+    for block in content:
+        if isinstance(block, DiagnosticTextBlock):
+            blocks.append({"type": "text", "text": block.text})
+        elif isinstance(block, DiagnosticImageBlock):
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": block.media_type,
+                        "data": block.base64_data,
+                    },
+                }
+            )
+        else:
+            blocks.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": block.media_type,
+                        "data": block.base64_data,
+                    },
+                }
+            )
+    return blocks
 
 
 @runtime_checkable
@@ -110,7 +200,10 @@ class AnthropicMessagesClient:
             "temperature": temperature,
             "system": system_prompt,
             "messages": [
-                {"role": message.role, "content": message.content}
+                {
+                    "role": message.role,
+                    "content": to_anthropic_content(message.content),
+                }
                 for message in messages
             ],
         }
@@ -211,7 +304,7 @@ class DeterministicDiagnosticLLMClient:
         tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
         del max_output_tokens, temperature, tenant_id
-        content = "\n".join(message.content for message in messages)
+        content = "\n".join(message_text(message.content) for message in messages)
         if "generate governed customer-facing support replies" in system_prompt.casefold():
             return _deterministic_grounded_reply_completion(content)
         lowered = content.casefold()
@@ -417,6 +510,12 @@ def _retry_after_seconds(retry_after: str | None) -> int:
 __all__ = [
     "AnthropicMessagesClient",
     "DeterministicDiagnosticLLMClient",
+    "DiagnosticContentBlock",
+    "DiagnosticDocumentBlock",
+    "DiagnosticImageBlock",
     "DiagnosticLLMClient",
     "DiagnosticLLMMessage",
+    "DiagnosticTextBlock",
+    "message_text",
+    "to_anthropic_content",
 ]

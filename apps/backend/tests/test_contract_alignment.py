@@ -520,7 +520,10 @@ def test_diagnostic_worker_task_kwargs_align_with_work_item_contract() -> None:
     assert work_item_constructor_fields == work_item_fields
     # DLQ task visibility/replay stores the durable execution identity, not
     # customer reply addressing/thread metadata. The worker rehydrates that
-    # context from the execution/session records on replay.
+    # context from the execution/session records on replay. attachment_ids
+    # (PR-B2) is the same kind of reconstructable context — the worker
+    # re-derives it from the dispatch's canonical_payload on replay, same
+    # as conversation_history/the reply_* fields.
     assert set(_dead_letter_task_payload(work_item)) == (
         work_item_fields
         - {
@@ -536,6 +539,7 @@ def test_diagnostic_worker_task_kwargs_align_with_work_item_contract() -> None:
             "reply_in_reply_to_message_id",
             "reply_references_header",
             "reply_phone_number_id",
+            "attachment_ids",
         }
     )
 

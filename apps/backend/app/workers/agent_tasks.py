@@ -107,7 +107,7 @@ from app.boundary.translation import (
     TranslationRuntime,
 )
 from app.boundary.translation.provider_factory import build_translation_provider
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.queue_admission import (
     TenantQueueQoSClient,
     release_tenant_queue_publish,
@@ -131,6 +131,8 @@ from app.approvals.ingress import (
     CaseApprovalReviewRequest,
 )
 from app.approvals.persistence import PostgresCaseApprovalPersistence
+from app.attachments.repository import AttachmentRepository
+from app.attachments.s3_client import AttachmentBlobStore
 from app.governance.enums import Decision, EnforcementStage, ViolationSeverity
 from app.governance.identity import derive_decision_id
 from app.governance.persistence import (
@@ -414,6 +416,7 @@ class _DiagnosticExecutionWorkItem:
     reply_phone_number_id: str | None = None
     conversation_history: tuple[Mapping[str, Any], ...] = ()
     conversation_turn_id: str | None = None
+    attachment_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +433,7 @@ class _DispatchContentContext:
     reply_references_header: str | None = None
     reply_phone_number_id: str | None = None
     conversation_history: tuple[Mapping[str, Any], ...] = ()
+    attachment_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -611,6 +615,7 @@ async def _prepare_diagnostic_execution(
             reply_phone_number_id=content_context.reply_phone_number_id,
             conversation_history=content_context.conversation_history,
             conversation_turn_id=conversation_turn_id,
+            attachment_ids=content_context.attachment_ids,
         )
 
 
@@ -829,6 +834,7 @@ async def _load_diagnostic_reasoning_snapshot(
                     attempt_number=work_item.attempt_number,
                     worker_id=worker_id,
                     source_language=work_item.source_language,
+                    attachment_ids=work_item.attachment_ids,
                 )
                 circuit_snapshot = await ProviderCircuitBreaker(
                     session=session,
@@ -1513,6 +1519,7 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
                 reply_references_header=reply_context.references_header,
                 reply_phone_number_id=reply_context.phone_number_id,
                 conversation_history=conversation_history,
+                attachment_ids=_extract_attachment_ids(typed_payload),
             )
     reply_context = _extract_outbound_reply_context(body)
     return _DispatchContentContext(
@@ -1572,6 +1579,26 @@ def _extract_outbound_reply_context(
         ),
         phone_number_id=phone_number_id,
     )
+
+
+def _extract_attachment_ids(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    """Only attachments that B1b actually persisted (status="stored")
+    carry a usable attachment_id — a rejected or failed attachment has
+    none, see TicketIngressService._persist_email_attachments."""
+    attachments = payload.get("attachments")
+    if not isinstance(attachments, list):
+        return ()
+    ids: list[str] = []
+    for item in cast(list[object], attachments):
+        if not isinstance(item, Mapping):
+            continue
+        typed_item = cast(Mapping[str, Any], item)
+        if typed_item.get("storage_status") != "stored":
+            continue
+        attachment_id = typed_item.get("attachment_id")
+        if isinstance(attachment_id, str) and attachment_id.strip():
+            ids.append(attachment_id.strip())
+    return tuple(ids)
 
 
 def _normalised_reply_channel(value: str | None) -> str | None:
@@ -3817,6 +3844,27 @@ def _classify_diagnostic_exception(exc: BaseException) -> str:
     return "PROVIDER_5XX"
 
 
+def _diagnostic_attachment_repository(
+    session: AsyncSession,
+    *,
+    settings: Settings,
+    data_protection: DataProtectionService | None,
+) -> AttachmentRepository | None:
+    """None when attachment storage isn't configured (no S3 bucket, no
+    data-protection key) — vision wiring degrades to text-only rather than
+    failing closed. Workers have no app.state (unlike the FastAPI boot-time
+    singleton in main.py for the email-ingestion path), so the blob store
+    is constructed fresh from settings here, matching how every other
+    per-session repository in this factory is built."""
+    if data_protection is None or not settings.ATTACHMENTS_S3_BUCKET.strip():
+        return None
+    return AttachmentRepository(
+        session,
+        data_protection=data_protection,
+        blob_store=AttachmentBlobStore.from_settings(settings),
+    )
+
+
 def _diagnostic_cognition_runtime(
     session: AsyncSession,
 ) -> DiagnosticCognitionRuntime:
@@ -3854,6 +3902,9 @@ def _diagnostic_cognition_runtime(
         redis_client=get_redis_client(),
         quota_runtime=get_initialized_quota_runtime(),
         tenant_configuration_repository=tenant_repository,
+        attachment_repository=_diagnostic_attachment_repository(
+            session, settings=settings, data_protection=data_protection
+        ),
         config=DiagnosticCognitionRuntimeConfig(
             max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,
             temperature=settings.ANTHROPIC_TEMPERATURE,
