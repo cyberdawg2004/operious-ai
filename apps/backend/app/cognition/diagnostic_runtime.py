@@ -520,12 +520,48 @@ class DiagnosticCognitionRuntime:
         semantic_correction_metadata = _semantic_self_correction_metadata(
             attempted=False,
         )
+        json_parse_correction_metadata = _json_parse_self_correction_metadata(
+            attempted=False,
+        )
         try:
-            candidate = _evaluate_semantic_candidate(
-                snapshot=snapshot,
-                completion=active_completion,
-                authorized_terms=self._config.authorized_governance_terms,
-            )
+            try:
+                candidate = _evaluate_semantic_candidate(
+                    snapshot=snapshot,
+                    completion=active_completion,
+                    authorized_terms=self._config.authorized_governance_terms,
+                )
+            except CognitionLLMProviderError as parse_exc:
+                # The model occasionally returns text that doesn't parse as
+                # JSON at all (e.g. an unescaped quote inside a free-text
+                # field) — this is the same class of recoverable mistake the
+                # semantic self-correction retry already handles for
+                # parseable-but-drifted output, so it gets the same one-shot
+                # corrective retry rather than failing closed immediately.
+                if not self._config.semantic_self_correction_enabled:
+                    raise
+                broken_completion = active_completion
+                # Recorded as attempted *before* the retry call resolves so
+                # a second parse failure (fail-closed, see the helper) still
+                # leaves an accurate audit trail instead of silently
+                # reverting to "not_attempted".
+                json_parse_correction_metadata = _json_parse_self_correction_metadata(
+                    attempted=True,
+                    outcome="retry_attempted",
+                    initial_error=str(parse_exc),
+                    initial_completion=broken_completion,
+                )
+                candidate = await self._attempt_json_parse_self_correction(
+                    snapshot=snapshot,
+                    broken_completion=broken_completion,
+                    parse_error=parse_exc,
+                )
+                active_completion = candidate.completion
+                json_parse_correction_metadata = _json_parse_self_correction_metadata(
+                    attempted=True,
+                    outcome="reparsed",
+                    initial_error=str(parse_exc),
+                    initial_completion=broken_completion,
+                )
             if not candidate.semantic.valid:
                 if self._config.semantic_self_correction_enabled:
                     (
@@ -584,6 +620,7 @@ class DiagnosticCognitionRuntime:
                     "retrieved_citations": _citations_list(snapshot),
                     **_attempt_metadata(snapshot),
                     **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
                     "semantic_terms": list(semantic.output_terms),
                     "raw_completion_sha256": _raw_completion_sha256(completion),
                     "quota_state": dict(snapshot.quota_state),
@@ -623,6 +660,7 @@ class DiagnosticCognitionRuntime:
                     "cognition_audit_record_id": audit_id,
                     "raw_completion_sha256": _raw_completion_sha256(completion),
                     **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
                 },
                 extracted_fields=parse_extracted_fields(parsed.extracted_fields),
             )
@@ -631,14 +669,20 @@ class DiagnosticCognitionRuntime:
                 exc,
                 snapshot=snapshot,
                 completion=active_completion,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             await self.persist_reasoning_failure(
                 snapshot=snapshot,
                 error=exc,
                 completion=active_completion,
                 audit_id=audit_id,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             raise
         except CognitionGovernanceRejectionError as exc:
@@ -646,14 +690,20 @@ class DiagnosticCognitionRuntime:
                 exc,
                 snapshot=snapshot,
                 completion=active_completion,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             await self.persist_reasoning_failure(
                 snapshot=snapshot,
                 error=exc,
                 completion=active_completion,
                 audit_id=audit_id,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             raise
         except CognitionPersistenceError as exc:
@@ -663,7 +713,10 @@ class DiagnosticCognitionRuntime:
                 completion=active_completion,
                 audit_id=audit_id,
                 failed=True,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             raise
         except CognitionLLMProviderError as exc:
@@ -672,7 +725,10 @@ class DiagnosticCognitionRuntime:
                 error=exc,
                 completion=active_completion,
                 audit_id=audit_id,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             raise
         except Exception as exc:
@@ -682,7 +738,10 @@ class DiagnosticCognitionRuntime:
                 completion=active_completion,
                 audit_id=audit_id,
                 failed=True,
-                metadata=semantic_correction_metadata,
+                metadata={
+                    **semantic_correction_metadata,
+                    **json_parse_correction_metadata,
+                },
             )
             raise CognitionLLMProviderError(
                 f"diagnostic cognition failed: {exc.__class__.__name__}"
@@ -760,6 +819,35 @@ class DiagnosticCognitionRuntime:
                 initial=initial,
                 corrected=corrected,
             ),
+        )
+
+    async def _attempt_json_parse_self_correction(
+        self,
+        *,
+        snapshot: DiagnosticReasoningSnapshot,
+        broken_completion: DiagnosticLLMCompletion,
+        parse_error: CognitionLLMProviderError,
+    ) -> _DiagnosticSemanticCandidate:
+        corrected_completion = await self._complete_llm(
+            system_prompt=snapshot.system_prompt,
+            messages=_json_parse_correction_messages(
+                snapshot=snapshot,
+                broken_completion=broken_completion,
+                parse_error=parse_error,
+            ),
+            tenant_id=snapshot.tenant_id,
+        )
+        if self._quota_runtime is not None:
+            await self._record_quota_token_usage(
+                tenant_id=snapshot.tenant_id,
+                tokens=corrected_completion.usage.total_tokens,
+            )
+        # Re-raises CognitionLLMProviderError if the retry is also
+        # unparseable — exactly one corrective attempt, then fail closed.
+        return _evaluate_semantic_candidate(
+            snapshot=snapshot,
+            completion=corrected_completion,
+            authorized_terms=self._config.authorized_governance_terms,
         )
 
     async def _record_quota_token_usage(
@@ -1152,7 +1240,9 @@ def _parse_output(text: str) -> DiagnosticLLMOutput:
     try:
         raw = json.loads(_extract_json(text))
     except json.JSONDecodeError as exc:
-        raise CognitionLLMProviderError("diagnostic model returned invalid JSON") from exc
+        raise CognitionLLMProviderError(
+            f"diagnostic model returned invalid JSON: {exc}"
+        ) from exc
     if not isinstance(raw, Mapping):
         raise CognitionLLMProviderError("diagnostic model returned non-object JSON")
     raw_map = cast(Mapping[str, Any], raw)
@@ -1288,8 +1378,73 @@ def _semantic_correction_messages(
     )
 
 
+def _json_parse_correction_messages(
+    *,
+    snapshot: DiagnosticReasoningSnapshot,
+    broken_completion: DiagnosticLLMCompletion,
+    parse_error: CognitionLLMProviderError,
+) -> tuple[DiagnosticLLMMessage, ...]:
+    return (
+        *snapshot.messages,
+        DiagnosticLLMMessage(
+            role="assistant",
+            content=broken_completion.text,
+        ),
+        DiagnosticLLMMessage(
+            role="user",
+            content="\n\n".join(
+                (
+                    "Rewrite the prior diagnostic response.",
+                    f"It could not be parsed as valid JSON: {parse_error}.",
+                    (
+                        "Return strictly valid JSON only: no markdown code "
+                        "fences, no commentary before or after the JSON "
+                        "object, and any double quote character that "
+                        "appears inside a string value (for example when "
+                        'quoting the customer) must be escaped as \\".'
+                    ),
+                    (
+                        "Use only the same ticket text and the same cited "
+                        "SOP context already provided. Do not re-retrieve "
+                        "or add new facts."
+                    ),
+                    (
+                        "Return JSON only with keys summary, category, "
+                        "confidence, reasoning, extracted_fields. schema="
+                        f"{_schema_appendix(snapshot.resolved_taxonomy)}"
+                    ),
+                    _EXTRACTION_INSTRUCTION,
+                )
+            ),
+        ),
+    )
+
+
 def _terms_for_prompt(terms: tuple[str, ...]) -> str:
     return ", ".join(terms) if terms else "(none)"
+
+
+def _json_parse_self_correction_metadata(
+    *,
+    attempted: bool,
+    outcome: str | None = None,
+    initial_error: str | None = None,
+    initial_completion: DiagnosticLLMCompletion | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "json_parse_self_correction_attempted": attempted,
+        "json_parse_self_correction_outcome": (
+            outcome if attempted else "not_attempted"
+        ),
+        "json_parse_self_correction_attempt_count": 1 if attempted else 0,
+    }
+    if initial_error is not None:
+        metadata["json_parse_self_correction_initial_error"] = initial_error
+    if initial_completion is not None:
+        metadata["json_parse_self_correction_initial_completion_sha256"] = (
+            _raw_completion_sha256(initial_completion)
+        )
+    return metadata
 
 
 def _semantic_self_correction_metadata(
