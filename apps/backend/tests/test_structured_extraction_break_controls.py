@@ -31,6 +31,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -44,7 +45,10 @@ from app.agents.tools.orchestration import (
 from app.attachments.repository import AttachmentRepository
 from app.attachments.s3_client import AttachmentBlobStore
 from app.attachments.storage_service import AttachmentStorageService
-from app.cognition.diagnostic_runtime import DiagnosticCognitionRuntime
+from app.cognition.diagnostic_runtime import (
+    DiagnosticCognitionRuntime,
+    parse_diagnostic_output,
+)
 from app.cognition.extraction import (
     ExtractedField,
     ExtractedOrderFields,
@@ -401,25 +405,33 @@ def test_low_confidence_extraction_also_blocks_auto_eligibility() -> None:
 @requires_live_anthropic
 @pytest.mark.asyncio
 async def test_live_text_extraction_returns_real_order_id() -> None:
-    runtime = _diagnostic_runtime(
-        AnthropicMessagesClient(
-            api_key=Settings().ANTHROPIC_API_KEY,
-            model=Settings().ANTHROPIC_DEFAULT_MODEL,
+    # A fresh httpx.AsyncClient per test, not the process-wide shared
+    # client: the shared client is a module-level singleton bound to
+    # whichever event loop first created it, and pytest-asyncio gives
+    # each test function its own loop — reusing the shared client across
+    # tests raises "Event loop is closed" on the second/third live test
+    # in this file. Same shape as test_anthropic_client_circuit.py's
+    # per-test http_client= pattern, just with a real transport.
+    async with httpx.AsyncClient() as http_client:
+        runtime = _diagnostic_runtime(
+            AnthropicMessagesClient(
+                api_key=Settings().ANTHROPIC_API_KEY,
+                model=Settings().ANTHROPIC_DEFAULT_MODEL,
+                http_client=http_client,
+            )
         )
-    )
-    ticket = (
-        "Hi, I'd like a refund for my order. The order number is "
-        "ORD-2026-77412 and I paid $89.50 for it."
-    )
-    snapshot = await runtime.load_reasoning_snapshot(
-        tenant_id=TENANT_ID,
-        execution_id="exec-text-extract",
-        dispatch_id=DISPATCH_ID,
-        session_id=SESSION_ID,
-        content=ticket,
-    )
-    completion = await runtime.complete_reasoning_snapshot(snapshot)
-    from app.cognition.diagnostic_runtime import parse_diagnostic_output
+        ticket = (
+            "Hi, I'd like a refund for my order. The order number is "
+            "ORD-2026-77412 and I paid $89.50 for it."
+        )
+        snapshot = await runtime.load_reasoning_snapshot(
+            tenant_id=TENANT_ID,
+            execution_id="exec-text-extract",
+            dispatch_id=DISPATCH_ID,
+            session_id=SESSION_ID,
+            content=ticket,
+        )
+        completion = await runtime.complete_reasoning_snapshot(snapshot)
 
     parsed = parse_diagnostic_output(completion.text)
     extracted = parse_extracted_fields(parsed.extracted_fields)
@@ -448,20 +460,12 @@ async def test_live_vision_extraction_reads_invoice_image(
     storage_service = AttachmentStorageService.from_settings(
         settings, repository=repository, blob_store=blob_store, data_protection=data_protection
     )
-    png_bytes = render_text_png("ZX-77231-AB ROXX 20260115 499")
+    png_bytes = render_text_png("ZX-77231-QD ROXX 20260115 499")
     record = await storage_service.store(
         [png_bytes], tenant_id=tenant_id, channel="email", content_type_declared="image/png"
     )
     assert record.status == "stored"
 
-    runtime = DiagnosticCognitionRuntime(
-        knowledge_runtime=cast(Any, _FakeKnowledgeRuntime()),
-        llm_client=AnthropicMessagesClient(
-            api_key=settings.ANTHROPIC_API_KEY, model=settings.ANTHROPIC_DEFAULT_MODEL
-        ),
-        usage_persistence=cast(Any, _UnusedUsagePersistence()),
-        attachment_repository=repository,
-    )
     ticket = (
         "Customer asks: 'Can you check my order using the attached invoice "
         "image?' The image shows, in order separated by spaces: the order "
@@ -469,20 +473,30 @@ async def test_live_vision_extraction_reads_invoice_image(
         "amount in whole dollars."
     )
     try:
-        snapshot = await runtime.load_reasoning_snapshot(
-            tenant_id=tenant_id,
-            execution_id="exec-vision-extract",
-            dispatch_id=DISPATCH_ID,
-            session_id=SESSION_ID,
-            content=ticket,
-            attachment_ids=(str(record.attachment_id),),
-        )
-        completion = await runtime.complete_reasoning_snapshot(snapshot)
-        from app.cognition.diagnostic_runtime import parse_diagnostic_output
+        async with httpx.AsyncClient() as http_client:
+            runtime = DiagnosticCognitionRuntime(
+                knowledge_runtime=cast(Any, _FakeKnowledgeRuntime()),
+                llm_client=AnthropicMessagesClient(
+                    api_key=settings.ANTHROPIC_API_KEY,
+                    model=settings.ANTHROPIC_DEFAULT_MODEL,
+                    http_client=http_client,
+                ),
+                usage_persistence=cast(Any, _UnusedUsagePersistence()),
+                attachment_repository=repository,
+            )
+            snapshot = await runtime.load_reasoning_snapshot(
+                tenant_id=tenant_id,
+                execution_id="exec-vision-extract",
+                dispatch_id=DISPATCH_ID,
+                session_id=SESSION_ID,
+                content=ticket,
+                attachment_ids=(str(record.attachment_id),),
+            )
+            completion = await runtime.complete_reasoning_snapshot(snapshot)
 
         parsed = parse_diagnostic_output(completion.text)
         extracted = parse_extracted_fields(parsed.extracted_fields)
-        assert extracted.order_id.value == "ZX-77231-AB"
+        assert extracted.order_id.value == "ZX-77231-QD"
         assert extracted.seller.value == "ROXX"
         assert extracted.purchase_date.value == "20260115"
         assert extracted.amount.value in ("499", "499.00", "$499")
@@ -497,27 +511,28 @@ async def test_live_adversarial_ambiguity_does_not_fabricate_confidence() -> Non
     """LOAD-BEARING: two genuinely conflicting order numbers in the same
     ticket must never produce confidence "high" on either — a confidently
     wrong extraction feeds a confidently wrong money decision."""
-    runtime = _diagnostic_runtime(
-        AnthropicMessagesClient(
-            api_key=Settings().ANTHROPIC_API_KEY,
-            model=Settings().ANTHROPIC_DEFAULT_MODEL,
-        )
-    )
     ticket = (
         "I need a refund. My order number is ZX-11111-AA. Wait, actually, "
         "I just double-checked my email and it might be ZX-99999-BB "
         "instead — I genuinely cannot tell which one is correct, they're "
         "both in my inbox and I'm confused about which order this is."
     )
-    snapshot = await runtime.load_reasoning_snapshot(
-        tenant_id=TENANT_ID,
-        execution_id="exec-ambiguous",
-        dispatch_id=DISPATCH_ID,
-        session_id=SESSION_ID,
-        content=ticket,
-    )
-    completion = await runtime.complete_reasoning_snapshot(snapshot)
-    from app.cognition.diagnostic_runtime import parse_diagnostic_output
+    async with httpx.AsyncClient() as http_client:
+        runtime = _diagnostic_runtime(
+            AnthropicMessagesClient(
+                api_key=Settings().ANTHROPIC_API_KEY,
+                model=Settings().ANTHROPIC_DEFAULT_MODEL,
+                http_client=http_client,
+            )
+        )
+        snapshot = await runtime.load_reasoning_snapshot(
+            tenant_id=TENANT_ID,
+            execution_id="exec-ambiguous",
+            dispatch_id=DISPATCH_ID,
+            session_id=SESSION_ID,
+            content=ticket,
+        )
+        completion = await runtime.complete_reasoning_snapshot(snapshot)
 
     parsed = parse_diagnostic_output(completion.text)
     extracted = parse_extracted_fields(parsed.extracted_fields)
