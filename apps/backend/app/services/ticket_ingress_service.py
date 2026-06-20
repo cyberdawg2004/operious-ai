@@ -759,10 +759,18 @@ class TicketIngressService:
         )
         if not nonce_recorded:
             return WebhookDuplicateDeliveryResult()
+        email_message_id = email_payload.get("message_id")
         await self._persist_email_attachments(
             email_payload,
             tenant_id=channel_config.tenant_id,
-            message_id=verified.message_id,
+            # The email's own MIME Message-ID (the stable per-email
+            # identifier B2/B3 will look attachments up by) — NOT the SNS
+            # envelope's MessageId, which only identifies this delivery.
+            message_id=(
+                email_message_id
+                if isinstance(email_message_id, str)
+                else verified.message_id
+            ),
         )
         source_language = "en"
         fingerprint_metadata: dict[str, object] = {}
