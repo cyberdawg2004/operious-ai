@@ -17,6 +17,11 @@ from app.boundary.translation import (
     TranslationRuntime,
     derive_formality,
 )
+from app.cognition.extraction import (
+    EXTRACTED_ORDER_FIELD_NAMES,
+    ExtractedField,
+    ExtractedOrderFields,
+)
 from app.governance.capability import OperationalAct
 from app.identity import AuthorityContext, TenantId
 from app.resolution.enums import (
@@ -216,6 +221,7 @@ class ResolutionProposalRequest:
     reply_thread_context: str | None = None
     retrieved_citations: Sequence[Mapping[str, Any]] = ()
     conversation_history: Sequence[Mapping[str, Any]] = ()
+    extracted_fields: ExtractedOrderFields | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,7 +325,9 @@ class ResolutionRuntime:
         )
         reply_segments = tuple(segment.to_dict() for segment in reply_draft.segments)
         reply = render_grounded_reply(reply_draft)
-        recommended_actions = _recommended_actions(category, taxonomy)
+        recommended_actions = _recommended_actions(
+            category, taxonomy, request.extracted_fields
+        )
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
@@ -331,6 +339,8 @@ class ResolutionRuntime:
             evidence=evidence,
             autonomy_policy=autonomy_policy,
             taxonomy=taxonomy,
+            recommended_actions=recommended_actions,
+            extracted_fields=request.extracted_fields,
         )
         proposal_id = derive_resolution_proposal_id(
             tenant_id=request.tenant_id,
@@ -757,8 +767,96 @@ def _resolution_category(
 def _recommended_actions(
     category: str,
     taxonomy: ResolutionTaxonomyPolicy,
+    extracted_fields: ExtractedOrderFields | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
-    return taxonomy.actions_for(category)
+    actions = taxonomy.actions_for(category)
+    if extracted_fields is None:
+        return actions
+    return tuple(_merge_extracted_fields(action, extracted_fields) for action in actions)
+
+
+def _merge_extracted_fields(
+    action: Mapping[str, Any],
+    extracted_fields: ExtractedOrderFields,
+) -> Mapping[str, Any]:
+    """Merge real extracted values into the action's template dict — this
+    is the precise fix for the unknown_order/unknown_sku bug: actions built
+    from category+taxonomy alone never carried real ticket data, so
+    downstream fallback chains (orchestration.py) always hit their
+    fabricated-placeholder branch. An explicit tenant-configured value on
+    the template (rare; templates are empty by default) still wins over
+    extraction. A None extracted value never overwrites anything — it
+    simply leaves the key unset, which downstream code reads as "missing"
+    honestly rather than as a string that looks like data.
+    """
+    merged = dict(action)
+    for name in EXTRACTED_ORDER_FIELD_NAMES:
+        field: ExtractedField = getattr(extracted_fields, name)
+        if field.value is not None and merged.get(name) is None:
+            merged[name] = field.value
+    return merged
+
+
+# Required for THIS action type to be eligible for auto-approval. Keyed by
+# the taxonomy action "type" (matches app.agents.tools.orchestration's
+# _ACTION_TOOL_BY_TYPE keys) rather than tool_name, since tool_name can be
+# tenant-customized while "type" is the stable taxonomy identifier.
+_REQUIRED_EXTRACTION_FIELDS_BY_ACTION_TYPE: Mapping[str, tuple[str, ...]] = {
+    "refund_request": ("order_id", "amount"),
+    "warranty_claim": ("purchase_date",),
+    "replacement_order": ("order_id",),
+    "warehouse_repair": (),
+}
+
+# confidence levels that are NOT good enough to act on, even though a
+# value is present — "low" means the model itself flagged uncertainty
+# (e.g. conflicting values in the ticket); "missing" (value is None) is
+# handled separately below. Both fail closed identically.
+_INSUFFICIENT_CONFIDENCE = frozenset({"low"})
+
+
+def _extraction_completeness_reasons(
+    *,
+    recommended_actions: tuple[Mapping[str, Any], ...],
+    extracted_fields: ExtractedOrderFields | None,
+) -> tuple[str, ...]:
+    """Fail-closed extraction gating: an action whose required field is
+    missing or low-confidence must route to human approval through the
+    SAME reasons-list mechanism a monetary-threshold breach or fraud
+    keyword already uses — not a parallel check. A wrong order_id or
+    purchase_date feeds a wrong eligibility decision, so "extraction
+    didn't find it" is never silently treated as "proceed anyway".
+    """
+    reasons: list[str] = []
+    for action in recommended_actions:
+        action_type = action.get("type")
+        if not isinstance(action_type, str) or not action_type.strip():
+            continue
+        required = _REQUIRED_EXTRACTION_FIELDS_BY_ACTION_TYPE.get(
+            action_type.strip(), ()
+        )
+        for field_name in required:
+            field = _extracted_field_or_none(extracted_fields, field_name)
+            is_insufficient = (
+                field is None
+                or field.value is None
+                or field.confidence in _INSUFFICIENT_CONFIDENCE
+            )
+            if is_insufficient:
+                reasons.append(
+                    f"missing_required_extraction_field:{action_type}:{field_name}"
+                )
+    return tuple(reasons)
+
+
+def _extracted_field_or_none(
+    extracted_fields: ExtractedOrderFields | None,
+    field_name: str,
+) -> ExtractedField | None:
+    if extracted_fields is None:
+        return None
+    value = getattr(extracted_fields, field_name, None)
+    return value if isinstance(value, ExtractedField) else None
 
 
 def _evaluate_gate(
@@ -769,6 +867,8 @@ def _evaluate_gate(
     evidence: tuple[Mapping[str, Any], ...],
     autonomy_policy: ResolutionAutonomyPolicy,
     taxonomy: ResolutionTaxonomyPolicy,
+    recommended_actions: tuple[Mapping[str, Any], ...] = (),
+    extracted_fields: ExtractedOrderFields | None = None,
 ) -> _GateDecision:
     reasons: list[str] = []
     text = f"{original_content} {reply}".lower()
@@ -794,6 +894,12 @@ def _evaluate_gate(
         reasons.append("monetary_commitment_requires_approval")
     if _has_conflicting_evidence(evidence):
         reasons.append("conflicting_evidence")
+    reasons.extend(
+        _extraction_completeness_reasons(
+            recommended_actions=recommended_actions,
+            extracted_fields=extracted_fields,
+        )
+    )
     if _contains_any(reply.lower(), _unsupported_commitment_patterns(taxonomy)):
         return _GateDecision(
             supervisor_verdict=ResolutionSupervisorVerdict.FAIL,

@@ -990,6 +990,7 @@ def _diagnostic_result_from_reasoning(
             else None
         ),
         retrieved_citations=result.retrieved_citations,
+        extracted_fields=result.extracted_fields,
     )
 
 
@@ -1782,6 +1783,7 @@ async def _append_resolution_proposal_after_diagnostic(
                     reply_thread_context=work_item.reply_thread_context,
                     retrieved_citations=result.retrieved_citations,
                     conversation_history=work_item.conversation_history,
+                    extracted_fields=result.extracted_fields,
                 )
             )
             await timeline.append_event(

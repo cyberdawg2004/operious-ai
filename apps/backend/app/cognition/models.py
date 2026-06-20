@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.cognition.extraction import ExtractedOrderFields
 from app.cognition.identity import (
     CognitionAuditId,
     CognitionLLMUsageId,
@@ -72,6 +73,12 @@ class DiagnosticLLMOutput(BaseModel):
     category: str = Field(min_length=1, max_length=200)
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str = Field(max_length=4000, default="")
+    # Intentionally a raw dict, not ExtractedOrderFields, here: a malformed
+    # extraction sub-object must not fail the WHOLE diagnostic parse (the
+    # categorization fields above may still be perfectly good). It is
+    # validated separately via app.cognition.extraction.parse_extracted_fields,
+    # which fails closed to an all-absent result instead of raising.
+    extracted_fields: dict[str, Any] | None = None
 
     @field_validator("summary")
     @classmethod
@@ -192,6 +199,10 @@ class DiagnosticLLMCompletion:
     raw_metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 
+def _empty_extracted_fields() -> ExtractedOrderFields:
+    return ExtractedOrderFields()
+
+
 @dataclass(frozen=True, slots=True)
 class DiagnosticReasoningResult:
     summary: str
@@ -212,6 +223,9 @@ class DiagnosticReasoningResult:
         default_factory=_empty_retrieved_citations
     )
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
+    extracted_fields: ExtractedOrderFields = field(
+        default_factory=_empty_extracted_fields
+    )
 
 
 __all__ = [

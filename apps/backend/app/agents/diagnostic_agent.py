@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.cognition.diagnostic_runtime import DiagnosticCognitionRuntime
+from app.cognition.extraction import ExtractedOrderFields
 
 
 def _empty_retrieved_citations() -> list[dict[str, Any]]:
@@ -31,6 +32,9 @@ class DiagnosticResult(BaseModel):
     cognition_audit_id: str | None = None
     retrieved_citations: list[dict[str, Any]] = Field(
         default_factory=_empty_retrieved_citations
+    )
+    extracted_fields: ExtractedOrderFields = Field(
+        default_factory=ExtractedOrderFields
     )
 
 
@@ -86,6 +90,7 @@ class DiagnosticAgent:
                     "cognition_audit_id",
                 ),
                 retrieved_citations=result.retrieved_citations,
+                extracted_fields=result.extracted_fields,
             )
         normalized = content.casefold()
         category, confidence = _classify(normalized)

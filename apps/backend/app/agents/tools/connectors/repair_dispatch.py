@@ -451,9 +451,21 @@ def _metadata_uuid(
 
 
 def _target_resource_from_payload(payload: Mapping[str, Any]) -> str:
-    order_id = _clean_text(payload.get("order_id")) or "unknown-order"
-    sku = _clean_text(payload.get("product_sku")) or "unknown-sku"
-    return f"repair:{order_id}:{sku}"
+    """Secondary fallback only — orchestration.py's _request_metadata
+    already computes a real target_resource (via _target_resource, which
+    degrades to tool_name rather than a fabricated identifier) before this
+    connector ever sees the request; this only fires if that metadata key
+    is somehow absent. No fabricated "unknown-order"/"unknown-sku" — a
+    None order_id/sku here collapses to a generic-but-honest resource
+    key, same degrade-gracefully shape as orchestration.py's _target_resource.
+    """
+    order_id = _clean_text(payload.get("order_id"))
+    sku = _clean_text(payload.get("product_sku"))
+    if order_id is not None and sku is not None:
+        return f"repair:{order_id}:{sku}"
+    if sku is not None:
+        return f"repair:sku:{sku}"
+    return "repair"
 
 
 def _result_text(result: ToolInvocationResult, key: str) -> str | None:

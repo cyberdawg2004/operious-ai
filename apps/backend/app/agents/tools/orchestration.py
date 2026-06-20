@@ -502,8 +502,18 @@ def _default_payload(
     action_type: str,
     tool_name: str,
 ) -> JsonObject:
-    order_id = _text(action.get("order_id")) or f"session-{proposal.session_id}"
-    product_sku = _text(action.get("product_sku")) or "unknown_sku"
+    # No fallback lies: order_id/product_sku come from real extraction
+    # merged into `action` upstream (resolution_runtime.py
+    # _merge_extracted_fields) — or they are None. A null in the
+    # connector/approval-queue payload is honest; the old
+    # f"session-{id}" / "unknown_sku" placeholders were strings a human
+    # reviewer could mistake for real data. The resolution gate
+    # (_evaluate_gate's missing_required_extraction_field reason) is what
+    # keeps a None order_id from reaching auto-execution for action types
+    # that require it — this function does not re-implement that check,
+    # it just stops lying about what it has.
+    order_id = _text(action.get("order_id"))
+    product_sku = _text(action.get("product_sku"))
     if tool_name == "warranty.claim":
         return {
             "order_id": order_id,
@@ -527,7 +537,7 @@ def _default_payload(
             "order_id": order_id,
             "product_sku": product_sku,
             "refund_amount_cents": _int(action.get("refund_amount_cents"))
-            or 5000,
+            or _amount_to_cents(_text(action.get("amount"))),
             "refund_reason": _text(action.get("refund_reason"))
             or proposal.resolution_category,
         }
@@ -681,6 +691,23 @@ def _int(value: object) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _amount_to_cents(amount_text: str | None) -> int | None:
+    """Parse an extracted dollar-amount string (e.g. "$49.99", "1,234.56")
+    into integer cents. Returns None on any parse failure — never a
+    fabricated number. A refund amount that can't be parsed is exactly
+    the "missing_required_extraction_field" case _evaluate_gate already
+    routes to human approval; this must not paper over that with a fake
+    default like the old `or 5000`.
+    """
+    if amount_text is None:
+        return None
+    cleaned = amount_text.strip().lstrip("$").replace(",", "")
+    try:
+        return round(float(cleaned) * 100)
+    except ValueError:
+        return None
 
 
 __all__ = [
