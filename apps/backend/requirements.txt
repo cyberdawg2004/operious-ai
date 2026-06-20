@@ -52,6 +52,8 @@ attrs==26.1.0
 bcrypt==5.0.0
 billiard==4.2.4
 black==26.3.1
+boto3==1.43.34
+botocore==1.43.34
 build==1.5.0
 cachetools==6.2.6
 celery[redis]==5.3.6
@@ -88,6 +90,7 @@ importlib_metadata==8.7.1
 importlib_resources==7.1.0
 Jinja2==3.1.6
 jiter==0.13.0
+jmespath==1.1.0
 json5==0.10.0
 jsonpatch==1.33
 jsonpointer==3.1.1
@@ -149,6 +152,7 @@ requests-toolbelt==1.0.0
 rich==14.3.4
 rpds-py==0.30.0
 ruff==0.15.12
+s3transfer==0.19.0
 sentry-sdk==2.60.0
 shellingham==1.5.4
 six==1.17.0

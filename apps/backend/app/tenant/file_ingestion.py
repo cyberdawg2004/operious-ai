@@ -10,8 +10,15 @@ _PDF_MAGIC = b"%PDF-"
 _ZIP_MAGIC = b"PK\x03\x04"
 _DOCX_MEMBER = "word/document.xml"
 _EXE_MAGIC = b"MZ"
+_JPEG_MAGIC = b"\xff\xd8\xff"
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 _MIN_EXTRACTED_CHARS = 50
+
+# Sentinel returned by detect_content_type() for an executable payload.
+# Never appears in any caller's allow-list — there is no legitimate
+# document or image type that begins with the MZ header.
+EXECUTABLE_CONTENT_TYPE = "application/x-msdownload"
 
 ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
     {
@@ -35,31 +42,32 @@ class KnowledgeUploadEmptyTextError(ValueError):
     """Raised when extraction succeeds but yields too little text (e.g. scanned PDF)."""
 
 
-def _sniff_content_type(raw: bytes) -> str:
-    """Return a canonical MIME type based on magic bytes only.
+def detect_content_type(raw: bytes) -> str | None:
+    """Return a canonical MIME type based on magic bytes only, or ``None``
+    if no recognized signature matches.
 
-    Rejects the client-supplied Content-Type entirely — the extension or
-    MIME type claimed by the uploader is never trusted.
+    This is the single shared detector — callers (knowledge uploads,
+    customer attachments) apply their OWN allow-list against the result
+    rather than each re-implementing magic-byte parsing. The caller's
+    declared Content-Type is never consulted here or anywhere downstream.
     """
     if raw[:5] == _PDF_MAGIC:
         return "application/pdf"
     if raw[:2] == _EXE_MAGIC:
-        raise KnowledgeUploadTypeError(
-            "Executable binary rejected (MZ magic bytes detected)"
-        )
+        return EXECUTABLE_CONTENT_TYPE
+    if raw[:3] == _JPEG_MAGIC:
+        return "image/jpeg"
+    if raw[:8] == _PNG_MAGIC:
+        return "image/png"
     if raw[:4] == _ZIP_MAGIC:
         # DOCX is a ZIP archive that must contain word/document.xml
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as zf:
                 names = zf.namelist()
-        except zipfile.BadZipFile as exc:
-            raise KnowledgeUploadTypeError(
-                f"File has ZIP magic bytes but is not a valid ZIP archive: {exc}"
-            ) from exc
+        except zipfile.BadZipFile:
+            return None
         if _DOCX_MEMBER not in names:
-            raise KnowledgeUploadTypeError(
-                "ZIP archive does not contain word/document.xml — not a valid .docx"
-            )
+            return None
         return (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
@@ -70,11 +78,26 @@ def _sniff_content_type(raw: bytes) -> str:
         raw.decode("utf-8")
         return "text/plain"
     except UnicodeDecodeError:
-        pass
-    raise KnowledgeUploadTypeError(
-        "File does not match any supported type "
-        "(expected PDF, DOCX, UTF-8 plain text, or Markdown)"
-    )
+        return None
+
+
+def _sniff_content_type(raw: bytes) -> str:
+    """Return a canonical MIME type, restricted to ``ALLOWED_CONTENT_TYPES``.
+
+    Rejects the client-supplied Content-Type entirely — the extension or
+    MIME type claimed by the uploader is never trusted.
+    """
+    detected = detect_content_type(raw)
+    if detected == EXECUTABLE_CONTENT_TYPE:
+        raise KnowledgeUploadTypeError(
+            "Executable binary rejected (MZ magic bytes detected)"
+        )
+    if detected is None or detected not in ALLOWED_CONTENT_TYPES:
+        raise KnowledgeUploadTypeError(
+            "File does not match any supported type "
+            "(expected PDF, DOCX, UTF-8 plain text, or Markdown)"
+        )
+    return detected
 
 
 def _extract_pdf(raw: bytes) -> str:

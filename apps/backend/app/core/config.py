@@ -487,6 +487,21 @@ class Settings(BaseSettings):
     KNOWLEDGE_UPLOAD_MAX_BYTES: int = 15_728_640  # 15 MiB
     KNOWLEDGE_UPLOAD_ALLOWED_TYPES: str = "pdf,docx,txt,md"
 
+    # ─── Customer attachment storage (Phase B1a) ─────────────────────
+    # Customer-submitted evidence (invoice/receipt photos, PDFs) lands in a
+    # dedicated private S3 bucket — NOT the tenant_knowledge_uploads bytea
+    # path — because attachment volume is per-ticket, not admin-initiated.
+    # The app-layer envelope (DataProtectionService.encrypt_bytes,
+    # tenant_scoped=True) is the security boundary; S3 SSE is defense in
+    # depth only. No AWS KMS — same KMS posture as the rest of the platform
+    # (DATA_PROTECTION_KMS_BACKEND).
+    ATTACHMENTS_S3_BUCKET: str = ""
+    ATTACHMENTS_S3_REGION: str = ""
+    ATTACHMENTS_S3_ACCESS_KEY_ID: str = ""
+    ATTACHMENTS_S3_SECRET_ACCESS_KEY: str = ""
+    ATTACHMENT_MAX_BYTES: int = 26_214_400  # 25 MiB — receipt/invoice photos
+    ATTACHMENT_RETENTION_DAYS: int = 90
+
     # ─── HTTP transport (2.5-I) ──────────────────────────────────────
     # Comma-separated CORS allowlist. Empty string disables CORS at
     # the FastAPI level (production posture defaults to "no CORS";
