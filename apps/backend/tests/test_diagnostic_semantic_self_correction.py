@@ -58,7 +58,7 @@ def _empty_calls() -> list[tuple[str, tuple[DiagnosticLLMMessage, ...]]]:
 class _SequentialLLMClient:
     texts: Sequence[str]
     provider_name: str = "anthropic"
-    model_name: str = "claude-sonnet-4-20250514"
+    model_name: str = "claude-sonnet-4-6"
     calls: list[tuple[str, tuple[DiagnosticLLMMessage, ...]]] = field(
         default_factory=_empty_calls
     )

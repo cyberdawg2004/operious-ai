@@ -121,7 +121,7 @@ Expected: `ANTHROPIC_API_KEY` is present. If it is missing or was rotated recent
 
    ```bash
    fly ssh console --app operious-ai-imad \
-     --command "python -c \"import json, os, urllib.request; body=json.dumps({'model': os.environ.get('ANTHROPIC_DEFAULT_MODEL', 'claude-sonnet-4-20250514'), 'max_tokens': 1, 'messages': [{'role': 'user', 'content': 'ping'}]}).encode(); req=urllib.request.Request(os.environ.get('ANTHROPIC_BASE_URL', 'https://api.anthropic.com') + '/v1/messages', data=body, headers={'x-api-key': os.environ['ANTHROPIC_API_KEY'], 'anthropic-version': os.environ.get('ANTHROPIC_VERSION', '2023-06-01'), 'content-type': 'application/json'}, method='POST'); r=urllib.request.urlopen(req, timeout=20); print(r.status); print(r.read(200).decode())\""
+     --command "python -c \"import json, os, urllib.request; body=json.dumps({'model': os.environ.get('ANTHROPIC_DEFAULT_MODEL', 'claude-sonnet-4-6'), 'max_tokens': 1, 'messages': [{'role': 'user', 'content': 'ping'}]}).encode(); req=urllib.request.Request(os.environ.get('ANTHROPIC_BASE_URL', 'https://api.anthropic.com') + '/v1/messages', data=body, headers={'x-api-key': os.environ['ANTHROPIC_API_KEY'], 'anthropic-version': os.environ.get('ANTHROPIC_VERSION', '2023-06-01'), 'content-type': 'application/json'}, method='POST'); r=urllib.request.urlopen(req, timeout=20); print(r.status); print(r.read(200).decode())\""
    ```
 
    Expected: HTTP status `200` from Anthropic with a short response body.
@@ -192,7 +192,7 @@ Expected output includes:
 ```
 
 ```bash
-curl -sS "https://operious-ai-imad.fly.dev/api/v1/quota/status/anker-pilot/anthropic/claude-sonnet-4-20250514" \
+curl -sS "https://operious-ai-imad.fly.dev/api/v1/quota/status/anker-pilot/anthropic/claude-sonnet-4-6" \
   -H "X-Tenant-ID: anker-pilot" \
   -H "Authorization: Bearer ${OPERIOUS_OPERATOR_TOKEN:?set OPERIOUS_OPERATOR_TOKEN to an Auth0 operator token from https://app.operious.com}" | \
   python3 -m json.tool | grep -E '"operator_circuit_state"|"redis_available"'

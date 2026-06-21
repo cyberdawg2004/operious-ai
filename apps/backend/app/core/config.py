@@ -340,7 +340,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_VERSION: str = "2023-06-01"
-    ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-6"
     ANTHROPIC_MAX_OUTPUT_TOKENS: int = 512
     ANTHROPIC_TEMPERATURE: float = 0.0
 

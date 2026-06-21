@@ -58,7 +58,7 @@ class _ScriptedLLMClient:
     prompt_tokens: int = 100
     completion_tokens: int = 20
     provider_name: str = "anthropic"
-    model_name: str = "claude-sonnet-4-20250514"
+    model_name: str = "claude-sonnet-4-6"
 
     async def complete(
         self,

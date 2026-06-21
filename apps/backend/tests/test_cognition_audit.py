@@ -90,7 +90,7 @@ def pg_tenant_id() -> str:
 class _ScriptedLLMClient:
     text: str
     provider_name: str = "anthropic"
-    model_name: str = "claude-sonnet-4-20250514"
+    model_name: str = "claude-sonnet-4-6"
 
     async def complete(
         self,

@@ -80,7 +80,7 @@ class _ScriptedLLMClient:
     prompt_tokens: int = 100
     completion_tokens: int = 20
     provider_name: str = "anthropic"
-    model_name: str = "claude-sonnet-4-20250514"
+    model_name: str = "claude-sonnet-4-6"
     prompt_seen: str = ""
     system_seen: str = ""
 
@@ -682,7 +682,7 @@ async def test_postgres_cognition_usage_persistence_is_tenant_scoped(
     usage_id = derive_llm_usage_id(
         tenant_id=_TENANT_ID,
         execution_id="execution-5c-postgres",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
     )
     record = CognitionLLMUsageRecord(
         usage_id=usage_id,
@@ -691,7 +691,7 @@ async def test_postgres_cognition_usage_persistence_is_tenant_scoped(
         dispatch_id="dispatch-5c-postgres",
         session_id="session-5c-postgres",
         provider="anthropic",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
