@@ -33,6 +33,7 @@ EXPECTED_QUEUES = {
     "ingress.whatsapp",
     "ingress.shopify",
     "ingress.voice",
+    "whatsapp_media_fetch",
     "diagnostic.high",
     "diagnostic.normal",
     "diagnostic.retry",

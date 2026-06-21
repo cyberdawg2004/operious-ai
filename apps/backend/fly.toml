@@ -17,7 +17,7 @@ primary_region = "iad"
   worker_sop = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q sop_intelligence,knowledge_indexing --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
   worker_maintenance = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q webhook_maintenance,dead_letter --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
   worker_beat = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule"
-  worker_ingress = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q ingress.email,ingress.whatsapp,ingress.shopify --concurrency=2 --without-gossip --without-mingle --without-heartbeat"
+  worker_ingress = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q ingress.email,ingress.whatsapp,ingress.shopify,whatsapp_media_fetch --concurrency=2 --without-gossip --without-mingle --without-heartbeat"
   worker_outbound_send = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --loglevel=info -Q outbound.send --concurrency=1 --without-gossip --without-mingle --without-heartbeat"
   worker_voice_realtime = "scripts/prepare_google_credentials.sh env DB_USE_NULLPOOL=true celery -A app.workers.celery_app worker --queues ingress.voice --concurrency=2 --loglevel=info --without-gossip --without-mingle --without-heartbeat"
 

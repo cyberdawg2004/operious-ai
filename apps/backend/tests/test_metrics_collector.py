@@ -159,7 +159,7 @@ async def test_health_returns_all_queues() -> None:
     response = await _health_response(_MetricsRedis())
 
     assert set(ALL_QUEUES).issubset(response.queues)
-    assert len(ALL_QUEUES) == 17
+    assert len(ALL_QUEUES) == 18
     assert response.queues[QUEUE_DIAGNOSTIC_NORMAL].status == "ok"
 
 

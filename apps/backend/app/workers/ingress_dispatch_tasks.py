@@ -23,6 +23,10 @@ from app.boundary.ingress_dispatch_publisher import (
     enqueue_ingress_dispatch_outbox,
     queue_for_ingress_dispatch_channel,
 )
+from app.boundary.whatsapp_media_fetch import (
+    PostgresWhatsAppMediaFetchPersistence,
+    WhatsAppMediaFetchStatus,
+)
 from app.core.config import get_settings
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
@@ -48,6 +52,14 @@ from app.workers.dead_letter_persistence import (
 )
 logger = logging.getLogger(__name__)
 _T = TypeVar("_T")
+# Capped well below the outbox's own max_attempts ceiling (B1.5): waiting
+# for WhatsApp media must never exhaust the SAME budget a genuine dispatch
+# failure relies on, or a slow-but-healthy media fetch could silently drop
+# the ticket. 3 matches the media fetch task's own bounded-retry ceiling
+# (app.workers.whatsapp_media_fetch_tasks._MAX_FETCH_RETRIES) — once that
+# task has had its full budget to resolve, waiting further can't help.
+_MAX_WHATSAPP_MEDIA_WAIT_RESCHEDULES = 3
+_WHATSAPP_MEDIA_WAIT_RETRY_SECONDS = 30
 
 
 class DispatchServiceProtocol(Protocol):
@@ -219,6 +231,19 @@ async def process_ingress_dispatch_outbox_runtime(
                 ),
                 "outbox_id": str(outbox.outbox_id),
             }
+        if outbox.channel == "whatsapp" and session is not None:
+            waited = await _wait_for_whatsapp_media_if_pending(
+                session=session,
+                outbox_runtime=outbox_runtime,
+                outbox=outbox,
+                now=ts,
+            )
+            if waited is not None:
+                await _commit_if_present(session)
+                return {
+                    "status": "deferred_for_media",
+                    "outbox_id": str(outbox.outbox_id),
+                }
         if dispatch_service is None:
             if session is None:
                 raise RuntimeError("dispatch_service or session is required")
@@ -366,6 +391,42 @@ async def _reschedule_or_dead_letter(
     )
     await _commit_if_present(session)
     return updated
+
+
+async def _wait_for_whatsapp_media_if_pending(
+    *,
+    session: AsyncSession,
+    outbox_runtime: IngressDispatchOutboxRuntime,
+    outbox: IngressDispatchOutboxRecord,
+    now: datetime,
+) -> IngressDispatchOutboxRecord | None:
+    """Defer dispatch (a pure reschedule, never a dead-letter) while a
+    WhatsApp ingress has unresolved media. boundary_ingress /
+    coordination_envelopes are write-once (see
+    app.boundary.whatsapp_media_fetch module docstring), so the
+    coordination envelope must not be written until media resolves —
+    otherwise it's frozen forever without the final attachment state.
+
+    Bounded by _MAX_WHATSAPP_MEDIA_WAIT_RESCHEDULES, NOT by this
+    outbox's own dead-letter budget: once exhausted, this returns None
+    and dispatch proceeds anyway (fail-soft — the ticket is never
+    dropped over a slow/failed attachment).
+    """
+    if outbox.claim_id is None:
+        raise RuntimeError("claimed ingress dispatch outbox missing claim_id")
+    if outbox.attempt_count >= _MAX_WHATSAPP_MEDIA_WAIT_RESCHEDULES:
+        return None
+    repo = PostgresWhatsAppMediaFetchPersistence(session)
+    records = await repo.list_by_ingress(outbox.ingress_id, tenant_id=outbox.tenant_id)
+    if not any(record.status is WhatsAppMediaFetchStatus.PENDING for record in records):
+        return None
+    return await outbox_runtime.reschedule(
+        outbox=outbox,
+        claim_id=outbox.claim_id,
+        error="whatsapp_media_fetch_pending",
+        now=now,
+        retry_after_seconds=_WHATSAPP_MEDIA_WAIT_RETRY_SECONDS,
+    )
 
 
 async def _record_dead_letter_visibility(

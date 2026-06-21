@@ -21,6 +21,12 @@ from app.boundary.persistence import (
     BoundaryIngressQuery,
     InMemoryBoundaryPersistence,
 )
+from app.boundary.whatsapp_media_fetch import (
+    InMemoryWhatsAppMediaFetchPersistence,
+    WhatsAppMediaFetchRecord,
+    WhatsAppMediaFetchRepositoryProtocol,
+    WhatsAppMediaFetchStatus,
+)
 from app.services.ticket_ingress_service import (
     TicketIngressRejected,
     TicketIngressService,
@@ -240,6 +246,150 @@ async def test_channel_webhook_immediately_enqueues_committed_dispatch_outbox() 
     assert str(enqueued[0].ingress_id) == result.ingress_id
     assert enqueued[0].tenant_id == TENANT_ID
     assert enqueued[0].channel == TenantChannelType.WHATSAPP.value
+
+
+@pytest.mark.asyncio
+async def test_channel_webhook_whatsapp_media_acks_before_any_fetch() -> None:
+    """B1.5 ack-then-defer proof: the webhook captures the Meta media id
+    as a durable PENDING row and best-effort enqueues the fetch task —
+    it never constructs a WhatsAppGraphMediaFetcher or makes any HTTP
+    call itself. ``whatsapp_media_fetch_enqueue`` here is a bare list
+    .append (incapable of any network I/O), and the webhook response
+    still returns successfully — proving the fetch is structurally
+    deferred to a separate Celery task invocation, not inlined."""
+    boundary_store = InMemoryBoundaryPersistence()
+    session = _FakeSession()
+    enqueued_dispatch: list[IngressDispatchOutboxRecord] = []
+    enqueued_fetches: list[WhatsAppMediaFetchRecord] = []
+    fetch_repository = InMemoryWhatsAppMediaFetchPersistence()
+    service = await _service_with_channel(
+        boundary_store=boundary_store,
+        session=session,
+        channel_type=TenantChannelType.WHATSAPP,
+        routing_address="phone-number-media",
+        tenant_id=TENANT_ID,
+        webhook_secret="whatsapp-secret",
+        ingress_dispatch_enqueue=enqueued_dispatch.append,
+        whatsapp_media_fetch_repository=fetch_repository,
+        whatsapp_media_fetch_enqueue=enqueued_fetches.append,
+    )
+    body = _with_fresh_timestamp(
+        TenantChannelType.WHATSAPP,
+        {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "metadata": {
+                                    "phone_number_id": "phone-number-media"
+                                },
+                                "messages": [
+                                    {
+                                        "id": "wamid.media-001",
+                                        "from": "15551234567",
+                                        "timestamp": "1779458400",
+                                        "type": "image",
+                                        "image": {
+                                            "id": "media-id-123",
+                                            "mime_type": "image/jpeg",
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    raw_body = _raw(body)
+
+    result = await service.process_channel_webhook(
+        channel_type=TenantChannelType.WHATSAPP.value,
+        body=body,
+        headers=_signed_headers(
+            channel_type=TenantChannelType.WHATSAPP,
+            secret="whatsapp-secret",
+            raw_body=raw_body,
+        ),
+        raw_body=raw_body,
+        content_type="application/json",
+    )
+
+    assert result.ingress_id is not None
+    assert len(enqueued_fetches) == 1
+    record = enqueued_fetches[0]
+    assert record.media_id == "media-id-123"
+    assert record.mime_type == "image/jpeg"
+    assert record.tenant_id == TENANT_ID
+    assert record.status is WhatsAppMediaFetchStatus.PENDING
+    assert record.external_message_id == "wamid.media-001"
+    # Durable: the repository row exists independent of the enqueue
+    # callback having fired — the recovery path if enqueue is lost.
+    stored = await fetch_repository.get(record.fetch_id, tenant_id=TENANT_ID)
+    assert stored is not None
+    assert stored.status is WhatsAppMediaFetchStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_channel_webhook_whatsapp_text_only_captures_no_media() -> None:
+    boundary_store = InMemoryBoundaryPersistence()
+    session = _FakeSession()
+    enqueued_fetches: list[WhatsAppMediaFetchRecord] = []
+    service = await _service_with_channel(
+        boundary_store=boundary_store,
+        session=session,
+        channel_type=TenantChannelType.WHATSAPP,
+        routing_address="phone-number-text-only",
+        tenant_id=TENANT_ID,
+        webhook_secret="whatsapp-secret",
+        whatsapp_media_fetch_repository=InMemoryWhatsAppMediaFetchPersistence(),
+        whatsapp_media_fetch_enqueue=enqueued_fetches.append,
+    )
+    body = _with_fresh_timestamp(
+        TenantChannelType.WHATSAPP,
+        {
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "metadata": {
+                                    "phone_number_id": "phone-number-text-only"
+                                },
+                                "messages": [
+                                    {
+                                        "id": "wamid.text-only",
+                                        "from": "15551234567",
+                                        "timestamp": "1779458400",
+                                        "type": "text",
+                                        "text": {"body": "Just a question."},
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+    raw_body = _raw(body)
+
+    result = await service.process_channel_webhook(
+        channel_type=TenantChannelType.WHATSAPP.value,
+        body=body,
+        headers=_signed_headers(
+            channel_type=TenantChannelType.WHATSAPP,
+            secret="whatsapp-secret",
+            raw_body=raw_body,
+        ),
+        raw_body=raw_body,
+        content_type="application/json",
+    )
+
+    assert result.ingress_id is not None
+    assert enqueued_fetches == []
 
 
 @pytest.mark.asyncio
@@ -469,6 +619,12 @@ async def _service_with_channel(
     ingress_dispatch_enqueue: (
         Callable[[IngressDispatchOutboxRecord], None] | None
     ) = None,
+    whatsapp_media_fetch_repository: (
+        WhatsAppMediaFetchRepositoryProtocol | None
+    ) = None,
+    whatsapp_media_fetch_enqueue: (
+        Callable[[WhatsAppMediaFetchRecord], None] | None
+    ) = None,
 ) -> TicketIngressService:
     tenant_runtime = TenantConfigurationRuntime(
         repository=InMemoryTenantConfigurationRepository(),
@@ -489,6 +645,8 @@ async def _service_with_channel(
         session=session,  # type: ignore[arg-type]
         tenant_configuration_runtime=tenant_runtime,
         ingress_dispatch_enqueue=ingress_dispatch_enqueue,
+        whatsapp_media_fetch_repository=whatsapp_media_fetch_repository,
+        whatsapp_media_fetch_enqueue=whatsapp_media_fetch_enqueue,
     )
 
 

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, ClassVar, FrozenSet, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, FrozenSet, Sequence, cast
 
 from app.boundary.identity import as_ingress_id
 from app.boundary.persistence import (
     BoundaryIngressQuery,
     BoundaryIngressRecord,
     BoundaryPersistenceProtocol,
+)
+from app.boundary.whatsapp_media_fetch import (
+    WhatsAppMediaFetchRepositoryProtocol,
+    WhatsAppMediaFetchStatus,
 )
 from app.coordination.contracts import (
     CoordinationDispatchRequest,
@@ -123,6 +127,9 @@ class DispatchService:
         continuity_runtime: CaseContinuityRuntime | None = None,
         approval_queue_ingress: ApprovalQueueIngressService | None = None,
         case_approval_reviewer: CaseApprovalReviewer | None = None,
+        whatsapp_media_fetch_repository: (
+            WhatsAppMediaFetchRepositoryProtocol | None
+        ) = None,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
@@ -138,6 +145,7 @@ class DispatchService:
         )
         self._approval_queue_ingress = approval_queue_ingress
         self._case_approval_reviewer = case_approval_reviewer
+        self._whatsapp_media_fetch_repository = whatsapp_media_fetch_repository
 
     async def dispatch(
         self,
@@ -149,6 +157,10 @@ class DispatchService:
             ingress_id=ingress_id,
             tenant_id=tenant_id,
         )
+        canonical_payload = await self._resolved_canonical_payload(
+            ingress=ingress,
+            tenant_id=tenant_id,
+        )
         authority = AuthorityContext.from_raw(tenant_id=tenant_id)
         coordination_runtime = await self._coordination_runtime_for_tenant(
             tenant_id=tenant_id,
@@ -158,6 +170,7 @@ class DispatchService:
                 ingress=ingress,
                 tenant_id=tenant_id,
                 authority=authority,
+                canonical_payload=canonical_payload,
             )
         )
         governance_decision_id = coordination_result.trace.governance_decision_id
@@ -493,6 +506,71 @@ class DispatchService:
             return page.ingress[0]
         raise DispatchIngressNotFoundError(ingress_id)
 
+    async def _resolved_canonical_payload(
+        self,
+        *,
+        ingress: BoundaryIngressRecord,
+        tenant_id: str,
+    ) -> Mapping[str, Any]:
+        """Fold any resolved B1.5 WhatsApp media into the canonical
+        payload the coordination envelope is about to be written with.
+
+        boundary_ingress is write-once (see
+        app.boundary.whatsapp_media_fetch module docstring) — the
+        webhook could only ever write a "pending" placeholder for media
+        still being fetched. This is the one remaining point before the
+        (also write-once) coordination envelope is created where the
+        FINAL attachment state (stored/failed) can still make it in.
+        Every other channel, and a WhatsApp ingress with no pending
+        media, pays a single dict .get() and returns unchanged.
+        """
+        payload = ingress.canonical_payload
+        if (
+            self._whatsapp_media_fetch_repository is None
+            or payload.get("channel") != "whatsapp"
+        ):
+            return payload
+        raw_attachments = payload.get("attachments")
+        if not isinstance(raw_attachments, list):
+            return payload
+        attachments = cast("list[object]", raw_attachments)
+        pending_media_ids = {
+            cast("Mapping[str, object]", item).get("media_id")
+            for item in attachments
+            if isinstance(item, Mapping)
+            and cast("Mapping[str, object]", item).get("storage_status") == "pending"
+            and cast("Mapping[str, object]", item).get("provider") == "meta"
+        }
+        if not pending_media_ids:
+            return payload
+        records = await self._whatsapp_media_fetch_repository.list_by_ingress(
+            uuid.UUID(str(ingress.ingress_id)), tenant_id=tenant_id
+        )
+        by_media_id = {record.media_id: record for record in records}
+        resolved_attachments: list[Any] = []
+        for item in attachments:
+            if not isinstance(item, Mapping):
+                resolved_attachments.append(item)
+                continue
+            typed_item = cast("Mapping[str, object]", item)
+            media_id = typed_item.get("media_id")
+            record = by_media_id.get(media_id) if isinstance(media_id, str) else None
+            if record is None or record.status is WhatsAppMediaFetchStatus.PENDING:
+                resolved_attachments.append(typed_item)
+            elif record.status is WhatsAppMediaFetchStatus.STORED:
+                resolved_attachments.append(
+                    {
+                        **typed_item,
+                        "storage_status": "stored",
+                        "attachment_id": str(record.attachment_id),
+                    }
+                )
+            else:
+                resolved_attachments.append(
+                    {**typed_item, "storage_status": "failed"}
+                )
+        return {**payload, "attachments": resolved_attachments}
+
     async def _coordination_runtime_for_tenant(
         self,
         *,
@@ -584,6 +662,7 @@ def _to_coordination_request(
     ingress: BoundaryIngressRecord,
     tenant_id: str,
     authority: AuthorityContext,
+    canonical_payload: Mapping[str, Any] | None = None,
 ) -> CoordinationDispatchRequest:
     lineage_seed = f"{tenant_id}|{ingress.ingress_id}|{ingress.event_id}|dispatch"
     coordination_id = derive_coordination_id(seed=lineage_seed)
@@ -614,7 +693,11 @@ def _to_coordination_request(
                     "source_type": ingress.source_type.value,
                     "source_id": ingress.source_id,
                     "external_message_id": ingress.external_message_id,
-                    "canonical_payload": dict(ingress.canonical_payload),
+                    "canonical_payload": dict(
+                        canonical_payload
+                        if canonical_payload is not None
+                        else ingress.canonical_payload
+                    ),
                     "source_language": ingress.source_language,
                 },
                 schema_version="1",

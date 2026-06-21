@@ -409,6 +409,12 @@ def get_ticket_ingress_service(
     from app.boundary.ingress_dispatch_publisher import (
         enqueue_ingress_dispatch_outbox,
     )
+    from app.boundary.whatsapp_media_fetch import (
+        PostgresWhatsAppMediaFetchPersistence,
+    )
+    from app.boundary.whatsapp_media_fetch_publisher import (
+        enqueue_whatsapp_media_fetch,
+    )
 
     settings = get_settings()
     tenant_runtime: TenantConfigurationRuntime | None = None
@@ -473,6 +479,10 @@ def get_ticket_ingress_service(
         attachment_blob_store=getattr(
             request.app.state, "attachment_blob_store", None
         ),
+        whatsapp_media_fetch_repository=PostgresWhatsAppMediaFetchPersistence(
+            session
+        ),
+        whatsapp_media_fetch_enqueue=enqueue_whatsapp_media_fetch,
     )
 
 
@@ -735,6 +745,10 @@ async def get_dispatch_service(
     execution_publisher: ExecutionPublisher = Depends(get_execution_publisher),
 ) -> AsyncIterator[DispatchService]:
     """Return the PR-W3 dispatch service for this request."""
+    from app.boundary.whatsapp_media_fetch import (
+        PostgresWhatsAppMediaFetchPersistence,
+    )
+
     data_protection = _data_protection_service(session)
     approval_ingress, approval_reviewer = _case_approval_producer_dependencies(
         session,
@@ -810,6 +824,9 @@ async def get_dispatch_service(
         ),
         approval_queue_ingress=approval_ingress,
         case_approval_reviewer=approval_reviewer,
+        whatsapp_media_fetch_repository=PostgresWhatsAppMediaFetchPersistence(
+            session
+        ),
     )
     try:
         yield service

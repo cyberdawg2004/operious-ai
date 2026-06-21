@@ -245,6 +245,84 @@ class IngressDispatchOutboxRow(Base):
     )
 
 
+class WhatsAppMediaFetchRecordRow(Base):
+    """Mutable side-channel for the B1.5 Meta media two-hop fetch.
+
+    boundary_ingress / coordination_envelopes are write-once end to
+    end, so this table is the only place a background task can record
+    "the media for this ingress resolved to attachment X (or failed)"
+    — see app.boundary.whatsapp_media_fetch for the read/write API.
+    """
+
+    __tablename__ = "whatsapp_media_fetch_records"
+
+    fetch_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False, index=True
+    )
+    ingress_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
+    )
+    external_message_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH), nullable=False
+    )
+    media_id: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'pending'"), index=True
+    )
+    attachment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "length(tenant_id) > 0",
+            name="ck_whatsapp_media_fetch_records_tenant_id_nonempty",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_whatsapp_media_fetch_records_attempt_nonnegative",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'stored', 'failed')",
+            name="ck_whatsapp_media_fetch_records_status_valid",
+        ),
+        ForeignKeyConstraint(
+            ["ingress_id"],
+            ["boundary_ingress.ingress_id"],
+            name="fk_whatsapp_media_fetch_records_ingress_id_boundary_ingress",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "ingress_id",
+            "media_id",
+            name="uq_whatsapp_media_fetch_records_tenant_ingress_media",
+        ),
+        Index(
+            "ix_whatsapp_media_fetch_records_tenant_status",
+            "tenant_id",
+            "status",
+        ),
+        Index(
+            "ix_whatsapp_media_fetch_records_status_created",
+            "status",
+            "created_at",
+        ),
+    )
+
+
 class BoundaryEgressRow(Base):
     """ORM row for ``boundary_egress`` — write-once."""
 

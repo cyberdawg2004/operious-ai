@@ -20,7 +20,12 @@ EXPECTED_PROCESS_QUEUES = {
     "worker_sme_approval": ("sme_approval",),
     "worker_sop": ("sop_intelligence", "knowledge_indexing"),
     "worker_maintenance": ("webhook_maintenance", "dead_letter"),
-    "worker_ingress": ("ingress.email", "ingress.whatsapp", "ingress.shopify"),
+    "worker_ingress": (
+        "ingress.email",
+        "ingress.whatsapp",
+        "ingress.shopify",
+        "whatsapp_media_fetch",
+    ),
     "worker_outbound_send": ("outbound.send",),
     "worker_voice_realtime": ("ingress.voice",),
 }

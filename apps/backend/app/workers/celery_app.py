@@ -43,6 +43,7 @@ from app.queues import (
     QUEUE_SME_APPROVAL,
     QUEUE_SUPERVISOR,
     QUEUE_WEBHOOK_MAINTENANCE,
+    QUEUE_WHATSAPP_MEDIA_FETCH,
 )
 from app.services.crisis_events import PostgresCrisisEventRepository
 from app.services.crisis_service import CrisisService
@@ -94,6 +95,7 @@ celery_app = Celery(
         "app.workers.sop_intelligence_tasks",
         "app.workers.supervisor_tasks",
         "app.workers.webhook_nonce_tasks",
+        "app.workers.whatsapp_media_fetch_tasks",
     ],
 )
 
@@ -121,6 +123,10 @@ celery_conf.update(
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "dispatch_ingress": {"queue": QUEUE_INGRESS_EMAIL},
         "send_outbound_draft": {"queue": QUEUE_OUTBOUND_SEND},
+        "fetch_whatsapp_media": {"queue": QUEUE_WHATSAPP_MEDIA_FETCH},
+        "reconcile_whatsapp_media_fetch": {
+            "queue": QUEUE_WHATSAPP_MEDIA_FETCH,
+        },
         "reconcile_ingress_dispatch_outbox": {
             "queue": QUEUE_WEBHOOK_MAINTENANCE,
         },
@@ -191,6 +197,16 @@ celery_conf.update(
             "schedule": 60.0,
             "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        # Catches a whatsapp_media_fetch_records row whose initial
+        # best-effort enqueue (app.services.ticket_ingress_service)
+        # never reached a worker — see
+        # app.workers.whatsapp_media_fetch_tasks.reconcile_whatsapp_media_fetch.
+        "reconcile-whatsapp-media-fetch-minutely": {
+            "task": "reconcile_whatsapp_media_fetch",
+            "schedule": 60.0,
+            "kwargs": {"stale_after_seconds": 600},
+            "options": {"queue": QUEUE_WHATSAPP_MEDIA_FETCH},
         },
         "reconcile-outbound-send-outbox-minutely": {
             "task": "reconcile_outbound_send_outbox",

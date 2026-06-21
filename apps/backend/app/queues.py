@@ -17,6 +17,9 @@ QUEUE_DIAGNOSTIC_HIGH = "diagnostic.high"
 QUEUE_DIAGNOSTIC_NORMAL = "diagnostic.normal"
 QUEUE_DIAGNOSTIC_RETRY = "diagnostic.retry"
 
+# Boundary capture queues
+QUEUE_WHATSAPP_MEDIA_FETCH = "whatsapp_media_fetch"
+
 # Agent queues
 QUEUE_ESCALATION = "escalation"
 QUEUE_SUPERVISOR = "supervisor"
@@ -45,6 +48,7 @@ ALL_QUEUES: tuple[str, ...] = (
     QUEUE_INGRESS_WHATSAPP,
     QUEUE_INGRESS_SHOPIFY,
     QUEUE_INGRESS_VOICE,
+    QUEUE_WHATSAPP_MEDIA_FETCH,
     QUEUE_DIAGNOSTIC_HIGH,
     QUEUE_DIAGNOSTIC_NORMAL,
     QUEUE_DIAGNOSTIC_RETRY,

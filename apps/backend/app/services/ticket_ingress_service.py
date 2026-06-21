@@ -65,6 +65,10 @@ from app.boundary.translation import (
     TranslationPayload,
     TranslationRuntime,
 )
+from app.boundary.whatsapp_media_fetch import (
+    WhatsAppMediaFetchRecord,
+    WhatsAppMediaFetchRepositoryProtocol,
+)
 from app.core.config import get_settings
 from app.core.twilio_signature import (
     TWILIO_CANONICAL_URL_HEADER,
@@ -106,6 +110,7 @@ WEBHOOK_FRESHNESS_WINDOW_SECONDS = 300
 WEBHOOK_NONCE_TTL_SECONDS = 24 * 60 * 60
 logger = logging.getLogger(__name__)
 IngressDispatchEnqueue = Callable[[IngressDispatchOutboxRecord], None]
+WhatsAppMediaFetchEnqueue = Callable[[WhatsAppMediaFetchRecord], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +152,10 @@ class TicketIngressService:
         sns_subscription_confirmer: SnsSubscriptionConfirmer | None = None,
         ses_raw_email_fetcher: SesRawEmailFetcher | None = None,
         attachment_blob_store: AttachmentBlobStore | None = None,
+        whatsapp_media_fetch_repository: (
+            WhatsAppMediaFetchRepositoryProtocol | None
+        ) = None,
+        whatsapp_media_fetch_enqueue: WhatsAppMediaFetchEnqueue | None = None,
     ) -> None:
         self._persistence = persistence
         self._session = session
@@ -169,6 +178,8 @@ class TicketIngressService:
         )
         self._ses_raw_email_fetcher = ses_raw_email_fetcher
         self._attachment_blob_store = attachment_blob_store
+        self._whatsapp_media_fetch_repository = whatsapp_media_fetch_repository
+        self._whatsapp_media_fetch_enqueue = whatsapp_media_fetch_enqueue
 
     async def process(
         self,
@@ -655,6 +666,13 @@ class TicketIngressService:
             channel=tenant_channel_type.value,
             request_correlation_id=webhook_request_id,
         )
+        if tenant_channel_type is TenantChannelType.WHATSAPP:
+            await self._best_effort_capture_whatsapp_media(
+                ingress_id=result.ingress_id,
+                tenant_id=channel_config.tenant_id,
+                external_message_id=result.normalization.external_message_id,
+                canonical_payload=result.normalization.canonical_payload,
+            )
         await self._record_processing_admission_after_capture(
             tenant_id=channel_config.tenant_id,
             channel_type=tenant_channel_type,
@@ -1204,6 +1222,64 @@ class TicketIngressService:
                     "outbox_id": str(outbox.outbox_id),
                 },
             )
+
+    async def _best_effort_capture_whatsapp_media(
+        self,
+        *,
+        ingress_id: BoundaryIngressId,
+        tenant_id: str,
+        external_message_id: str | None,
+        canonical_payload: Mapping[str, Any],
+    ) -> None:
+        """Write a durable pending row per Meta media placeholder and
+        best-effort enqueue its fetch task — mirrors
+        _best_effort_enqueue_captured_ingress_dispatch's shape exactly.
+        Never blocks or fails the webhook: a durable row is the recovery
+        path if the immediate enqueue is lost (see
+        app.workers.whatsapp_media_fetch_tasks.reconcile_whatsapp_media_fetch).
+        """
+        if (
+            self._whatsapp_media_fetch_repository is None
+            or external_message_id is None
+        ):
+            return
+        attachments = canonical_payload.get("attachments")
+        if not isinstance(attachments, list):
+            return
+        for item in cast(list[object], attachments):
+            if not isinstance(item, Mapping):
+                continue
+            typed_item = cast(Mapping[str, Any], item)
+            if (
+                typed_item.get("storage_status") != "pending"
+                or typed_item.get("provider") != "meta"
+            ):
+                continue
+            media_id = typed_item.get("media_id")
+            if not isinstance(media_id, str) or not media_id:
+                continue
+            mime_type = typed_item.get("content_type_declared")
+            record = await self._whatsapp_media_fetch_repository.create_pending(
+                tenant_id=tenant_id,
+                ingress_id=cast(uuid.UUID, ingress_id),
+                external_message_id=external_message_id,
+                media_id=media_id,
+                mime_type=mime_type if isinstance(mime_type, str) else None,
+            )
+            if self._whatsapp_media_fetch_enqueue is None:
+                continue
+            try:
+                self._whatsapp_media_fetch_enqueue(record)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "whatsapp_media_fetch_immediate_enqueue_failed",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "ingress_id": str(ingress_id),
+                        "fetch_id": str(record.fetch_id),
+                        "media_id": media_id,
+                    },
+                )
 
     async def _record_processing_admission_after_capture(
         self,

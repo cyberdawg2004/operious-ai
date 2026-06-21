@@ -263,7 +263,7 @@ class TenantWhatsAppWebhookAdapter(BaseIngressAdapter):
             to_address=route,
             subject=None,
             text=text,
-            attachments=(),
+            attachments=_meta_media_placeholders(first),
             source_event_type=_first_text(first.get("type"), "message"),
             emitted_at=_parse_timestamp(first.get("timestamp")),
             metadata={
@@ -688,6 +688,43 @@ def normalize_routing_address(channel_type: str, value: str | None) -> str:
 
 def canonical_channel_payload_keys() -> frozenset[str]:
     return _CANONICAL_CHANNEL_PAYLOAD_KEYS
+
+
+_META_MEDIA_TYPES = ("image", "document", "audio", "video", "sticker")
+
+
+def _meta_media_placeholders(message: Mapping[str, Any]) -> tuple[object, ...]:
+    """Pending-attachment placeholders for a Meta WhatsApp message.
+
+    This adapter is a pure, synchronous translator with no DB session
+    (see module docstring: "edge translators only") — it cannot fetch
+    media bytes or write the durable whatsapp_media_fetch_records row
+    itself. It only carries the media id/mime_type forward as a
+    ``storage_status: "pending"`` placeholder; B1.5's background fetch
+    task resolves it later (see app.services.ticket_ingress_service
+    and app.boundary.whatsapp_media_fetch). ``storage_status`` is
+    deliberately never "stored" here, so
+    app.workers.agent_tasks._extract_attachment_ids correctly excludes
+    an unresolved placeholder from attachment_ids.
+    """
+    placeholders: list[object] = []
+    for media_type in _META_MEDIA_TYPES:
+        media = _mapping_or_none(message.get(media_type))
+        if media is None:
+            continue
+        media_id = _first_text(media.get("id"))
+        if media_id is None:
+            continue
+        placeholders.append(
+            {
+                "storage_status": "pending",
+                "channel": "whatsapp",
+                "provider": "meta",
+                "media_id": media_id,
+                "content_type_declared": _first_text(media.get("mime_type")),
+            }
+        )
+    return tuple(placeholders)
 
 
 def _ok_result(
