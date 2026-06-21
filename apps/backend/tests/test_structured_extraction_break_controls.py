@@ -47,14 +47,17 @@ from app.attachments.s3_client import AttachmentBlobStore
 from app.attachments.storage_service import AttachmentStorageService
 from app.cognition.diagnostic_runtime import (
     DiagnosticCognitionRuntime,
+    DiagnosticReasoningSnapshot,
     parse_diagnostic_output,
 )
+from app.cognition.exceptions import CognitionLLMProviderError
 from app.cognition.extraction import (
     ExtractedField,
     ExtractedOrderFields,
     parse_extracted_fields,
 )
 from app.cognition.llm import AnthropicMessagesClient
+from app.cognition.models import DiagnosticLLMOutput
 from app.core.config import Settings
 from app.data_protection.crypto import DataProtectionService
 from app.knowledge.models import KnowledgeRetrievalResult
@@ -402,6 +405,27 @@ def test_low_confidence_extraction_also_blocks_auto_eligibility() -> None:
 # ─── BC-5: live-Anthropic proofs ───────────────────────────────────────────
 
 
+async def _complete_and_parse_with_retry(
+    runtime: DiagnosticCognitionRuntime,
+    snapshot: DiagnosticReasoningSnapshot,
+) -> DiagnosticLLMOutput:
+    """These live tests call complete_reasoning_snapshot + parse directly
+    rather than the full persist_reasoning_result path (to avoid needing
+    governance/audit/usage-persistence infra), so they don't get
+    diagnostic_runtime.py's production JSON-parse self-correction retry
+    for free. Mirror its one-shot bounded retry here: the model
+    occasionally returns text that doesn't parse as JSON at all (e.g. an
+    unescaped quote inside a free-text field) — confirmed via repeated
+    direct API calls — so a single re-ask is the same bounded retry
+    production gets, just without the corrective prompt wording."""
+    completion = await runtime.complete_reasoning_snapshot(snapshot)
+    try:
+        return parse_diagnostic_output(completion.text)
+    except CognitionLLMProviderError:
+        completion = await runtime.complete_reasoning_snapshot(snapshot)
+        return parse_diagnostic_output(completion.text)
+
+
 @requires_live_anthropic
 @pytest.mark.asyncio
 async def test_live_text_extraction_returns_real_order_id() -> None:
@@ -431,9 +455,8 @@ async def test_live_text_extraction_returns_real_order_id() -> None:
             session_id=SESSION_ID,
             content=ticket,
         )
-        completion = await runtime.complete_reasoning_snapshot(snapshot)
+        parsed = await _complete_and_parse_with_retry(runtime, snapshot)
 
-    parsed = parse_diagnostic_output(completion.text)
     extracted = parse_extracted_fields(parsed.extracted_fields)
     assert extracted.order_id.value == "ORD-2026-77412"
     assert extracted.order_id.confidence == "high"
@@ -492,9 +515,8 @@ async def test_live_vision_extraction_reads_invoice_image(
                 content=ticket,
                 attachment_ids=(str(record.attachment_id),),
             )
-            completion = await runtime.complete_reasoning_snapshot(snapshot)
+            parsed = await _complete_and_parse_with_retry(runtime, snapshot)
 
-        parsed = parse_diagnostic_output(completion.text)
         extracted = parse_extracted_fields(parsed.extracted_fields)
         assert extracted.order_id.value == "ZX-77231-QD"
         assert extracted.seller.value == "ROXX"
@@ -532,9 +554,8 @@ async def test_live_adversarial_ambiguity_does_not_fabricate_confidence() -> Non
             session_id=SESSION_ID,
             content=ticket,
         )
-        completion = await runtime.complete_reasoning_snapshot(snapshot)
+        parsed = await _complete_and_parse_with_retry(runtime, snapshot)
 
-    parsed = parse_diagnostic_output(completion.text)
     extracted = parse_extracted_fields(parsed.extracted_fields)
 
     confidently_wrong = (
