@@ -12,6 +12,7 @@ from app.tenant.enums import (
     TenantGovernancePolicyStatus,
     TenantKnowledgeDocumentStatus,
     TenantKnowledgeDocumentType,
+    TenantKnowledgeReviewStatus,
     TenantTopologyStatus,
 )
 from app.tenant.identity import (
@@ -59,6 +60,9 @@ class TenantKnowledgeDocumentQuery:
     document_id: TenantKnowledgeDocumentId | None = None
     document_type: TenantKnowledgeDocumentType | None = None
     status: TenantKnowledgeDocumentStatus | None = None
+    review_status: TenantKnowledgeReviewStatus | None = None
+    template_purpose: str | None = None
+    template_channel: str | None = None
     limit: int | None = None
     offset: int = 0
 

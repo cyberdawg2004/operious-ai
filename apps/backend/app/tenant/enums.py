@@ -51,6 +51,13 @@ class TenantKnowledgeDocumentType(StrEnum):
     PRODUCT_GUIDE = "product_guide"
     FAQ = "faq"
     ESCALATION_MATRIX = "escalation_matrix"
+    # TEMPLATE: a tenant-defined, channel-specific customer-facing message
+    # (e.g. a probe asking for missing evidence). Retrieved by an exact
+    # (tenant, purpose, channel) key — see
+    # TenantKnowledgeDocumentRecord.template_purpose/template_channel and
+    # TenantConfigurationRuntime.get_approved_template — never by semantic
+    # search, so it is never chunked/embedded the way SOP/POLICY content is.
+    TEMPLATE = "template"
 
 
 class TenantKnowledgeDocumentStatus(StrEnum):

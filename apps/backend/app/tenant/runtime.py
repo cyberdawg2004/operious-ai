@@ -584,8 +584,15 @@ class TenantConfigurationRuntime:
             TenantKnowledgeDocumentStatus.PENDING_INDEX
         ),
         approval: ApprovalRecord | None = None,
+        template_purpose: str | None = None,
+        template_channel: str | None = None,
     ) -> TenantKnowledgeDocumentRecord:
         approval_record = _require_approval(approval, tenant_id=tenant_id)
+        template_purpose, template_channel = _validated_template_fields(
+            document_type=document_type,
+            template_purpose=template_purpose,
+            template_channel=template_channel,
+        )
         document_id = derive_knowledge_document_id(
             tenant_id=tenant_id,
             title=title,
@@ -610,6 +617,8 @@ class TenantConfigurationRuntime:
                 existing.vector_indexed_at if existing is not None else None
             ),
             created_at=existing.created_at if existing is not None else now,
+            template_purpose=template_purpose,
+            template_channel=template_channel,
         )
         await self._repository.save_knowledge_document(
             record,
@@ -693,6 +702,34 @@ class TenantConfigurationRuntime:
             query,
             expected_tenant_id=tenant_id,
         )
+
+    async def get_approved_template(
+        self,
+        *,
+        tenant_id: str,
+        purpose: str,
+        channel: str,
+    ) -> TenantKnowledgeDocumentRecord | None:
+        """Exact-match (tenant, purpose, channel) template lookup.
+
+        Returns ``None`` on no match — a missing or not-yet-approved
+        template is never silently substituted with a default; the
+        caller (a future probe-dispatch workflow) must handle absence
+        explicitly. Only ``review_status=APPROVED`` rows are
+        returned — a QUARANTINED or REJECTED template is invisible
+        here, mirroring SOP/POLICY document retrieval.
+        """
+        page = await self._repository.list_knowledge_documents(
+            TenantKnowledgeDocumentQuery(
+                document_type=TenantKnowledgeDocumentType.TEMPLATE,
+                review_status=TenantKnowledgeReviewStatus.APPROVED,
+                template_purpose=purpose,
+                template_channel=channel,
+                limit=1,
+            ),
+            expected_tenant_id=tenant_id,
+        )
+        return page.items[0] if page.items else None
 
     async def save_knowledge_upload(
         self,
@@ -1201,6 +1238,33 @@ class TenantConfigurationRuntime:
         if record is None:
             raise TenantConfigurationNotFoundError("governance policy not found")
         return record
+
+
+def _validated_template_fields(
+    *,
+    document_type: TenantKnowledgeDocumentType,
+    template_purpose: str | None,
+    template_channel: str | None,
+) -> tuple[str | None, str | None]:
+    """Fail closed on the TEMPLATE <-> (purpose, channel) invariant the DB
+    CHECK constraint (migration 0090) also enforces — raising here gives a
+    clear application-level error instead of an IntegrityError surfacing
+    from a failed INSERT."""
+    if document_type is TenantKnowledgeDocumentType.TEMPLATE:
+        purpose = (template_purpose or "").strip()
+        channel = (template_channel or "").strip()
+        if not purpose or not channel:
+            raise TenantConfigurationError(
+                "template_purpose and template_channel are required when "
+                "document_type is TEMPLATE"
+            )
+        return purpose, channel
+    if template_purpose is not None or template_channel is not None:
+        raise TenantConfigurationError(
+            "template_purpose/template_channel are only valid when "
+            "document_type is TEMPLATE"
+        )
+    return None, None
 
 
 def _require_approval(

@@ -456,6 +456,18 @@ class PostgresTenantConfigurationRepository(BaseRepository):
             )
         if query.status is not None:
             stmt = stmt.where(TenantKnowledgeDocumentRow.status == query.status.value)
+        if query.review_status is not None:
+            stmt = stmt.where(
+                TenantKnowledgeDocumentRow.review_status == query.review_status.value
+            )
+        if query.template_purpose is not None:
+            stmt = stmt.where(
+                TenantKnowledgeDocumentRow.template_purpose == query.template_purpose
+            )
+        if query.template_channel is not None:
+            stmt = stmt.where(
+                TenantKnowledgeDocumentRow.template_channel == query.template_channel
+            )
         stmt = stmt.order_by(
             TenantKnowledgeDocumentRow.document_type,
             TenantKnowledgeDocumentRow.title,
@@ -1276,6 +1288,8 @@ def _document_record_to_row(
         uploaded_by=record.uploaded_by,
         vector_indexed_at=record.vector_indexed_at,
         created_at=record.created_at,
+        template_purpose=record.template_purpose,
+        template_channel=record.template_channel,
     )
 
 
@@ -1293,6 +1307,8 @@ def _update_document_row(
     row.vector_indexed_at = record.vector_indexed_at
     row.created_at = record.created_at
     row.last_index_error = record.last_index_error
+    row.template_purpose = record.template_purpose
+    row.template_channel = record.template_channel
 
 
 def _document_row_to_record(
@@ -1312,6 +1328,8 @@ def _document_row_to_record(
         created_at=row.created_at,
         updated_at=getattr(row, "updated_at", None),
         last_index_error=row.last_index_error,
+        template_purpose=row.template_purpose,
+        template_channel=row.template_channel,
     )
 
 

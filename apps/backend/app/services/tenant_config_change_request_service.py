@@ -405,6 +405,8 @@ class TenantConfigChangeRequestService:
                 approval=approval,
                 bypass_direct_apply_gate=True,
                 commit=False,
+                template_purpose=_optional_str(payload, "template_purpose"),
+                template_channel=_optional_str(payload, "template_channel"),
             )
             return {
                 "kind": "knowledge_document",
@@ -1002,11 +1004,18 @@ async def _validate_payload(
         )
     operation = _operation(payload, default="")
     if change_type is TenantConfigChangeType.KNOWLEDGE:
-        required = (
-            ("title", "content", "document_type")
-            if operation != "update"
-            else ("document_id",)
-        )
+        if operation == "update":
+            required = ("document_id",)
+        elif payload.get("document_type") == TenantKnowledgeDocumentType.TEMPLATE.value:
+            required = (
+                "title",
+                "content",
+                "document_type",
+                "template_purpose",
+                "template_channel",
+            )
+        else:
+            required = ("title", "content", "document_type")
     elif change_type is TenantConfigChangeType.POLICY:
         required = (
             ("policy_type", "effective_from")

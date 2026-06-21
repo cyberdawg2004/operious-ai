@@ -390,6 +390,8 @@ class TenantConfigurationService:
         approval: ApprovalRecord | None = None,
         bypass_direct_apply_gate: bool = False,
         commit: bool = True,
+        template_purpose: str | None = None,
+        template_channel: str | None = None,
     ) -> TenantKnowledgeDocumentRecord:
         _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
         if approval is None:
@@ -403,6 +405,8 @@ class TenantConfigurationService:
                     "content": content,
                     "document_type": document_type.value,
                     "status": status.value,
+                    "template_purpose": template_purpose,
+                    "template_channel": template_channel,
                 },
             )
         record = await self._runtime.create_knowledge_document(
@@ -413,6 +417,8 @@ class TenantConfigurationService:
             status=status,
             uploaded_by=uploaded_by,
             approval=approval,
+            template_purpose=template_purpose,
+            template_channel=template_channel,
         )
         if commit:
             await self._session.commit()
@@ -524,6 +530,19 @@ class TenantConfigurationService:
                 limit=limit,
                 offset=offset,
             ),
+        )
+
+    async def get_approved_template(
+        self,
+        *,
+        tenant_id: str,
+        purpose: str,
+        channel: str,
+    ) -> TenantKnowledgeDocumentRecord | None:
+        return await self._runtime.get_approved_template(
+            tenant_id=tenant_id,
+            purpose=purpose,
+            channel=channel,
         )
 
     async def create_governance_policy(

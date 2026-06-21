@@ -104,6 +104,11 @@ class TenantKnowledgeDocumentRecord:
     )
     updated_at: datetime | None = None
     last_index_error: str | None = None
+    # Populated iff document_type is TEMPLATE; the (tenant_id,
+    # template_purpose, template_channel) tuple is the exact-match
+    # retrieval key — see TenantConfigurationRuntime.get_approved_template.
+    template_purpose: str | None = None
+    template_channel: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

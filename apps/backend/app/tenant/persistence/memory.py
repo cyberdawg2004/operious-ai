@@ -369,6 +369,12 @@ class InMemoryTenantConfigurationRepository:
             rows = [r for r in rows if r.document_type == query.document_type]
         if query.status is not None:
             rows = [r for r in rows if r.status == query.status]
+        if query.review_status is not None:
+            rows = [r for r in rows if r.review_status == query.review_status]
+        if query.template_purpose is not None:
+            rows = [r for r in rows if r.template_purpose == query.template_purpose]
+        if query.template_channel is not None:
+            rows = [r for r in rows if r.template_channel == query.template_channel]
         rows.sort(key=lambda r: (r.document_type.value, r.title))
         return _document_page(rows, query.limit, query.offset)
 

@@ -281,6 +281,14 @@ class TenantKnowledgeDocumentRow(Base):
         onupdate=func.now(),
     )
     last_index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Populated iff document_type='template' — see migration 0090 and
+    # app.tenant.persistence.records.TenantKnowledgeDocumentRecord.
+    template_purpose: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    template_channel: Mapped[str | None] = mapped_column(
+        String(_ENUM_WIDTH), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),
@@ -288,6 +296,13 @@ class TenantKnowledgeDocumentRow(Base):
         CheckConstraint(
             "review_status IN ('quarantined', 'approved', 'rejected')",
             name="knowledge_document_review_status_valid",
+        ),
+        CheckConstraint(
+            "(document_type = 'template' AND template_purpose IS NOT NULL "
+            "AND template_channel IS NOT NULL) "
+            "OR (document_type != 'template' AND template_purpose IS NULL "
+            "AND template_channel IS NULL)",
+            name="ck_tenant_knowledge_documents_template_fields_match_type",
         ),
         UniqueConstraint(
             "tenant_id",
@@ -304,6 +319,14 @@ class TenantKnowledgeDocumentRow(Base):
             "ix_tenant_knowledge_documents_tenant_review_status",
             "tenant_id",
             "review_status",
+        ),
+        Index(
+            "uq_tenant_knowledge_documents_template_slot",
+            "tenant_id",
+            "template_purpose",
+            "template_channel",
+            unique=True,
+            postgresql_where=text("document_type = 'template'"),
         ),
     )
 
