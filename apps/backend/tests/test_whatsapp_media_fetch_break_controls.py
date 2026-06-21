@@ -600,11 +600,14 @@ async def test_happy_path_fetch_stores_and_is_retrievable(
         routing_address="phone-number-happy",
     )
     fetch_repo = PostgresWhatsAppMediaFetchPersistence(pg_session)
+    # media_id/external_message_id must match _ingress_record()'s
+    # hardcoded placeholder attachment so the dispatch-time overlay
+    # (which joins on media_id) actually finds this row.
     record = await fetch_repo.create_pending(
         tenant_id=tenant_id,
         ingress_id=uuid.UUID(str(ingress.ingress_id)),
-        external_message_id="wamid.happy-001",
-        media_id="media-id-happy",
+        external_message_id="wamid.bc-001",
+        media_id="media-id-bc",
         mime_type="image/jpeg",
     )
     await pg_session.commit()
@@ -663,7 +666,7 @@ async def test_happy_path_fetch_stores_and_is_retrievable(
     )
     assert fetched.content == expected_bytes
     assert fetched.channel == "whatsapp"
-    assert fetched.external_message_id == "wamid.happy-001"
+    assert fetched.external_message_id == "wamid.bc-001"
 
     service = _bare_dispatch_service(pg_session)
     overlaid = await service._resolved_canonical_payload(  # pyright: ignore[reportPrivateUsage]
