@@ -7,7 +7,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, Protocol, Sequence
+from typing import Any, Iterable, Mapping, Protocol, Sequence, cast
 
 from app.boundary.translation import (
     CANONICAL_LANGUAGE,
@@ -58,6 +58,14 @@ from app.runtime.resolution_taxonomy_policy import (
     ResolutionTaxonomyPolicy,
     UNCLASSIFIED_CATEGORY_ID,
     resolve_resolution_taxonomy_policy,
+)
+from app.runtime.warranty_refund_eligibility import (
+    EligibilityDetermination,
+    determine_eligibility,
+)
+from app.runtime.warranty_refund_policy import (
+    WarrantyRefundPolicy,
+    resolve_warranty_refund_policy,
 )
 from app.tenant.persistence import TenantConfigurationRepository
 
@@ -314,6 +322,10 @@ class ResolutionRuntime:
             repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
         )
+        warranty_refund_policy = await resolve_warranty_refund_policy(
+            repository=self._tenant_configuration_repository,
+            tenant_id=request.tenant_id,
+        )
         category = _resolution_category(
             diagnostic_category=request.diagnostic_category,
             taxonomy=taxonomy,
@@ -325,8 +337,13 @@ class ResolutionRuntime:
         )
         reply_segments = tuple(segment.to_dict() for segment in reply_draft.segments)
         reply = render_grounded_reply(reply_draft)
+        now = datetime.now(tz=timezone.utc)
         recommended_actions = _recommended_actions(
-            category, taxonomy, request.extracted_fields
+            category,
+            taxonomy,
+            request.extracted_fields,
+            warranty_refund_policy=warranty_refund_policy,
+            now=now,
         )
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._tenant_configuration_repository,
@@ -386,7 +403,6 @@ class ResolutionRuntime:
             )
         )
 
-        now = datetime.now(tz=timezone.utc)
         record = ResolutionProposalRecord(
             proposal_id=proposal_id,
             tenant_id=request.tenant_id,
@@ -768,11 +784,92 @@ def _recommended_actions(
     category: str,
     taxonomy: ResolutionTaxonomyPolicy,
     extracted_fields: ExtractedOrderFields | None = None,
+    *,
+    warranty_refund_policy: WarrantyRefundPolicy | None = None,
+    now: datetime | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     actions = taxonomy.actions_for(category)
-    if extracted_fields is None:
+    if extracted_fields is None and warranty_refund_policy is None:
         return actions
-    return tuple(_merge_extracted_fields(action, extracted_fields) for action in actions)
+    resolved_fields = (
+        extracted_fields if extracted_fields is not None else ExtractedOrderFields()
+    )
+    resolved_now = now if now is not None else datetime.now(timezone.utc)
+    result: list[Mapping[str, Any]] = []
+    for action in actions:
+        merged = (
+            _merge_extracted_fields(action, resolved_fields)
+            if extracted_fields is not None
+            else dict(action)
+        )
+        result.append(
+            _attach_warranty_refund_eligibility(
+                merged,
+                extracted_fields=resolved_fields,
+                policy=warranty_refund_policy,
+                now=resolved_now,
+            )
+        )
+    return tuple(result)
+
+
+def _attach_warranty_refund_eligibility(
+    action: Mapping[str, Any],
+    *,
+    extracted_fields: ExtractedOrderFields,
+    policy: WarrantyRefundPolicy | None,
+    now: datetime,
+) -> Mapping[str, Any]:
+    """Embed a W1 eligibility determination into a recommended action's dict
+    when the action's taxonomy "type" is a configured warranty/refund claim
+    type. Rides along through the existing recommended_actions JSON field —
+    no schema change. An action whose type the tenant hasn't configured
+    warranty_refund_rules for is returned unchanged: W1 has nothing to say
+    about it, and no eligibility key is added (distinct from a
+    cannot_determine verdict, which means the determination ran and could
+    not conclude).
+    """
+    if policy is None:
+        return action
+    action_type = action.get("type")
+    if not isinstance(action_type, str) or not action_type.strip():
+        return action
+    claim_type = action_type.strip()
+    if policy.required_evidence_for(claim_type) is None:
+        return action
+    determination = determine_eligibility(
+        claim_type=claim_type,
+        extracted_fields=extracted_fields,
+        policy=policy,
+        now=now,
+    )
+    merged = dict(action)
+    merged["warranty_refund_eligibility"] = _eligibility_determination_to_dict(
+        determination
+    )
+    return merged
+
+
+def _eligibility_determination_to_dict(
+    determination: EligibilityDetermination,
+) -> dict[str, Any]:
+    return {
+        "claim_type": determination.claim_type,
+        "verdict": determination.verdict.value,
+        "recommended_remedy": determination.recommended_remedy,
+        "missing_evidence": list(determination.missing_evidence),
+        "grounding": [
+            {
+                "name": check.name,
+                "passed": check.passed,
+                "rule": check.rule,
+                "evidence_field": check.evidence_field,
+                "evidence_value": check.evidence_value,
+                "evidence_confidence": check.evidence_confidence,
+            }
+            for check in determination.grounding
+        ],
+    }
 
 
 def _merge_extracted_fields(
@@ -849,6 +946,30 @@ def _extraction_completeness_reasons(
     return tuple(reasons)
 
 
+def _warranty_refund_cannot_determine_reasons(
+    recommended_actions: tuple[Mapping[str, Any], ...],
+) -> tuple[str, ...]:
+    """A cannot_determine eligibility verdict must reach human review through
+    the same reasons-list mechanism every other gate condition uses — never
+    silently dropped. Distinct from _extraction_completeness_reasons' fixed
+    per-type field list: this is driven by the tenant's own configured
+    warranty_refund_rules evidence requirements, which can require fields
+    (e.g. seller) that the fixed list does not check at all.
+    """
+    reasons: list[str] = []
+    for action in recommended_actions:
+        raw_eligibility = action.get("warranty_refund_eligibility")
+        if not isinstance(raw_eligibility, Mapping):
+            continue
+        eligibility = cast(Mapping[str, Any], raw_eligibility)
+        if eligibility.get("verdict") == "cannot_determine":
+            claim_type = eligibility.get("claim_type") or action.get("type")
+            reasons.append(
+                f"warranty_refund_eligibility_cannot_determine:{claim_type}"
+            )
+    return tuple(reasons)
+
+
 def _extracted_field_or_none(
     extracted_fields: ExtractedOrderFields | None,
     field_name: str,
@@ -899,6 +1020,9 @@ def _evaluate_gate(
             recommended_actions=recommended_actions,
             extracted_fields=extracted_fields,
         )
+    )
+    reasons.extend(
+        _warranty_refund_cannot_determine_reasons(recommended_actions)
     )
     if _contains_any(reply.lower(), _unsupported_commitment_patterns(taxonomy)):
         return _GateDecision(

@@ -2105,8 +2105,52 @@ async def _request_resolution_approval_cases(
         governance_repository=governance_repository,
         session=None,
     )
-    record = await ingress.request_case_review(
-        CaseApprovalReviewRequest(
+    base_metadata: dict[str, Any] = {
+        "source": "resolution_runtime",
+        "proposal_status": proposal.status.value,
+        "governance_verdict": proposal.governance_verdict.value,
+        "autonomy_decision": proposal.autonomy_decision.value,
+        "confidence": proposal.confidence,
+        "approval_reasons": [category.value for category in categories],
+    }
+    determinations = _warranty_refund_eligibility_determinations(proposal)
+    if determinations:
+        # Always surface every W1 determination found on this proposal, even
+        # when this case's entry_category isn't REFUND_WARRANTY (e.g. a
+        # cannot_determine verdict routes here via RESOLUTION_*_APPROVAL
+        # instead) — a human must never lose the "why" behind missing
+        # evidence just because it wasn't a determinable verdict.
+        base_metadata["warranty_refund_eligibility"] = determinations
+
+    eligible_action = (
+        _first_warranty_refund_eligible_action(proposal)
+        if entry_category is CaseApprovalEntryCategory.REFUND_WARRANTY
+        else None
+    )
+    if eligible_action is not None:
+        eligibility = cast(
+            Mapping[str, Any], eligible_action["warranty_refund_eligibility"]
+        )
+        request = CaseApprovalReviewRequest(
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+            execution_id=work_item.execution_id,
+            dispatch_id=work_item.dispatch_id,
+            resolution_proposal_id=str(proposal.proposal_id),
+            entry_category=entry_category,
+            ticket_ref=f"session:{work_item.session_id}",
+            issue_summary=(
+                f"{eligibility.get('claim_type')}: {eligibility.get('verdict')}"
+            ),
+            product=(
+                eligible_action.get("product_sku")
+                or eligible_action.get("product")
+            ),
+            recommended_action=eligible_action,
+            metadata=base_metadata,
+        )
+    else:
+        request = CaseApprovalReviewRequest(
             tenant_id=work_item.tenant_id,
             session_id=work_item.session_id,
             execution_id=work_item.execution_id,
@@ -2116,15 +2160,10 @@ async def _request_resolution_approval_cases(
             ticket_ref=f"session:{work_item.session_id}",
             issue_summary=proposal.resolution_category,
             recommended_action=_first_resolution_action(proposal),
-            metadata={
-                "source": "resolution_runtime",
-                "proposal_status": proposal.status.value,
-                "governance_verdict": proposal.governance_verdict.value,
-                "autonomy_decision": proposal.autonomy_decision.value,
-                "confidence": proposal.confidence,
-                "approval_reasons": [category.value for category in categories],
-            },
-        ),
+            metadata=base_metadata,
+        )
+    record = await ingress.request_case_review(
+        request,
         expected_tenant_id=work_item.tenant_id,
     )
     if record.status is CaseApprovalStatus.PENDING_SME_REVIEW:
@@ -2140,6 +2179,12 @@ def _approval_categories_for_resolution(
     if proposal.status is not ResolutionProposalStatus.PENDING_HUMAN_APPROVAL:
         return ()
     categories: list[CaseApprovalEntryCategory] = []
+    if _first_warranty_refund_eligible_action(proposal) is not None:
+        # A determinable (eligible/ineligible) W1 verdict takes priority as
+        # the case's entry_category, so the reviewer lands on the
+        # warranty/refund queue with its grounding attached, rather than a
+        # generic one.
+        categories.append(CaseApprovalEntryCategory.REFUND_WARRANTY)
     if (
         proposal.governance_verdict
         is ResolutionGovernanceVerdict.REQUIRE_APPROVAL
@@ -2169,6 +2214,33 @@ def _first_resolution_action(
         if action.get("requires_execution") is True:
             return dict(action)
     return None
+
+
+def _first_warranty_refund_eligible_action(
+    proposal: ResolutionProposalRecord,
+) -> Mapping[str, Any] | None:
+    """The first recommended action carrying a determinable (eligible or
+    ineligible) W1 verdict — never cannot_determine, which is not a
+    refund/warranty approval case (see _warranty_refund_cannot_determine_
+    reasons in resolution_runtime.py for where that routes instead)."""
+    for action in proposal.recommended_actions:
+        raw_eligibility = action.get("warranty_refund_eligibility")
+        if not isinstance(raw_eligibility, Mapping):
+            continue
+        eligibility = cast(Mapping[str, Any], raw_eligibility)
+        if eligibility.get("verdict") in ("eligible", "ineligible"):
+            return action
+    return None
+
+
+def _warranty_refund_eligibility_determinations(
+    proposal: ResolutionProposalRecord,
+) -> list[Mapping[str, Any]]:
+    return [
+        cast(Mapping[str, Any], action["warranty_refund_eligibility"])
+        for action in proposal.recommended_actions
+        if isinstance(action.get("warranty_refund_eligibility"), Mapping)
+    ]
 
 
 async def _resolution_safety_escalation_governance_decision_id(
