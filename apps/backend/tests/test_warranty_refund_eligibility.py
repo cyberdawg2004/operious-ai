@@ -10,6 +10,8 @@ would otherwise conclude.
 
 from __future__ import annotations
 
+import ast
+import inspect
 from datetime import datetime, timezone
 
 import pytest
@@ -33,6 +35,7 @@ def _policy(
     warranty_window_days: int = 730,
     authorized_resellers: frozenset[str] = frozenset({"amazon.com"}),
     required_evidence_by_claim_type: dict[str, tuple[str, ...]] | None = None,
+    remedy_sequence_by_claim_type: dict[str, tuple[str, ...]] | None = None,
 ) -> WarrantyRefundPolicy:
     return WarrantyRefundPolicy(
         warranty_window_days=warranty_window_days,
@@ -41,7 +44,7 @@ def _policy(
             required_evidence_by_claim_type
             or {"defective": ("order_id", "purchase_date", "seller")}
         ),
-        remedy_sequence_by_claim_type={},
+        remedy_sequence_by_claim_type=remedy_sequence_by_claim_type or {},
     )
 
 
@@ -115,6 +118,46 @@ def test_low_confidence_required_field_is_cannot_determine() -> None:
     )
     assert determination.verdict is EligibilityVerdict.CANNOT_DETERMINE
     assert determination.missing_evidence == ("order_id",)
+
+
+def test_adversarial_ambiguous_evidence_is_cannot_determine_not_a_guess() -> None:
+    """The load-bearing ambiguity break-control, same philosophy as B3's.
+
+    Scenario: the ticket text mentions two different purchase dates for
+    the same order ("ordered Jan 1st... no wait, it was actually Dec
+    15th"). B3's extraction surfaces this as a single purchase_date field
+    marked confidence="low" — it does not pick one of the two dates and
+    present it as a confident extraction. This eligibility core has no
+    independent ambiguity detector of its own; it trusts that signal
+    completely. The property under test: a determination NEVER resolves
+    that low confidence into either of the two plausible verdicts
+    (eligible if the earlier date were used, ineligible if the later one
+    were outside the window) — it is cannot_determine regardless of
+    which date, if any, the rules would have favored.
+    """
+    fields = _complete_fields(
+        purchase_date="2020-01-01",  # would be INELIGIBLE if trusted outright
+        confidence="high",
+    )
+    fields = fields.model_copy(
+        update={
+            "purchase_date": ExtractedField(
+                value="2020-01-01",
+                confidence="low",  # B3's signal: conflicting mentions in the ticket
+                source="text",
+            )
+        }
+    )
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=fields,
+        policy=_policy(warranty_window_days=30),  # would also fail outright
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.CANNOT_DETERMINE
+    assert determination.missing_evidence == ("purchase_date",)
+    assert determination.grounding == ()
+    assert determination.recommended_remedy is None
 
 
 def test_unparseable_purchase_date_is_cannot_determine() -> None:
@@ -211,6 +254,62 @@ def test_claim_type_not_requiring_seller_skips_reseller_check() -> None:
     assert determination.grounding[0].name == "within_warranty_window"
 
 
+# ─── recommended remedy (first ladder step only — no availability check) ──
+
+
+def test_eligible_with_remedy_ladder_recommends_first_step() -> None:
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=_complete_fields(),
+        policy=_policy(
+            remedy_sequence_by_claim_type={
+                "defective": ("replacement", "refund", "store_credit")
+            }
+        ),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.ELIGIBLE
+    assert determination.recommended_remedy == "replacement"
+
+
+def test_eligible_with_no_remedy_ladder_configured_has_no_recommendation() -> None:
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=_complete_fields(),
+        policy=_policy(remedy_sequence_by_claim_type={}),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.ELIGIBLE
+    assert determination.recommended_remedy is None
+
+
+def test_ineligible_never_recommends_a_remedy() -> None:
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=_complete_fields(purchase_date="2020-01-01"),
+        policy=_policy(
+            warranty_window_days=30,
+            remedy_sequence_by_claim_type={"defective": ("replacement",)},
+        ),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.INELIGIBLE
+    assert determination.recommended_remedy is None
+
+
+def test_cannot_determine_never_recommends_a_remedy() -> None:
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=ExtractedOrderFields(),
+        policy=_policy(
+            remedy_sequence_by_claim_type={"defective": ("replacement",)}
+        ),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.CANNOT_DETERMINE
+    assert determination.recommended_remedy is None
+
+
 # ─── tenant-configurability: identical evidence, different policies ──────
 
 
@@ -249,3 +348,43 @@ def test_same_evidence_different_authorized_reseller_lists() -> None:
 
     assert determination_a.verdict is EligibilityVerdict.INELIGIBLE
     assert determination_b.verdict is EligibilityVerdict.ELIGIBLE
+
+
+# ─── pure-data proof: no execution capability exists in this module ───────
+
+
+def test_module_imports_no_execution_capable_symbol() -> None:
+    """Static proof this module cannot reach a connector, queue, or DB.
+
+    Inspects the actual import statements in warranty_refund_eligibility.py's
+    source — not a mock or a behavioral assertion — so it fails the moment
+    a future edit adds an import of anything that could perform a side
+    effect (a connector, the approval-queue service, a DB session or
+    repository type, an HTTP client). determine_eligibility must remain a
+    pure function of its three arguments for as long as W1 exists.
+    """
+    import app.runtime.warranty_refund_eligibility as module
+
+    tree = ast.parse(inspect.getsource(module))
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.add(node.module)
+
+    forbidden_substrings = (
+        "connector",
+        "approval_queue",
+        "session",
+        "repository",
+        "httpx",
+        "requests",
+        "boto3",
+    )
+    offending = {
+        name
+        for name in imported_names
+        if any(forbidden in name.lower() for forbidden in forbidden_substrings)
+    }
+    assert offending == set(), f"unexpected execution-capable import(s): {offending}"

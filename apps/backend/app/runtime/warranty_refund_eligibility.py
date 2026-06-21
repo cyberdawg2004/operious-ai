@@ -1,11 +1,14 @@
 """Eligibility-verification core (W1).
 
 Pure, fail-closed: given B3's extracted order fields and a tenant's
-warranty/refund policy, produces a grounded eligibility determination.
+warranty/refund policy, produces a grounded eligibility determination,
+including the first step of the tenant's remedy ladder when eligible.
 No I/O, no connector calls, no approval-queue submission, no execution —
 this module only ever returns data. W2 wires the output into the
-existing human-approval queue; W3 adds remedy/inventory selection; W4
-adds customer-facing probes for missing evidence.
+existing human-approval queue; W3 adds inventory/availability checking
+against the recommended remedy (and may substitute a later ladder step
+if the first is unavailable); W4 adds customer-facing probes for
+missing evidence.
 
 Verdict is exactly one of three values, never a fourth:
   - "eligible": every applicable rule passed against complete,
@@ -57,6 +60,11 @@ class EligibilityDetermination:
     claim_type: str
     grounding: tuple[EligibilityCheck, ...] = ()
     missing_evidence: tuple[str, ...] = ()
+    # First step of the tenant's remedy ladder, populated only when
+    # verdict is ELIGIBLE and a ladder is configured for this claim type.
+    # A recommendation citing config, not a decision: no availability
+    # check has run (W3) and nothing here reaches an approval queue (W2).
+    recommended_remedy: str | None = None
 
 
 def determine_eligibility(
@@ -118,12 +126,20 @@ def determine_eligibility(
         grounding.append(check)
         eligible = eligible and check.passed
 
+    if not eligible:
+        return EligibilityDetermination(
+            verdict=EligibilityVerdict.INELIGIBLE,
+            claim_type=claim_type,
+            grounding=tuple(grounding),
+        )
+
+    remedy_sequence = policy.remedy_sequence_by_claim_type.get(claim_type)
+    recommended_remedy = remedy_sequence[0] if remedy_sequence else None
     return EligibilityDetermination(
-        verdict=(
-            EligibilityVerdict.ELIGIBLE if eligible else EligibilityVerdict.INELIGIBLE
-        ),
+        verdict=EligibilityVerdict.ELIGIBLE,
         claim_type=claim_type,
         grounding=tuple(grounding),
+        recommended_remedy=recommended_remedy,
     )
 
 

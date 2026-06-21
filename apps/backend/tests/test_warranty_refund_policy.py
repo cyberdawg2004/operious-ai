@@ -263,6 +263,44 @@ async def test_resolve_with_invalid_active_record_returns_none() -> None:
     assert policy is None
 
 
+@pytest.mark.asyncio
+async def test_resolve_is_tenant_scoped_not_cross_tenant_visible() -> None:
+    """Tenant A's warranty rules must never be evaluated for tenant B.
+
+    A bank-tenant-style policy with a 60-day dispute window is saved for
+    tenant A only. Resolving for tenant B (which has no policy of its
+    own) must see nothing — not tenant A's, not a permissive default.
+    """
+    tenant_a = "tenant-warranty-refund-policy-a"
+    tenant_b = "tenant-warranty-refund-policy-b"
+    repository = InMemoryTenantConfigurationRepository()
+    await repository.save_governance_policy(
+        _record(
+            parameters={
+                "warranty_window_days": 60,
+                "authorized_resellers": ["chase.com"],
+                "required_evidence_by_claim_type": {
+                    "disputed_transaction": ["purchase_date", "amount"],
+                },
+                "remedy_sequence_by_claim_type": {},
+            },
+            tenant_id=tenant_a,
+        ),
+        expected_tenant_id=tenant_a,
+    )
+
+    policy_for_a = await resolve_warranty_refund_policy(
+        repository=repository, tenant_id=tenant_a
+    )
+    policy_for_b = await resolve_warranty_refund_policy(
+        repository=repository, tenant_id=tenant_b
+    )
+
+    assert policy_for_a is not None
+    assert policy_for_a.warranty_window_days == 60
+    assert policy_for_b is None
+
+
 # ─── dual-control propose/approve/apply (Postgres — no in-memory ledger) ──
 
 _LEDGER_MASTER_KEY = "w1-warranty-refund-ledger-master-key-32b"

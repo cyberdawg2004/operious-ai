@@ -5,9 +5,11 @@ needs, mirroring resolution_taxonomy_policy.py's shape (one policy,
 several related concerns) rather than resolution_autonomy_policy.py's
 narrower one (single concern) — see the W1 hyperprompt's rationale.
 
-``remedy_sequence_by_claim_type`` is parsed and stored here but not yet
-consumed — that is W3's job. Defining the full policy shape now avoids a
-second schema migration later.
+``remedy_sequence_by_claim_type`` is parsed here and its first step is
+read by the eligibility core (warranty_refund_eligibility.py) to populate
+an eligible determination's recommended_remedy. Availability checking
+against that recommendation, and falling back to later ladder steps if
+unavailable, is W3's job — this module never checks inventory.
 """
 
 from __future__ import annotations
