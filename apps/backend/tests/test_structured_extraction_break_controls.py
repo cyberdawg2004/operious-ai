@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 
@@ -56,7 +57,7 @@ from app.cognition.extraction import (
     ExtractedOrderFields,
     parse_extracted_fields,
 )
-from app.cognition.llm import AnthropicMessagesClient
+from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMMessage
 from app.cognition.models import DiagnosticLLMOutput
 from app.core.config import Settings
 from app.data_protection.crypto import DataProtectionService
@@ -413,17 +414,36 @@ async def _complete_and_parse_with_retry(
     rather than the full persist_reasoning_result path (to avoid needing
     governance/audit/usage-persistence infra), so they don't get
     diagnostic_runtime.py's production JSON-parse self-correction retry
-    for free. Mirror its one-shot bounded retry here: the model
-    occasionally returns text that doesn't parse as JSON at all (e.g. an
-    unescaped quote inside a free-text field) — confirmed via repeated
-    direct API calls — so a single re-ask is the same bounded retry
-    production gets, just without the corrective prompt wording."""
+    for free. Mirror it here with an actual corrective prompt rather than
+    a bare identical resend: at temperature=0.0 a bare resend barely
+    changes the odds and can reproduce the SAME malformed output
+    (confirmed live in CI — the same parse error at the same offset, two
+    runs in a row) — telling the model what broke is what actually gives
+    the retry a real chance, same as production."""
     completion = await runtime.complete_reasoning_snapshot(snapshot)
     try:
         return parse_diagnostic_output(completion.text)
-    except CognitionLLMProviderError:
-        completion = await runtime.complete_reasoning_snapshot(snapshot)
-        return parse_diagnostic_output(completion.text)
+    except CognitionLLMProviderError as exc:
+        corrective_snapshot = replace(
+            snapshot,
+            messages=(
+                *snapshot.messages,
+                DiagnosticLLMMessage(role="assistant", content=completion.text),
+                DiagnosticLLMMessage(
+                    role="user",
+                    content=(
+                        "Rewrite the prior diagnostic response. It could not "
+                        f"be parsed as valid JSON: {exc}. Return strictly "
+                        "valid JSON only: no markdown code fences, no "
+                        "commentary before or after the JSON object, and any "
+                        "double quote character that appears inside a string "
+                        'value must be escaped as \\".'
+                    ),
+                ),
+            ),
+        )
+        corrected = await runtime.complete_reasoning_snapshot(corrective_snapshot)
+        return parse_diagnostic_output(corrected.text)
 
 
 @requires_live_anthropic
