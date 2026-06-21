@@ -1749,6 +1749,17 @@ async def _append_resolution_proposal_after_diagnostic(
                 session,
                 data_protection=data_protection,
             )
+            # inventory_availability_checker is deliberately NOT constructed
+            # here: doing so unconditionally on every diagnostic completion
+            # (constructing TenantConfigurationRuntime + a credential
+            # encryptor on EVERY call) measurably regressed burst-load
+            # throughput with zero tenant benefit, since no tenant has yet
+            # configured both warranty_refund_rules gating AND an active
+            # inventory.check connector. ResolutionRuntime defaults this to
+            # None, so W1/W2 behavior is fully preserved; wiring a REAL
+            # checker here is a follow-up once a tenant actually needs it,
+            # ideally behind a per-tenant existence check that avoids this
+            # construction cost for tenants who haven't opted in.
             proposal = await ResolutionRuntime(
                 persistence=resolution_persistence,
                 governance_gate=ResolutionGovernanceGate(

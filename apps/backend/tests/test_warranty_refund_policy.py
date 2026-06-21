@@ -207,6 +207,52 @@ def test_remedy_sequence_is_optional() -> None:
     assert policy.remedy_sequence_by_claim_type == {}
 
 
+# ─── remedy_requires_availability_check (W3) ──────────────────────────────
+
+
+def test_remedy_requires_availability_check_is_optional_and_defaults_to_false() -> (
+    None
+):
+    """No W3 config at all -> every remedy defaults to "no check required",
+    preserving W1's original first-ladder-step behavior unchanged."""
+    parameters = _valid_parameters()
+    policy = parse_warranty_refund_policy(_record(parameters=parameters))
+    assert policy.remedy_requires_availability_check == {}
+    assert policy.remedy_requires_check("replacement") is False
+
+
+def test_remedy_requires_availability_check_parses_true_and_false() -> None:
+    parameters = _valid_parameters()
+    parameters["remedy_requires_availability_check"] = {
+        "replacement": True,
+        "refurbished": True,
+        "refund": False,
+    }
+    policy = parse_warranty_refund_policy(_record(parameters=parameters))
+    assert policy.remedy_requires_check("replacement") is True
+    assert policy.remedy_requires_check("refurbished") is True
+    assert policy.remedy_requires_check("refund") is False
+
+
+def test_remedy_requires_availability_check_for_orphaned_remedy_rejected() -> None:
+    """A remedy not present in ANY remedy_sequence_by_claim_type ladder is
+    a typo/orphan — rejected the same way orphaned remedy_sequence
+    entries already are."""
+    parameters = _valid_parameters()
+    parameters["remedy_requires_availability_check"] = {
+        "store_credit": True,  # never appears in remedy_sequence_by_claim_type
+    }
+    with pytest.raises(WarrantyRefundPolicyParseError):
+        validate_warranty_refund_policy_parameters(parameters)
+
+
+def test_remedy_requires_availability_check_non_boolean_value_rejected() -> None:
+    parameters = _valid_parameters()
+    parameters["remedy_requires_availability_check"] = {"replacement": "yes"}
+    with pytest.raises(WarrantyRefundPolicyParseError):
+        validate_warranty_refund_policy_parameters(parameters)
+
+
 # ─── resolve (fail-closed to None, not an empty-but-vacuous policy) ───────
 
 

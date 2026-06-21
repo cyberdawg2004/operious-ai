@@ -59,14 +59,17 @@ from app.runtime.resolution_taxonomy_policy import (
     UNCLASSIFIED_CATEGORY_ID,
     resolve_resolution_taxonomy_policy,
 )
+from app.runtime.inventory_availability import InventoryAvailabilityChecker
 from app.runtime.warranty_refund_eligibility import (
     EligibilityDetermination,
+    EligibilityVerdict,
     determine_eligibility,
 )
 from app.runtime.warranty_refund_policy import (
     WarrantyRefundPolicy,
     resolve_warranty_refund_policy,
 )
+from app.runtime.warranty_refund_remedy_selection import select_available_remedy
 from app.tenant.persistence import TenantConfigurationRepository
 
 _DEFAULT_AUTO_APPROVE_THRESHOLD = 0.80
@@ -300,6 +303,7 @@ class ResolutionRuntime:
         conversation_generator: ConversationGenerationRuntimeProtocol | None = None,
         tenant_configuration_repository: TenantConfigurationRepository | None = None,
         auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
+        inventory_availability_checker: InventoryAvailabilityChecker | None = None,
     ) -> None:
         if auto_approve_threshold < 0 or auto_approve_threshold > 1:
             raise ValueError("auto_approve_threshold must be between 0 and 1")
@@ -310,6 +314,7 @@ class ResolutionRuntime:
         self._conversation_generator = (
             conversation_generator or GroundedConversationGenerationRuntime()
         )
+        self._inventory_availability_checker = inventory_availability_checker
 
     async def create_proposal(
         self,
@@ -344,6 +349,13 @@ class ResolutionRuntime:
             request.extracted_fields,
             warranty_refund_policy=warranty_refund_policy,
             now=now,
+        )
+        recommended_actions = await _apply_availability_gating(
+            recommended_actions,
+            policy=warranty_refund_policy,
+            tenant_id=request.tenant_id,
+            extracted_fields=request.extracted_fields,
+            availability_checker=self._inventory_availability_checker,
         )
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._tenant_configuration_repository,
@@ -828,6 +840,11 @@ def _attach_warranty_refund_eligibility(
     about it, and no eligibility key is added (distinct from a
     cannot_determine verdict, which means the determination ran and could
     not conclude).
+
+    Stays synchronous and pure, exactly like W1/W2 — the availability-
+    gated remedy refinement (W3) is a separate async post-processing pass
+    (_apply_availability_gating, called from create_proposal) so this
+    function's existing callers/tests are unaffected by W3's addition.
     """
     if policy is None:
         return action
@@ -850,6 +867,57 @@ def _attach_warranty_refund_eligibility(
     return merged
 
 
+async def _apply_availability_gating(
+    actions: tuple[Mapping[str, Any], ...],
+    *,
+    policy: WarrantyRefundPolicy | None,
+    tenant_id: str,
+    extracted_fields: ExtractedOrderFields | None,
+    availability_checker: InventoryAvailabilityChecker | None,
+) -> tuple[Mapping[str, Any], ...]:
+    """W3: refine W1's naive "first ladder step" remedy into the first
+    AVAILABLE one, for every eligible action embedded by
+    _attach_warranty_refund_eligibility. The only I/O in the whole
+    recommended_actions pipeline lives here, isolated from the pure
+    embedding step above.
+    """
+    if policy is None:
+        return actions
+    resolved_fields = (
+        extracted_fields if extracted_fields is not None else ExtractedOrderFields()
+    )
+    result: list[Mapping[str, Any]] = []
+    for action in actions:
+        raw_eligibility = action.get("warranty_refund_eligibility")
+        if not isinstance(raw_eligibility, Mapping):
+            result.append(action)
+            continue
+        eligibility = cast(Mapping[str, Any], raw_eligibility)
+        if eligibility.get("verdict") != EligibilityVerdict.ELIGIBLE.value:
+            result.append(action)
+            continue
+        claim_type = eligibility.get("claim_type")
+        if not isinstance(claim_type, str):
+            result.append(action)
+            continue
+        selection = await select_available_remedy(
+            claim_type=claim_type,
+            policy=policy,
+            tenant_id=tenant_id,
+            extracted_fields=resolved_fields,
+            availability_checker=availability_checker,
+        )
+        merged_eligibility = dict(eligibility)
+        merged_eligibility["recommended_remedy"] = selection.remedy
+        merged_eligibility["recommended_remedy_availability"] = (
+            selection.availability.value if selection.availability else None
+        )
+        merged_action = dict(action)
+        merged_action["warranty_refund_eligibility"] = merged_eligibility
+        result.append(merged_action)
+    return tuple(result)
+
+
 def _eligibility_determination_to_dict(
     determination: EligibilityDetermination,
 ) -> dict[str, Any]:
@@ -857,6 +925,7 @@ def _eligibility_determination_to_dict(
         "claim_type": determination.claim_type,
         "verdict": determination.verdict.value,
         "recommended_remedy": determination.recommended_remedy,
+        "recommended_remedy_availability": None,
         "missing_evidence": list(determination.missing_evidence),
         "grounding": [
             {

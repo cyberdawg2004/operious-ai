@@ -18,6 +18,7 @@ from app.agents.tools.connectors.config import (
     InMemoryConnectorConfigRepository,
     PostgresConnectorConfigRepository,
 )
+from app.agents.tools.connectors.inventory import InventoryCheckConnector
 from app.agents.tools.connectors.repair_dispatch import (
     GenericRestRepairDispatchConnector,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "GenericRestReplacementOrderConnector",
     "GenericRestWarrantyClaimConnector",
     "InMemoryConnectorConfigRepository",
+    "InventoryCheckConnector",
     "PostgresConnectorConfigRepository",
     "ReplacementOrderConnector",
     "SSRFValidator",

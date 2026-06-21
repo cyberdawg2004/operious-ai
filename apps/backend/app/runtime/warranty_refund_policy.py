@@ -7,16 +7,23 @@ narrower one (single concern) — see the W1 hyperprompt's rationale.
 
 ``remedy_sequence_by_claim_type`` is parsed here and its first step is
 read by the eligibility core (warranty_refund_eligibility.py) to populate
-an eligible determination's recommended_remedy. Availability checking
-against that recommendation, and falling back to later ladder steps if
-unavailable, is W3's job — this module never checks inventory.
+an eligible determination's recommended_remedy. ``remedy_requires_
+availability_check`` (W3) tells the availability-gated remedy-selection
+walk (warranty_refund_remedy_selection.py) which ladder steps need an
+inventory.check call before being recommended — domain-agnostic by
+design: it's a tenant-keyed mapping of remedy name -> bool, not a
+hardcoded "replacement needs a check, refund doesn't" assumption. A
+remedy absent from this mapping defaults to False (no check required),
+which is exactly W1's original behavior for every existing tenant that
+hasn't opted into W3's gating — this module still never checks inventory
+itself.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from app.cognition.extraction import EXTRACTED_ORDER_FIELD_NAMES
@@ -28,6 +35,10 @@ from app.tenant.persistence import (
 logger = logging.getLogger(__name__)
 
 WARRANTY_REFUND_RULES_POLICY_TYPE = "warranty_refund_rules"
+
+
+def _empty_availability_check_map() -> dict[str, bool]:
+    return {}
 
 
 class WarrantyRefundPolicyParseError(ValueError):
@@ -42,9 +53,15 @@ class WarrantyRefundPolicy:
     authorized_resellers: frozenset[str]
     required_evidence_by_claim_type: Mapping[str, tuple[str, ...]]
     remedy_sequence_by_claim_type: Mapping[str, tuple[str, ...]]
+    remedy_requires_availability_check: Mapping[str, bool] = field(
+        default_factory=_empty_availability_check_map
+    )
 
     def required_evidence_for(self, claim_type: str) -> tuple[str, ...] | None:
         return self.required_evidence_by_claim_type.get(claim_type)
+
+    def remedy_requires_check(self, remedy: str) -> bool:
+        return self.remedy_requires_availability_check.get(remedy, False)
 
 
 def parse_warranty_refund_policy(
@@ -125,11 +142,21 @@ def _parse_warranty_refund_parameters(
         parameters.get("remedy_sequence_by_claim_type"),
         known_claim_types=frozenset(required_evidence_by_claim_type),
     )
+    known_remedies = frozenset(
+        step
+        for sequence in remedy_sequence_by_claim_type.values()
+        for step in sequence
+    )
+    remedy_requires_availability_check = _parse_remedy_requires_availability_check(
+        parameters.get("remedy_requires_availability_check"),
+        known_remedies=known_remedies,
+    )
     return WarrantyRefundPolicy(
         warranty_window_days=warranty_window_days,
         authorized_resellers=authorized_resellers,
         required_evidence_by_claim_type=required_evidence_by_claim_type,
         remedy_sequence_by_claim_type=remedy_sequence_by_claim_type,
+        remedy_requires_availability_check=remedy_requires_availability_check,
     )
 
 
@@ -209,6 +236,35 @@ def _parse_remedy_sequence_by_claim_type(
                 )
             parsed_steps.append(step.strip())
         result[claim_type] = tuple(parsed_steps)
+    return result
+
+
+def _parse_remedy_requires_availability_check(
+    value: object,
+    *,
+    known_remedies: frozenset[str],
+) -> Mapping[str, bool]:
+    if value is None:
+        return {}
+    entry = _require_mapping(value, "remedy_requires_availability_check")
+    result: dict[str, bool] = {}
+    for remedy, raw_requires_check in entry.items():
+        if not remedy.strip():
+            raise WarrantyRefundPolicyParseError(
+                "remedy_requires_availability_check keys must be non-empty strings"
+            )
+        remedy = remedy.strip()
+        if remedy not in known_remedies:
+            raise WarrantyRefundPolicyParseError(
+                f"remedy_requires_availability_check[{remedy!r}] does not "
+                "appear in any remedy_sequence_by_claim_type ladder"
+            )
+        if not isinstance(raw_requires_check, bool):
+            raise WarrantyRefundPolicyParseError(
+                f"remedy_requires_availability_check[{remedy!r}] must be a "
+                "boolean"
+            )
+        result[remedy] = raw_requires_check
     return result
 
 

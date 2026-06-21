@@ -390,3 +390,155 @@ async def test_full_pipeline_persists_eligibility_on_resolution_proposal() -> No
     )
     # No execution occurred — create_proposal only ever persists data.
     assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+
+
+# ─── W3: availability-gated remedy selection, full pipeline ──────────────
+
+
+class _ScriptedAvailabilityChecker:
+    def __init__(self, *, availability: dict[str, bool | None]) -> None:
+        self._availability = availability
+
+    async def check_availability(
+        self,
+        *,
+        tenant_id: str,
+        remedy: str,
+        extracted_fields: ExtractedOrderFields,
+    ) -> bool | None:
+        del tenant_id, extracted_fields
+        return self._availability.get(remedy)
+
+
+async def _tenant_configuration_repository_with_gating() -> (
+    InMemoryTenantConfigurationRepository
+):
+    repository = InMemoryTenantConfigurationRepository()
+    await _save_policy(
+        repository,
+        policy_type="resolution_taxonomy",
+        parameters={
+            "categories": [
+                {
+                    "id": "warranty_claim_category",
+                    "label": "Warranty Claim",
+                    "description": "Customer believes their item is under warranty.",
+                    "recommended_actions": [
+                        {
+                            "type": "warranty_claim",
+                            "label": "File a warranty claim",
+                            "requires_execution": True,
+                            "tool_name": "warranty.claim",
+                            "payload_template": {},
+                            "target_resource_id": "warranty:claim",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+    await _save_policy(
+        repository,
+        policy_type="warranty_refund_rules",
+        parameters={
+            "warranty_window_days": 730,
+            "authorized_resellers": ["amazon.com"],
+            "required_evidence_by_claim_type": {
+                "warranty_claim": ["order_id", "purchase_date", "seller"],
+            },
+            "remedy_sequence_by_claim_type": {
+                "warranty_claim": ["replacement", "refurbished", "refund"],
+            },
+            "remedy_requires_availability_check": {
+                "replacement": True,
+                "refurbished": True,
+            },
+        },
+    )
+    await _save_policy(
+        repository,
+        policy_type="resolution_autonomy",
+        parameters={
+            "reply_auto_send": {
+                "category_allowlist": ["warranty_claim_category"],
+                "monetary_commitment_threshold_cents": 10_000,
+            }
+        },
+    )
+    return repository
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_recommends_first_available_not_first_ladder_step() -> (
+    None
+):
+    """LOAD-BEARING end-to-end proof: the first ladder step (replacement)
+    is confirmed unavailable, the second (refurbished) is confirmed
+    available — the full ResolutionRuntime.create_proposal pipeline
+    recommends the SECOND, not just the first-listed step."""
+    repository = await _tenant_configuration_repository_with_gating()
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        tenant_configuration_repository=repository,
+        inventory_availability_checker=_ScriptedAvailabilityChecker(
+            availability={"replacement": False, "refurbished": True}
+        ),
+    )
+
+    record = await runtime.create_proposal(
+        ResolutionProposalRequest(
+            tenant_id=_TENANT,
+            session_id=_SESSION_ID,
+            execution_id=_EXECUTION_ID,
+            dispatch_id=_DISPATCH_ID,
+            diagnostic_event_id=None,
+            diagnostic_summary="Warranty claim.",
+            diagnostic_category="warranty_claim_category",
+            diagnostic_confidence=0.9,
+            original_content="Is my widget still under warranty?",
+            extracted_fields=_complete_fields(),
+        )
+    )
+
+    warranty_action = next(
+        a for a in record.recommended_actions if a["type"] == "warranty_claim"
+    )
+    eligibility = warranty_action["warranty_refund_eligibility"]
+    assert eligibility["recommended_remedy"] == "refurbished"
+    assert eligibility["recommended_remedy_availability"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_fails_safe_when_no_checker_wired() -> None:
+    """The tenant configured gating (remedy_requires_availability_check)
+    but this ResolutionRuntime has no inventory_availability_checker —
+    the first gated step is surfaced unconfirmed, never fabricated as
+    available, and the pipeline never crashes."""
+    repository = await _tenant_configuration_repository_with_gating()
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        tenant_configuration_repository=repository,
+        inventory_availability_checker=None,
+    )
+
+    record = await runtime.create_proposal(
+        ResolutionProposalRequest(
+            tenant_id=_TENANT,
+            session_id=_SESSION_ID,
+            execution_id=_EXECUTION_ID,
+            dispatch_id=_DISPATCH_ID,
+            diagnostic_event_id=None,
+            diagnostic_summary="Warranty claim.",
+            diagnostic_category="warranty_claim_category",
+            diagnostic_confidence=0.9,
+            original_content="Is my widget still under warranty?",
+            extracted_fields=_complete_fields(),
+        )
+    )
+
+    warranty_action = next(
+        a for a in record.recommended_actions if a["type"] == "warranty_claim"
+    )
+    eligibility = warranty_action["warranty_refund_eligibility"]
+    assert eligibility["recommended_remedy"] == "replacement"
+    assert eligibility["recommended_remedy_availability"] == "unconfirmed"
