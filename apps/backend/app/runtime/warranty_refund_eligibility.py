@@ -1,0 +1,182 @@
+"""Eligibility-verification core (W1).
+
+Pure, fail-closed: given B3's extracted order fields and a tenant's
+warranty/refund policy, produces a grounded eligibility determination.
+No I/O, no connector calls, no approval-queue submission, no execution —
+this module only ever returns data. W2 wires the output into the
+existing human-approval queue; W3 adds remedy/inventory selection; W4
+adds customer-facing probes for missing evidence.
+
+Verdict is exactly one of three values, never a fourth:
+  - "eligible": every applicable rule passed against complete,
+    sufficient-confidence evidence.
+  - "ineligible": complete, sufficient-confidence evidence, but at
+    least one applicable rule failed.
+  - "cannot_determine": no active/parseable tenant policy, an unknown
+    claim_type, missing required evidence, low-confidence required
+    evidence, or evidence present but unusable (e.g. an unparseable
+    purchase_date). NEVER falls through to eligible or ineligible on
+    incomplete evidence — "a wrong but confident eligibility verdict is
+    worse than an honest escalation" (same philosophy as B3's
+    adversarial-ambiguity break-control).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime
+from enum import StrEnum
+
+from app.cognition.extraction import ExtractedOrderFields
+from app.runtime.warranty_refund_policy import WarrantyRefundPolicy
+
+_DATE_FORMATS = ("%Y-%m-%d", "%Y%m%d", "%Y/%m/%d")
+
+
+class EligibilityVerdict(StrEnum):
+    ELIGIBLE = "eligible"
+    INELIGIBLE = "ineligible"
+    CANNOT_DETERMINE = "cannot_determine"
+
+
+@dataclass(frozen=True, slots=True)
+class EligibilityCheck:
+    """One grounded rule evaluation — cites the literal evidence used."""
+
+    name: str
+    passed: bool
+    rule: str
+    evidence_field: str
+    evidence_value: str
+    evidence_confidence: str
+
+
+@dataclass(frozen=True, slots=True)
+class EligibilityDetermination:
+    verdict: EligibilityVerdict
+    claim_type: str
+    grounding: tuple[EligibilityCheck, ...] = ()
+    missing_evidence: tuple[str, ...] = ()
+
+
+def determine_eligibility(
+    *,
+    claim_type: str,
+    extracted_fields: ExtractedOrderFields,
+    policy: WarrantyRefundPolicy | None,
+    now: datetime,
+) -> EligibilityDetermination:
+    if policy is None:
+        return EligibilityDetermination(
+            verdict=EligibilityVerdict.CANNOT_DETERMINE, claim_type=claim_type
+        )
+    required = policy.required_evidence_for(claim_type)
+    if required is None:
+        return EligibilityDetermination(
+            verdict=EligibilityVerdict.CANNOT_DETERMINE, claim_type=claim_type
+        )
+
+    missing: list[str] = []
+    for field_name in required:
+        field = getattr(extracted_fields, field_name)
+        if field.value is None or field.confidence == "low":
+            missing.append(field_name)
+
+    parsed_purchase_date: date | None = None
+    if "purchase_date" in required and "purchase_date" not in missing:
+        purchase_date_value = extracted_fields.purchase_date.value
+        assert purchase_date_value is not None  # not in missing => has a value
+        parsed_purchase_date = _parse_date(purchase_date_value)
+        if parsed_purchase_date is None:
+            missing.append("purchase_date")
+
+    if missing:
+        return EligibilityDetermination(
+            verdict=EligibilityVerdict.CANNOT_DETERMINE,
+            claim_type=claim_type,
+            missing_evidence=tuple(missing),
+        )
+
+    grounding: list[EligibilityCheck] = []
+    eligible = True
+
+    if "purchase_date" in required:
+        assert parsed_purchase_date is not None
+        check = _warranty_window_check(
+            extracted_fields,
+            parsed_purchase_date=parsed_purchase_date,
+            warranty_window_days=policy.warranty_window_days,
+            now=now,
+        )
+        grounding.append(check)
+        eligible = eligible and check.passed
+
+    if "seller" in required:
+        check = _authorized_reseller_check(
+            extracted_fields, authorized_resellers=policy.authorized_resellers
+        )
+        grounding.append(check)
+        eligible = eligible and check.passed
+
+    return EligibilityDetermination(
+        verdict=(
+            EligibilityVerdict.ELIGIBLE if eligible else EligibilityVerdict.INELIGIBLE
+        ),
+        claim_type=claim_type,
+        grounding=tuple(grounding),
+    )
+
+
+def _warranty_window_check(
+    extracted_fields: ExtractedOrderFields,
+    *,
+    parsed_purchase_date: date,
+    warranty_window_days: int,
+    now: datetime,
+) -> EligibilityCheck:
+    age_days = (now.date() - parsed_purchase_date).days
+    passed = 0 <= age_days <= warranty_window_days
+    field = extracted_fields.purchase_date
+    return EligibilityCheck(
+        name="within_warranty_window",
+        passed=passed,
+        rule=f"warranty_window_days={warranty_window_days}",
+        evidence_field="purchase_date",
+        evidence_value=field.value or "",
+        evidence_confidence=field.confidence or "",
+    )
+
+
+def _authorized_reseller_check(
+    extracted_fields: ExtractedOrderFields,
+    *,
+    authorized_resellers: frozenset[str],
+) -> EligibilityCheck:
+    field = extracted_fields.seller
+    seller_value = field.value or ""
+    passed = seller_value.strip().lower() in authorized_resellers
+    return EligibilityCheck(
+        name="authorized_reseller",
+        passed=passed,
+        rule=f"authorized_resellers={sorted(authorized_resellers)!r}",
+        evidence_field="seller",
+        evidence_value=seller_value,
+        evidence_confidence=field.confidence or "",
+    )
+
+
+def _parse_date(value: str) -> date | None:
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+__all__ = [
+    "EligibilityCheck",
+    "EligibilityDetermination",
+    "EligibilityVerdict",
+    "determine_eligibility",
+]

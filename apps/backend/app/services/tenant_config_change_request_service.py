@@ -30,6 +30,11 @@ from app.runtime.resolution_taxonomy_policy import (
     parse_resolution_taxonomy_policy,
     validate_resolution_taxonomy_policy_parameters,
 )
+from app.runtime.warranty_refund_policy import (
+    WARRANTY_REFUND_RULES_POLICY_TYPE,
+    WarrantyRefundPolicyParseError,
+    validate_warranty_refund_policy_parameters,
+)
 from app.events import EventCausality, EventChronology, EventId, OperationalEvent
 from app.events.appender import OperationalEventAppender
 from app.events.substrates import OperationalSubstrate
@@ -1029,6 +1034,7 @@ async def _validate_payload(
             tenant_id=tenant_id,
         )
         _validate_resolution_taxonomy_policy_payload(payload)
+        _validate_warranty_refund_policy_payload(payload)
     elif change_type is TenantConfigChangeType.EXECUTION_GOVERNANCE:
         required = (
             "execution_quota",
@@ -1172,6 +1178,25 @@ def _validate_resolution_taxonomy_policy_payload(payload: Mapping[str, Any]) -> 
     except ResolutionTaxonomyPolicyParseError as exc:
         raise TenantConfigChangeRequestLifecycleError(
             f"invalid resolution_taxonomy policy parameters: {exc}"
+        ) from exc
+
+
+def _validate_warranty_refund_policy_payload(payload: Mapping[str, Any]) -> None:
+    parameters = payload.get("parameters")
+    policy_type = payload.get("policy_type")
+    if policy_type != WARRANTY_REFUND_RULES_POLICY_TYPE:
+        return
+    if not isinstance(parameters, Mapping):
+        raise TenantConfigChangeRequestLifecycleError(
+            "warranty_refund_rules policy parameters must be an object"
+        )
+    try:
+        validate_warranty_refund_policy_parameters(
+            _dict_from_mapping(cast(Mapping[Any, Any], parameters))
+        )
+    except WarrantyRefundPolicyParseError as exc:
+        raise TenantConfigChangeRequestLifecycleError(
+            f"invalid warranty_refund_rules policy parameters: {exc}"
         ) from exc
 
 
