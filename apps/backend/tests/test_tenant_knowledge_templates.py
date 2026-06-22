@@ -39,7 +39,10 @@ from app.tenant.persistence import (
     TenantKnowledgeDocumentQuery,
 )
 from app.tenant.runtime import TenantConfigurationRuntime
-from app.tenant.template_placeholders import extract_placeholders
+from app.tenant.template_placeholders import (
+    extract_placeholders,
+    substitute_placeholders,
+)
 from app.events import PostgresOperationalEventPersistence
 from app.events.appender import OperationalEventAppender
 from tests.conftest import requires_postgres, set_pg_rls_tenant
@@ -430,6 +433,51 @@ def test_extract_placeholders_ignores_escaped_braces() -> None:
 
 def test_extract_placeholders_ignores_malformed_names() -> None:
     assert extract_placeholders("{Order ID} is not snake_case") == frozenset()
+
+
+# ─── substitution (W4): real data in, never a fabricated value ────────────
+
+
+def test_substitute_placeholders_fills_real_values() -> None:
+    content = "Hi! To process order {order_id}, we still need: {missing_fields}."
+    filled = substitute_placeholders(
+        content, {"order_id": "ORD-1", "missing_fields": "purchase date"}
+    )
+    assert filled == "Hi! To process order ORD-1, we still need: purchase date."
+
+
+def test_substitute_placeholders_marks_missing_value_not_fabricates() -> None:
+    """A placeholder absent from the value map — never silently dropped,
+    never invented — becomes a visible gap a human reviewer can catch."""
+    filled = substitute_placeholders("Hi {order_id}!", {})
+    assert filled == "Hi [missing: order_id]!"
+
+
+def test_substitute_placeholders_marks_blank_value_same_as_absent() -> None:
+    filled = substitute_placeholders("Order: {order_id}", {"order_id": "   "})
+    assert filled == "Order: [missing: order_id]"
+
+
+def test_substitute_placeholders_leaves_escaped_braces_untouched() -> None:
+    filled = substitute_placeholders(
+        "literal {{not_a_placeholder}} and real {order_id}",
+        {"order_id": "ORD-1"},
+    )
+    assert filled == "literal {{not_a_placeholder}} and real ORD-1"
+
+
+def test_substitute_placeholders_uses_same_pattern_as_extraction() -> None:
+    """What validates as a placeholder at save time substitutes
+    identically here — never a token extract_placeholders would have
+    flagged that substitute_placeholders silently ignores, or vice
+    versa."""
+    content = "{order_id} {Order ID} {{escaped}} {missing_fields}"
+    placeholders = extract_placeholders(content)
+    filled = substitute_placeholders(
+        content, {"order_id": "ORD-1", "missing_fields": "seller"}
+    )
+    for name in placeholders:
+        assert f"{{{name}}}" not in filled
 
 
 # ─── fail-closed validation ─────────────────────────────────────────────────

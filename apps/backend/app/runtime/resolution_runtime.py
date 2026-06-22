@@ -71,6 +71,8 @@ from app.runtime.warranty_refund_policy import (
 )
 from app.runtime.warranty_refund_remedy_selection import select_available_remedy
 from app.tenant.persistence import TenantConfigurationRepository
+from app.tenant.runtime import TenantConfigurationRuntime
+from app.tenant.template_placeholders import substitute_placeholders
 
 _DEFAULT_AUTO_APPROVE_THRESHOLD = 0.80
 _DIAGNOSTIC_EVENT_TYPE = "diagnostic_analysis_completed"
@@ -357,6 +359,15 @@ class ResolutionRuntime:
             extracted_fields=request.extracted_fields,
             availability_checker=self._inventory_availability_checker,
         )
+        probe_reply = await _probe_reply_for_cannot_determine(
+            recommended_actions=recommended_actions,
+            extracted_fields=request.extracted_fields,
+            tenant_configuration_repository=self._tenant_configuration_repository,
+            tenant_id=request.tenant_id,
+            channel=request.source_channel,
+        )
+        if probe_reply is not None:
+            reply = probe_reply
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
@@ -916,6 +927,98 @@ async def _apply_availability_gating(
         merged_action["warranty_refund_eligibility"] = merged_eligibility
         result.append(merged_action)
     return tuple(result)
+
+
+async def _probe_reply_for_cannot_determine(
+    *,
+    recommended_actions: tuple[Mapping[str, Any], ...],
+    extracted_fields: ExtractedOrderFields | None,
+    tenant_configuration_repository: TenantConfigurationRepository | None,
+    tenant_id: str,
+    channel: str | None,
+) -> str | None:
+    """W4: when a recommended action's W1 verdict is cannot_determine,
+    draft the customer-facing "we need X" ask from the tenant's own
+    APPROVED probe template — never from a hardcoded default. Returns
+    None (no override; the caller's existing reply stands unchanged)
+    whenever there's nothing to probe for, no channel to address it
+    through, or no approved template for (tenant, purpose, channel) —
+    fail-closed, never fabricated. This only ever returns DATA: the
+    proposal this feeds into still goes through the unchanged
+    cannot_determine gate (_warranty_refund_cannot_determine_reasons)
+    that forces PENDING_HUMAN_APPROVAL, and the existing send-eligibility
+    chain (governance ALLOW + explicit human approval) is the only path
+    that can ever transmit it — this function cannot cause a send.
+    """
+    if tenant_configuration_repository is None or channel is None:
+        return None
+    determination = _first_cannot_determine_eligibility(recommended_actions)
+    if determination is None:
+        return None
+    missing_evidence = determination.get("missing_evidence")
+    if not isinstance(missing_evidence, list) or not missing_evidence:
+        return None
+    missing_fields = [
+        field
+        for field in cast(list[object], missing_evidence)
+        if isinstance(field, str)
+    ]
+    if not missing_fields:
+        return None
+    purpose = f"probe.missing_{missing_fields[0]}"
+    runtime = TenantConfigurationRuntime(repository=tenant_configuration_repository)
+    template = await runtime.get_approved_template(
+        tenant_id=tenant_id,
+        purpose=purpose,
+        channel=channel,
+    )
+    if template is None:
+        return None
+    claim_type = determination.get("claim_type")
+    values = _probe_substitution_values(
+        claim_type=claim_type if isinstance(claim_type, str) else None,
+        missing_fields=missing_fields,
+        extracted_fields=extracted_fields,
+    )
+    return substitute_placeholders(template.content, values)
+
+
+def _first_cannot_determine_eligibility(
+    recommended_actions: tuple[Mapping[str, Any], ...],
+) -> Mapping[str, Any] | None:
+    for action in recommended_actions:
+        raw_eligibility = action.get("warranty_refund_eligibility")
+        if not isinstance(raw_eligibility, Mapping):
+            continue
+        eligibility = cast(Mapping[str, Any], raw_eligibility)
+        if eligibility.get("verdict") == EligibilityVerdict.CANNOT_DETERMINE.value:
+            return eligibility
+    return None
+
+
+def _probe_substitution_values(
+    *,
+    claim_type: str | None,
+    missing_fields: list[str],
+    extracted_fields: ExtractedOrderFields | None,
+) -> dict[str, str | None]:
+    values: dict[str, str | None] = {
+        "missing_fields": ", ".join(_humanize_field(field) for field in missing_fields),
+    }
+    if claim_type is not None:
+        values["claim_type"] = _humanize_field(claim_type)
+    if extracted_fields is not None:
+        for name in EXTRACTED_ORDER_FIELD_NAMES:
+            field: ExtractedField = getattr(extracted_fields, name)
+            values[name] = field.value
+    return values
+
+
+def _humanize_field(name: str) -> str:
+    # Lowercase, space-joined — meant to read inline in mid-sentence
+    # template prose (e.g. "we still need: purchase date, seller"), not
+    # as a standalone capitalized label.
+    return name.replace("_", " ")
 
 
 def _eligibility_determination_to_dict(
