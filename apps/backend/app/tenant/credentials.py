@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from app.data_protection.crypto import DataProtectionError, MasterKeyRing
 from app.data_protection.db.models import DataProtectionDataKeyRow
+from app.data_protection.kms import build_master_key_unwrap
 from app.identity import coerce_tenant_id
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
 from app.tenant.exceptions import TenantCredentialEncryptionError
@@ -240,7 +241,13 @@ class LocalMasterKeyProvider:
     @classmethod
     def from_settings(cls, settings: Any) -> "LocalMasterKeyProvider":
         try:
-            return cls(master_key_ring=MasterKeyRing.from_settings(settings))
+            return cls(
+                master_key_ring=MasterKeyRing.from_settings(
+                    settings,
+                    master_key_unwrap=build_master_key_unwrap(settings),
+                    legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+                )
+            )
         except DataProtectionError as exc:
             raise TenantCredentialEncryptionError(
                 "local credential KMS provider is not configured"

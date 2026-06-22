@@ -80,6 +80,7 @@ from app.core.webhook_url import (
     derive_canonical_webhook_url,
 )
 from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.tenant_context import set_current_tenant
 from app.governance.capability import OperationalAct
 from app.hardening.admission import (
@@ -913,7 +914,10 @@ class TicketIngressService:
         ):
             return None
         data_protection = DataProtectionService.from_settings(
-            self._session, settings
+            self._session,
+            settings,
+            master_key_unwrap=build_master_key_unwrap(settings),
+            legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
         )
         repository = AttachmentRepository(
             self._session,

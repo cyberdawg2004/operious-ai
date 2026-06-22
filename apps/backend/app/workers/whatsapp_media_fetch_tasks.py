@@ -29,6 +29,7 @@ from app.boundary.whatsapp_media_fetch import (
 from app.boundary.whatsapp_media_fetcher import WhatsAppGraphMediaFetcher
 from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.queues import QUEUE_WHATSAPP_MEDIA_FETCH
@@ -235,7 +236,12 @@ async def _resolve_and_store(
         resolution.url, access_token=access_token
     )
 
-    data_protection = DataProtectionService.from_settings(session, settings_)
+    data_protection = DataProtectionService.from_settings(
+        session,
+        settings_,
+        master_key_unwrap=build_master_key_unwrap(settings_),
+        legacy_credential_key=settings_.TENANT_CREDENTIAL_MASTER_KEY,
+    )
     blob_store = AttachmentBlobStore.from_settings(settings_)
     repository = AttachmentRepository(
         session, data_protection=data_protection, blob_store=blob_store

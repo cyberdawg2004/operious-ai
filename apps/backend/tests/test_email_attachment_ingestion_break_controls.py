@@ -20,6 +20,17 @@ Verified properties:
   BC-6  Fail-soft: a storage-layer exception (S3 unreachable) is recorded
         as storage_status="failed" on that attachment, but the ticket
         still ingests — one attachment's failure never drops the email.
+  BC-7  gcp KMS backend wiring: under DATA_PROTECTION_KMS_BACKEND=gcp, the
+        REQUEST PATH (TicketIngressService._build_attachment_storage_service,
+        invoked through the real process_channel_webhook entrypoint — not a
+        hand-built DataProtectionService) must construct its
+        DataProtectionService with the KMS unwrap callable, never omit it.
+        Omitting it makes the still-wrapped ciphertext get used AS the AES
+        key, which authenticates against nothing the real key wrapped —
+        every attachment fails with "data key could not be authenticated"
+        against the tenant's pre-existing data key. This reproduces the
+        production wiring (a missing constructor kwarg) that unit tests
+        built around a correctly-constructed service could never catch.
 """
 
 from __future__ import annotations
@@ -50,7 +61,8 @@ from app.boundary.adapters.email_ses import (
 )
 from app.boundary.persistence import BoundaryIngressQuery, InMemoryBoundaryPersistence
 from app.core.config import Settings
-from app.data_protection.crypto import DataProtectionService
+from app.data_protection.crypto import DataProtectionService, MasterKeyRing
+from app.data_protection.db.models import DataProtectionDataKeyRow
 from app.services.ticket_ingress_service import TicketIngressService
 from app.tenant.credentials import TenantCredentialEncryptor
 from app.tenant.enums import TenantChannelStatus, TenantChannelType
@@ -589,3 +601,141 @@ async def test_attachment_storage_failure_is_fail_soft(
     attachments = page.ingress[0].canonical_payload["attachments"]
     assert attachments[0]["storage_status"] == "failed"
     assert "simulated S3 outage" in attachments[0]["storage_error"]
+
+
+# ─── BC-7: gcp KMS backend — request path must use the unwrap callable ────
+#
+# This is the regression for the master_key_unwrap-omission bug class. The
+# previous tests in this file all construct DataProtectionService correctly
+# via Settings() under the default (local) backend, so they could never
+# have caught a missing master_key_unwrap kwarg under the gcp backend —
+# that's exactly the gap that let the bug ship. This test instead drives
+# the REAL production factory (_build_attachment_storage_service, reached
+# only through process_channel_webhook) under a simulated gcp backend with
+# a stub KMS unwrap, and proves the factory actually calls it.
+
+_KNOWN_PLAINTEXT_KEY = b"\x42" * 32  # what "KMS" decrypts the ciphertext to
+_FAKE_CIPHERTEXT_B64 = base64.b64encode(b"\x99" * 48).decode("ascii")
+# Mirrors crypto.py's private _TENANT_SCOPE_ID — the stable wire-format
+# scope_id every tenant-scoped data key (including production's) uses.
+_TENANT_SCOPE_ID = "__tenant__"
+
+
+def _stub_build_master_key_unwrap(settings: Any):
+    """Stand-in for the real GCP KMS client: ignores the ciphertext bytes
+    it's given and always returns the one known plaintext, so the test
+    never needs real KMS credentials — it only verifies that the request
+    path CALLS this callable at all, which is exactly what the bug omitted."""
+
+    def _unwrap(_ciphertext: bytes) -> bytes:
+        return _KNOWN_PLAINTEXT_KEY
+
+    return _unwrap
+
+
+@pytest.mark.asyncio
+async def test_gcp_backend_attachment_path_uses_the_kms_unwrap_callable(
+    pg_seed_engine: AsyncEngine | None,
+    pg_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = f"bc-email-gcp-{uuid.uuid4().hex}"
+    await _ensure_tenant_row(
+        pg_seed_engine=pg_seed_engine, pg_session=pg_session, tenant_id=tenant_id
+    )
+
+    # Pre-seed the tenant-scoped data key EXACTLY as production has one
+    # already: wrapped under the known plaintext "KMS would produce" —
+    # mirroring anker-pilot's real, pre-existing __tenant__ row.
+    ring = MasterKeyRing(keys={"v1": _KNOWN_PLAINTEXT_KEY}, active_version="v1")
+    data_key_id = uuid.uuid4()
+    raw_data_key = os.urandom(32)
+    master_version, wrapped = ring.wrap_key(
+        data_key=raw_data_key,
+        tenant_id=tenant_id,
+        scope="tenant",
+        scope_id=_TENANT_SCOPE_ID,
+        data_key_id=data_key_id,
+    )
+    pg_session.add(
+        DataProtectionDataKeyRow(
+            data_key_id=data_key_id,
+            tenant_id=tenant_id,
+            scope="tenant",
+            scope_id=_TENANT_SCOPE_ID,
+            master_key_version=master_version,
+            encrypted_key=wrapped,
+        )
+    )
+    # commit (not just flush) — TicketIngressService._process_email_sns_webhook
+    # does a deliberate mid-flow rollback (_end_read_only_routing_transaction)
+    # that would otherwise undo this pre-seeded row, same reason
+    # _ensure_tenant_row commits instead of flushing.
+    await pg_session.commit()
+
+    gcp_settings = Settings(
+        DATA_PROTECTION_KMS_BACKEND="gcp",
+        DATA_PROTECTION_MASTER_KEYS=f"v1:{_FAKE_CIPHERTEXT_B64}",
+        DATA_PROTECTION_ACTIVE_MASTER_KEY_VERSION="v1",
+    )
+    # Patch at the exact names the production module resolves at call time
+    # (app.services.ticket_ingress_service's own namespace) — reproducing
+    # the real call site, not a hand-built service.
+    monkeypatch.setattr(
+        "app.services.ticket_ingress_service.get_settings", lambda: gcp_settings
+    )
+    # raising=False: pre-fix, ticket_ingress_service doesn't import this
+    # name at all (that's part of the bug) — the patch must still apply so
+    # the test fails at the intended assertion below, not at setup.
+    monkeypatch.setattr(
+        "app.services.ticket_ingress_service.build_master_key_unwrap",
+        _stub_build_master_key_unwrap,
+        raising=False,
+    )
+
+    private_key, cert_pem = _certificate()
+    message_id = f"customer-bc7-{uuid.uuid4().hex}"
+    mime = _mime_with_attachment(
+        message_id=message_id,
+        attachment_bytes=_PDF_BYTES,
+        attachment_content_type="application/pdf",
+    )
+    service = await _service(
+        tenant_id=tenant_id,
+        session=pg_session,
+        certificate_pem=cert_pem,
+        attachment_blob_store=_FakeBlobStore(),
+    )
+    body = _signed_sns_body(
+        private_key=private_key,
+        message_id=f"sns-bc7-{uuid.uuid4().hex}",
+        timestamp=datetime.now(timezone.utc),
+        message=_ses_message_inline(mime),
+    )
+
+    result = await service.process_channel_webhook(
+        channel_type="email",
+        body=body,
+        headers={},
+        raw_body=_raw(body),
+        content_type="application/json",
+    )
+    assert result.ingress_id is not None
+
+    boundary_store = service._persistence  # type: ignore[attr-defined]
+    page = await boundary_store.list_ingress(
+        BoundaryIngressQuery(), expected_tenant_id=tenant_id
+    )
+    attachments = page.ingress[0].canonical_payload["attachments"]
+    # Before the fix: _build_attachment_storage_service never calls
+    # build_master_key_unwrap, so it ignores this stub entirely and uses
+    # the raw (fake) ciphertext as the AES key — unwrap_key on the
+    # pre-seeded row (wrapped under _KNOWN_PLAINTEXT_KEY) then throws
+    # InvalidTag, caught by the fail-soft except, landing here as
+    # storage_status="failed" with "data key could not be authenticated".
+    # After the fix: the factory calls the (stubbed) unwrap callable,
+    # gets _KNOWN_PLAINTEXT_KEY back, and the pre-seeded row authenticates.
+    assert attachments[0]["storage_status"] == "stored", (
+        f"attachment storage did not use the KMS unwrap callable on the "
+        f"request path: {attachments[0]!r}"
+    )

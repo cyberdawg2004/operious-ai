@@ -19,6 +19,7 @@ from app.core.config import get_settings
 from app.core.queue_depth import get_queue_depth_provider
 from app.core.redis import get_redis_client
 from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_owner_session_factory
 from app.hardening.observability.alert_evaluator import (
     get_alert_evaluator,
@@ -427,7 +428,12 @@ def purge_expired_protected_data() -> None:
     # by the next scheduled run; no replay needed.
     async def _run() -> None:
         async with get_owner_session_factory()() as session:
-            service = DataProtectionService.from_settings(session, settings)
+            service = DataProtectionService.from_settings(
+                session,
+                settings,
+                master_key_unwrap=build_master_key_unwrap(settings),
+                legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+            )
             purged = await service.purge_expired_cognition_audits()
             await session.commit()
             logger.info(

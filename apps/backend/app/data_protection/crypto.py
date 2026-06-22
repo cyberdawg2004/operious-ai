@@ -185,7 +185,27 @@ class MasterKeyRing:
         but were sealed under this credential key, not the dedicated one. When a
         dedicated ring is configured, this is registered as a fallback candidate for
         the active version label so those older rows continue to unwrap.
+
+        Constitutional guard: when ``DATA_PROTECTION_KMS_BACKEND=gcp``, a
+        missing ``master_key_unwrap`` is never silently tolerated. Without
+        this guard, ``DATA_PROTECTION_MASTER_KEYS``'s KMS-wrapped ciphertext
+        would be used AS the key material — a wrong-but-valid-length key
+        that authenticates against nothing it didn't itself wrap, failing
+        only later and silently (``InvalidTag`` on first real decrypt).
+        Failing loudly here, at construction, turns that whole bug class
+        into an immediate, unmissable error instead.
         """
+        backend = str(
+            getattr(settings, "DATA_PROTECTION_KMS_BACKEND", "local") or "local"
+        ).strip().lower()
+        if backend == "gcp" and master_key_unwrap is None:
+            raise DataProtectionError(
+                "DATA_PROTECTION_KMS_BACKEND=gcp requires a master_key_unwrap "
+                "callable (build_master_key_unwrap(settings)) — "
+                "DATA_PROTECTION_MASTER_KEYS holds KMS-wrapped ciphertext, "
+                "not plaintext key material. Omitting it would silently use "
+                "the wrapped ciphertext as the key."
+            )
         raw_ring = getattr(settings, "DATA_PROTECTION_MASTER_KEYS", "")
         active = getattr(settings, "DATA_PROTECTION_ACTIVE_MASTER_KEY_VERSION", "")
         if raw_ring.strip():

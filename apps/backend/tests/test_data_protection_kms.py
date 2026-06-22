@@ -117,3 +117,37 @@ def test_build_master_key_unwrap_local_is_none() -> None:
     # Local backend wires no KMS client (plaintext key material).
     settings = Settings(ENVIRONMENT="test", DATA_PROTECTION_KMS_BACKEND="local")
     assert build_master_key_unwrap(settings) is None
+
+
+# ─── Footgun guard: gcp backend + missing unwrap must fail loudly ─────────
+#
+# Three call sites (ticket_ingress_service.py, whatsapp_media_fetch_tasks.py,
+# tenant/credentials.py) shipped without master_key_unwrap, which under the
+# gcp backend silently used still-wrapped KMS ciphertext AS the AES key —
+# wrong, valid-length, and undetectable until the first real decrypt threw
+# InvalidTag. This guard turns that whole bug class into an immediate,
+# unmissable construction-time error instead.
+
+
+def test_master_key_ring_rejects_gcp_backend_with_no_unwrap() -> None:
+    material = base64.b64encode(b"wrapped-token-footgun").decode("ascii")
+    settings = Settings(
+        ENVIRONMENT="test",
+        DATA_PROTECTION_KMS_BACKEND="gcp",
+        DATA_PROTECTION_MASTER_KEYS=f"v1:{material}",
+        OPERIOUS_KMS_KEY_RESOURCE=_KEY_RESOURCE,
+    )
+    with pytest.raises(DataProtectionError, match="master_key_unwrap"):
+        MasterKeyRing.from_settings(settings)  # master_key_unwrap omitted
+
+
+def test_master_key_ring_local_backend_with_no_unwrap_is_unaffected() -> None:
+    # The guard must not regress the legitimate local-backend path, where
+    # master_key_unwrap=None is correct (plaintext key material at rest).
+    settings = Settings(
+        ENVIRONMENT="test",
+        DATA_PROTECTION_KMS_BACKEND="local",
+        DATA_PROTECTION_MASTER_KEYS="v1:" + base64.b64encode(os.urandom(32)).decode("ascii"),
+    )
+    ring = MasterKeyRing.from_settings(settings)
+    assert ring.active_version == "v1"
