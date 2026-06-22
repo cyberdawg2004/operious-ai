@@ -9,7 +9,7 @@ const traceSteps = [
   {
     step: "02",
     label: "Policy admission evaluated",
-    detail: "anker_confidence_thresholds v1 · 3 policies",
+    detail: "confidence_thresholds v1 · 3 policies",
     status: "complete",
     ms: "8ms",
   },

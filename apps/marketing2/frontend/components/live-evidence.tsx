@@ -18,7 +18,7 @@ const evidenceTraces = {
       {
         label: "GOVERNANCE",
         value: "ALLOW",
-        accent: "anker_confidence_thresholds v1",
+        accent: "confidence_thresholds v1",
         color: "text-green-400/80",
       },
       {
@@ -55,7 +55,7 @@ const evidenceTraces = {
       {
         label: "GOVERNANCE",
         value: "DENY",
-        accent: "anker_refund_policy_v2",
+        accent: "refund_policy_v2",
         color: "text-[#C9A84C]",
       },
       {
