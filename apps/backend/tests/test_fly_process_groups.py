@@ -43,7 +43,7 @@ EXPECTED_CONCURRENCY = {
 }
 
 EXPECTED_VM_PROFILES = {
-    "web": ("512mb", "shared", 1),
+    "web": ("1024mb", "shared", 1),
     "worker_diagnostic": ("1024mb", "shared", 2),
     "worker_escalation": ("512mb", "shared", 1),
     "worker_supervisor": ("512mb", "shared", 1),
