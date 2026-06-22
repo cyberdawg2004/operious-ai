@@ -44,7 +44,17 @@ class EligibilityVerdict(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class EligibilityCheck:
-    """One grounded rule evaluation — cites the literal evidence used."""
+    """One grounded rule evaluation — cites the literal evidence used.
+
+    evidence_source mirrors B3's ExtractedField.source ("text" |
+    "document" | "none") verbatim — metadata for a human reviewer (a
+    document-sourced fact is a stronger trust signal than typed text),
+    never an input to the verdict. A check only ever runs on a field
+    that passed the fail-closed evidence gate (present, sufficient
+    confidence), so evidence_source is never "none" here in practice —
+    that value only appears upstream, on a field that never reached a
+    check at all.
+    """
 
     name: str
     passed: bool
@@ -52,6 +62,7 @@ class EligibilityCheck:
     evidence_field: str
     evidence_value: str
     evidence_confidence: str
+    evidence_source: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +171,7 @@ def _warranty_window_check(
         evidence_field="purchase_date",
         evidence_value=field.value or "",
         evidence_confidence=field.confidence or "",
+        evidence_source=field.source,
     )
 
 
@@ -178,6 +190,7 @@ def _authorized_reseller_check(
         evidence_field="seller",
         evidence_value=seller_value,
         evidence_confidence=field.confidence or "",
+        evidence_source=field.source,
     )
 
 

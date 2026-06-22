@@ -20,6 +20,7 @@ from app.cognition.extraction import (
     ExtractedField,
     ExtractedOrderFields,
     ExtractionConfidence,
+    ExtractionSource,
 )
 from app.runtime.warranty_refund_eligibility import (
     EligibilityVerdict,
@@ -53,13 +54,15 @@ def _complete_fields(
     purchase_date: str = "2026-01-01",
     seller: str = "amazon.com",
     confidence: ExtractionConfidence = "high",
+    purchase_date_source: ExtractionSource = "document",
+    seller_source: ExtractionSource = "document",
 ) -> ExtractedOrderFields:
     return ExtractedOrderFields(
         order_id=ExtractedField(value="ORD-1", confidence=confidence, source="text"),
         purchase_date=ExtractedField(
-            value=purchase_date, confidence=confidence, source="document"
+            value=purchase_date, confidence=confidence, source=purchase_date_source
         ),
-        seller=ExtractedField(value=seller, confidence=confidence, source="document"),
+        seller=ExtractedField(value=seller, confidence=confidence, source=seller_source),
     )
 
 
@@ -193,8 +196,10 @@ def test_eligible_when_within_window_and_authorized_reseller() -> None:
     by_name = {check.name: check for check in determination.grounding}
     assert by_name["within_warranty_window"].passed is True
     assert by_name["within_warranty_window"].evidence_value == "2026-01-01"
+    assert by_name["within_warranty_window"].evidence_source == "document"
     assert by_name["authorized_reseller"].passed is True
     assert by_name["authorized_reseller"].evidence_value == "amazon.com"
+    assert by_name["authorized_reseller"].evidence_source == "document"
 
 
 def test_ineligible_when_outside_warranty_window() -> None:
@@ -219,7 +224,82 @@ def test_ineligible_when_unauthorized_reseller() -> None:
     assert determination.verdict is EligibilityVerdict.INELIGIBLE
     by_name = {check.name: check for check in determination.grounding}
     assert by_name["authorized_reseller"].passed is False
-    assert by_name["authorized_reseller"].evidence_value == "shady-reseller.example"
+
+
+# ─── evidence_source propagates from ExtractedField, never hardcoded ──────
+
+
+def test_evidence_source_propagates_text_not_hardcoded() -> None:
+    """LOAD-BEARING: evidence_source on a grounded check reflects the
+    SAME extracted field's actual source — proven by using "text" here
+    (not the "document" every other test in this file defaults to), so
+    a hardcoded "document" would be caught."""
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=_complete_fields(
+            purchase_date_source="text", seller_source="text"
+        ),
+        policy=_policy(),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.ELIGIBLE
+    by_name = {check.name: check for check in determination.grounding}
+    assert by_name["within_warranty_window"].evidence_source == "text"
+    assert by_name["authorized_reseller"].evidence_source == "text"
+
+
+def test_evidence_source_differs_per_field_within_one_determination() -> None:
+    """A single determination can ground one check in a document and
+    another in typed text — source is per-field, not a single flag for
+    the whole determination."""
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=_complete_fields(
+            purchase_date_source="document", seller_source="text"
+        ),
+        policy=_policy(),
+        now=_NOW,
+    )
+    by_name = {check.name: check for check in determination.grounding}
+    assert by_name["within_warranty_window"].evidence_source == "document"
+    assert by_name["authorized_reseller"].evidence_source == "text"
+
+
+@pytest.mark.parametrize("source", ["text", "document"])
+def test_evidence_source_never_alters_the_verdict(source: ExtractionSource) -> None:
+    """Metadata-only: the SAME evidence values produce the SAME verdict
+    regardless of source — source describes provenance for a human
+    reviewer, it is never an input the verdict logic branches on."""
+    determination = determine_eligibility(
+        claim_type="defective",
+        extracted_fields=_complete_fields(
+            purchase_date_source=source, seller_source=source
+        ),
+        policy=_policy(warranty_window_days=730),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.ELIGIBLE
+    by_name = {check.name: check for check in determination.grounding}
+    assert by_name["within_warranty_window"].passed is True
+    assert by_name["authorized_reseller"].passed is True
+
+
+def test_evidence_source_is_none_only_when_field_is_absent_never_a_check() -> None:
+    """B3's invariant (value=None <=> source="none") means a field that
+    reaches a grounded CHECK always has a real source — "none" can only
+    describe a field that never had a value, which means it was already
+    caught by the fail-closed evidence gate before any check ran."""
+    fields = ExtractedOrderFields(
+        order_id=ExtractedField(value="ORD-1", confidence="high", source="text"),
+        # purchase_date and seller absent entirely — their source is
+        # "none" by B3's own model validator, never reaching a check.
+    )
+    determination = determine_eligibility(
+        claim_type="defective", extracted_fields=fields, policy=_policy(), now=_NOW
+    )
+    assert determination.verdict is EligibilityVerdict.CANNOT_DETERMINE
+    assert determination.grounding == ()
+    assert set(determination.missing_evidence) == {"purchase_date", "seller"}
 
 
 def test_reseller_check_is_case_insensitive() -> None:

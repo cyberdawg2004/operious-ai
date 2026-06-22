@@ -1038,6 +1038,7 @@ def _eligibility_determination_to_dict(
                 "evidence_field": check.evidence_field,
                 "evidence_value": check.evidence_value,
                 "evidence_confidence": check.evidence_confidence,
+                "evidence_source": check.evidence_source,
             }
             for check in determination.grounding
         ],

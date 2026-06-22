@@ -137,6 +137,10 @@ def test_eligible_verdict_embeds_grounded_recommendation_in_action() -> None:
     grounding_by_name = {check["name"]: check for check in eligibility["grounding"]}
     assert grounding_by_name["within_warranty_window"]["evidence_value"] == "2026-01-01"
     assert grounding_by_name["within_warranty_window"]["passed"] is True
+    # W2 wire-through: evidence_source rides the existing grounding JSON
+    # into the action dict unchanged — no new schema, same flat dict.
+    assert grounding_by_name["within_warranty_window"]["evidence_source"] == "document"
+    assert grounding_by_name["authorized_reseller"]["evidence_source"] == "document"
 
 
 def test_ineligible_verdict_embeds_grounded_reasons() -> None:
