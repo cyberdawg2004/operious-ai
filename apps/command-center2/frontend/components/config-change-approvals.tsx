@@ -109,7 +109,7 @@ export function ConfigChangeApprovals({
   const emptyMessage =
     changeKind === "knowledge"
       ? "Pending knowledge document uploads awaiting approval will appear here."
-      : "Proposed connector, credential, and action-policy changes awaiting approval will appear here.";
+      : "Proposed connector, credential, action-policy, and governance-policy changes awaiting approval will appear here.";
 
   return (
     <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
@@ -448,6 +448,7 @@ function StatusBadge({ status }: { status: TenantConfigChangeRequest["status"] }
 function kindLabel(kind: ConfigChangeKind | null): string {
   if (kind === "connector") return "Connector Config Change";
   if (kind === "action_policy") return "Action Policy Change";
+  if (kind === "governance_policy") return "Governance Policy Change";
   if (kind === "knowledge") return "Knowledge Document Upload";
   return "Config Change";
 }

@@ -227,7 +227,7 @@ test('action policy change payload includes policy_id only on update', () => {
 
 // ─── Constraint C: client-side change_type filter ─────────────────────────
 
-test('client-side filter keeps connector, action_tools policy, and knowledge upload changes', () => {
+test('client-side filter keeps connector, every policy type, and knowledge upload changes', () => {
   const items = [
     { change_type: 'connector' as const, proposed_payload: {} },
     {
@@ -242,12 +242,78 @@ test('client-side filter keeps connector, action_tools policy, and knowledge upl
     { change_type: 'knowledge' as const, proposed_payload: {} },
   ];
   const kept = payloads.filterConfigChangeRequests(items);
-  strictEqual(kept.length, 3);
+  // channel is the only change_type with no approval surface yet — every
+  // other kind, including an unrecognised policy_type, must classify.
+  strictEqual(kept.length, 4);
   strictEqual(payloads.classifyConfigChange(items[0]), 'connector');
   strictEqual(payloads.classifyConfigChange(items[1]), 'action_policy');
-  strictEqual(payloads.classifyConfigChange(items[2]), null);
+  strictEqual(payloads.classifyConfigChange(items[2]), 'governance_policy');
   strictEqual(payloads.classifyConfigChange(items[3]), null);
   strictEqual(payloads.classifyConfigChange(items[4]), 'knowledge');
+});
+
+// ─── Regression: no policy_type may ever classify to null ─────────────────
+//
+// warranty_refund_rules (W1's change_request dea9bbd6) and resolution_
+// autonomy (an earlier change_request, 53a226d1) were both stranded as
+// PROPOSED forever: classifyConfigChange returned null for any policy_type
+// other than action_tools, and filterConfigChangeRequests drops null-
+// classified items on every view — including the "unfiltered" config-
+// approvals page, which calls filterConfigChangeRequests too. Neither
+// change request could ever be approved through the UI. The fix must be
+// generic: it is not enough to special-case these two known policy_types,
+// because the next new policy_type would be stranded the same way.
+
+test('warranty_refund_rules policy classifies and survives the client-side filter', () => {
+  const item = {
+    change_type: 'policy' as const,
+    proposed_payload: {
+      policy_type: 'warranty_refund_rules',
+      parameters: { warranty_window_days: 730 },
+    },
+  };
+  strictEqual(payloads.classifyConfigChange(item), 'governance_policy');
+  strictEqual(payloads.filterConfigChangeRequests([item]).length, 1);
+});
+
+test('resolution_autonomy policy classifies and survives the client-side filter', () => {
+  const item = {
+    change_type: 'policy' as const,
+    proposed_payload: {
+      policy_type: 'resolution_autonomy',
+      parameters: { reply_auto_send: {} },
+    },
+  };
+  strictEqual(payloads.classifyConfigChange(item), 'governance_policy');
+  strictEqual(payloads.filterConfigChangeRequests([item]).length, 1);
+});
+
+test('a policy change with no policy_type at all still classifies (generic, not enumerated)', () => {
+  const item = { change_type: 'policy' as const, proposed_payload: {} };
+  strictEqual(payloads.classifyConfigChange(item), 'governance_policy');
+});
+
+test('action_tools policy still classifies to its dedicated kind (no regression)', () => {
+  const item = {
+    change_type: 'policy' as const,
+    proposed_payload: { policy_type: 'action_tools' },
+  };
+  strictEqual(payloads.classifyConfigChange(item), 'action_policy');
+});
+
+test('connector and knowledge changes still classify to their existing kinds (no regression)', () => {
+  strictEqual(
+    payloads.classifyConfigChange({ change_type: 'connector', proposed_payload: {} }),
+    'connector',
+  );
+  strictEqual(
+    payloads.classifyConfigChange({ change_type: 'credential_update', proposed_payload: {} }),
+    'connector',
+  );
+  strictEqual(
+    payloads.classifyConfigChange({ change_type: 'knowledge', proposed_payload: {} }),
+    'knowledge',
+  );
 });
 
 // ─── API client surface ───────────────────────────────────────────────────
@@ -354,4 +420,30 @@ test('config-change approval surface mirrors the inbox over the ledger', () => {
   for (const phase of ['PROPOSED', 'APPROVED', 'APPLIED']) {
     ok(src.includes(phase), `approval surface should surface ${phase} status`);
   }
+});
+
+// ─── Regression: the unfiltered config-approvals page renders policy items ─
+
+test('the unfiltered /dashboard/config-approvals page renders ConfigChangeApprovals with no changeKind filter', () => {
+  const src = readText(join(CC2, 'app', 'dashboard', 'config-approvals', 'page.tsx'));
+  ok(src.includes('<ConfigChangeApprovals'));
+  // No changeKind prop here is what makes this the unfiltered page — any
+  // governed change_type renders, not just connector/knowledge.
+  ok(!src.includes('changeKind='));
+});
+
+test('the embedded connector and knowledge views stay scoped to their own kind (no regression)', () => {
+  const connectorSrc = readText(join(CC2, 'components', 'connector-config-views.tsx'));
+  ok(connectorSrc.includes('changeKind="connector"'));
+  const inboxSrc = readText(join(CC2, 'components', 'attention-inbox.tsx'));
+  ok(inboxSrc.includes('changeKind="knowledge"'));
+});
+
+test('kindLabel and changeSummary handle a governance_policy item end-to-end', () => {
+  const src = readText(join(CC2, 'components', 'config-change-approvals.tsx'));
+  ok(src.includes('"governance_policy"'), 'kindLabel must recognise governance_policy');
+  ok(src.includes('Governance Policy Change'));
+  // changeSummary already reads policy_type generically for change_type
+  // === "policy", so it needs no change — confirm that branch still exists.
+  ok(src.includes("request.change_type === \"policy\""));
 });

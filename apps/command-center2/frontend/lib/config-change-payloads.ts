@@ -440,8 +440,21 @@ function dropBlankValues(values: Record<string, string>): Record<string, string>
  * PROPOSED requests and filter here. A server-side change_type filter is a
  * future backend optimization if the ledger grows.
  */
-export type ConfigChangeKind = "connector" | "action_policy" | "knowledge";
+export type ConfigChangeKind =
+  | "connector"
+  | "action_policy"
+  | "governance_policy"
+  | "knowledge";
 
+/**
+ * Any `policy` change classifies — action_tools keeps its dedicated kind
+ * (it has its own editor/summary), every other policy_type (warranty_refund_
+ * rules, resolution_autonomy, and any future type) falls through to the
+ * generic `governance_policy` kind. A policy change must never classify to
+ * `null`: that silently drops it from filterConfigChangeRequests, which
+ * stranded warranty_refund_rules (dea9bbd6) and resolution_autonomy
+ * (53a226d1) with no approval path at all.
+ */
 export function classifyConfigChange(item: {
   change_type: TenantConfigChangeType;
   proposed_payload: Record<string, unknown>;
@@ -449,11 +462,10 @@ export function classifyConfigChange(item: {
   if (item.change_type === "connector" || item.change_type === "credential_update") {
     return "connector";
   }
-  if (
-    item.change_type === "policy" &&
-    item.proposed_payload.policy_type === ACTION_TOOLS_POLICY_TYPE
-  ) {
-    return "action_policy";
+  if (item.change_type === "policy") {
+    return item.proposed_payload.policy_type === ACTION_TOOLS_POLICY_TYPE
+      ? "action_policy"
+      : "governance_policy";
   }
   if (item.change_type === "knowledge") return "knowledge";
   return null;
