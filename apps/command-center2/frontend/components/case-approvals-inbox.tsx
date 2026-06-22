@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
   Check,
+  CircleHelp,
   Clock,
   FileText,
   Lock,
@@ -11,6 +12,7 @@ import {
   ShieldCheck,
   Sparkles,
   X,
+  XCircle,
 } from "lucide-react";
 import {
   approveCaseApproval,
@@ -320,6 +322,7 @@ function CaseCard({
   onOpen: () => void;
 }) {
   const recommendation = smeRecommendation(record);
+  const eligibility = warrantyRefundEligibility(record);
   return (
     <button
       type="button"
@@ -337,17 +340,28 @@ function CaseCard({
               {categoryTitle(record.entry_category)}
             </span>
           </div>
-          <p className="mt-1 line-clamp-2 text-[13px] text-ink-secondary">
-            {recommendation?.recommended_reply ||
-              record.issue_summary ||
-              "SME review in progress…"}
-          </p>
+          {eligibility ? (
+            <p className="mt-1 line-clamp-2 text-[13px] text-ink-secondary">
+              {humanize(eligibility.claimType)}
+              {record.product ? ` · ${record.product}` : ""}
+              {eligibility.verdict === "eligible" && eligibility.recommendedRemedy
+                ? ` · recommends ${humanize(eligibility.recommendedRemedy)}`
+                : ""}
+            </p>
+          ) : (
+            <p className="mt-1 line-clamp-2 text-[13px] text-ink-secondary">
+              {recommendation?.recommended_reply ||
+                record.issue_summary ||
+                "SME review in progress…"}
+            </p>
+          )}
           <p className="mt-1.5 font-technical text-[11px] text-ink-tertiary">
             {record.session_id ? `session ${shortId(record.session_id)} / ` : ""}
             {formatDate(record.requested_at)}
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
+          {eligibility && <VerdictBadge verdict={eligibility.verdict} />}
           {record.guidance_round > 0 && (
             <span className="rounded border border-gold-primary/50 bg-surface-raised px-2 py-1 font-technical text-[10px] uppercase tracking-[0.10em] text-gold-primary">
               guided
@@ -395,6 +409,7 @@ function DetailPanel({
 }) {
   const recommendation = smeRecommendation(record);
   const action = record.recommended_action;
+  const eligibility = warrantyRefundEligibility(record);
   const isAwaiting = record.status === "awaiting_approval";
   const guidanceExhausted = record.guidance_round > 0;
   // AUTHORITY GATES: each control is ABSENT (not merely disabled) without the
@@ -487,6 +502,72 @@ function DetailPanel({
                   </span>
                 ))}
               </div>
+            </Section>
+          )}
+
+          {/* Warranty/refund eligibility — the grounded W1-W3 determination,
+              rendered as a readable evidence trail, never raw JSON. Shown
+              whenever present, regardless of entry_category: a
+              cannot_determine verdict can ride on a case that landed in a
+              DIFFERENT category (e.g. "Resolution — approval required") via
+              the existing fail-closed gate, and the missing-evidence detail
+              still belongs in front of the reviewer there too. */}
+          {eligibility && (
+            <Section title="Warranty / refund eligibility">
+              <div className="flex flex-wrap items-center gap-2">
+                <VerdictBadge verdict={eligibility.verdict} />
+                <span className="font-technical text-[11px] text-ink-tertiary">
+                  {humanize(eligibility.claimType)}
+                </span>
+              </div>
+
+              {eligibility.verdict === "cannot_determine" && (
+                <p className="rounded-md border border-warning-amber/30 bg-surface px-3 py-2 text-[12.5px] leading-relaxed text-ink-primary">
+                  The eligibility determination could not reach a verdict —
+                  required evidence was missing, low-confidence, or
+                  unparseable.{" "}
+                  {eligibility.missingEvidence.length > 0 && (
+                    <>
+                      Missing:{" "}
+                      <span className="font-technical">
+                        {eligibility.missingEvidence.map(humanize).join(", ")}
+                      </span>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
+
+              {eligibility.grounding.length > 0 && (
+                <div className="space-y-2">
+                  {eligibility.grounding.map((check) => (
+                    <GroundingCheckRow key={check.name} check={check} />
+                  ))}
+                </div>
+              )}
+
+              {eligibility.verdict === "eligible" && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-border-subtle bg-surface px-3 py-2">
+                  <span className="font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+                    Recommended remedy
+                  </span>
+                  <span className="text-[13px] font-medium text-ink-primary">
+                    {eligibility.recommendedRemedy
+                      ? humanize(eligibility.recommendedRemedy)
+                      : "None configured for this claim type"}
+                  </span>
+                  {eligibility.recommendedRemedy && (
+                    <AvailabilityBadge availability={eligibility.recommendedRemedyAvailability} />
+                  )}
+                </div>
+              )}
+
+              {eligibility.verdict === "ineligible" && (
+                <p className="rounded-md border border-red-alert/25 bg-surface px-3 py-2 text-[12.5px] leading-relaxed text-ink-primary">
+                  Denied based on the grounded checks above — review the
+                  failed check(s) before deciding.
+                </p>
+              )}
             </Section>
           )}
 
@@ -886,6 +967,167 @@ function parseCitations(raw: unknown): string[] {
     }
     return `Source ${index + 1}`;
   });
+}
+
+type EligibilityVerdict = "eligible" | "ineligible" | "cannot_determine";
+type RemedyAvailability = "available" | "unconfirmed" | "not_applicable";
+
+type GroundingCheck = {
+  name: string;
+  passed: boolean;
+  rule: string;
+  evidenceField: string;
+  evidenceValue: string;
+  evidenceConfidence: string;
+};
+
+type WarrantyRefundEligibility = {
+  claimType: string;
+  verdict: EligibilityVerdict;
+  recommendedRemedy: string | null;
+  recommendedRemedyAvailability: RemedyAvailability | null;
+  missingEvidence: string[];
+  grounding: GroundingCheck[];
+};
+
+/**
+ * Parses the W1-W3 eligibility determination embedded in
+ * recommended_action.warranty_refund_eligibility. Defensive like
+ * smeRecommendation: absent or malformed data renders nothing rather than
+ * guessing — this is a recommendation a human verifies, never a value the
+ * UI should fabricate.
+ *
+ * NOTE: the backend's grounding struct (EligibilityCheck) does not capture
+ * an evidence "source" (text vs. document) today — only evidence_field,
+ * evidence_value, and evidence_confidence. This renders exactly what the
+ * data carries; it does not invent a source label.
+ */
+function warrantyRefundEligibility(
+  record: CaseApprovalRecord
+): WarrantyRefundEligibility | null {
+  const action = record.recommended_action;
+  if (!action || typeof action !== "object") return null;
+  const raw = (action as Record<string, unknown>)["warranty_refund_eligibility"];
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+
+  const verdict = value["verdict"];
+  if (verdict !== "eligible" && verdict !== "ineligible" && verdict !== "cannot_determine") {
+    return null;
+  }
+  const availability = value["recommended_remedy_availability"];
+
+  return {
+    claimType: typeof value["claim_type"] === "string" ? value["claim_type"] : "—",
+    verdict,
+    recommendedRemedy:
+      typeof value["recommended_remedy"] === "string" ? value["recommended_remedy"] : null,
+    recommendedRemedyAvailability:
+      availability === "available" || availability === "unconfirmed" || availability === "not_applicable"
+        ? availability
+        : null,
+    missingEvidence: Array.isArray(value["missing_evidence"])
+      ? value["missing_evidence"].filter((entry): entry is string => typeof entry === "string")
+      : [],
+    grounding: parseGrounding(value["grounding"]),
+  };
+}
+
+function parseGrounding(raw: unknown): GroundingCheck[] {
+  if (!Array.isArray(raw)) return [];
+  const checks: GroundingCheck[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry as Record<string, unknown>;
+    if (typeof value["name"] !== "string" || typeof value["passed"] !== "boolean") continue;
+    checks.push({
+      name: value["name"],
+      passed: value["passed"],
+      rule: typeof value["rule"] === "string" ? value["rule"] : "—",
+      evidenceField: typeof value["evidence_field"] === "string" ? value["evidence_field"] : "—",
+      evidenceValue: typeof value["evidence_value"] === "string" ? value["evidence_value"] : "—",
+      evidenceConfidence:
+        typeof value["evidence_confidence"] === "string" ? value["evidence_confidence"] : "—",
+    });
+  }
+  return checks;
+}
+
+/** snake_case -> "Snake case", for claim types, remedy names, and field names. */
+function humanize(value: string): string {
+  const spaced = value.replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function VerdictBadge({ verdict }: { verdict: EligibilityVerdict }) {
+  const tone =
+    verdict === "eligible"
+      ? "border-green-success/40 bg-green-success/10 text-green-success"
+      : verdict === "ineligible"
+        ? "border-red-alert/40 bg-red-alert/10 text-red-alert"
+        : "border-warning-amber/40 bg-warning-amber/10 text-warning-amber";
+  const Icon = verdict === "eligible" ? Check : verdict === "ineligible" ? XCircle : CircleHelp;
+  const label = verdict === "cannot_determine" ? "Cannot determine" : humanize(verdict);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-technical text-[10.5px] font-semibold uppercase tracking-[0.10em]",
+        tone
+      )}
+    >
+      <Icon className="h-3 w-3" strokeWidth={2} />
+      {label}
+    </span>
+  );
+}
+
+function AvailabilityBadge({ availability }: { availability: RemedyAvailability | null }) {
+  if (!availability || availability === "not_applicable") return null;
+  const tone =
+    availability === "available"
+      ? "border-green-success/40 text-green-success"
+      : "border-warning-amber/40 text-warning-amber";
+  const label = availability === "available" ? "Available" : "Availability unconfirmed";
+  return (
+    <span
+      className={cn(
+        "rounded border px-2 py-0.5 font-technical text-[10px] uppercase tracking-[0.10em]",
+        tone
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function GroundingCheckRow({ check }: { check: GroundingCheck }) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border px-3 py-2",
+        check.passed ? "border-border-subtle bg-surface" : "border-red-alert/25 bg-surface"
+      )}
+    >
+      <div className="flex items-start gap-2">
+        {check.passed ? (
+          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-success" strokeWidth={2} />
+        ) : (
+          <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-alert" strokeWidth={2} />
+        )}
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-ink-primary">{humanize(check.name)}</p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {humanize(check.evidenceField)}: <span className="text-ink-primary">{check.evidenceValue}</span>
+            {" · "}
+            {check.evidenceConfidence} confidence
+          </p>
+          <p className="mt-0.5 font-technical text-[10.5px] text-ink-tertiary">
+            rule: {check.rule}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function statusLabel(status: CaseApprovalStatus): string {
