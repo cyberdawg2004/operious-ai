@@ -240,6 +240,87 @@ def test_parse_response_interprets_tenant_shaped_availability_field(
     assert fields.provider_id == "sku-1"
 
 
+# ─── domain-agnostic proof: bank + telecom, not just electronics ──────────
+
+
+@pytest.mark.parametrize(
+    ("config_kwargs", "request_payload", "response_body", "expected_status"),
+    [
+        # A bank checking provisional-credit availability — no SKU, no
+        # product, no electronics vocabulary anywhere in the config.
+        (
+            {
+                "endpoint_template": "https://bank.example/credit-limits/{account_id}",
+                "field_mappings": {
+                    "account": "payload.account_id",
+                    "credit_type": "payload.credit_type",
+                },
+                "response_parse": {
+                    "available": "provisional_credit.eligible",
+                    "provider_id": "provisional_credit.case_id",
+                },
+            },
+            {"account_id": "ACC-9", "credit_type": "provisional_credit"},
+            {"provisional_credit": {"eligible": True, "case_id": "ACC-9"}},
+            AVAILABLE_PROVIDER_STATUS,
+        ),
+        # A telecom checking replacement-SIM stock — entirely different
+        # request/response shape, same connector class, zero code changes.
+        (
+            {
+                "endpoint_template": "https://telecom.example/sim-stock/{region}",
+                "field_mappings": {
+                    "region_code": "payload.region",
+                    "sim_type": "payload.sim_type",
+                },
+                "response_parse": {
+                    "available": "sim_inventory.in_stock",
+                    "provider_id": "sim_inventory.region",
+                },
+            },
+            {"region": "west", "sim_type": "esim"},
+            {"sim_inventory": {"in_stock": False, "region": "west"}},
+            UNAVAILABLE_PROVIDER_STATUS,
+        ),
+    ],
+)
+def test_same_connector_class_serves_bank_and_telecom_tenants(
+    config_kwargs: dict[str, Any],
+    request_payload: dict[str, Any],
+    response_body: dict[str, Any],
+    expected_status: str,
+) -> None:
+    """LOAD-BEARING genericity proof: the identical InventoryCheckConnector
+    class, with no code branch or hardcoded vocabulary, correctly serves a
+    bank tenant checking credit availability and a telecom tenant checking
+    SIM stock — neither config mentions a SKU, a product, or anything
+    electronics/retail-shaped. This is the bank/telecom test."""
+    connector = InventoryCheckConnector(
+        config_repository=InMemoryConnectorConfigRepository(),
+        credential_runtime=_CredentialRuntime(),
+    )
+    config = _config(response_parse=config_kwargs["response_parse"])
+    config = ConnectorConfigRecord(
+        tenant_id=config.tenant_id,
+        connector_type=config.connector_type,
+        tool_name=config.tool_name,
+        http_method="GET",
+        endpoint_template=config_kwargs["endpoint_template"],
+        endpoint_host=config.endpoint_host,
+        field_mappings=config_kwargs["field_mappings"],
+        response_parse=config_kwargs["response_parse"],
+        success_status_codes=(200,),
+    )
+
+    outbound = connector.build_request(payload=request_payload, config=config)
+    assert "sku" not in outbound.json_body
+    assert "product" not in str(outbound.json_body).lower()
+
+    response = _StubResponse(status_code=200, body=response_body)
+    fields = connector.parse_response(response, config=config)
+    assert fields.provider_status == expected_status
+
+
 # ─── happy path / unavailable, end-to-end through invoke() ─────────────────
 
 
