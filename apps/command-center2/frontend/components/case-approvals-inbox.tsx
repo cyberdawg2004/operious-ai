@@ -1078,6 +1078,7 @@ type GroundingCheck = {
   evidenceField: string;
   evidenceValue: string;
   evidenceConfidence: string;
+  evidenceSource: string;
 };
 
 type WarrantyRefundEligibility = {
@@ -1096,10 +1097,11 @@ type WarrantyRefundEligibility = {
  * guessing — this is a recommendation a human verifies, never a value the
  * UI should fabricate.
  *
- * NOTE: the backend's grounding struct (EligibilityCheck) does not capture
- * an evidence "source" (text vs. document) today — only evidence_field,
- * evidence_value, and evidence_confidence. This renders exactly what the
- * data carries; it does not invent a source label.
+ * Each grounding check also carries evidence_source ("text" | "document" |
+ * "none") — a trust signal for the reviewer (document-sourced evidence is
+ * stronger than typed text). Rendered only when it names an actual source;
+ * "none" or an absent/unrecognized value renders no source clause at all,
+ * never a fabricated "document".
  */
 function warrantyRefundEligibility(
   record: CaseApprovalRecord
@@ -1147,6 +1149,8 @@ function parseGrounding(raw: unknown): GroundingCheck[] {
       evidenceValue: typeof value["evidence_value"] === "string" ? value["evidence_value"] : "—",
       evidenceConfidence:
         typeof value["evidence_confidence"] === "string" ? value["evidence_confidence"] : "—",
+      evidenceSource:
+        typeof value["evidence_source"] === "string" ? value["evidence_source"] : "none",
     });
   }
   return checks;
@@ -1156,6 +1160,18 @@ function parseGrounding(raw: unknown): GroundingCheck[] {
 function humanize(value: string): string {
   const spaced = value.replace(/_/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * Readable label for an evidence_source value. "none" and anything not
+ * recognized return "" so the caller renders no source clause at all —
+ * never a fabricated "from document" for evidence that has no real
+ * source.
+ */
+function sourceLabel(source: string): string {
+  if (source === "document") return "from document";
+  if (source === "text") return "from message text";
+  return "";
 }
 
 function VerdictBadge({ verdict }: { verdict: EligibilityVerdict }) {
@@ -1219,6 +1235,7 @@ function GroundingCheckRow({ check }: { check: GroundingCheck }) {
             {humanize(check.evidenceField)}: <span className="text-ink-primary">{check.evidenceValue}</span>
             {" · "}
             {check.evidenceConfidence} confidence
+            {sourceLabel(check.evidenceSource) && ` · ${sourceLabel(check.evidenceSource)}`}
           </p>
           <p className="mt-0.5 font-technical text-[10.5px] text-ink-tertiary">
             rule: {check.rule}

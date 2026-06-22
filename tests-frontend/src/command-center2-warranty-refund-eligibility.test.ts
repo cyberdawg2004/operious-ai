@@ -86,3 +86,23 @@ test('Reject confirm panel never claims a connector fires or a reply is delivere
   ok(source.includes('not</strong> delivered'));
   ok(source.includes('its bound action is denied too'));
 });
+
+test('Grounding rows render evidence source readably, never a fabricated label', () => {
+  const source = readText(CASE_APPROVALS_INBOX_TSX);
+
+  // Parsed from the wire field, defaulting to "none" rather than
+  // guessing when absent.
+  ok(source.includes('evidenceSource'));
+  ok(source.includes('evidence_source'));
+
+  // A dedicated label function maps known sources to readable text and
+  // returns "" (no clause) for anything else — never invents "document".
+  ok(source.includes('function sourceLabel'));
+  ok(source.includes('"document"') && source.includes('from document'));
+  ok(source.includes('"text"') && source.includes('from message text'));
+  ok(source.includes('return ""'));
+
+  // The row only appends a source clause when sourceLabel returns
+  // something — an absent/"none" source renders no fabricated text.
+  ok(source.includes('sourceLabel(check.evidenceSource)'));
+});
