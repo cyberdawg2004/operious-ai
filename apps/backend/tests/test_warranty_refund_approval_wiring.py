@@ -25,6 +25,7 @@ from typing import Any, cast
 
 import pytest
 
+from app.agents.tools.approvals import InMemoryActionApprovalRepository
 from app.approvals.enums import CaseApprovalEntryCategory, CaseApprovalStatus
 from app.approvals.persistence import (
     CaseApprovalQuery,
@@ -156,7 +157,10 @@ def _cannot_determine_eligibility() -> dict[str, Any]:
 
 
 def _install_fakes(
-    monkeypatch: pytest.MonkeyPatch, persistence: InMemoryCaseApprovalPersistence
+    monkeypatch: pytest.MonkeyPatch,
+    persistence: InMemoryCaseApprovalPersistence,
+    *,
+    action_approvals: InMemoryActionApprovalRepository | None = None,
 ) -> None:
     def _approval_persistence_factory(
         session: object, data_protection: object | None = None
@@ -169,6 +173,14 @@ def _install_fakes(
     ) -> object:
         del session, data_protection
         return object()
+
+    action_approval_repository = action_approvals or InMemoryActionApprovalRepository()
+
+    def _action_approval_repository_factory(
+        session: object,
+    ) -> InMemoryActionApprovalRepository:
+        del session
+        return action_approval_repository
 
     class _NoOpReviewService:
         def __init__(self, **_kwargs: object) -> None:
@@ -193,6 +205,11 @@ def _install_fakes(
     )
     monkeypatch.setattr(agent_tasks, "CaseApprovalService", _NoOpReviewService)
     monkeypatch.setattr(agent_tasks, "build_sme_review_runtime", lambda: object())
+    monkeypatch.setattr(
+        agent_tasks,
+        "PostgresActionApprovalRepository",
+        _action_approval_repository_factory,
+    )
 
 
 def _work_item(*, tenant_id: str = _TENANT) -> Any:
@@ -298,17 +315,43 @@ async def test_cannot_determine_does_not_create_refund_warranty_case(
 async def test_no_execution_path_is_invoked_when_case_is_created(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Creating the case is the end of W2's responsibility — assert the
-    only thing that happened is a persisted, PENDING_SME_REVIEW-derived
-    case. No connector, no action-approval firing path is reachable from
-    this function at all (none is even imported by it)."""
+    """Creating the case (and, since the approve/reject wiring, binding a
+    PENDING action-approval to it) is still the end of this function's
+    responsibility — it must never reach an actual connector-invocation
+    symbol. A pending action-approval is not an execution: nothing fires
+    until a human approves it through CaseApprovalService.approve_case,
+    a completely separate code path this function never calls."""
     source = inspect.getsource(_worker._request_resolution_approval_cases)
-    forbidden = ("connector", "execute_action", "fire_action", "ActionApproval")
+    forbidden = ("ToolInvoker", ".invoke(", "re_invoke_approved_action", "execute_action")
     assert not any(token in source for token in forbidden)
 
     proposal = _proposal_with_eligibility(eligibility=_eligible_eligibility())
-    records = await _run_and_fetch_cases(monkeypatch, proposal)
+    action_approvals = InMemoryActionApprovalRepository()
+    persistence = InMemoryCaseApprovalPersistence()
+    monkeypatch_target = monkeypatch
+    _install_fakes(monkeypatch_target, persistence, action_approvals=action_approvals)
+    await _worker._request_resolution_approval_cases_with_retry(
+        session=cast(Any, _FakeSession()),
+        proposal=proposal,
+        work_item=_work_item(),
+        data_protection=None,
+        governance_repository=cast(Any, object()),
+    )
+    page = await persistence.list_cases(
+        CaseApprovalQuery(limit=10), expected_tenant_id=_TENANT
+    )
+    records = page.items
     assert records[0].status is CaseApprovalStatus.PENDING_SME_REVIEW
+
+    action = records[0].recommended_action
+    assert action is not None
+    approval_id = action.get("action_approval_id")
+    assert approval_id is not None
+    bound = await action_approvals.get_approval(
+        str(approval_id), expected_tenant_id=_TENANT
+    )
+    assert bound is not None
+    assert bound.status == "pending"
 
 
 @pytest.mark.asyncio

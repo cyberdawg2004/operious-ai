@@ -23,6 +23,7 @@ class CaseApprovalStatus(StrEnum):
     AWAITING_APPROVAL = "awaiting_approval"
     GUIDANCE_IN_PROGRESS = "guidance_in_progress"
     APPROVED = "approved"
+    REJECTED = "rejected"
     ESCALATED = "escalated"
     FAILED = "failed"
 
@@ -39,6 +40,7 @@ class CaseApprovalOutboxStatus(StrEnum):
 TERMINAL_CASE_APPROVAL_STATUSES: frozenset[CaseApprovalStatus] = frozenset(
     {
         CaseApprovalStatus.APPROVED,
+        CaseApprovalStatus.REJECTED,
         CaseApprovalStatus.ESCALATED,
         CaseApprovalStatus.FAILED,
     }

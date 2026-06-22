@@ -9,6 +9,7 @@ from app.api.v1.schemas.case_approvals import (
     CaseApprovalEscalateRequest,
     CaseApprovalGuideRequest,
     CaseApprovalListResponse,
+    CaseApprovalRejectRequest,
     CaseApprovalResponse,
 )
 from app.approvals.enums import CaseApprovalEntryCategory, CaseApprovalStatus
@@ -149,6 +150,34 @@ async def guide_case_approval(
         raise _bad_request("case_approval_guidance_rejected", exc)
     except CaseApprovalLifecycleError as exc:
         raise _conflict("case_approval_guidance_conflict", exc)
+    return CaseApprovalResponse.from_record(record)
+
+
+@router.post(
+    "/{approval_case_id}/reject",
+    response_model=CaseApprovalResponse,
+    dependencies=[Depends(require_tenant_actions_approve)],
+)
+async def reject_case_approval(
+    approval_case_id: str,
+    request: CaseApprovalRejectRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_authority),
+    service: CaseApprovalService = Depends(get_case_approval_service),
+) -> CaseApprovalResponse:
+    try:
+        record = await service.reject_case(
+            approval_case_id=approval_case_id,
+            tenant_id=expected_tenant_id,
+            rejected_by=_principal_or_400(authority),
+            reason=request.reason,
+        )
+    except CaseApprovalNotFoundError as exc:
+        raise _not_found(exc)
+    except CaseApprovalLifecycleError as exc:
+        raise _conflict("case_approval_lifecycle_conflict", exc)
+    except CaseApprovalRuntimeError as exc:
+        raise _bad_request("case_approval_reject_failed", exc)
     return CaseApprovalResponse.from_record(record)
 
 

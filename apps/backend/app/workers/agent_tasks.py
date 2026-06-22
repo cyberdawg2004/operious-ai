@@ -30,6 +30,7 @@ from app.agents.enums import CapabilityScope
 from app.agents.identity import (
     AgentIdentity,
     ExecutionIdentity,
+    derive_action_idempotency_key,
     derive_agent_runtime_instance_id,
 )
 from app.agents.runtime.quota_runtime import (
@@ -42,12 +43,20 @@ from app.agents.tools.action_governance import (
 )
 from app.agents.tools.actions import build_tenant_action_tool_registry
 from app.agents.tools.connectors import PostgresConnectorConfigRepository
-from app.agents.tools.approvals import PostgresActionApprovalRepository
+from app.agents.tools.approvals import (
+    ActionApprovalError,
+    PostgresActionApprovalRepository,
+    build_pending_action_approval,
+)
 from app.agents.tools.connector_invocations import (
     PostgresConnectorInvocationRepository,
 )
 from app.agents.tools.grants import PostgresAgentActionGrantRepository
-from app.agents.tools.orchestration import ActionOrchestrationRuntime
+from app.agents.tools.orchestration import (
+    ActionOrchestrationRuntime,
+    payload_for_recommended_action,
+    target_resource_for_action,
+)
 from app.agents.value_objects import CausalityMetadata
 from app.cognition import (
     AnthropicMessagesClient,
@@ -2138,6 +2147,22 @@ async def _request_resolution_approval_cases(
         if entry_category is CaseApprovalEntryCategory.REFUND_WARRANTY
         else None
     )
+    if eligible_action is not None and eligible_action.get("requires_execution") is True:
+        # Bind a real action_approval_id BEFORE the case is created — without
+        # one, CaseApprovalService.approve_case's _approve_recommended_action_
+        # if_bound silently no-ops (requires_execution=True but nothing to
+        # approve), so approving the case would mark it resolved while the
+        # refund/replacement/warranty connector never actually fires. This
+        # mirrors orchestration.py's own create_pending_approval call exactly
+        # — same builder, same payload/target-resource derivation — except
+        # here the action waits for human approval before EVER attempting
+        # invocation, since the resolution pipeline never tries blind.
+        eligible_action = await _bind_action_approval(
+            session=session,
+            proposal=proposal,
+            work_item=work_item,
+            action=eligible_action,
+        )
     if eligible_action is not None:
         eligibility = cast(
             Mapping[str, Any], eligible_action["warranty_refund_eligibility"]
@@ -2182,6 +2207,86 @@ async def _request_resolution_approval_cases(
             approval_case_id=record.approval_case_id,
             tenant_id=work_item.tenant_id,
         )
+
+
+async def _bind_action_approval(
+    *,
+    session: AsyncSession,
+    proposal: ResolutionProposalRecord,
+    work_item: _DiagnosticExecutionWorkItem,
+    action: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Create a pending ActionApprovalRecord for a determinable (eligible or
+    ineligible) warranty/refund recommendation and embed its id into the
+    action dict the case approval carries. Idempotent: the approval_id is
+    deterministically derived from the idempotency key, and the insert is
+    ON CONFLICT DO NOTHING, so retried calls (see _with_retry) bind to the
+    SAME approval rather than creating duplicates.
+
+    Deliberately works whether the verdict is eligible or ineligible: a
+    human reviewing an ineligible recommendation may still choose to
+    approve it (override the denial), and that override must be able to
+    fire the SAME bound action — recommendation-only means the human
+    decides either way, not that only the system's preferred outcome is
+    executable.
+    """
+    tool_name = _metadata_text(action.get("tool_name"))
+    if tool_name is None:
+        return action
+    action_type = _metadata_text(action.get("type")) or tool_name
+    payload = payload_for_recommended_action(
+        action=action,
+        proposal=proposal,
+        action_type=action_type,
+        tool_name=tool_name,
+    )
+    target_resource = target_resource_for_action(
+        action=action,
+        tool_name=tool_name,
+        payload=payload,
+    )
+    idempotency_key = derive_action_idempotency_key(
+        tenant_id=work_item.tenant_id,
+        session_id=work_item.session_id,
+        tool_name=tool_name,
+        target_resource=target_resource,
+    )
+    repository = PostgresActionApprovalRepository(session)
+    try:
+        approval = await repository.create_pending_approval(
+            build_pending_action_approval(
+                tenant_id=work_item.tenant_id,
+                session_id=work_item.session_id,
+                execution_id=work_item.execution_id,
+                tool_name=tool_name,
+                idempotency_key=str(idempotency_key),
+                payload_json=payload,
+                governance_decision_id=(
+                    str(proposal.governance_decision_id)
+                    if proposal.governance_decision_id is not None
+                    else None
+                ),
+                metadata={
+                    "proposal_id": str(proposal.proposal_id),
+                    "action_type": action_type,
+                    "target_resource": target_resource,
+                    "dispatch_id": work_item.dispatch_id,
+                },
+            ),
+            expected_tenant_id=work_item.tenant_id,
+        )
+    except ActionApprovalError:
+        logger.exception(
+            "warranty_refund_action_approval_bind_failed",
+            extra={
+                "tenant_id": work_item.tenant_id,
+                "execution_id": work_item.execution_id,
+                "proposal_id": str(proposal.proposal_id),
+                "tool_name": tool_name,
+            },
+        )
+        return action
+    return {**action, "action_approval_id": approval.approval_id}
 
 
 def _approval_categories_for_resolution(

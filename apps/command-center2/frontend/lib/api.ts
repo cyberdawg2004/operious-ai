@@ -969,6 +969,7 @@ export type CaseApprovalStatus =
   | "awaiting_approval"
   | "guidance_in_progress"
   | "approved"
+  | "rejected"
   | "escalated"
   | "failed";
 
@@ -1047,6 +1048,16 @@ export function guideCaseApproval(approvalCaseId: string, guidance: string) {
 export function escalateCaseApproval(approvalCaseId: string, reason: string) {
   return apiRequest<CaseApprovalRecord>(
     `/approvals/cases/${encodeURIComponent(approvalCaseId)}/escalate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }
+  );
+}
+
+export function rejectCaseApproval(approvalCaseId: string, reason: string | null) {
+  return apiRequest<CaseApprovalRecord>(
+    `/approvals/cases/${encodeURIComponent(approvalCaseId)}/reject`,
     {
       method: "POST",
       body: JSON.stringify({ reason }),

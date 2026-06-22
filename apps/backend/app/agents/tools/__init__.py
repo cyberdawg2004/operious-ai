@@ -22,6 +22,8 @@ from app.agents.tools.orchestration import (
     ActionOrchestrationResult,
     ActionOrchestrationRuntime,
     ActionOutcome,
+    payload_for_recommended_action,
+    target_resource_for_action,
 )
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tools.session import AgentToolSession
@@ -35,4 +37,6 @@ __all__ = [
     "ToolRegistry",
     "ToolInvoker",
     "AgentToolSession",
+    "payload_for_recommended_action",
+    "target_resource_for_action",
 ]

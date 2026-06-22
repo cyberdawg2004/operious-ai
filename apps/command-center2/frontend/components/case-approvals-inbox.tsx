@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Ban,
   BadgeCheck,
   Check,
   CircleHelp,
@@ -20,6 +21,7 @@ import {
   formatApiError,
   guideCaseApproval,
   listCaseApprovals,
+  rejectCaseApproval,
   type ApiPage,
   type CaseApprovalRecord,
   type CaseApprovalStatus,
@@ -35,7 +37,7 @@ const READ_CAPABILITY = "tenant.approvals.read";
 const APPROVE_CAPABILITY = "tenant.actions.approve";
 const GUIDE_CAPABILITY = "tenant.resolution.guide";
 
-type DetailMode = "review" | "approve" | "guide" | "escalate";
+type DetailMode = "review" | "approve" | "reject" | "guide" | "escalate";
 
 const OPEN_STATUSES: ReadonlySet<CaseApprovalStatus> = new Set([
   "pending_sme_review",
@@ -193,6 +195,22 @@ export function CaseApprovalsInbox({
     }
   };
 
+  const runReject = async () => {
+    if (!selectedId) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await rejectCaseApproval(selectedId, note.trim() || null);
+      setNotice("Case rejected — no action fires; the denial is recorded.");
+      closeDetail();
+      reload();
+    } catch (caught: unknown) {
+      setActionError(formatApiError(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!canRead) {
     return (
       <div className={embedded ? "" : "min-h-[calc(100vh-82px)] bg-canvas px-4 py-5 sm:px-6 lg:px-12 lg:py-8"}>
@@ -284,6 +302,7 @@ export function CaseApprovalsInbox({
             setActionError(null);
           }}
           onApprove={runApprove}
+          onReject={runReject}
           onGuide={runGuide}
           onEscalate={runEscalate}
           onClose={closeDetail}
@@ -387,6 +406,7 @@ function DetailPanel({
   onGuidanceChange,
   onSetMode,
   onApprove,
+  onReject,
   onGuide,
   onEscalate,
   onClose,
@@ -403,6 +423,7 @@ function DetailPanel({
   onGuidanceChange: (value: string) => void;
   onSetMode: (next: DetailMode) => void;
   onApprove: () => void;
+  onReject: () => void;
   onGuide: () => void;
   onEscalate: () => void;
   onClose: () => void;
@@ -413,10 +434,23 @@ function DetailPanel({
   const isAwaiting = record.status === "awaiting_approval";
   const guidanceExhausted = record.guidance_round > 0;
   // AUTHORITY GATES: each control is ABSENT (not merely disabled) without the
-  // capability, mirroring the backend route gates and the escalation UI.
+  // capability, mirroring the backend route gates and the escalation UI. The
+  // backend independently enforces the same tenant.actions.approve gate on
+  // /reject — hiding the button here is a UX nicety, not the security
+  // boundary.
   const showApprove = canApprove && isAwaiting;
   const showGuide = canGuide && isAwaiting && !guidanceExhausted;
   const showEscalate = canApprove && isAwaiting;
+  // Reject is scoped to determinable warranty/refund verdicts only — a
+  // cannot_determine case has no recommendation to act on yet (missing
+  // evidence routes to escalate/probe, not a reject button). Cases without
+  // any eligibility data (every other entry_category) keep escalate as
+  // their only negative disposition, unchanged by this addition.
+  const showReject =
+    canApprove &&
+    isAwaiting &&
+    eligibility !== null &&
+    eligibility.verdict !== "cannot_determine";
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-[2px]">
@@ -619,7 +653,8 @@ function DetailPanel({
           </Section>
 
           {/* ---- Controls: each gated + ABSENT without the capability ---- */}
-          {mode === "review" && (showApprove || showGuide || showEscalate) && (
+          {mode === "review" &&
+            (showApprove || showReject || showGuide || showEscalate) && (
             <div className="flex flex-col gap-2">
               {showApprove && (
                 <button
@@ -630,6 +665,17 @@ function DetailPanel({
                 >
                   <Check className="h-4 w-4" strokeWidth={1.8} />
                   Approve recommendation
+                </button>
+              )}
+              {showReject && (
+                <button
+                  type="button"
+                  onClick={() => onSetMode("reject")}
+                  disabled={busy}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-red-alert bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-red-alert transition-colors hover:bg-surface-raised disabled:opacity-50"
+                >
+                  <Ban className="h-4 w-4" strokeWidth={1.8} />
+                  Reject recommendation
                 </button>
               )}
               {showGuide && (
@@ -697,6 +743,59 @@ function DetailPanel({
                 >
                   <Check className="h-4 w-4" strokeWidth={1.8} />
                   Confirm approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSetMode("review")}
+                  disabled={busy}
+                  className="inline-flex h-10 items-center justify-center rounded-md border border-border-subtle bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-ink-secondary hover:text-ink-primary disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Reject confirm — a terminal "no", distinct from escalate: no
+              connector fires, no customer reply is delivered, and any bound
+              action is explicitly denied so it cannot fire through another
+              path later. */}
+          {mode === "reject" && showReject && (
+            <div className="rounded-lg border border-red-alert/40 bg-surface-raised p-4">
+              <div className="flex items-center gap-2 text-red-alert">
+                <Ban className="h-4 w-4" strokeWidth={1.9} />
+                <span className="font-technical text-[11px] font-semibold uppercase tracking-[0.12em]">
+                  Confirm rejection
+                </span>
+              </div>
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-primary">
+                You are <strong>denying</strong> this recommendation. No
+                connector fires and the customer-facing reply above is{" "}
+                <strong>not</strong> delivered
+                {action ? " — its bound action is denied too" : ""}.
+              </p>
+              <label
+                htmlFor="case-reject-note"
+                className="mt-3 block font-technical text-[10px] uppercase tracking-[0.14em] text-ink-tertiary"
+              >
+                Rejection reason (optional)
+              </label>
+              <textarea
+                id="case-reject-note"
+                value={note}
+                onChange={(event) => onNoteChange(event.target.value)}
+                placeholder="Why this recommendation is being denied…"
+                className="mt-2 min-h-[72px] w-full resize-y rounded-md border border-border-subtle bg-surface px-3 py-2 text-[13px] text-ink-primary outline-none transition-colors focus:border-red-alert"
+              />
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={onReject}
+                  disabled={busy}
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-red-alert bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-red-alert transition-colors hover:bg-red-alert/10 disabled:opacity-50"
+                >
+                  <Ban className="h-4 w-4" strokeWidth={1.8} />
+                  Confirm reject
                 </button>
                 <button
                   type="button"
@@ -912,7 +1011,7 @@ function StatusBadge({ status }: { status: CaseApprovalStatus }) {
   const tone =
     status === "approved"
       ? "border-green-success/40 text-green-success"
-      : status === "escalated"
+      : status === "rejected" || status === "escalated"
         ? "border-red-alert/40 text-red-alert"
         : status === "awaiting_approval"
           ? "border-gold-primary/40 text-gold-primary"

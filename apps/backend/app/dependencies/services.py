@@ -1110,6 +1110,21 @@ def get_case_approval_service(
             expected_tenant_id=expected_tenant_id,
         )
 
+    async def _deny_bound_action(
+        approval_id: str,
+        denied_by: str,
+        reason: str,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> object:
+        return await action_service.deny_in_transaction(
+            approval_id=approval_id,
+            denied_by=denied_by,
+            reason=reason,
+            tenant_id=tenant_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+
     return CaseApprovalService(
         persistence=PostgresCaseApprovalPersistence(
             session,
@@ -1130,6 +1145,7 @@ def get_case_approval_service(
             ),
         ),
         action_approval_approve=_approve_bound_action,
+        action_approval_deny=_deny_bound_action,
         post_commit_flush=action_service.flush_after_commit,
         resolution_governance_gate=ResolutionGovernanceGate(
             governance_runtime=build_resolution_governance_runtime(

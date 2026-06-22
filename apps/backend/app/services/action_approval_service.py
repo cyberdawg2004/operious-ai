@@ -347,45 +347,69 @@ class ActionApprovalService:
         tenant_id: str,
         expected_tenant_id: str,
     ) -> ActionApprovalRecord:
-        _assert_tenant(tenant_id, expected_tenant_id)
-        note = reason.strip()
-        if not note:
-            raise ActionApprovalRuntimeError("denial reason is required")
         try:
-            approval = await self._require_pending(
+            resolved = await self.deny_in_transaction(
                 approval_id=approval_id,
-                expected_tenant_id=expected_tenant_id,
-            )
-            enriched = await self._with_resolution_metadata(
-                approval,
-                expected_tenant_id=expected_tenant_id,
-            )
-            resolved = await self._approvals.resolve_approval(
-                enriched.approval_id,
-                expected_tenant_id=expected_tenant_id,
-                status="denied",
-                resolved_at=datetime.now(timezone.utc),
-                resolved_by=denied_by,
-                resolution_note=note,
-                metadata={
-                    **dict(enriched.metadata),
-                    "denied_by": denied_by,
-                },
-            )
-            if resolved is None:
-                raise ActionApprovalNotFoundError(
-                    f"unknown action approval: {approval_id}"
-                )
-            await self._append_denied_event(
-                approval=enriched,
                 denied_by=denied_by,
-                reason=note,
+                reason=reason,
+                tenant_id=tenant_id,
+                expected_tenant_id=expected_tenant_id,
             )
             await self._session.commit()
             return resolved
         except Exception:
             await self._session.rollback()
             raise
+
+    async def deny_in_transaction(
+        self,
+        *,
+        approval_id: str,
+        denied_by: str,
+        reason: str,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> ActionApprovalRecord:
+        """Deny the bound action WITHOUT committing/rolling back.
+
+        The caller owns the transaction. Used when an SME case rejection
+        must deny its bound action and mark the case rejected atomically
+        in a single shared commit — mirrors approve_in_transaction.
+        """
+        _assert_tenant(tenant_id, expected_tenant_id)
+        note = reason.strip()
+        if not note:
+            raise ActionApprovalRuntimeError("denial reason is required")
+        approval = await self._require_pending(
+            approval_id=approval_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        enriched = await self._with_resolution_metadata(
+            approval,
+            expected_tenant_id=expected_tenant_id,
+        )
+        resolved = await self._approvals.resolve_approval(
+            enriched.approval_id,
+            expected_tenant_id=expected_tenant_id,
+            status="denied",
+            resolved_at=datetime.now(timezone.utc),
+            resolved_by=denied_by,
+            resolution_note=note,
+            metadata={
+                **dict(enriched.metadata),
+                "denied_by": denied_by,
+            },
+        )
+        if resolved is None:
+            raise ActionApprovalNotFoundError(
+                f"unknown action approval: {approval_id}"
+            )
+        await self._append_denied_event(
+            approval=enriched,
+            denied_by=denied_by,
+            reason=note,
+        )
+        return resolved
 
     async def _require_approval(
         self,

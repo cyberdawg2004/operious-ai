@@ -76,9 +76,14 @@ _POLICY_VERSION = "fix_1b.case_approval.v1"
 _APPROVE_CHAIN_ID = "case_approval.human_approve.v1"
 _GUIDE_CHAIN_ID = "case_approval.operator_guidance.v1"
 _ESCALATE_CHAIN_ID = "case_approval.operator_escalate.v1"
+_REJECT_CHAIN_ID = "case_approval.human_reject.v1"
 
 ActionApprovalApprove = Callable[
     [str, str, str | None, str, str],
+    Awaitable[object],
+]
+ActionApprovalDeny = Callable[
+    [str, str, str, str, str],
     Awaitable[object],
 ]
 PostCommitFlush = Callable[[], Awaitable[None]]
@@ -106,6 +111,7 @@ class CaseApprovalService:
         escalation_runtime: EscalationAgentRuntime | None = None,
         injection_scanner: KnowledgeInjectionScanner | None = None,
         action_approval_approve: ActionApprovalApprove | None = None,
+        action_approval_deny: ActionApprovalDeny | None = None,
         resolution_governance_gate: ResolutionGovernanceGateProtocol | None = None,
         post_commit_flush: PostCommitFlush | None = None,
     ) -> None:
@@ -117,6 +123,7 @@ class CaseApprovalService:
         self._escalation_runtime = escalation_runtime
         self._scanner = injection_scanner or PatternKnowledgeInjectionScanner()
         self._action_approval_approve = action_approval_approve
+        self._action_approval_deny = action_approval_deny
         self._resolution_gate = resolution_governance_gate
         self._post_commit_flush = post_commit_flush
 
@@ -340,6 +347,65 @@ class CaseApprovalService:
             )
             saved = await self._persistence.update_case(
                 approved,
+                expected_tenant_id=tenant_id,
+            )
+            await self._commit()
+            return saved
+        except Exception:
+            await self._rollback()
+            raise
+
+    async def reject_case(
+        self,
+        *,
+        approval_case_id: str,
+        tenant_id: str,
+        rejected_by: str,
+        reason: str | None,
+    ) -> CaseApprovalRecord:
+        """Record a terminal "no" — distinct from escalate (which hands the
+        case to a DIFFERENT queue for further review). Never delivers the
+        resolution's customer-facing reply and never fires a bound action;
+        if one exists, it is explicitly DENIED so it cannot be approved
+        through some other path later.
+        """
+        try:
+            record = await self._require_case(
+                approval_case_id=approval_case_id,
+                tenant_id=tenant_id,
+            )
+            if record.status is not CaseApprovalStatus.AWAITING_APPROVAL:
+                raise CaseApprovalLifecycleError(
+                    "only awaiting approval cases can be rejected"
+                )
+            decision_id = await self._record_case_governance_decision(
+                record=record,
+                actor=rejected_by,
+                decision=Decision.DENY,
+                policy_chain_id=_REJECT_CHAIN_ID,
+                reason="case_approval_rejected",
+                note=reason,
+            )
+            await self._deny_recommended_action_if_bound(
+                record=record,
+                denied_by=rejected_by,
+                reason=reason,
+                tenant_id=tenant_id,
+            )
+            rejected = replace(
+                record,
+                status=CaseApprovalStatus.REJECTED,
+                governance_decision_id=decision_id,
+                resolved_at=datetime.now(timezone.utc),
+                resolved_by=rejected_by,
+                resolution_note=reason,
+                metadata={
+                    **dict(record.metadata),
+                    "rejected_by": rejected_by,
+                },
+            )
+            saved = await self._persistence.update_case(
+                rejected,
                 expected_tenant_id=tenant_id,
             )
             await self._commit()
@@ -585,6 +651,39 @@ class CaseApprovalService:
             action_approval_id,
             approved_by,
             note,
+            tenant_id,
+            tenant_id,
+        )
+        return True
+
+    async def _deny_recommended_action_if_bound(
+        self,
+        *,
+        record: CaseApprovalRecord,
+        denied_by: str,
+        reason: str | None,
+        tenant_id: str,
+    ) -> bool:
+        action = record.recommended_action
+        if action is None or not _requires_execution(action):
+            return False
+        action_approval_id = _text(action.get("action_approval_id"))
+        if action_approval_id is None:
+            return False
+        if self._action_approval_deny is None:
+            # Symmetric with the approve side: a case bound to a real
+            # action must not be marked rejected while that action is left
+            # dangling pending — it could still be approved through a
+            # different path later. Fail closed.
+            raise CaseApprovalRuntimeError(
+                "rejecting an action-bound case requires the action "
+                "approval denier to be configured"
+            )
+        denial_note = (reason or "").strip() or "Rejected via case approval review."
+        await self._action_approval_deny(
+            action_approval_id,
+            denied_by,
+            denial_note,
             tenant_id,
             tenant_id,
         )

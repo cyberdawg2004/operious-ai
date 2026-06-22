@@ -29,6 +29,12 @@ class CaseApprovalEscalateRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=4000)
 
 
+class CaseApprovalRejectRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    reason: str | None = Field(default=None, max_length=4000)
+
+
 class CaseApprovalResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -98,5 +104,6 @@ __all__ = [
     "CaseApprovalEscalateRequest",
     "CaseApprovalGuideRequest",
     "CaseApprovalListResponse",
+    "CaseApprovalRejectRequest",
     "CaseApprovalResponse",
 ]

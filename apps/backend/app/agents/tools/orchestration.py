@@ -168,7 +168,7 @@ class ActionOrchestrationRuntime:
         action_type = _text(approval_record.metadata.get("action_type")) or "unknown"
         target_resource = (
             _text(approval_record.metadata.get("target_resource"))
-            or _target_resource(
+            or target_resource_for_action(
                 action={},
                 tool_name=approval_record.tool_name,
                 payload=approval_record.payload_json,
@@ -263,7 +263,7 @@ class ActionOrchestrationRuntime:
                 approval_record_id=None,
             )
 
-        payload = _payload_for_action(
+        payload = payload_for_recommended_action(
             action=action,
             proposal=proposal,
             action_type=action_type,
@@ -275,7 +275,7 @@ class ActionOrchestrationRuntime:
         execution_id = _required_proposal_reference(
             proposal.execution_id, "execution_id"
         )
-        target_resource = _target_resource(
+        target_resource = target_resource_for_action(
             action=action,
             tool_name=tool_name,
             payload=payload,
@@ -473,7 +473,7 @@ def _tool_name_for(action: Mapping[str, Any]) -> str | None:
     return _ACTION_TOOL_BY_TYPE.get(action_type)
 
 
-def _payload_for_action(
+def payload_for_recommended_action(
     *,
     action: Mapping[str, Any],
     proposal: ResolutionProposalRecord,
@@ -557,7 +557,7 @@ def _default_payload(
     return {}
 
 
-def _target_resource(
+def target_resource_for_action(
     *,
     action: Mapping[str, Any],
     tool_name: str,
@@ -714,4 +714,6 @@ __all__ = [
     "ActionOrchestrationResult",
     "ActionOrchestrationRuntime",
     "ActionOutcome",
+    "payload_for_recommended_action",
+    "target_resource_for_action",
 ]
