@@ -624,12 +624,28 @@ _initialize_worker_alert_evaluator()
 
 
 async def _collect_queue_depths() -> dict[str, int]:
+    """Sample every queue's depth, isolating one queue's failure from the rest.
+
+    One unreachable queue (e.g. a 404 for a queue never created on the
+    broker) must not discard every other queue's already-fetched depth.
+    A failed queue is omitted from the result rather than reported as 0
+    or any other placeholder -- "unknown" must never read as "empty" or
+    "huge" to a consumer (including admission telemetry), so it is simply
+    absent.
+    """
+
     queue_depth_provider = get_queue_depth_provider()
     depths: dict[str, int] = {}
     for queue_name in ALL_QUEUES:
-        depths[queue_name] = (
-            await queue_depth_provider.get_queue_depth(queue_name)
-        ).depth
+        try:
+            depths[queue_name] = (
+                await queue_depth_provider.get_queue_depth(queue_name)
+            ).depth
+        except Exception as exc:  # noqa: BLE001 - one queue's outage must not abort the snapshot.
+            logger.warning(
+                "queue_depth_snapshot_queue_failed",
+                extra={"queue_name": queue_name, "error": exc.__class__.__name__},
+            )
     return depths
 
 
