@@ -269,7 +269,17 @@ _APPROVAL_CASE_CREATION_MAX_ATTEMPTS = 2
 _DIAGNOSTIC_RETRY_BASE_DELAY_SECONDS = 30
 _SEMANTIC_REJECTION_EXCERPT_MAX_CHARS = 2000
 _DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS = frozenset(
-    {"SEMANTIC_REJECTION", "GOVERNANCE_DENY"}
+    {"SEMANTIC_REJECTION", "GOVERNANCE_DENY", "PARSING_FAILURE"}
+)
+# Substring markers identifying a CognitionLLMProviderError that is really
+# an unparseable-output failure (including one a truncated, max_tokens-
+# capped completion produces) -- shared between _classify_diagnostic_
+# exception (retry-policy lookup) and _parsing_failure_error_from_chain
+# (exception-shape correction) so the two can never drift apart.
+_PARSING_FAILURE_MESSAGE_MARKERS: tuple[str, ...] = (
+    "invalid json",
+    "non-object json",
+    "schema validation",
 )
 _DIAGNOSTIC_TERMINAL_POLICY_NAME = "cognition.diagnostic_terminal_block"
 _DIAGNOSTIC_TERMINAL_POLICY_CHAIN_ID = "cognition.diagnostic.terminal_block"
@@ -3964,10 +3974,43 @@ def _success_persistence_failure_exception(exc: BaseException) -> BaseException:
     governance_rejection = _governance_rejection_error_from_chain(exc)
     if governance_rejection is not None:
         return governance_rejection
+    parsing_failure = _parsing_failure_error_from_chain(exc)
+    if parsing_failure is not None:
+        return parsing_failure
     return CognitionPersistenceFailureError(
         "diagnostic success persistence failed: "
         f"{exc.__class__.__name__}: {_bounded_exception_message(exc)}"
     )
+
+
+def _is_parsing_failure_message(message: str) -> bool:
+    folded = message.casefold()
+    return any(marker in folded for marker in _PARSING_FAILURE_MESSAGE_MARKERS)
+
+
+def _parsing_failure_error_from_chain(
+    exc: BaseException,
+) -> CognitionParsingFailureError | None:
+    """Detect a CognitionLLMProviderError (unparseable model output --
+    including a max_tokens-truncated completion that never got far enough
+    to escalate) buried under the generic _persist_diagnostic_success
+    try/except, and re-shape it into the exception type that actually maps
+    to PARSING_FAILURE. Without this, _classify_diagnostic_exception never
+    sees the original error and the failure is misclassified as
+    PERSISTENCE_FAILURE -- wrong retry budget, and ineligible for the
+    PARSING_FAILURE terminal-escalation route to a human instead of
+    dead-lettering.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(
+            current, CognitionLLMProviderError
+        ) and _is_parsing_failure_message(str(current)):
+            return CognitionParsingFailureError(str(current))
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _semantic_validation_error_from_chain(
@@ -4024,12 +4067,7 @@ def _classify_diagnostic_exception(exc: BaseException) -> str:
     if isinstance(exc, CognitionSemanticValidationError):
         return "SEMANTIC_REJECTION"
     if isinstance(exc, CognitionLLMProviderError):
-        message = str(exc).casefold()
-        if (
-            "invalid json" in message
-            or "non-object json" in message
-            or "schema validation" in message
-        ):
+        if _is_parsing_failure_message(str(exc)):
             return "PARSING_FAILURE"
     return "PROVIDER_5XX"
 
@@ -4097,6 +4135,9 @@ def _diagnostic_cognition_runtime(
         ),
         config=DiagnosticCognitionRuntimeConfig(
             max_output_tokens=settings.ANTHROPIC_MAX_OUTPUT_TOKENS,
+            max_output_tokens_escalated=(
+                settings.ANTHROPIC_MAX_OUTPUT_TOKENS_ESCALATED
+            ),
             temperature=settings.ANTHROPIC_TEMPERATURE,
             context_top_k=settings.COGNITION_LLM_CONTEXT_TOP_K,
             context_token_budget=settings.COGNITION_LLM_CONTEXT_TOKEN_BUDGET,

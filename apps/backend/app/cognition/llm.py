@@ -285,11 +285,13 @@ class AnthropicMessagesClient:
                 f"Anthropic diagnostic request failed: {exc.__class__.__name__}"
             ) from exc
         data = cast(dict[str, Any], response.json())
+        stop_reason = data.get("stop_reason")
         return DiagnosticLLMCompletion(
             provider=self.provider_name,
             model=self.model_name,
             text=_extract_text(data),
             usage=_extract_usage(data),
+            stop_reason=stop_reason if isinstance(stop_reason, str) else None,
             raw_metadata=_bounded_metadata(data),
         )
 

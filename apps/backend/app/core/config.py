@@ -341,7 +341,13 @@ class Settings(BaseSettings):
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
     ANTHROPIC_VERSION: str = "2023-06-01"
     ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-6"
-    ANTHROPIC_MAX_OUTPUT_TOKENS: int = 512
+    ANTHROPIC_MAX_OUTPUT_TOKENS: int = 1024
+    # One-shot escalation budget the diagnostic runtime retries at when a
+    # completion comes back truncated (stop_reason == "max_tokens") at the
+    # base budget above -- see DiagnosticCognitionRuntimeConfig. Customer
+    # ticket length is unbounded, so this exists instead of betting
+    # everything on ANTHROPIC_MAX_OUTPUT_TOKENS alone being "big enough".
+    ANTHROPIC_MAX_OUTPUT_TOKENS_ESCALATED: int = 3072
     ANTHROPIC_TEMPERATURE: float = 0.0
 
     # ─── Translation provider ────────────────────────────────────────

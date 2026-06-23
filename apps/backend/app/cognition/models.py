@@ -69,10 +69,18 @@ class CognitionSemanticRejectionDirection(StrEnum):
 class DiagnosticLLMOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = Field(min_length=1, max_length=4000)
+    # 1500/500: reasoning is consumed only as ephemeral input to the
+    # in-process governance-term-drift check (never persisted or shown;
+    # see app.cognition.diagnostic_runtime._evaluate_semantic_candidate) and
+    # summary feeds the reply-drafting prompt but is not itself rendered
+    # anywhere -- neither needs the prior 4000-char ceiling, and a smaller
+    # ceiling keeps the worst-case completion well clear of the output-
+    # token budget instead of relying solely on retry/escalation to cover
+    # arbitrarily long ticket content.
+    summary: str = Field(min_length=1, max_length=1500)
     category: str = Field(min_length=1, max_length=200)
     confidence: float = Field(ge=0.0, le=1.0)
-    reasoning: str = Field(max_length=4000, default="")
+    reasoning: str = Field(max_length=500, default="")
     # Intentionally a raw dict, not ExtractedOrderFields, here: a malformed
     # extraction sub-object must not fail the WHOLE diagnostic parse (the
     # categorization fields above may still be perfectly good). It is
@@ -196,6 +204,11 @@ class DiagnosticLLMCompletion:
     model: str
     text: str
     usage: DiagnosticLLMUsage
+    # First-class so callers can detect a response cut off by the output-
+    # token ceiling ("max_tokens") without reaching into raw_metadata.
+    # None for providers/paths that don't report it (e.g. the deterministic
+    # test client) -- absence is never treated as "definitely not truncated".
+    stop_reason: str | None = None
     raw_metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
 
 

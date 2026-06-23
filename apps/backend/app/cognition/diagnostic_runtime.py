@@ -91,6 +91,10 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from app.agents.runtime.quota_runtime import TenantQuotaRuntime
 
+# Anthropic's stop_reason value when a completion is cut off by the
+# max_output_tokens ceiling, as opposed to "end_turn" (finished naturally).
+_TRUNCATION_STOP_REASON = "max_tokens"
+
 _SYSTEM_PROMPT = """You are Operious diagnostic cognition.
 Classify the support ticket using only the ticket text and cited tenant SOP
 context. Return compact JSON only. Do not wrap it in markdown fences and do
@@ -98,10 +102,10 @@ not include keys outside the schema below.
 
 Required JSON schema:
 {
-  "summary": "non-empty string, max 4000 characters",
+  "summary": "non-empty string, max 1500 characters",
   "category": "one of the tenant categories listed below",
   "confidence": "number between 0.0 and 1.0",
-  "reasoning": "string, max 4000 characters"
+  "reasoning": "string, max 500 characters"
 }
 
 The category value must be exactly one of the following tenant-defined
@@ -144,7 +148,16 @@ _EXTRACTION_INSTRUCTION = (
 
 @dataclass(frozen=True, slots=True)
 class DiagnosticCognitionRuntimeConfig:
-    max_output_tokens: int = 512
+    max_output_tokens: int = 1024
+    # A truncated completion (stop_reason == "max_tokens") gets exactly ONE
+    # retry at this larger budget before _complete_llm gives up and returns
+    # whatever the escalated attempt produced — bounded, not a doubling
+    # loop, because customer-message length is unbounded and no single
+    # fixed cap can be guaranteed sufficient. A still-truncated result after
+    # this falls through to the existing parse-failure handling, which (with
+    # PARSING_FAILURE now in _DIAGNOSTIC_TERMINAL_ESCALATION_ERRORS) routes
+    # to human escalation rather than dead-lettering.
+    max_output_tokens_escalated: int = 3072
     temperature: float = 0.0
     context_top_k: int = 6
     context_token_budget: int = 2500
@@ -872,11 +885,60 @@ class DiagnosticCognitionRuntime:
         messages: tuple[DiagnosticLLMMessage, ...],
         tenant_id: str,
     ) -> DiagnosticLLMCompletion:
+        completion = await self._complete_llm_at_budget(
+            system_prompt=system_prompt,
+            messages=messages,
+            tenant_id=tenant_id,
+            max_output_tokens=self._config.max_output_tokens,
+        )
+        if (
+            completion.stop_reason != _TRUNCATION_STOP_REASON
+            or self._config.max_output_tokens_escalated
+            <= self._config.max_output_tokens
+        ):
+            return completion
+        # Truncated: customer-message length is unbounded, so no single
+        # fixed cap can be guaranteed sufficient -- give it exactly ONE
+        # larger-budget retry rather than betting everything on a bigger
+        # static ceiling. The discarded completion's tokens were a real
+        # provider charge, so record them now; the caller's own usage
+        # recording (complete_reasoning_snapshot et al.) only ever sees and
+        # records the completion this method finally returns.
+        if self._quota_runtime is not None:
+            await self._record_quota_token_usage(
+                tenant_id=tenant_id,
+                tokens=completion.usage.total_tokens,
+            )
+        logger.warning(
+            "diagnostic_completion_truncated_escalating_budget",
+            extra={
+                "tenant_id": tenant_id,
+                "base_max_output_tokens": self._config.max_output_tokens,
+                "escalated_max_output_tokens": (
+                    self._config.max_output_tokens_escalated
+                ),
+            },
+        )
+        return await self._complete_llm_at_budget(
+            system_prompt=system_prompt,
+            messages=messages,
+            tenant_id=tenant_id,
+            max_output_tokens=self._config.max_output_tokens_escalated,
+        )
+
+    async def _complete_llm_at_budget(
+        self,
+        *,
+        system_prompt: str,
+        messages: tuple[DiagnosticLLMMessage, ...],
+        tenant_id: str,
+        max_output_tokens: int,
+    ) -> DiagnosticLLMCompletion:
         try:
             return await self._llm_client.complete(
                 system_prompt=system_prompt,
                 messages=messages,
-                max_output_tokens=self._config.max_output_tokens,
+                max_output_tokens=max_output_tokens,
                 temperature=self._config.temperature,
                 tenant_id=tenant_id,
             )
@@ -886,7 +948,7 @@ class DiagnosticCognitionRuntime:
             return await self._llm_client.complete(
                 system_prompt=system_prompt,
                 messages=messages,
-                max_output_tokens=self._config.max_output_tokens,
+                max_output_tokens=max_output_tokens,
                 temperature=self._config.temperature,
             )
 
@@ -1582,10 +1644,10 @@ _EXTRACTED_FIELD_SCHEMA = {
 def _schema_appendix(taxonomy: ResolutionTaxonomyPolicy) -> str:
     return json.dumps(
         {
-            "summary": "non-empty string, max 4000 characters",
+            "summary": "non-empty string, max 1500 characters",
             "category": _category_values(taxonomy),
             "confidence": "number between 0.0 and 1.0",
-            "reasoning": "string, max 4000 characters",
+            "reasoning": "string, max 500 characters",
             "extracted_fields": {
                 name: _EXTRACTED_FIELD_SCHEMA
                 for name in EXTRACTED_ORDER_FIELD_NAMES
