@@ -167,8 +167,13 @@ class AdmissionGate:
         redis_memory_sample = await self._redis_memory_pct_sample(
             queue_name=queue_identity
         )
-        queue_depth_sample = await self._queue_depth_sample(queue_names=targets)
-        queue_age_sample = await self._queue_age_seconds_sample(queue_names=targets)
+        queue_depth_sample, per_queue_depth_samples = await self._queue_depth_sample(
+            queue_names=targets
+        )
+        queue_age_sample = await self._queue_age_seconds_sample(
+            queue_names=targets,
+            queue_depth_samples=per_queue_depth_samples,
+        )
         redis_memory_pct = (
             float(redis_memory_sample.value)
             if redis_memory_sample.value is not None
@@ -341,18 +346,23 @@ class AdmissionGate:
                 unavailable_reasons=("redis_memory_unavailable",),
             )
 
-    async def _queue_depth_sample(self, *, queue_names: Sequence[str]) -> _TelemetrySample:
+    async def _queue_depth_sample(
+        self, *, queue_names: Sequence[str]
+    ) -> tuple[_TelemetrySample, dict[str, _TelemetrySample]]:
         depth = 0
         unavailable_reasons: list[str] = []
+        per_queue: dict[str, _TelemetrySample] = {}
         for queue_name in queue_names:
             sample = await self._single_queue_depth_sample(queue_name=queue_name)
+            per_queue[queue_name] = sample
             depth += int(sample.value or 0)
             unavailable_reasons.extend(sample.unavailable_reasons)
-        return _TelemetrySample(
+        total = _TelemetrySample(
             value=depth,
             available=not unavailable_reasons,
             unavailable_reasons=tuple(unavailable_reasons),
         )
+        return total, per_queue
 
     async def _single_queue_depth_sample(self, *, queue_name: str) -> _TelemetrySample:
         try:
@@ -373,11 +383,20 @@ class AdmissionGate:
         self,
         *,
         queue_names: Sequence[str],
+        queue_depth_samples: Mapping[str, _TelemetrySample] | None = None,
     ) -> _TelemetrySample:
         ages: list[float] = []
         unavailable_reasons: list[str] = []
         for queue_name in queue_names:
-            sample = await self._single_queue_age_seconds_sample(queue_name=queue_name)
+            depth_sample = (
+                queue_depth_samples.get(queue_name)
+                if queue_depth_samples is not None
+                else None
+            )
+            sample = await self._single_queue_age_seconds_sample(
+                queue_name=queue_name,
+                depth_sample=depth_sample,
+            )
             if sample.value is not None:
                 ages.append(float(sample.value))
             unavailable_reasons.extend(sample.unavailable_reasons)
@@ -397,6 +416,7 @@ class AdmissionGate:
         self,
         *,
         queue_name: str,
+        depth_sample: _TelemetrySample | None = None,
     ) -> _TelemetrySample:
         try:
             key = QUEUE_AGE_ZSET_KEY.format(queue_name=queue_name)
@@ -414,6 +434,20 @@ class AdmissionGate:
             score = queue_age_entry[1]
             if not isinstance(score, int | float | str):
                 return _TelemetrySample(value=None, available=True)
+            # A queue verified empty right now cannot have a real in-flight
+            # message aging in it: any sentinel member here is an orphan
+            # left by a publish/dequeue race, not a genuine backlog. Only
+            # trust this when depth telemetry itself is available -- an
+            # unavailable depth sample must not be read as "depth is zero".
+            if (
+                depth_sample is not None
+                and depth_sample.available
+                and int(depth_sample.value or 0) <= 0
+            ):
+                await self._reconcile_empty_queue_age_sentinel(
+                    queue_name=queue_name
+                )
+                return _TelemetrySample(value=None, available=True)
             return _TelemetrySample(
                 value=round(max(0.0, time.time() - float(score)), 2),
                 available=True,
@@ -427,6 +461,27 @@ class AdmissionGate:
                 value=None,
                 available=False,
                 unavailable_reasons=(f"queue_age_unavailable:{queue_name}",),
+            )
+
+    async def _reconcile_empty_queue_age_sentinel(self, *, queue_name: str) -> None:
+        """Best-effort cleanup of a stale sentinel for a known-empty queue.
+
+        ``zremrangebyscore`` isn't part of ``AdmissionRedisClient`` (most
+        callers only need read access for evaluation), so this degrades to
+        a no-op against a client that doesn't support it -- the depth-zero
+        override above is what stops the false reject either way.
+        """
+
+        cleanup = getattr(self._redis, "zremrangebyscore", None)
+        if cleanup is None:
+            return
+        try:
+            key = QUEUE_AGE_ZSET_KEY.format(queue_name=queue_name)
+            await _resolve(cleanup(key, "-inf", time.time()))
+        except Exception:  # noqa: BLE001 - reconciliation must never block admission.
+            logger.warning(
+                "admission_queue_age_sentinel_reconcile_failed",
+                extra={"queue_name": queue_name},
             )
 
     @staticmethod

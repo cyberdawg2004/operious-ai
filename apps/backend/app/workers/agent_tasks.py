@@ -3077,15 +3077,25 @@ async def _queue_supervisor_if_closed(
     if session is None or not is_terminal_session(session.lifecycle_phase):
         return False
     await admit_supervisor_publish(tenant_id=tenant_id, dispatch_id=dispatch_id)
-    cast(Any, evaluate_session_supervisor).apply_async(
-        args=(session_id, tenant_id),
-        kwargs={"_enqueued_at": enqueued_at_iso()},
-        queue=QUEUE_SUPERVISOR,
-    )
+    # Write the sentinel before the task is dispatchable: if a worker
+    # could dequeue and clear it first, the later write would orphan
+    # the member permanently.
     await record_worker_queue_age(
         queue_name=QUEUE_SUPERVISOR,
         member_id=session_id,
     )
+    try:
+        cast(Any, evaluate_session_supervisor).apply_async(
+            args=(session_id, tenant_id),
+            kwargs={"_enqueued_at": enqueued_at_iso()},
+            queue=QUEUE_SUPERVISOR,
+        )
+    except Exception:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_SUPERVISOR,
+            member_id=session_id,
+        )
+        raise
     return True
 
 

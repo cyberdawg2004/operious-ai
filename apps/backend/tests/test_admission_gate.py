@@ -56,6 +56,7 @@ class _AdmissionRedis:
         fail_info: bool = False,
         fail_llen: bool = False,
         fail_zrange: bool = False,
+        events: list[str] | None = None,
     ) -> None:
         self.depth = depth
         self.oldest_age_seconds = oldest_age_seconds
@@ -64,7 +65,10 @@ class _AdmissionRedis:
         self.fail_llen = fail_llen
         self.fail_zrange = fail_zrange
         self.zadds: list[tuple[str, Mapping[str, float], bool]] = []
+        self.zrems: list[tuple[str, tuple[str, ...]]] = []
+        self.zremrangebyscore_calls: list[tuple[str, float | str, float | str]] = []
         self.values: dict[str, int] = {}
+        self._events = events
 
     async def info(self, section: str | None = None) -> Mapping[str, Any]:
         del section
@@ -100,7 +104,24 @@ class _AdmissionRedis:
         *,
         nx: bool = False,
     ) -> int:
+        if self._events is not None:
+            self._events.append("zadd")
         self.zadds.append((name, mapping, nx))
+        return 1
+
+    async def zrem(self, name: str, *values: str) -> int:
+        if self._events is not None:
+            self._events.append("zrem")
+        self.zrems.append((name, values))
+        return len(values)
+
+    async def zremrangebyscore(
+        self,
+        name: str,
+        min_score: float | str,
+        max_score: float | str,
+    ) -> int:
+        self.zremrangebyscore_calls.append((name, min_score, max_score))
         return 1
 
     async def get(self, key: str) -> int | None:
@@ -167,7 +188,8 @@ async def test_reject_on_queue_depth_reject() -> None:
 
 @pytest.mark.asyncio
 async def test_defer_on_queue_age_warn() -> None:
-    decision = await _decision(_AdmissionRedis(oldest_age_seconds=10.5))
+    """A genuine backlog (real depth, real age) must still warn-defer."""
+    decision = await _decision(_AdmissionRedis(depth=1, oldest_age_seconds=10.5))
 
     assert decision.outcome is AdmissionOutcome.DEFER
     assert decision.reason is AdmissionReason.QUEUE_AGE_EXCEEDED
@@ -175,7 +197,56 @@ async def test_defer_on_queue_age_warn() -> None:
 
 @pytest.mark.asyncio
 async def test_reject_on_queue_age_reject() -> None:
-    decision = await _decision(_AdmissionRedis(oldest_age_seconds=21))
+    """A genuine backlog (real depth, real age) must still hard-reject."""
+    decision = await _decision(_AdmissionRedis(depth=1, oldest_age_seconds=21))
+
+    assert decision.outcome is AdmissionOutcome.REJECT
+    assert decision.reason is AdmissionReason.QUEUE_AGE_EXCEEDED
+
+
+@pytest.mark.asyncio
+async def test_orphaned_age_sentinel_with_zero_depth_does_not_false_reject() -> None:
+    """LOAD-BEARING: an orphaned ``queue:age:{queue}`` member left by a
+    publish/dequeue race must never claim a multi-hour backlog when the
+    broker's actual depth for that queue is 0. Reproduces the live
+    false-reject incident (2.6h sentinel age, depth 0, every dispatch
+    rejected with QUEUE_AGE_EXCEEDED).
+    """
+    redis = _AdmissionRedis(depth=0, oldest_age_seconds=9_360)
+
+    decision = await _decision(redis)
+
+    assert decision.outcome is AdmissionOutcome.ADMIT
+    assert decision.reason is not AdmissionReason.QUEUE_AGE_EXCEEDED
+    assert decision.queue_age_available is True
+
+
+@pytest.mark.asyncio
+async def test_orphaned_age_sentinel_is_reconciled_when_client_supports_cleanup() -> None:
+    """The depth-zero override also clears the stale member when the
+    redis client exposes ``zremrangebyscore``, so the same orphan can't
+    keep costing a reconciliation check on every future evaluation.
+    """
+    redis = _AdmissionRedis(depth=0, oldest_age_seconds=9_360)
+
+    await _decision(redis)
+
+    assert redis.zremrangebyscore_calls
+    key, min_score, max_score = redis.zremrangebyscore_calls[0]
+    assert key == f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}"
+    assert min_score == "-inf"
+    assert isinstance(max_score, float)
+
+
+@pytest.mark.asyncio
+async def test_unavailable_depth_does_not_suppress_real_age_signal() -> None:
+    """If depth telemetry itself is unavailable, the gate must not assume
+    depth is zero -- the existing sentinel score must still be trusted so
+    a genuine backlog isn't masked by an unrelated telemetry outage.
+    """
+    redis = _AdmissionRedis(fail_llen=True, oldest_age_seconds=21)
+
+    decision = await _decision(redis)
 
     assert decision.outcome is AdmissionOutcome.REJECT
     assert decision.reason is AdmissionReason.QUEUE_AGE_EXCEEDED
@@ -467,6 +538,78 @@ async def test_execution_publisher_writes_queue_age_sentinel(
 
 
 @pytest.mark.asyncio
+async def test_execution_publisher_writes_sentinel_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LOAD-BEARING: the sentinel must be visible before the task is
+    dispatchable. If a worker could dequeue and clear it first, the
+    publisher's later write would orphan the member permanently --
+    the exact mechanism behind the live false-reject incident.
+    """
+    events: list[str] = []
+    redis = _AdmissionRedis(depth=0, events=events)
+    task = _FakeTask(events=events)
+    monkeypatch.setattr(
+        execution_publisher_module,
+        "_running_under_pytest",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        execution_publisher_module,
+        "execute_diagnostic_agent",
+        task,
+    )
+    publisher = CeleryExecutionPublisher(
+        redis_client=redis,  # type: ignore[arg-type]
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+        max_queue_depth=100,
+        run_inline_under_pytest=False,
+    )
+
+    await publisher.publish_execution("execution-order", tenant_id=TENANT_ID)
+
+    assert events == ["zadd", "apply_async"]
+
+
+@pytest.mark.asyncio
+async def test_execution_publisher_clears_sentinel_when_dispatch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the broker rejects the publish after the sentinel was written,
+    the publisher must compensate by clearing it -- otherwise the task
+    never runs (so the worker-side clear never fires either) and the
+    sentinel is orphaned forever.
+    """
+    redis = _AdmissionRedis(depth=0)
+    task = _FakeTask(raise_on_apply_async=RuntimeError("broker unavailable"))
+    monkeypatch.setattr(
+        execution_publisher_module,
+        "_running_under_pytest",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        execution_publisher_module,
+        "execute_diagnostic_agent",
+        task,
+    )
+    publisher = CeleryExecutionPublisher(
+        redis_client=redis,  # type: ignore[arg-type]
+        queue_name=QUEUE_DIAGNOSTIC_NORMAL,
+        max_queue_depth=100,
+        run_inline_under_pytest=False,
+    )
+
+    with pytest.raises(RuntimeError, match="broker unavailable"):
+        await publisher.publish_execution("execution-failed-dispatch", tenant_id=TENANT_ID)
+
+    assert redis.zadds
+    assert redis.zrems
+    key, members = redis.zrems[0]
+    assert key == f"queue:age:{QUEUE_DIAGNOSTIC_NORMAL}"
+    assert members == ("execution-failed-dispatch",)
+
+
+@pytest.mark.asyncio
 async def test_webhook_reject_decision_preserves_captured_ingress() -> None:
     boundary_store = InMemoryBoundaryPersistence()
     service = await _webhook_service(
@@ -738,10 +881,21 @@ class _RecordingSessionFactory:
 
 
 class _FakeTask:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        events: list[str] | None = None,
+        raise_on_apply_async: Exception | None = None,
+    ) -> None:
         self.calls: list[dict[str, object]] = []
+        self._events = events
+        self._raise_on_apply_async = raise_on_apply_async
 
     def apply_async(self, **kwargs: object) -> None:
+        if self._events is not None:
+            self._events.append("apply_async")
+        if self._raise_on_apply_async is not None:
+            raise self._raise_on_apply_async
         self.calls.append(kwargs)
 
 

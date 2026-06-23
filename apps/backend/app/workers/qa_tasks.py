@@ -129,16 +129,26 @@ async def _queue_sop_intelligence(score: QAScoreRecord) -> bool:
     if session_id is None:
         return False
     await admit_sop_intelligence_publish(tenant_id=score.tenant_id)
-    cast(Any, propose_sop_intelligence_change).apply_async(
-        args=(str(session_id), score.tenant_id, score.inspection_id),
-        kwargs={"_enqueued_at": enqueued_at_iso()},
-        queue=QUEUE_SOP_INTELLIGENCE,
-        priority=9,
-    )
+    # Write the sentinel before the task is dispatchable: if a worker
+    # could dequeue and clear it first, the later write would orphan
+    # the member permanently.
     await record_worker_queue_age(
         queue_name=QUEUE_SOP_INTELLIGENCE,
         member_id=str(session_id),
     )
+    try:
+        cast(Any, propose_sop_intelligence_change).apply_async(
+            args=(str(session_id), score.tenant_id, score.inspection_id),
+            kwargs={"_enqueued_at": enqueued_at_iso()},
+            queue=QUEUE_SOP_INTELLIGENCE,
+            priority=9,
+        )
+    except Exception:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_SOP_INTELLIGENCE,
+            member_id=str(session_id),
+        )
+        raise
     return True
 
 

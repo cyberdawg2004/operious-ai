@@ -6,7 +6,11 @@ import os
 import sys
 from typing import Any, Protocol, cast
 
-from app.core.admission import QueueAgeSentinelClient, record_queue_age_sentinel
+from app.core.admission import (
+    QueueAgeSentinelClient,
+    clear_queue_age_sentinel,
+    record_queue_age_sentinel,
+)
 from app.core.config import get_settings
 from app.core.queue_depth import (
     QueueDepthProvider,
@@ -130,6 +134,14 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                         tenant_id=tenant_id,
                     )
             return
+        # Write the sentinel before the task is dispatchable: if a worker
+        # could dequeue and clear it first, the publisher's clear-on-entry
+        # would be a no-op and the later write would orphan the member.
+        await record_queue_age_sentinel(
+            redis_client=cast(QueueAgeSentinelClient, client),
+            queue_name=self._queue_name,
+            member_id=execution_id,
+        )
         try:
             task.apply_async(
                 kwargs={
@@ -139,16 +151,12 @@ class CeleryExecutionPublisher(ExecutionPublisher):
                 },
                 queue=self._queue_name,
             )
-            client = self._redis_client
-            if client is None:
-                client = cast(QueueDepthClient, get_redis_client())
-                self._redis_client = client
-            await record_queue_age_sentinel(
+        except Exception:
+            await clear_queue_age_sentinel(
                 redis_client=cast(QueueAgeSentinelClient, client),
                 queue_name=self._queue_name,
                 member_id=execution_id,
             )
-        except Exception:
             if tenant_qos_admitted and client is not None:
                 await release_tenant_queue_publish(
                     redis_client=cast(TenantQueueQoSClient, client),

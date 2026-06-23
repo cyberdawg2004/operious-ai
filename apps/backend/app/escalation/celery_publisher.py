@@ -6,7 +6,11 @@ import os
 import sys
 from typing import Any, cast
 
-from app.core.admission import QueueAgeSentinelClient, record_queue_age_sentinel
+from app.core.admission import (
+    QueueAgeSentinelClient,
+    clear_queue_age_sentinel,
+    record_queue_age_sentinel,
+)
 from app.core.config import get_settings
 from app.core.queue_depth import (
     QueueDepthProvider,
@@ -111,24 +115,35 @@ class CeleryEscalationPublisher(EscalationPublisher):
                 session_id=session_id,
             )
         else:
-            task.apply_async(
-                kwargs={
-                    "governance_decision_id": governance_decision_id,
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
-                    "_enqueued_at": enqueued_at_iso(),
-                },
-                queue=self._queue_name,
-            )
             client = self._redis_client
             if client is None:
                 client = get_redis_client()
                 self._redis_client = client
+            # Write the sentinel before the task is dispatchable: if a
+            # worker could dequeue and clear it first, the publisher's
+            # later write would orphan the member permanently.
             await record_queue_age_sentinel(
                 redis_client=cast(QueueAgeSentinelClient, client),
                 queue_name=self._queue_name,
                 member_id=governance_decision_id,
             )
+            try:
+                task.apply_async(
+                    kwargs={
+                        "governance_decision_id": governance_decision_id,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "_enqueued_at": enqueued_at_iso(),
+                    },
+                    queue=self._queue_name,
+                )
+            except Exception:
+                await clear_queue_age_sentinel(
+                    redis_client=cast(QueueAgeSentinelClient, client),
+                    queue_name=self._queue_name,
+                    member_id=governance_decision_id,
+                )
+                raise
 
 
 def _running_under_pytest() -> bool:

@@ -108,15 +108,25 @@ async def _queue_qa_scoring(inspection_id: str, tenant_id: str | None) -> bool:
     if tenant_id is None or not tenant_id:
         return False
     await admit_qa_publish(tenant_id=tenant_id)
-    cast(Any, score_supervisor_inspection).apply_async(
-        args=(inspection_id, tenant_id),
-        kwargs={"_enqueued_at": enqueued_at_iso()},
-        queue=QUEUE_QA,
-    )
+    # Write the sentinel before the task is dispatchable: if a worker
+    # could dequeue and clear it first, the later write would orphan
+    # the member permanently.
     await record_worker_queue_age(
         queue_name=QUEUE_QA,
         member_id=inspection_id,
     )
+    try:
+        cast(Any, score_supervisor_inspection).apply_async(
+            args=(inspection_id, tenant_id),
+            kwargs={"_enqueued_at": enqueued_at_iso()},
+            queue=QUEUE_QA,
+        )
+    except Exception:
+        await clear_worker_queue_age(
+            queue_name=QUEUE_QA,
+            member_id=inspection_id,
+        )
+        raise
     return True
 
 
