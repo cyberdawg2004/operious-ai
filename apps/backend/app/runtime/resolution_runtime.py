@@ -6,7 +6,9 @@ import hashlib
 import re
 import uuid
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Any, Iterable, Mapping, Protocol, Sequence, cast
 
 from app.boundary.translation import (
@@ -359,15 +361,34 @@ class ResolutionRuntime:
             extracted_fields=request.extracted_fields,
             availability_checker=self._inventory_availability_checker,
         )
-        probe_reply = await _probe_reply_for_cannot_determine(
-            recommended_actions=recommended_actions,
+        recommended_actions = _attach_resolution_verdicts(
+            recommended_actions,
             extracted_fields=request.extracted_fields,
+        )
+        verdict_reply = await _apply_resolution_verdict_override(
+            recommended_actions=recommended_actions,
             tenant_configuration_repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
             channel=request.source_channel,
         )
-        if probe_reply is not None:
-            reply = probe_reply
+        verdict_summary = _first_resolution_verdict(recommended_actions)
+        # An APPROVED verdict's whole purpose is to state the exact
+        # commitment ("approved for replacement") the baseline
+        # unsupported-promise guard exists to catch from an UNAUTHORIZED
+        # LLM draft. This reply isn't LLM-drafted and isn't unauthorized:
+        # it's a tenant-authored, dual-control-approved template that
+        # only ever renders because a specialized verdict already
+        # confirmed eligibility. Scoped to APPROVED only — DENIED/
+        # NEEDS_MORE_INFO overrides (including the unchanged
+        # cannot_determine probe path) keep the guard exactly as before.
+        reply_is_approved_verdict_override = (
+            verdict_reply is not None
+            and verdict_summary is not None
+            and verdict_summary.get("outcome")
+            == ResolutionVerdictOutcome.APPROVED.value
+        )
+        if verdict_reply is not None:
+            reply = verdict_reply
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
@@ -381,6 +402,7 @@ class ResolutionRuntime:
             taxonomy=taxonomy,
             recommended_actions=recommended_actions,
             extracted_fields=request.extracted_fields,
+            skip_unsupported_commitment_check=reply_is_approved_verdict_override,
         )
         proposal_id = derive_resolution_proposal_id(
             tenant_id=request.tenant_id,
@@ -803,6 +825,51 @@ def _resolution_category(
     return UNCLASSIFIED_CATEGORY_ID
 
 
+class ResolutionVerdictOutcome(StrEnum):
+    """Domain-agnostic outcome a specialized resolution path can report.
+
+    This is the generic extension contract _apply_resolution_verdict_
+    override consumes. Warranty/refund eligibility (W1) is the first
+    producer; any other tenant-specific determination (a bank's KYC
+    check, a telecom's SIM-swap eligibility) populates the same three
+    values without the dispatcher or the LLM drafter knowing anything
+    domain-specific changed.
+    """
+
+    APPROVED = "approved"
+    DENIED = "denied"
+    NEEDS_MORE_INFO = "needs_more_info"
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionVerdictSummary:
+    """Domain-agnostic verdict summary attached to a recommended action.
+
+    ``outcome_purpose_key`` is opaque to the dispatcher — it is whatever
+    vocabulary the producing domain uses (a remedy name, a failed-rule
+    name, a missing-field name) — and combines with ``outcome`` to form
+    the template lookup key ``resolution.{outcome}.{outcome_purpose_key}``
+    against the tenant's own approved Templates KB. ``substitution_values``
+    are placeholder values for that template's content, also opaque to
+    the dispatcher.
+    """
+
+    outcome: ResolutionVerdictOutcome
+    outcome_purpose_key: str
+    missing_fields: tuple[str, ...] = ()
+    substitution_values: Mapping[str, str | None] = dataclass_field(
+        default_factory=dict[str, str | None]
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "outcome": self.outcome.value,
+            "outcome_purpose_key": self.outcome_purpose_key,
+            "missing_fields": list(self.missing_fields),
+            "substitution_values": dict(self.substitution_values),
+        }
+
+
 def _recommended_actions(
     category: str,
     taxonomy: ResolutionTaxonomyPolicy,
@@ -929,43 +996,170 @@ async def _apply_availability_gating(
     return tuple(result)
 
 
-async def _probe_reply_for_cannot_determine(
+def _attach_resolution_verdicts(
+    actions: tuple[Mapping[str, Any], ...],
+    *,
+    extracted_fields: ExtractedOrderFields | None,
+) -> tuple[Mapping[str, Any], ...]:
+    """Map each action's warranty/refund eligibility verdict (if any) onto
+    the generic ResolutionVerdictSummary contract
+    _apply_resolution_verdict_override consumes, embedding it under the
+    domain-agnostic "resolution_verdict" key alongside the existing
+    "warranty_refund_eligibility" key — which is left untouched, since
+    W2's approval-queue wiring (agent_tasks._first_warranty_refund_
+    eligible_action) still reads it directly.
+
+    This is the ONLY place warranty-specific verdict shape knowledge
+    exists outside warranty_refund_eligibility.py itself. Any other
+    specialized resolution path would add its own analogous attach step
+    here (or attach "resolution_verdict" directly at its own embedding
+    site) — never inside the dispatcher, never inside the drafter. Runs
+    after _apply_availability_gating so an ELIGIBLE outcome's
+    outcome_purpose_key reflects the availability-checked final remedy,
+    not W1's naive first-ladder-step guess.
+    """
+    result: list[Mapping[str, Any]] = []
+    for action in actions:
+        eligibility = action.get("warranty_refund_eligibility")
+        if not isinstance(eligibility, Mapping):
+            result.append(action)
+            continue
+        summary = _warranty_refund_eligibility_to_resolution_verdict(
+            cast(Mapping[str, Any], eligibility),
+            extracted_fields=extracted_fields,
+        )
+        if summary is None:
+            result.append(action)
+            continue
+        merged = dict(action)
+        merged["resolution_verdict"] = summary.to_dict()
+        result.append(merged)
+    return tuple(result)
+
+
+def _warranty_refund_eligibility_to_resolution_verdict(
+    eligibility: Mapping[str, Any],
+    *,
+    extracted_fields: ExtractedOrderFields | None,
+) -> ResolutionVerdictSummary | None:
+    """The warranty-specific mapping: EligibilityDetermination (as the
+    dict _eligibility_determination_to_dict produces, post-W3 remedy
+    gating) -> the generic ResolutionVerdictSummary. Returns None when
+    there's genuinely nothing actionable to report (e.g. cannot_determine
+    with no specific missing field, or eligible with no remedy
+    configured) — mirroring the old probe's fail-closed "nothing to
+    probe for" path exactly.
+    """
+    verdict = eligibility.get("verdict")
+    raw_claim_type = eligibility.get("claim_type")
+    claim_type = raw_claim_type if isinstance(raw_claim_type, str) else None
+
+    if verdict == EligibilityVerdict.ELIGIBLE.value:
+        remedy = eligibility.get("recommended_remedy")
+        if not isinstance(remedy, str) or not remedy:
+            return None
+        return ResolutionVerdictSummary(
+            outcome=ResolutionVerdictOutcome.APPROVED,
+            outcome_purpose_key=remedy,
+            substitution_values=_probe_substitution_values(
+                claim_type=claim_type,
+                missing_fields=[],
+                extracted_fields=extracted_fields,
+            ),
+        )
+
+    if verdict == EligibilityVerdict.INELIGIBLE.value:
+        failed_rule = _first_failed_grounding_check(eligibility.get("grounding"))
+        if failed_rule is None:
+            return None
+        return ResolutionVerdictSummary(
+            outcome=ResolutionVerdictOutcome.DENIED,
+            outcome_purpose_key=failed_rule,
+            substitution_values=_probe_substitution_values(
+                claim_type=claim_type,
+                missing_fields=[],
+                extracted_fields=extracted_fields,
+            ),
+        )
+
+    if verdict == EligibilityVerdict.CANNOT_DETERMINE.value:
+        missing_evidence = eligibility.get("missing_evidence")
+        missing_fields = (
+            [
+                field
+                for field in cast(list[object], missing_evidence)
+                if isinstance(field, str)
+            ]
+            if isinstance(missing_evidence, list)
+            else []
+        )
+        if not missing_fields:
+            return None
+        return ResolutionVerdictSummary(
+            outcome=ResolutionVerdictOutcome.NEEDS_MORE_INFO,
+            outcome_purpose_key=f"missing_{missing_fields[0]}",
+            missing_fields=tuple(missing_fields),
+            substitution_values=_probe_substitution_values(
+                claim_type=claim_type,
+                missing_fields=missing_fields,
+                extracted_fields=extracted_fields,
+            ),
+        )
+
+    return None
+
+
+def _first_failed_grounding_check(grounding: object) -> str | None:
+    if not isinstance(grounding, list):
+        return None
+    for check in cast(list[object], grounding):
+        if not isinstance(check, Mapping):
+            continue
+        check_mapping = cast(Mapping[str, Any], check)
+        if check_mapping.get("passed") is False:
+            name = check_mapping.get("name")
+            if isinstance(name, str) and name:
+                return name
+    return None
+
+
+async def _apply_resolution_verdict_override(
     *,
     recommended_actions: tuple[Mapping[str, Any], ...],
-    extracted_fields: ExtractedOrderFields | None,
     tenant_configuration_repository: TenantConfigurationRepository | None,
     tenant_id: str,
     channel: str | None,
 ) -> str | None:
-    """W4: when a recommended action's W1 verdict is cannot_determine,
-    draft the customer-facing "we need X" ask from the tenant's own
-    APPROVED probe template — never from a hardcoded default. Returns
-    None (no override; the caller's existing reply stands unchanged)
-    whenever there's nothing to probe for, no channel to address it
-    through, or no approved template for (tenant, purpose, channel) —
-    fail-closed, never fabricated. This only ever returns DATA: the
-    proposal this feeds into still goes through the unchanged
-    cannot_determine gate (_warranty_refund_cannot_determine_reasons)
-    that forces PENDING_HUMAN_APPROVAL, and the existing send-eligibility
-    chain (governance ALLOW + explicit human approval) is the only path
-    that can ever transmit it — this function cannot cause a send.
+    """Generic, domain-agnostic reply-override dispatch.
+
+    Generalizes the old single-purpose cannot_determine probe (W4) to
+    all three ResolutionVerdictSummary outcomes. Any specialized
+    resolution path — W1 warranty/refund eligibility today, any other
+    tenant-specific determination tomorrow — can attach a
+    ResolutionVerdictSummary to a recommended action (under the
+    "resolution_verdict" key) to have this function render a
+    tenant-authored, byte-exact customer message in place of the
+    LLM-drafted reply. This function knows nothing about what an
+    "outcome" or "outcome_purpose_key" MEANS — it only resolves
+    (tenant_id, "resolution.{outcome}.{outcome_purpose_key}", channel)
+    against the tenant's own approved Templates KB and substitutes the
+    values the verdict producer supplied. Fail-closed exactly like the
+    W4 probe this generalizes: no approved template -> None, the
+    caller's existing reply stands unchanged — never fabricated. This
+    only ever returns DATA: the unchanged governance gate and explicit
+    human-approval chain are the only path that can ever transmit it —
+    this function cannot cause a send.
     """
     if tenant_configuration_repository is None or channel is None:
         return None
-    determination = _first_cannot_determine_eligibility(recommended_actions)
-    if determination is None:
+    summary = _first_resolution_verdict(recommended_actions)
+    if summary is None:
         return None
-    missing_evidence = determination.get("missing_evidence")
-    if not isinstance(missing_evidence, list) or not missing_evidence:
+    outcome = summary.get("outcome")
+    purpose_key = summary.get("outcome_purpose_key")
+    if not isinstance(outcome, str) or not isinstance(purpose_key, str) or not purpose_key:
         return None
-    missing_fields = [
-        field
-        for field in cast(list[object], missing_evidence)
-        if isinstance(field, str)
-    ]
-    if not missing_fields:
-        return None
-    purpose = f"probe.missing_{missing_fields[0]}"
+    purpose = f"resolution.{outcome}.{purpose_key}"
     runtime = TenantConfigurationRuntime(repository=tenant_configuration_repository)
     template = await runtime.get_approved_template(
         tenant_id=tenant_id,
@@ -974,25 +1168,22 @@ async def _probe_reply_for_cannot_determine(
     )
     if template is None:
         return None
-    claim_type = determination.get("claim_type")
-    values = _probe_substitution_values(
-        claim_type=claim_type if isinstance(claim_type, str) else None,
-        missing_fields=missing_fields,
-        extracted_fields=extracted_fields,
+    raw_values = summary.get("substitution_values")
+    values = (
+        dict(cast(Mapping[str, Any], raw_values))
+        if isinstance(raw_values, Mapping)
+        else {}
     )
     return substitute_placeholders(template.content, values)
 
 
-def _first_cannot_determine_eligibility(
+def _first_resolution_verdict(
     recommended_actions: tuple[Mapping[str, Any], ...],
 ) -> Mapping[str, Any] | None:
     for action in recommended_actions:
-        raw_eligibility = action.get("warranty_refund_eligibility")
-        if not isinstance(raw_eligibility, Mapping):
-            continue
-        eligibility = cast(Mapping[str, Any], raw_eligibility)
-        if eligibility.get("verdict") == EligibilityVerdict.CANNOT_DETERMINE.value:
-            return eligibility
+        raw_verdict = action.get("resolution_verdict")
+        if isinstance(raw_verdict, Mapping):
+            return cast(Mapping[str, Any], raw_verdict)
     return None
 
 
@@ -1163,6 +1354,7 @@ def _evaluate_gate(
     taxonomy: ResolutionTaxonomyPolicy,
     recommended_actions: tuple[Mapping[str, Any], ...] = (),
     extracted_fields: ExtractedOrderFields | None = None,
+    skip_unsupported_commitment_check: bool = False,
 ) -> _GateDecision:
     reasons: list[str] = []
     text = f"{original_content} {reply}".lower()
@@ -1197,7 +1389,9 @@ def _evaluate_gate(
     reasons.extend(
         _warranty_refund_cannot_determine_reasons(recommended_actions)
     )
-    if _contains_any(reply.lower(), _unsupported_commitment_patterns(taxonomy)):
+    if not skip_unsupported_commitment_check and _contains_any(
+        reply.lower(), _unsupported_commitment_patterns(taxonomy)
+    ):
         return _GateDecision(
             supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
             governance_verdict=ResolutionGovernanceVerdict.DENY,

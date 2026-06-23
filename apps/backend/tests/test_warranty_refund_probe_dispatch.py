@@ -1,21 +1,32 @@
-"""W4 break-controls: probe dispatch (draft-for-review) for cannot_determine.
+"""Regression guard for the cannot_determine slice of the generic
+resolution-verdict override (_apply_resolution_verdict_override).
 
-When a recommended action's W1 verdict is cannot_determine, resolution_
-runtime.py drafts a customer-facing "we need X" ask from the tenant's
-own APPROVED probe template (W0) — filled via substitute_placeholders,
-never a hardcoded default. The result becomes the proposal's
-proposed_customer_reply, which still flows through the UNCHANGED
-cannot_determine gate (warranty_refund_eligibility_cannot_determine
-reason) that forces PENDING_HUMAN_APPROVAL — this file proves that
-override never bypasses that gate, never sends anything, and never
-fabricates a placeholder value.
+This dispatch used to be single-purpose (W4: probe dispatch for
+cannot_determine only, purpose="probe.missing_{field}"). It has since
+been generalized to cover all three EligibilityVerdict outcomes
+uniformly via the domain-agnostic ResolutionVerdictSummary contract,
+purpose="resolution.{outcome}.{outcome_purpose_key}" — see
+test_resolution_verdict_override.py for the new eligible/ineligible/
+domain-agnostic coverage. THIS file exists to prove the generalization
+did not change the cannot_determine path's observable behavior at all:
+when a recommended action's W1 verdict is cannot_determine, resolution_
+runtime.py still drafts a customer-facing "we need X" ask from the
+tenant's own APPROVED template (now at
+purpose="resolution.needs_more_info.missing_{field}", migrated in place
+by 0092_resolution_verdict_template_purpose_rename) — filled via
+substitute_placeholders, never a hardcoded default. The result still
+flows through the UNCHANGED cannot_determine gate
+(warranty_refund_eligibility_cannot_determine reason) that forces
+PENDING_HUMAN_APPROVAL — this file proves that override never bypasses
+that gate, never sends anything, and never fabricates a placeholder
+value.
 
 Mirrors test_warranty_refund_eligibility_resolution_runtime.py's
 established InMemoryTenantConfigurationRepository pattern — fast,
 no Postgres — since W0's own test suite already proves the dual-control
 template-approval workflow and Postgres-level tenant isolation; this
 file only needs an ALREADY-approved record in the repository to prove
-resolution_runtime.py's NEW consumption of it.
+resolution_runtime.py's consumption of it.
 """
 
 from __future__ import annotations
@@ -219,7 +230,7 @@ async def test_cannot_determine_with_approved_template_drafts_filled_probe() -> 
     repository = await _repository_with_policies()
     await repository.save_knowledge_document(
         _approved_template(
-            purpose="probe.missing_purchase_date",
+            purpose="resolution.needs_more_info.missing_purchase_date",
             channel="email",
             content=(
                 "Hi! For order {order_id}, we still need: {missing_fields}. "
@@ -254,7 +265,7 @@ async def test_placeholder_with_no_available_data_is_marked_not_fabricated() -> 
     repository = await _repository_with_policies()
     await repository.save_knowledge_document(
         _approved_template(
-            purpose="probe.missing_purchase_date",
+            purpose="resolution.needs_more_info.missing_purchase_date",
             channel="email",
             content="We need {missing_fields} for {seller}'s claim on {order_id}.",
         ),
@@ -324,7 +335,7 @@ async def test_no_channel_means_no_probe_override() -> None:
     repository = await _repository_with_policies()
     await repository.save_knowledge_document(
         _approved_template(
-            purpose="probe.missing_purchase_date",
+            purpose="resolution.needs_more_info.missing_purchase_date",
             channel="email",
             content="We need {missing_fields}.",
         ),
@@ -368,7 +379,7 @@ async def test_even_unambiguous_missing_evidence_only_drafts_never_sends() -> No
     repository = await _repository_with_policies()
     await repository.save_knowledge_document(
         _approved_template(
-            purpose="probe.missing_purchase_date",
+            purpose="resolution.needs_more_info.missing_purchase_date",
             channel="email",
             content="We need {missing_fields}.",
         ),
@@ -448,7 +459,7 @@ async def test_probe_is_tenant_scoped_cross_tenant_template_invisible() -> None:
     await repository.save_knowledge_document(
         _approved_template(
             tenant_id=tenant_a,
-            purpose="probe.missing_purchase_date",
+            purpose="resolution.needs_more_info.missing_purchase_date",
             channel="email",
             content="Tenant-A-only ask: {missing_fields}.",
         ),
@@ -535,7 +546,7 @@ async def test_domain_agnostic_bank_probe_template() -> None:
     )
     await repository.save_knowledge_document(
         _approved_template(
-            purpose="probe.missing_purchase_date",
+            purpose="resolution.needs_more_info.missing_purchase_date",
             channel="email",
             content="To review transaction {order_id}, please send: {missing_fields}.",
         ),
