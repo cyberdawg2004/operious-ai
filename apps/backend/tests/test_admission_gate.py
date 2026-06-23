@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
+from fastapi.responses import JSONResponse
 
 from app.api.v1.routers.ingress import create_channel_webhook_ingress
 from app.core.config import Settings
@@ -30,6 +31,7 @@ from app.services.admission_service import AdmissionService
 from app.services.ticket_ingress_service import (
     TicketIngressRejected,
     TicketIngressService,
+    TicketIngressServiceResult,
 )
 from app.boundary.persistence import (
     BoundaryIngressQuery,
@@ -497,8 +499,7 @@ async def test_persistence_failure_is_non_fatal() -> None:
 
 def test_admission_record_decision_id_is_primary_key() -> None:
     primary_keys = {
-        column.name
-        for column in AdmissionRecordRow.__table__.primary_key.columns
+        column.name for column in AdmissionRecordRow.__table__.primary_key
     }
 
     assert primary_keys == {"decision_id"}
@@ -627,6 +628,7 @@ async def test_webhook_reject_decision_preserves_captured_ingress() -> None:
         content_type="application/json",
     )
 
+    assert isinstance(result, TicketIngressServiceResult)
     assert result.ingress_id
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),
@@ -653,6 +655,7 @@ async def test_webhook_defer_decision_preserves_captured_ingress() -> None:
         content_type="application/json",
     )
 
+    assert isinstance(result, TicketIngressServiceResult)
     assert result.ingress_id
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),
@@ -687,6 +690,7 @@ async def test_webhook_redis_unavailable_preserves_captured_ingress() -> None:
         content_type="application/json",
     )
 
+    assert isinstance(result, TicketIngressServiceResult)
     assert result.ingress_id
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),
@@ -723,6 +727,7 @@ async def test_admit_webhook_does_not_return_429_or_503() -> None:
         content_type="application/json",
     )
 
+    assert isinstance(result, TicketIngressServiceResult)
     assert result.ingress_id
     page = await boundary_store.list_ingress(
         BoundaryIngressQuery(),
@@ -769,7 +774,9 @@ async def test_duplicate_webhook_ack_precedes_admission_pressure() -> None:
         raw_body=raw_body,
         content_type="application/json",
     )
-    service._admission_service = _FakeAdmissionService(AdmissionOutcome.REJECT)
+    service._admission_service = _FakeAdmissionService(  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+        AdmissionOutcome.REJECT
+    )
     second = await service.process_channel_webhook(
         channel_type="email",
         body=body,
@@ -778,6 +785,7 @@ async def test_duplicate_webhook_ack_precedes_admission_pressure() -> None:
         content_type="application/json",
     )
 
+    assert isinstance(first, TicketIngressServiceResult)
     assert first.ingress_id
     assert second.status == "duplicate_delivery_acknowledged"
 
@@ -797,9 +805,10 @@ async def test_router_returns_admission_response_body() -> None:
         service=service,  # type: ignore[arg-type]
     )
 
+    assert isinstance(response, JSONResponse)
     assert response.status_code == 429
     assert response.headers["x-operious-admission-decision-id"] == decision_id
-    assert json.loads(response.body)["error"] == "admission_rejected"
+    assert json.loads(bytes(response.body))["error"] == "admission_rejected"
 
 
 def test_admission_settings_are_env_overridable() -> None:
