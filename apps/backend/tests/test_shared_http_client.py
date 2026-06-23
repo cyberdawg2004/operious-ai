@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -52,6 +53,38 @@ async def test_shared_http_client_close_tolerates_closed_loop(
     await close_shared_http_client()
 
     assert http_module._shared_http_client is None
+
+
+def test_shared_http_client_recreated_across_different_event_loops() -> None:
+    """Reproduces agent_tasks._run_async's real pattern: each Celery
+    diagnostic-agent task attempt runs its own asyncio.run() loop, fully
+    torn down when that attempt finishes (not pytest-asyncio's loop, which
+    a single async test body can't escape).
+
+    Before this fix, the client was cached as a bare process global with
+    no loop awareness: the second asyncio.run() call below would get back
+    the SAME client whose connection pool still references the first,
+    now-dead loop. The next real outbound call's pool housekeeping
+    (closing an idle/expired keepalive connection) calling back into that
+    dead loop is exactly what produced the live
+    "RuntimeError: Event loop is closed" failures during diagnostic-agent
+    embedding calls. The client must be recreated per running loop.
+    """
+    asyncio.run(close_shared_http_client())
+
+    async def _get_client() -> httpx.AsyncClient:
+        return get_shared_http_client()
+
+    first = asyncio.run(_get_client())
+    second = asyncio.run(_get_client())
+
+    assert first is not second, (
+        "the shared client survived across two different event loops — "
+        "the next pool-housekeeping callback into the dead first loop "
+        "would raise 'RuntimeError: Event loop is closed'"
+    )
+
+    asyncio.run(close_shared_http_client())
 
 
 @pytest.mark.asyncio
