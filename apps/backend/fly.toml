@@ -4,6 +4,18 @@ primary_region = "iad"
 
 [build]
 
+[deploy]
+  # Runs ONCE per deploy, in a one-off release machine, before any process
+  # group's machines are replaced -- Fly aborts the entire deploy (no
+  # machines updated) if this exits non-zero, so a bad migration fails
+  # closed instead of half-applying across a rolling deploy. Picks up
+  # ALEMBIC_DATABASE_URL (the owner role that can run DDL) over the
+  # restricted-RLS DATABASE_URL the app uses at runtime --
+  # migrations/env.py already prefers it when set (see
+  # apps/backend/migrations/env.py). Closes the orphaned-probe window
+  # between deploy-live and a manual `alembic upgrade head` (hit with 0092).
+  release_command = "alembic upgrade head"
+
 # Pilot scaling: manually invoke `fly scale count N --process-group <name>
 # --app operious-ai-imad` to scale within the bounds below.
 # See docs/runbooks/autoscaling.md for thresholds.

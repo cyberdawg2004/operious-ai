@@ -122,6 +122,19 @@ def test_fly_workers_do_not_embed_beat_scheduler() -> None:
         assert " --beat" not in command
 
 
+def test_fly_release_command_runs_migrations_before_traffic() -> None:
+    """LOAD-BEARING: without a release_command, `fly deploy` never runs
+    alembic, leaving a window where the new release is live but the DB
+    is behind (hit manually with 0092). Fly runs release_command exactly
+    once per deploy, in a one-off machine, before any process group's
+    machines are replaced, and aborts the whole deploy on a non-zero
+    exit -- so this single line is what makes migrations run-once and
+    fail-closed; this test only proves the line is present and correct.
+    """
+    deploy = _fly_config()["deploy"]
+    assert deploy["release_command"] == "alembic upgrade head"
+
+
 def test_http_service_targets_web_process_only() -> None:
     assert _fly_config()["http_service"]["processes"] == ["web"]
 
