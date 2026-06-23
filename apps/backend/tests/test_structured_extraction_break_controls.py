@@ -29,7 +29,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Mapping, cast
 
 import httpx
@@ -78,6 +78,9 @@ from app.runtime.resolution_runtime import (
 from app.runtime.resolution_taxonomy_policy import (
     ResolutionTaxonomyCategory,
     ResolutionTaxonomyPolicy,
+)
+from app.runtime.warranty_refund_eligibility import (
+    _parse_date,  # pyright: ignore[reportPrivateUsage]
 )
 from tests._png_text_renderer import render_text_png
 from tests.conftest import requires_postgres
@@ -540,7 +543,13 @@ async def test_live_vision_extraction_reads_invoice_image(
         extracted = parse_extracted_fields(parsed.extracted_fields)
         assert extracted.order_id.value == "ZX-77231-QD"
         assert extracted.seller.value == "ROXX"
-        assert extracted.purchase_date.value == "20260115"
+        # The model is free to emit any of W1's supported date formats
+        # (e.g. "2026-01-15" vs "20260115") for the same calendar date --
+        # pin the semantic date W1 eligibility will actually parse, not
+        # one exact LLM-emitted string, so format non-determinism that W1
+        # already tolerates doesn't flake CI.
+        assert extracted.purchase_date.value is not None
+        assert _parse_date(extracted.purchase_date.value) == date(2026, 1, 15)
         assert extracted.amount.value in ("499", "499.00", "$499")
         assert extracted.order_id.source == "document"
     finally:
