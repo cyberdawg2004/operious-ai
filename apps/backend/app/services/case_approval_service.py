@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
@@ -59,6 +60,8 @@ from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateResult,
 )
 from app.sme import SmeCaseContext, SmeReviewRuntime
+
+logger = logging.getLogger(__name__)
 
 # Verdicts under which a (possibly revised) resolution may be delivered after a
 # human approval. ALLOW = clean pass; REQUIRE_APPROVAL = the gate defers to the
@@ -324,11 +327,25 @@ class CaseApprovalService:
                     tenant_id=tenant_id,
                     governance_decision_id=decision_id,
                 )
+            # TEMP-DIAG-CASE-ATOMICITY: correlation id for the trace below.
+            _diag_action_approval_id = (
+                _text(record.recommended_action.get("action_approval_id"))
+                if record.recommended_action is not None
+                else None
+            )
             await self._approve_recommended_action_if_bound(
                 record=record,
                 approved_by=approved_by,
                 note=note,
                 tenant_id=tenant_id,
+            )
+            # TEMP-DIAG-CASE-ATOMICITY
+            logger.info(
+                "diag_case_atomicity_action_approved_proceeding_to_case_update",
+                extra={
+                    "approval_case_id": approval_case_id,
+                    "action_approval_id": _diag_action_approval_id,
+                },
             )
             approved = replace(
                 record,
@@ -345,13 +362,58 @@ class CaseApprovalService:
                     ),
                 },
             )
+            # TEMP-DIAG-CASE-ATOMICITY
+            logger.info(
+                "diag_case_atomicity_before_update_case",
+                extra={
+                    "approval_case_id": approval_case_id,
+                    "action_approval_id": _diag_action_approval_id,
+                    "target_status": approved.status.value,
+                },
+            )
             saved = await self._persistence.update_case(
                 approved,
                 expected_tenant_id=tenant_id,
             )
+            # TEMP-DIAG-CASE-ATOMICITY
+            logger.info(
+                "diag_case_atomicity_after_update_case",
+                extra={
+                    "approval_case_id": approval_case_id,
+                    "action_approval_id": _diag_action_approval_id,
+                    "saved_status": saved.status.value,
+                    "saved_resolved_at": str(saved.resolved_at),
+                },
+            )
+            # TEMP-DIAG-CASE-ATOMICITY
+            logger.info(
+                "diag_case_atomicity_before_commit",
+                extra={
+                    "approval_case_id": approval_case_id,
+                    "action_approval_id": _diag_action_approval_id,
+                },
+            )
             await self._commit()
+            # TEMP-DIAG-CASE-ATOMICITY
+            logger.info(
+                "diag_case_atomicity_commit_succeeded",
+                extra={
+                    "approval_case_id": approval_case_id,
+                    "action_approval_id": _diag_action_approval_id,
+                },
+            )
             return saved
-        except Exception:
+        except Exception as exc:
+            # TEMP-DIAG-CASE-ATOMICITY: make the existing failure visible —
+            # does not change handling, only logs before the same re-raise.
+            logger.warning(
+                "diag_case_atomicity_exception_before_rollback",
+                extra={
+                    "approval_case_id": approval_case_id,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                },
+            )
             await self._rollback()
             raise
 
