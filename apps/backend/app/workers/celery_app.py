@@ -82,6 +82,7 @@ celery_app = Celery(
     include=[
         "app.workers.agent_tasks",
         "app.workers.approval_tasks",
+        "app.workers.case_approval_recovery_tasks",
         "app.workers.defect_cluster_tasks",
         "app.workers.escalation_recovery_tasks",
         "app.workers.escalation_tasks",
@@ -218,6 +219,17 @@ celery_conf.update(
         "reconcile-failed-execution-outbox-minutely": {
             "task": "reconcile_failed_execution_outbox",
             "schedule": 60.0,
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        # Catches a case_approval_records row left in awaiting_approval
+        # after its bound action already resolved — see
+        # app.workers.case_approval_recovery_tasks for why the inline
+        # approve_case/reject_case path can diverge from the case's own
+        # status update.
+        "reconcile-stale-case-approvals-minutely": {
+            "task": "reconcile_stale_case_approvals",
+            "schedule": 60.0,
+            "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
         "queue-depth-snapshot": {

@@ -28,6 +28,9 @@ from app.workers.agent_tasks import (
     _retry_countdown,
     execute_diagnostic_agent,
 )
+from app.workers.case_approval_recovery_tasks import (
+    reconcile_stale_case_approvals,
+)
 from app.workers.celery_app import celery_app, process_post_call_transcript
 from app.workers.celery_app import (
     _broker_transport_options,
@@ -82,6 +85,7 @@ _FIRE_AND_FORGET_TASKS = {
     "reconcile_failed_execution_outbox": reconcile_failed_execution_outbox,
     "reconcile_stale_execution_outbox": reconcile_stale_execution_outbox,
     "reconcile_stale_escalation_outbox": reconcile_stale_escalation_outbox,
+    "reconcile_stale_case_approvals": reconcile_stale_case_approvals,
     "cleanup_expired_webhook_nonces": cleanup_expired_webhook_nonces,
     "emit_queue_depth_snapshot": emit_queue_depth_snapshot,
     "evaluate_alert_conditions": evaluate_alert_conditions,
@@ -105,6 +109,7 @@ _TASK_RETRY_SETTINGS = {
     "reconcile_failed_execution_outbox": (5, 30),
     "reconcile_stale_execution_outbox": (5, 30),
     "reconcile_stale_escalation_outbox": (5, 30),
+    "reconcile_stale_case_approvals": (5, 30),
     "cleanup_expired_webhook_nonces": (1, 30),
     "emit_queue_depth_snapshot": (0, 0),
     "evaluate_alert_conditions": (0, 0),
@@ -251,6 +256,7 @@ def test_celery_beat_schedules_ingress_and_outbound_reconcilers() -> None:
             "reconcile_ingress_dispatch_outbox"
         ),
         "reconcile-outbound-send-outbox-minutely": "reconcile_outbound_send_outbox",
+        "reconcile-stale-case-approvals-minutely": "reconcile_stale_case_approvals",
     }.items():
         entry = schedule[schedule_name]
         assert entry["task"] == task_name
