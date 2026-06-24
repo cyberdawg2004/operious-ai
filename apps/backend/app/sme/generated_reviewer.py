@@ -39,6 +39,22 @@ class GeneratedSmeReviewer:
         recommendation_id: str,
         guidance: str | None = None,
     ) -> SmeRecommendation:
+        if (
+            guidance is None or not guidance.strip()
+        ) and context.proposed_customer_reply:
+            # No operator guidance to incorporate: regenerating from
+            # scratch would discard an already-governed reply (e.g. a
+            # tenant-authored verdict-override template) for no benefit,
+            # and risks producing a fresh, independently-ungrounded draft
+            # that silently supersedes it at delivery -- the approve path
+            # treats ANY textual difference from the proposal's own reply
+            # as a human revision needing fresh grounding revalidation,
+            # so an unprompted regeneration can fail a correct, already-
+            # approved reply for no reason. Mirrors the deterministic
+            # reviewer's preservation behavior in app.sme.runtime.
+            return _preserved_recommendation(
+                context, recommendation_id=recommendation_id
+            )
         evidence = tuple(dict(item) for item in context.citations)
         confidence = _confidence(context)
         history = [dict(turn) for turn in context.timeline]
@@ -100,6 +116,38 @@ class GeneratedSmeReviewer:
                 ),
             },
         )
+
+
+def _preserved_recommendation(
+    context: SmeCaseContext, *, recommendation_id: str
+) -> SmeRecommendation:
+    reply = (
+        context.proposed_customer_reply
+        or "A human-approved response is required before customer delivery."
+    ).strip()
+    return SmeRecommendation(
+        recommendation_id=recommendation_id,
+        recommended_reply=reply,
+        recommended_actions=tuple(
+            dict(action) for action in context.recommended_actions
+        ),
+        rationale=(
+            "No operator guidance to incorporate -- the proposal's own "
+            "already-governed reply is preserved verbatim rather than "
+            "regenerated."
+        ),
+        confidence=_confidence(context),
+        citations=tuple(dict(citation) for citation in context.citations),
+        risk_flags=(),
+        created_at=datetime.now(timezone.utc),
+        reply_segments=(),
+        metadata={
+            "reviewer": "preserved_existing_reply:v1",
+            "proposal_only": True,
+            "entry_category": context.entry_category,
+            "guidance_incorporated": False,
+        },
+    )
 
 
 def _confidence(context: SmeCaseContext) -> float:
