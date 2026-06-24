@@ -408,7 +408,13 @@ async def test_reconciled_approval_also_delivers_the_bound_reply(
     )
     assert saved_proposal is not None
     assert saved_proposal.status == ResolutionProposalStatus.SEND_ELIGIBLE
-    assert str(saved_proposal.governance_decision_id) == saved_case.governance_decision_id
+    assert saved_proposal.governance_decision_id is not None
+    # The case-approval decision authorizes the CASE; the proposal/draft
+    # must instead reference a dedicated delivery-authorization decision
+    # (carrying proposal_id + proposed_reply_sha256, which the email/
+    # whatsapp send-time governance check requires), never the case's
+    # own decision.
+    assert str(saved_proposal.governance_decision_id) != saved_case.governance_decision_id
 
     saved_draft = await resolutions.list_resolution_outbound_drafts(
         ResolutionOutboundDraftQuery(proposal_id=proposal_id),
@@ -416,6 +422,7 @@ async def test_reconciled_approval_also_delivers_the_bound_reply(
     )
     assert len(saved_draft.items) == 1
     assert saved_draft.items[0].status == ResolutionOutboundDraftStatus.READY
+    assert saved_draft.items[0].governance_decision_id == saved_proposal.governance_decision_id
 
 
 @pytest.mark.asyncio

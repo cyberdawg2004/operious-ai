@@ -82,6 +82,7 @@ _APPROVE_CHAIN_ID = "case_approval.human_approve.v1"
 _GUIDE_CHAIN_ID = "case_approval.operator_guidance.v1"
 _ESCALATE_CHAIN_ID = "case_approval.operator_escalate.v1"
 _REJECT_CHAIN_ID = "case_approval.human_reject.v1"
+_DELIVERY_AUTHORIZATION_CHAIN_ID = "case_approval.delivery_authorization.v1"
 
 # Drives whatever case is bound to an action_approval_id (if any, and
 # still awaiting_approval) to match that action's outcome -- the single
@@ -775,6 +776,21 @@ class CaseApprovalService:
                 ).hexdigest(),
                 governance_decision_id=delivered_decision_uuid,
             )
+        else:
+            # No revision: the reply is unchanged from the proposal's own
+            # (already build-time-governed) text. The case-approval
+            # decision we were handed authorizes the CASE, not this
+            # specific reply -- it carries neither proposal_id nor
+            # proposed_reply_sha256, which the email/whatsapp send-time
+            # governance check requires (it must bind an ALLOW decision
+            # to the exact content being sent). Record a dedicated,
+            # deterministically-keyed delivery-authorization decision
+            # instead of reusing the case decision as a stand-in.
+            delivered_decision_uuid = await self._record_delivery_authorization_decision(
+                record=record,
+                proposal=proposal,
+                tenant_id=tenant_id,
+            )
         await self._resolutions.update_resolution_proposal_status(
             proposal_id,
             expected_tenant_id=tenant_id,
@@ -787,6 +803,115 @@ class CaseApprovalService:
             status=ResolutionOutboundDraftStatus.READY,
             governance_decision_id=delivered_decision_uuid,
         )
+
+    async def _record_delivery_authorization_decision(
+        self,
+        *,
+        record: CaseApprovalRecord,
+        proposal: ResolutionProposalRecord,
+        tenant_id: str,
+    ) -> uuid.UUID:
+        """Record an ALLOW decision keyed exactly the way
+        EmailCustomerReplySendService/WhatsAppCustomerReplySendService's
+        send-time governance check requires: metadata carrying
+        ``proposal_id`` and ``proposed_reply_sha256`` for the reply text
+        actually being delivered. Deterministically keyed on
+        ``(tenant_id, proposal_id)`` so a retry (e.g. the reconciler, or
+        this method called twice) is idempotent — the existing decision
+        is reused, never re-evaluated or rewritten (decisions are
+        write-once).
+        """
+        decision_id = str(
+            uuid.uuid5(
+                _CASE_APPROVAL_NAMESPACE,
+                f"{tenant_id}|{proposal.proposal_id}|"
+                f"{_DELIVERY_AUTHORIZATION_CHAIN_ID}",
+            )
+        )
+        existing = await self._governance.get_decision(
+            decision_id,
+            expected_tenant_id=tenant_id,
+        )
+        if existing is not None:
+            return uuid.UUID(decision_id)
+        now = datetime.now(timezone.utc)
+        reply_sha256 = hashlib.sha256(
+            proposal.proposed_customer_reply.encode("utf-8")
+        ).hexdigest()
+        metadata: dict[str, Any] = {
+            "approval_case_id": record.approval_case_id,
+            "proposal_id": str(proposal.proposal_id),
+            "proposed_reply_sha256": reply_sha256,
+            "governed_action": "resolution.customer_reply.send",
+        }
+        reason = "case_approval_delivery_authorized"
+        rule = PolicyEvaluationResultRecord(
+            policy_name=_DELIVERY_AUTHORIZATION_CHAIN_ID,
+            rule_id=reason,
+            decision=Decision.ALLOW.value,
+            severity=10,
+            reason=reason,
+            evaluated_at=now.isoformat(),
+            metadata=metadata,
+            policy_version=_POLICY_VERSION,
+        )
+        decision_record = GovernanceDecisionRecord(
+            decision_id=decision_id,
+            decision=Decision.ALLOW.value,
+            stage=EnforcementStage.PRE_EXECUTION.value,
+            policy_chain_id=_DELIVERY_AUTHORIZATION_CHAIN_ID,
+            reason=reason,
+            decided_at=now.isoformat(),
+            correlation_id=record.dispatch_id or record.execution_id,
+            request_id=f"resolution:{proposal.proposal_id}",
+            tenant_id=tenant_id,
+            subject_kind="resolution_proposal",
+            governance_version=_POLICY_VERSION,
+            evaluated_rules=(rule,),
+            metadata=metadata,
+        )
+        trace_record = GovernanceTraceRecord(
+            decision_id=decision_id,
+            request_id=decision_record.request_id,
+            correlation_id=decision_record.correlation_id,
+            stage=decision_record.stage,
+            action="resolution.customer_reply.send",
+            resource=f"resolution_proposal:{proposal.proposal_id}",
+            actor=record.resolved_by or "case_approval_service",
+            tenant_id=tenant_id,
+            subject_kind="resolution_proposal",
+            started_at=now.isoformat(),
+            ended_at=now.isoformat(),
+            latency_ms=0.0,
+            status="ok",
+            final_decision=Decision.ALLOW.value,
+            policy_chain_id=_DELIVERY_AUTHORIZATION_CHAIN_ID,
+            rule_count=1,
+            violation_count=0,
+            restriction_count=0,
+            enforcement_handler="case_approval_service",
+            enforcement_status="recorded",
+            enforcement_latency_ms=0.0,
+            metadata=metadata,
+        )
+        action_record = EnforcementActionRecord(
+            action_id=str(
+                uuid.uuid5(
+                    _CASE_APPROVAL_NAMESPACE,
+                    f"action|delivery_authorization|{proposal.proposal_id}",
+                )
+            ),
+            handler_name="case_approval_service",
+            decision_id=decision_id,
+            outcome="recorded",
+            applied_at=now.isoformat(),
+            detail=reason,
+            metadata=metadata,
+        )
+        await self._governance.record_decision(decision_record)
+        await self._governance.record_trace(trace_record)
+        await self._governance.record_enforcement_action(action_record)
+        return uuid.UUID(decision_id)
 
     async def _revalidate_resolution_governance(
         self,

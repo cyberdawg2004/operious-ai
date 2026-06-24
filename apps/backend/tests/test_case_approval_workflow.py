@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
@@ -239,11 +240,83 @@ async def test_approve_flips_resolution_and_draft_ready() -> None:
     assert approved.governance_decision_id is not None
     assert proposal is not None
     assert proposal.status is ResolutionProposalStatus.SEND_ELIGIBLE
-    assert proposal.governance_decision_id == uuid.UUID(
+    assert proposal.governance_decision_id is not None
+    # The case-approval decision authorizes the CASE; it carries neither
+    # proposal_id nor proposed_reply_sha256, which the email/whatsapp
+    # send-time governance check requires bound to the exact content
+    # being delivered. The proposal/draft must instead reference a
+    # dedicated delivery-authorization decision, never the case's own.
+    assert proposal.governance_decision_id != uuid.UUID(
         approved.governance_decision_id
     )
     assert draft is not None
     assert draft.status is ResolutionOutboundDraftStatus.READY
+    assert draft.governance_decision_id == proposal.governance_decision_id
+
+
+@pytest.mark.asyncio
+async def test_approve_records_a_send_governance_check_compatible_decision() -> None:
+    """LOAD-BEARING regression test: confirmed live (case c317eda9) that
+    reusing the case-approval decision as the proposal/draft's governance_
+    decision_id breaks the email/whatsapp send-time check, which requires
+    metadata["proposal_id"] (the case decision has no such key -- or the
+    wrong one, "resolution_proposal_id") and metadata["proposed_reply_
+    sha256"] (the case decision never carries one at all). The dedicated
+    delivery-authorization decision this test inspects directly is what
+    makes EmailCustomerReplySendService._assert_persisted_governance_allow
+    actually pass for a case-approval-driven (not auto-send) delivery.
+    """
+    governance_repository = InMemoryGovernanceRepository()
+    approval_persistence = InMemoryCaseApprovalPersistence()
+    resolutions = InMemoryResolutionProposalPersistence()
+    await resolutions.create_resolution_proposal(_proposal(), expected_tenant_id=_TENANT)
+    await resolutions.create_resolution_outbound_draft(_draft(), expected_tenant_id=_TENANT)
+    service = CaseApprovalService(
+        persistence=approval_persistence,
+        sme_runtime=SmeReviewRuntime(),
+        resolution_repository=resolutions,
+        governance_repository=governance_repository,
+    )
+    ingress = ApprovalQueueIngressService(persistence=approval_persistence)
+    record = await ingress.request_case_review(
+        _request(CaseApprovalEntryCategory.RESOLUTION_NEEDS_HUMAN_APPROVAL),
+        expected_tenant_id=_TENANT,
+    )
+    reviewed = await service.review_case(
+        approval_case_id=record.approval_case_id, tenant_id=_TENANT
+    )
+
+    approved = await service.approve_case(
+        approval_case_id=reviewed.approval_case_id,
+        tenant_id=_TENANT,
+        approved_by="operator-approve",
+        note="Looks good.",
+    )
+    proposal = await resolutions.get_resolution_proposal(
+        str(_proposal_id()), expected_tenant_id=_TENANT
+    )
+    assert proposal is not None
+    assert proposal.governance_decision_id is not None
+
+    delivery_decision = await governance_repository.get_decision(
+        str(proposal.governance_decision_id), expected_tenant_id=_TENANT
+    )
+    assert delivery_decision is not None
+    assert delivery_decision.decision == Decision.ALLOW.value
+    assert delivery_decision.policy_chain_id == "case_approval.delivery_authorization.v1"
+    assert delivery_decision.metadata["proposal_id"] == str(proposal.proposal_id)
+    assert delivery_decision.metadata["proposed_reply_sha256"] == hashlib.sha256(
+        proposal.proposed_customer_reply.encode("utf-8")
+    ).hexdigest()
+
+    # The case's OWN decision is a separate record -- never the same id.
+    assert approved.governance_decision_id is not None
+    case_decision = await governance_repository.get_decision(
+        approved.governance_decision_id, expected_tenant_id=_TENANT
+    )
+    assert case_decision is not None
+    assert case_decision.policy_chain_id == "case_approval.human_approve.v1"
+    assert case_decision.decision_id != delivery_decision.decision_id
 
 
 @pytest.mark.asyncio
