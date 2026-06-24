@@ -26,6 +26,7 @@ from typing import Sequence
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.approvals.exceptions import CaseApprovalRuntimeError
 from app.approvals.persistence import PostgresCaseApprovalPersistence
 from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
@@ -65,6 +66,7 @@ class BackfillResult:
     scanned: int
     delivered: int
     cases: tuple[str, ...]
+    denied: tuple[tuple[str, str], ...] = ()
 
 
 def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
@@ -131,18 +133,28 @@ async def backfill_undelivered_case_resolutions(
         .all()
     )
     delivered_cases: list[str] = []
+    denied_cases: list[tuple[str, str]] = []
     service = _build_case_approval_service(session)
     for row in candidates:
         approval_case_id = str(row["approval_case_id"])
         tenant_id = str(row["tenant_id"])
         if not apply:
             continue
-        delivered = await service.complete_reconciled_resolution(
-            approval_case_id=approval_case_id,
-            tenant_id=tenant_id,
-            resolved_by=str(row["resolved_by"] or "unknown"),
-            note=row["resolution_note"],
-        )
+        try:
+            delivered = await service.complete_reconciled_resolution(
+                approval_case_id=approval_case_id,
+                tenant_id=tenant_id,
+                resolved_by=str(row["resolved_by"] or "unknown"),
+                note=row["resolution_note"],
+            )
+        except CaseApprovalRuntimeError as exc:
+            # A clean governance denial (e.g. ungrounded claim) -- the
+            # reply is correctly held, not a script failure. Roll back
+            # so this case's row is untouched and report it distinctly
+            # from a delivered case.
+            await session.rollback()
+            denied_cases.append((approval_case_id, str(exc)))
+            continue
         if delivered:
             await session.commit()
             delivered_cases.append(approval_case_id)
@@ -155,6 +167,7 @@ async def backfill_undelivered_case_resolutions(
         cases=tuple(
             str(row["approval_case_id"]) for row in candidates
         ) if not apply else tuple(delivered_cases),
+        denied=tuple(denied_cases),
     )
 
 
@@ -190,6 +203,7 @@ async def _amain(argv: Sequence[str] | None = None) -> BackfillResult:
                 "scanned": result.scanned,
                 "delivered": result.delivered,
                 "cases": list(result.cases),
+                "denied": list(result.denied),
             }
         )
         return result
