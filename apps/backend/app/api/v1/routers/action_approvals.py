@@ -25,6 +25,7 @@ from app.services.action_approval_service import (
     ActionApprovalRuntimeError,
     ActionApprovalService,
 )
+from app.services.case_approval_service import CaseApprovalRuntimeError
 
 router = APIRouter(tags=["action-approvals"])
 
@@ -119,6 +120,17 @@ async def approve_action_approval(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "action_approval_failed"},
         ) from exc
+    except CaseApprovalRuntimeError as exc:
+        # The action itself resolved fine, but it's bound to a case whose
+        # reply couldn't be completed (e.g. a clean governance denial) --
+        # claim_and_complete_case_for_action rolled the whole transaction
+        # back, so neither half landed. Distinct from action_approval_
+        # failed: the action approval surface is fine, the linked case's
+        # content is the actual blocker.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "case_completion_failed"},
+        ) from exc
     return ActionApprovalSummaryResponse.from_record(record)
 
 
@@ -156,6 +168,11 @@ async def deny_action_approval(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "action_approval_denial_failed"},
+        ) from exc
+    except CaseApprovalRuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "case_completion_failed"},
         ) from exc
     return ActionApprovalSummaryResponse.from_record(record)
 
