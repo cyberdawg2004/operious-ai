@@ -80,20 +80,6 @@ _SELECT_STALE_CASES_SQL = text(
     """
 )
 
-_RECONCILE_CASE_SQL = text(
-    """
-    UPDATE case_approval_records
-    SET status = :status,
-        resolved_at = :resolved_at,
-        resolved_by = :resolved_by,
-        resolution_note = :resolution_note
-    WHERE approval_case_id = :approval_case_id
-      AND tenant_id = :tenant_id
-      AND status = 'awaiting_approval'
-    RETURNING approval_case_id
-    """
-)
-
 
 def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
     settings = get_settings()
@@ -201,7 +187,6 @@ async def _reconcile(session: AsyncSession, *, limit: int) -> dict[str, object]:
                 session,
                 action_repo=action_repo,
                 case_approval_service=case_approval_service,
-                approval_case_id=approval_case_id,
                 tenant_id=tenant_id,
                 action_approval_id=str(action_approval_id),
             )
@@ -239,7 +224,6 @@ async def _reconcile_one(
     *,
     action_repo: PostgresActionApprovalRepository,
     case_approval_service: CaseApprovalService,
-    approval_case_id: str,
     tenant_id: str,
     action_approval_id: str,
 ) -> dict[str, object] | None:
@@ -248,68 +232,56 @@ async def _reconcile_one(
     )
     if action is None or action.status not in _TERMINAL_ACTION_STATUSES:
         return None
-    new_status = (
-        CaseApprovalStatus.APPROVED
-        if action.status == "approved"
-        else CaseApprovalStatus.REJECTED
-    )
     resolved_at = action.resolved_at or datetime.now(timezone.utc)
     resolved_by = action.resolved_by or "unknown"
     resolution_note = action.resolution_note or (
         f"Reconciled: bound action {action.status}, but the case's own "
         "resolution never landed inline (reconcile_stale_case_approvals)."
     )
-    row = (
-        await session.execute(
-            _RECONCILE_CASE_SQL,
-            {
-                "approval_case_id": approval_case_id,
-                "tenant_id": tenant_id,
-                "status": new_status.value,
-                "resolved_at": resolved_at,
-                "resolved_by": resolved_by,
-                "resolution_note": resolution_note,
-            },
-        )
-    ).mappings().one_or_none()
-    if row is None:
+    # Single completion path, shared with ActionApprovalService's
+    # standalone Action Approvals surface (claim_and_complete_case_for_
+    # action): claims the case bound to this action_approval_id (if any,
+    # and still awaiting_approval) and -- if approved -- delivers its
+    # resolution, same transaction, committed together below so a
+    # delivery failure rolls the case-status change back too and the
+    # next sweep retries both halves together.
+    claimed = await case_approval_service.claim_and_complete_case_for_action(
+        action_approval_id=action_approval_id,
+        tenant_id=tenant_id,
+        action_status=action.status,
+        resolved_by=resolved_by,
+        resolved_at=resolved_at,
+        resolution_note=resolution_note,
+    )
+    if claimed is None:
         # Already resolved by the inline path or a concurrent run between
         # the detection scan and this update — not an error, just stale.
         # Nothing was written this call, so no commit/rollback is needed.
         return None
-    delivered = False
-    if new_status is CaseApprovalStatus.APPROVED:
-        # Same transaction as the case-status update above, committed
-        # together below: a delivery failure here must roll the
-        # case-status change back too, so the case stays
-        # awaiting_approval and the next sweep retries both halves
-        # together rather than leaving an "approved" case whose reply
-        # never delivered with no automatic retry.
-        delivered = await case_approval_service.complete_reconciled_resolution(
-            approval_case_id=approval_case_id,
-            tenant_id=tenant_id,
-            resolved_by=resolved_by,
-            note=resolution_note,
-        )
+    new_status = (
+        CaseApprovalStatus.APPROVED
+        if action.status == "approved"
+        else CaseApprovalStatus.REJECTED
+    )
     await session.commit()
     logger.info(
         "case_approval_reconciled",
         extra={
-            "approval_case_id": approval_case_id,
+            "approval_case_id": claimed.approval_case_id,
             "tenant_id": tenant_id,
             "action_approval_id": action_approval_id,
             "new_status": new_status.value,
-            "delivered": delivered,
+            "delivered": claimed.delivered,
             "resolved_by": resolved_by,
         },
     )
     return {
-        "approval_case_id": approval_case_id,
+        "approval_case_id": claimed.approval_case_id,
         "tenant_id": tenant_id,
         "action_approval_id": action_approval_id,
         "new_status": new_status.value,
         "resolved_by": resolved_by,
-        "delivered": delivered,
+        "delivered": claimed.delivered,
     }
 
 

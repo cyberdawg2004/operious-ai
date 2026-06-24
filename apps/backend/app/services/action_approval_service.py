@@ -112,6 +112,13 @@ ActionOrchestrationRuntimeFactory = Callable[
     Awaitable[ActionOrchestrationRuntime],
 ]
 PostCommitFlush = Callable[[], Awaitable[None]]
+# action_approval_id, tenant_id, action_status, resolved_by, resolved_at,
+# resolution_note -- mirrors CaseApprovalService.claim_and_complete_case_
+# for_action's keyword arguments positionally.
+CaseResolutionCompleter = Callable[
+    [str, str, str, str, datetime, str],
+    Awaitable[object],
+]
 
 
 class ActionApprovalService:
@@ -128,6 +135,7 @@ class ActionApprovalService:
         orchestration_runtime: ActionOrchestrationRuntime | None = None,
         orchestration_runtime_factory: ActionOrchestrationRuntimeFactory | None = None,
         post_commit_flush: PostCommitFlush | None = None,
+        case_resolution_completer: CaseResolutionCompleter | None = None,
     ) -> None:
         if orchestration_runtime is None and orchestration_runtime_factory is None:
             raise ValueError("ActionApprovalService requires orchestration runtime")
@@ -141,6 +149,7 @@ class ActionApprovalService:
         self._post_commit_flush = post_commit_flush
         self._timeline = timeline_runtime
         self._session = session
+        self._case_resolution_completer = case_resolution_completer
 
     async def list_pending(
         self,
@@ -326,7 +335,31 @@ class ActionApprovalService:
             raise ActionApprovalNotFoundError(
                 f"unknown action approval: {approval_id}"
             )
+        await self._complete_bound_case_if_any(resolved)
         return resolved
+
+    async def _complete_bound_case_if_any(
+        self, resolved: ActionApprovalRecord
+    ) -> None:
+        """One manager decision on an action must do both halves or
+        neither: if a case_approval_record is bound to this action (e.g.
+        a warranty/refund case approved/denied via the standalone Action
+        Approvals surface instead of Reply Reviews), drive it to match
+        AND -- if approved -- deliver its reply, in this SAME transaction.
+        No-op if no completer is configured or no case is bound; either
+        way this never blocks resolving the action itself."""
+        if self._case_resolution_completer is None:
+            return
+        if resolved.resolved_at is None or resolved.resolved_by is None:
+            return
+        await self._case_resolution_completer(
+            resolved.approval_id,
+            resolved.tenant_id,
+            resolved.status,
+            resolved.resolved_by,
+            resolved.resolved_at,
+            resolved.resolution_note or "",
+        )
 
     async def _orchestration_for(
         self,
@@ -409,6 +442,7 @@ class ActionApprovalService:
             denied_by=denied_by,
             reason=note,
         )
+        await self._complete_bound_case_if_any(resolved)
         return resolved
 
     async def _require_approval(

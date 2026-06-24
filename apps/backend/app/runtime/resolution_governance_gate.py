@@ -527,6 +527,7 @@ def _decision_seed(request: ResolutionGovernanceGateRequest) -> str:
         "resolution|"
         f"tenant:{request.tenant_id}|"
         f"proposal:{request.proposal_id}|"
+        f"stage:{request.evaluation_stage.value}|"
         "governance"
     )
 

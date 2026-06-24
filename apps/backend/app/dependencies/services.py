@@ -1020,6 +1020,53 @@ def build_action_approval_service(
         publisher_id="api:action-approval",
     )
 
+    # One manager decision on a case-bound action must do both halves or
+    # neither: if approving/denying THIS action also resolves a linked
+    # case_approval_records row, deliver its reply (when approved) in the
+    # SAME transaction -- the standalone Action Approvals surface must
+    # never be able to fire a case-bound action while leaving its reply
+    # undelivered. Full parity with get_case_approval_service's wiring
+    # (including the governance gate -- see case_approval_recovery_tasks
+    # for why it's required, not optional, for these cases).
+    case_completion_service = CaseApprovalService(
+        persistence=PostgresCaseApprovalPersistence(
+            session, data_protection=data_protection
+        ),
+        sme_runtime=build_sme_review_runtime(),
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session, data_protection=data_protection
+        ),
+        governance_repository=governance_repository,
+        resolution_governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=CitationCoverageGroundingChecker(
+                    document_repository=PostgresTenantConfigurationRepository(
+                        session, data_protection=data_protection
+                    ),
+                ),
+            )
+        ),
+        session=session,
+    )
+
+    async def _complete_case_for_action(
+        action_approval_id: str,
+        tenant_id: str,
+        action_status: str,
+        resolved_by: str,
+        resolved_at: datetime,
+        resolution_note: str,
+    ) -> object:
+        return await case_completion_service.claim_and_complete_case_for_action(
+            action_approval_id=action_approval_id,
+            tenant_id=tenant_id,
+            action_status=action_status,
+            resolved_by=resolved_by,
+            resolved_at=resolved_at,
+            resolution_note=resolution_note,
+        )
+
     async def _orchestration_factory(tenant_id: str) -> ActionOrchestrationRuntime:
         approval_ingress, approval_reviewer = _case_approval_producer_dependencies(
             session,
@@ -1080,6 +1127,7 @@ def build_action_approval_service(
         timeline_runtime=timeline_runtime,
         session=session,
         post_commit_flush=deferred_escalation_publisher.flush,
+        case_resolution_completer=_complete_case_for_action,
     )
 
 

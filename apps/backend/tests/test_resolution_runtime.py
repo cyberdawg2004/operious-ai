@@ -20,6 +20,7 @@ from app.resolution.enums import (
     ResolutionProposalStatus,
     ResolutionSupervisorVerdict,
 )
+from app.resolution.identity import as_resolution_proposal_id
 from app.resolution.persistence import (
     InMemoryResolutionProposalPersistence,
     PostgresResolutionProposalPersistence,
@@ -44,6 +45,7 @@ from app.runtime.resolution_governance_gate import (
     build_resolution_governance_runtime,
 )
 from app.runtime.resolution_runtime import (
+    ResolutionGovernanceEvaluationStage,
     ResolutionGovernanceGateRequest,
     ResolutionGovernanceGateResult,
     ResolutionOutboundDraftRuntime,
@@ -2003,3 +2005,118 @@ async def test_safety_floor_fires_for_swollen_power_bank_regardless_of_llm_categ
     # after the proposal is persisted.  Removing "swollen" from
     # _SAFETY_FLOOR_KEYWORDS breaks the keyword-floor invariant.
     assert resolution_proposal_is_send_eligible(record) is True
+
+
+def _governance_request(
+    *,
+    evaluation_stage: ResolutionGovernanceEvaluationStage,
+    proposed_customer_reply: str = "We can help with your warranty claim.",
+) -> ResolutionGovernanceGateRequest:
+    proposal_id = as_resolution_proposal_id(
+        "66666666-6666-4666-8666-666666666666"
+    )
+    return ResolutionGovernanceGateRequest(
+        proposal_id=proposal_id,
+        tenant_id=TENANT_ID,
+        session_id=SESSION_ID,
+        execution_id=EXECUTION_ID,
+        dispatch_id=DISPATCH_ID,
+        diagnostic_event_id=None,
+        diagnostic_summary="Warranty claim found.",
+        diagnostic_category="warranty_replacement_inquiry",
+        diagnostic_confidence=0.8,
+        original_content="My PowerCore is broken.",
+        proposed_customer_reply=proposed_customer_reply,
+        resolution_category="warranty_replacement_inquiry",
+        recommended_actions=(),
+        evidence=(_citation(),),
+        local_supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
+        local_governance_verdict=ResolutionGovernanceVerdict.REQUIRE_APPROVAL,
+        local_autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
+        local_status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
+        local_reasons=(),
+        evaluation_stage=evaluation_stage,
+        reply_segments=(
+            {
+                "kind": "claim",
+                "text": proposed_customer_reply,
+                "citation_ranks": [1],
+            },
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_delivery_revalidation_never_collides_with_build_time_decision() -> None:
+    """LOAD-BEARING regression test for the decision-id collision bug: a
+    proposal's build-time governance evaluation and a LATER delivery-time
+    revalidation of the same proposal (e.g. before delivering a human-
+    revised reply) used to compute the IDENTICAL decision_id from
+    (tenant_id, proposal_id) alone -- so the second evaluate() call always
+    raised "decision already recorded; records are write-once" regardless
+    of what its verdict was, instead of returning a clean verdict. The
+    evaluation_stage component in the seed must keep them distinct.
+    """
+    governance_repository = InMemoryGovernanceRepository()
+    gate = ResolutionGovernanceGate(
+        governance_runtime=build_resolution_governance_runtime(
+            persistence=governance_repository,
+            grounding_checker=StaticGroundingChecker(allowed=True),
+        )
+    )
+
+    build_result = await gate.evaluate_resolution_proposal(
+        _governance_request(
+            evaluation_stage=ResolutionGovernanceEvaluationStage.PROPOSAL_BUILD
+        )
+    )
+    # Must not raise: this is the regression. Before the fix, this second
+    # call for the SAME proposal always collided with the first.
+    delivery_result = await gate.evaluate_resolution_proposal(
+        _governance_request(
+            evaluation_stage=(
+                ResolutionGovernanceEvaluationStage.DELIVERY_REVALIDATION
+            )
+        )
+    )
+
+    assert build_result.governance_decision_id is not None
+    assert delivery_result.governance_decision_id is not None
+    assert build_result.governance_decision_id != delivery_result.governance_decision_id
+    assert await governance_repository.get_decision(
+        str(build_result.governance_decision_id)
+    ) is not None
+    assert await governance_repository.get_decision(
+        str(delivery_result.governance_decision_id)
+    ) is not None
+
+
+@pytest.mark.asyncio
+async def test_delivery_revalidation_denial_is_a_clean_verdict_not_a_crash() -> None:
+    """Break-control: an ungrounded reply revalidated at delivery time must
+    surface as a clean DENY verdict, not crash on the decision-id collision
+    (or anything else) -- the case must be held, not sent, and the caller
+    must be able to make that decision from a returned result, not an
+    exception escaping the governance layer itself."""
+    governance_repository = InMemoryGovernanceRepository()
+    gate = ResolutionGovernanceGate(
+        governance_runtime=build_resolution_governance_runtime(
+            persistence=governance_repository,
+            grounding_checker=StaticGroundingChecker(allowed=False),
+        )
+    )
+
+    await gate.evaluate_resolution_proposal(
+        _governance_request(
+            evaluation_stage=ResolutionGovernanceEvaluationStage.PROPOSAL_BUILD
+        )
+    )
+    delivery_result = await gate.evaluate_resolution_proposal(
+        _governance_request(
+            evaluation_stage=(
+                ResolutionGovernanceEvaluationStage.DELIVERY_REVALIDATION
+            )
+        )
+    )
+
+    assert delivery_result.governance_verdict is ResolutionGovernanceVerdict.DENY

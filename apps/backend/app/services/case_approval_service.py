@@ -7,10 +7,11 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol, cast
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.approvals.enums import (
@@ -55,6 +56,7 @@ from app.resolution.persistence import (
     ResolutionProposalRecord,
 )
 from app.runtime.resolution_runtime import (
+    ResolutionGovernanceEvaluationStage,
     ResolutionGovernanceGateProtocol,
     ResolutionGovernanceGateRequest,
     ResolutionGovernanceGateResult,
@@ -80,6 +82,37 @@ _APPROVE_CHAIN_ID = "case_approval.human_approve.v1"
 _GUIDE_CHAIN_ID = "case_approval.operator_guidance.v1"
 _ESCALATE_CHAIN_ID = "case_approval.operator_escalate.v1"
 _REJECT_CHAIN_ID = "case_approval.human_reject.v1"
+
+# Drives whatever case is bound to an action_approval_id (if any, and
+# still awaiting_approval) to match that action's outcome -- the single
+# completion path shared by reconcile_stale_case_approvals (the stale-
+# sweep entry point) and ActionApprovalService.approve_in_transaction
+# (the standalone Action Approvals entry point), so a case-bound action
+# can never be approved from ANY surface without also completing its
+# case. WHERE status = 'awaiting_approval' makes this idempotent: a case
+# already driven by the inline approve_case path (or a prior call here)
+# simply matches zero rows on a second call.
+_CLAIM_CASE_FOR_ACTION_SQL = text(
+    """
+    UPDATE case_approval_records
+    SET status = :status,
+        resolved_at = :resolved_at,
+        resolved_by = :resolved_by,
+        resolution_note = :resolution_note
+    WHERE tenant_id = :tenant_id
+      AND recommended_action ->> 'action_approval_id' = :action_approval_id
+      AND status = 'awaiting_approval'
+    RETURNING approval_case_id
+    """
+)
+
+@dataclass(frozen=True, slots=True)
+class ClaimedCaseCompletion:
+    """Result of claiming a case bound to an approved/denied action."""
+
+    approval_case_id: str
+    delivered: bool
+
 
 ActionApprovalApprove = Callable[
     [str, str, str | None, str, str],
@@ -481,6 +514,68 @@ class CaseApprovalService:
         )
         return True
 
+    async def claim_and_complete_case_for_action(
+        self,
+        *,
+        action_approval_id: str,
+        tenant_id: str,
+        action_status: str,
+        resolved_by: str,
+        resolved_at: datetime,
+        resolution_note: str,
+    ) -> ClaimedCaseCompletion | None:
+        """If a case is bound to ``action_approval_id`` and still
+        ``awaiting_approval``, drive it to match the action's outcome and
+        -- if approved -- deliver its resolution via
+        :meth:`complete_reconciled_resolution`, all in the caller's shared
+        transaction (no commit here). One manager decision on a case-bound
+        action must do both halves or neither; this is the single
+        completion path every surface that can approve/deny an action
+        calls, so no surface can fire a case-bound action while leaving
+        its case (and reply) untouched.
+
+        Idempotent: returns ``None`` (no-op) if no case is bound to this
+        action, or it was already resolved by the inline ``approve_case``
+        path or a prior call here -- the ``WHERE status =
+        'awaiting_approval'`` claim matches zero rows either way.
+        """
+        if self._session is None:
+            raise CaseApprovalRuntimeError(
+                "no shared session to claim a case-bound action's case in"
+            )
+        new_status = (
+            CaseApprovalStatus.APPROVED
+            if action_status == "approved"
+            else CaseApprovalStatus.REJECTED
+        )
+        row = (
+            await self._session.execute(
+                _CLAIM_CASE_FOR_ACTION_SQL,
+                {
+                    "tenant_id": tenant_id,
+                    "action_approval_id": action_approval_id,
+                    "status": new_status.value,
+                    "resolved_at": resolved_at,
+                    "resolved_by": resolved_by,
+                    "resolution_note": resolution_note,
+                },
+            )
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        approval_case_id = str(row["approval_case_id"])
+        delivered = False
+        if new_status is CaseApprovalStatus.APPROVED:
+            delivered = await self.complete_reconciled_resolution(
+                approval_case_id=approval_case_id,
+                tenant_id=tenant_id,
+                resolved_by=resolved_by,
+                note=resolution_note,
+            )
+        return ClaimedCaseCompletion(
+            approval_case_id=approval_case_id, delivered=delivered
+        )
+
     async def reject_case(
         self,
         *,
@@ -738,6 +833,9 @@ class CaseApprovalService:
                 local_autonomy_decision=proposal.autonomy_decision,
                 local_status=proposal.status,
                 local_reasons=(),
+                evaluation_stage=(
+                    ResolutionGovernanceEvaluationStage.DELIVERY_REVALIDATION
+                ),
                 reply_segments=segments,
                 source_language=proposal.source_language,
             )

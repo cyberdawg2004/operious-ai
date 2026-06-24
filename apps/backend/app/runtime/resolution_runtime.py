@@ -239,6 +239,24 @@ class ResolutionProposalRequest:
     extracted_fields: ExtractedOrderFields | None = None
 
 
+class ResolutionGovernanceEvaluationStage(StrEnum):
+    """WHEN a proposal is being evaluated by central governance.
+
+    The decision-id seed (see resolution_governance_gate._decision_seed)
+    must vary by stage: a proposal gets exactly one PROPOSAL_BUILD
+    evaluation when it's first created, and may later get a SEPARATE
+    DELIVERY_REVALIDATION evaluation if a human revises the reply before
+    delivery. These are two distinct decisions about the same proposal --
+    without a stage component in the seed, both compute the identical
+    decision_id and the second one always collides with the write-once
+    governance ledger (it doesn't matter what the second verdict is; the
+    insert fails before the verdict is ever returned).
+    """
+
+    PROPOSAL_BUILD = "proposal_build"
+    DELIVERY_REVALIDATION = "delivery_revalidation"
+
+
 @dataclass(frozen=True, slots=True)
 class ResolutionGovernanceGateRequest:
     """Application-layer governance input for a proposed resolution."""
@@ -262,6 +280,7 @@ class ResolutionGovernanceGateRequest:
     local_autonomy_decision: ResolutionAutonomyDecision
     local_status: ResolutionProposalStatus
     local_reasons: tuple[str, ...]
+    evaluation_stage: ResolutionGovernanceEvaluationStage
     reply_segments: tuple[Mapping[str, Any], ...] = ()
     source_language: str = "en"
     source_channel: str | None = None
@@ -440,6 +459,7 @@ class ResolutionRuntime:
                 local_autonomy_decision=gate.autonomy_decision,
                 local_status=gate.status,
                 local_reasons=gate.reasons,
+                evaluation_stage=ResolutionGovernanceEvaluationStage.PROPOSAL_BUILD,
                 reply_segments=reply_segments,
                 source_language=_normalise_language(request.source_language),
                 source_channel=request.source_channel,
