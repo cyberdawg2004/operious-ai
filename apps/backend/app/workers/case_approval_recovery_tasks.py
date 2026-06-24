@@ -55,8 +55,11 @@ from app.db.session import get_owner_session_factory
 from app.governance.persistence import PostgresGovernanceRepository
 from app.queues import QUEUE_WEBHOOK_MAINTENANCE
 from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.runtime import ResolutionGovernanceGate, build_resolution_governance_runtime
+from app.runtime.grounding import CitationCoverageGroundingChecker
 from app.services.case_approval_service import CaseApprovalService
 from app.sme import build_sme_review_runtime
+from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -108,17 +111,16 @@ def _data_protection_service(session: AsyncSession) -> DataProtectionService | N
 
 
 def _build_case_approval_service(session: AsyncSession) -> CaseApprovalService:
-    # No resolution_governance_gate: this sweep only ever completes cases
-    # whose bound action was approved/denied via the action-approval path,
-    # never via case_approval_service.guide_case, so the revised-reply
-    # branch in _deliver_resolution (the only caller of the gate) is
-    # structurally unreachable here. data_protection IS wired so guidance
-    # metadata, if a case was guided before falling through to this sweep,
-    # decrypts correctly instead of being mistaken for "no revision" --
-    # if a revision is genuinely present, _deliver_resolution still fails
-    # closed (raises, caught per-row below) rather than silently
-    # delivering unrevalidated text.
+    # resolution_governance_gate IS wired, matching get_case_approval_service
+    # exactly: _deliver_resolution's revision branch fires whenever
+    # metadata["sme_recommendation"]["recommended_reply"] differs from the
+    # proposal's own stored reply -- which is the NORM for warranty/refund
+    # cases (the SME recommendation is embedded into case metadata at
+    # creation regardless of whether a human ever guides/edits it), not a
+    # rare guided-case edge case. Without the gate, every such reconciled
+    # delivery fails closed (confirmed live backfilling a real stuck case).
     data_protection = _data_protection_service(session)
+    governance_repository = PostgresGovernanceRepository(session)
     return CaseApprovalService(
         persistence=PostgresCaseApprovalPersistence(
             session, data_protection=data_protection
@@ -127,7 +129,17 @@ def _build_case_approval_service(session: AsyncSession) -> CaseApprovalService:
         resolution_repository=PostgresResolutionProposalPersistence(
             session, data_protection=data_protection
         ),
-        governance_repository=PostgresGovernanceRepository(session),
+        governance_repository=governance_repository,
+        resolution_governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=CitationCoverageGroundingChecker(
+                    document_repository=PostgresTenantConfigurationRepository(
+                        session, data_protection=data_protection
+                    ),
+                ),
+            )
+        ),
         session=session,
     )
 

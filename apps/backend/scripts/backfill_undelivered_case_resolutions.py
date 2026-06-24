@@ -33,8 +33,11 @@ from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_owner_session_factory
 from app.governance.persistence import PostgresGovernanceRepository
 from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.runtime import ResolutionGovernanceGate, build_resolution_governance_runtime
+from app.runtime.grounding import CitationCoverageGroundingChecker
 from app.services.case_approval_service import CaseApprovalService
 from app.sme import build_sme_review_runtime
+from app.tenant.persistence import PostgresTenantConfigurationRepository
 
 _CANDIDATES_SQL = text(
     """
@@ -46,6 +49,10 @@ _CANDIDATES_SQL = text(
     WHERE car.status = 'approved'
       AND car.resolution_proposal_id IS NOT NULL
       AND rp.status = 'pending_human_approval'
+      AND (
+        CAST(:case_id AS uuid) IS NULL
+        OR car.approval_case_id = CAST(:case_id AS uuid)
+      )
     ORDER BY car.resolved_at ASC
     LIMIT :limit
     """
@@ -76,7 +83,12 @@ def _data_protection_service(session: AsyncSession) -> DataProtectionService | N
 
 
 def _build_case_approval_service(session: AsyncSession) -> CaseApprovalService:
+    # resolution_governance_gate is wired (matching get_case_approval_service):
+    # _deliver_resolution's revision branch fires whenever the case's
+    # embedded sme_recommendation differs from the proposal's stored reply,
+    # which is the norm for warranty/refund cases, not a rare edge case.
     data_protection = _data_protection_service(session)
+    governance_repository = PostgresGovernanceRepository(session)
     return CaseApprovalService(
         persistence=PostgresCaseApprovalPersistence(
             session, data_protection=data_protection
@@ -85,7 +97,17 @@ def _build_case_approval_service(session: AsyncSession) -> CaseApprovalService:
         resolution_repository=PostgresResolutionProposalPersistence(
             session, data_protection=data_protection
         ),
-        governance_repository=PostgresGovernanceRepository(session),
+        governance_repository=governance_repository,
+        resolution_governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=CitationCoverageGroundingChecker(
+                    document_repository=PostgresTenantConfigurationRepository(
+                        session, data_protection=data_protection
+                    ),
+                ),
+            )
+        ),
         session=session,
     )
 
@@ -95,11 +117,18 @@ async def backfill_undelivered_case_resolutions(
     session: AsyncSession,
     limit: int,
     apply: bool = False,
+    case_id: str | None = None,
 ) -> BackfillResult:
     if limit < 1:
         raise ValueError("limit must be positive")
     candidates = (
-        (await session.execute(_CANDIDATES_SQL, {"limit": limit})).mappings().all()
+        (
+            await session.execute(
+                _CANDIDATES_SQL, {"limit": limit, "case_id": case_id}
+            )
+        )
+        .mappings()
+        .all()
     )
     delivered_cases: list[str] = []
     service = _build_case_approval_service(session)
@@ -133,6 +162,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument(
+        "--case-id",
+        default=None,
+        help="restrict to a single approval_case_id instead of the full backlog",
+    )
+    parser.add_argument(
         "--apply",
         action="store_true",
         help="actually deliver (sends a real reply) instead of just listing candidates",
@@ -148,6 +182,7 @@ async def _amain(argv: Sequence[str] | None = None) -> BackfillResult:
             session=session,
             limit=args.limit,
             apply=args.apply,
+            case_id=args.case_id,
         )
         print(
             {
