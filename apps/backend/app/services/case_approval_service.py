@@ -417,6 +417,70 @@ class CaseApprovalService:
             await self._rollback()
             raise
 
+    async def complete_reconciled_resolution(
+        self,
+        *,
+        approval_case_id: str,
+        tenant_id: str,
+        resolved_by: str,
+        note: str | None,
+    ) -> bool:
+        """Deliver the half of an approval that a direct case-status
+        reconciliation (``reconcile_stale_case_approvals``) cannot perform
+        itself: flip the bound resolution proposal/draft to send-eligible/
+        ready so the reply actually reaches ``outbound.send``. Call this
+        immediately after driving a case to ``APPROVED`` outside the inline
+        ``approve_case`` path — without it, the case looks resolved forever
+        while its reply never transmits (the exact divergence this exists
+        to close).
+
+        Idempotent: returns ``False`` (no delivery performed) if the case
+        is not ``APPROVED``, has no bound proposal, or the proposal already
+        moved past ``PENDING_HUMAN_APPROVAL`` (already delivered, denied,
+        or failed) — so a case touched by both the inline path and this
+        sweep is never delivered twice. Returns ``True`` if a delivery ran.
+        Deliberately does not commit: the caller owns the transaction
+        boundary so this can share a single commit with whatever drove the
+        case to ``APPROVED`` (mirroring the inline path's one-commit
+        atomicity, rather than risking a status flip that "succeeds" while
+        delivery silently fails).
+        """
+        record = await self._require_case(
+            approval_case_id=approval_case_id,
+            tenant_id=tenant_id,
+        )
+        if record.status is not CaseApprovalStatus.APPROVED:
+            return False
+        if record.resolution_proposal_id is None:
+            return False
+        proposal = await self._proposal_for_record(record)
+        if (
+            proposal is None
+            or proposal.status is not ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+        ):
+            return False
+        decision_id = await self._record_case_governance_decision(
+            record=record,
+            actor=resolved_by,
+            decision=Decision.ALLOW,
+            policy_chain_id=_APPROVE_CHAIN_ID,
+            reason="case_approval_approved_reconciled",
+            note=note,
+        )
+        await self._deliver_resolution(
+            record=record,
+            tenant_id=tenant_id,
+            governance_decision_id=decision_id,
+        )
+        # Parity with the inline path: approve_case stamps the case's own
+        # governance_decision_id too (not just the proposal's), so a
+        # reconciled approval reads identically to an inline one.
+        await self._persistence.update_case(
+            replace(record, governance_decision_id=decision_id),
+            expected_tenant_id=tenant_id,
+        )
+        return True
+
     async def reject_case(
         self,
         *,

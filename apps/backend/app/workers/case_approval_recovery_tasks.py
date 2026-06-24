@@ -15,12 +15,22 @@ This sweep finds cases whose bound action has already resolved
 (``approved``/``denied``) while the case itself is still
 ``awaiting_approval``, and drives the case to the matching terminal
 status — reconstruction-bound to the action's own ``resolved_by``/
-``resolved_at``, never to this sweep or "system". The update only
-touches unencrypted case columns (status/resolved_at/resolved_by/
-resolution_note); ``metadata``/``guidance_ref`` are left untouched, so no
-field-level decrypt/re-encrypt round trip is needed. It is guarded by
-``WHERE status = 'awaiting_approval'`` so a second run is a no-op and a
-concurrent inline resolution can never be clobbered.
+``resolved_at``, never to this sweep or "system".
+
+An approved case that carries a bound resolution proposal must also be
+DELIVERED — ``approve_case``'s inline path flips the proposal/draft to
+send-eligible/ready in the same commit, which is the only thing that ever
+lets a reply reach ``outbound.send``. A reconciled case that only drives
+the case-status column is not equivalent to an inline approval: the case
+looks resolved forever while its reply silently never transmits. This
+sweep closes BOTH halves in one transaction via
+``CaseApprovalService.complete_reconciled_resolution`` (reusing the exact
+delivery path the inline approval uses, never reimplemented here) so a
+reconciled approval is indistinguishable in outcome from an inline one.
+Keeping the case-status update and the delivery in a single commit means
+a delivery failure rolls the case-status change back too, leaving the
+case ``awaiting_approval`` for the next sweep to retry both halves
+together — never a case that looks "approved" with an undelivered reply.
 """
 
 from __future__ import annotations
@@ -37,8 +47,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.approvals import PostgresActionApprovalRepository
 from app.approvals.enums import CaseApprovalStatus
+from app.approvals.persistence import PostgresCaseApprovalPersistence
+from app.core.config import get_settings
+from app.data_protection.crypto import DataProtectionService
+from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_owner_session_factory
+from app.governance.persistence import PostgresGovernanceRepository
 from app.queues import QUEUE_WEBHOOK_MAINTENANCE
+from app.resolution.persistence import PostgresResolutionProposalPersistence
+from app.services.case_approval_service import CaseApprovalService
+from app.sme import build_sme_review_runtime
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -72,6 +90,46 @@ _RECONCILE_CASE_SQL = text(
     RETURNING approval_case_id
     """
 )
+
+
+def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
+    settings = get_settings()
+    if (
+        not settings.DATA_PROTECTION_MASTER_KEYS.strip()
+        and not settings.TENANT_CREDENTIAL_MASTER_KEY.strip()
+    ):
+        return None
+    return DataProtectionService.from_settings(
+        session,
+        settings,
+        master_key_unwrap=build_master_key_unwrap(settings),
+        legacy_credential_key=settings.TENANT_CREDENTIAL_MASTER_KEY,
+    )
+
+
+def _build_case_approval_service(session: AsyncSession) -> CaseApprovalService:
+    # No resolution_governance_gate: this sweep only ever completes cases
+    # whose bound action was approved/denied via the action-approval path,
+    # never via case_approval_service.guide_case, so the revised-reply
+    # branch in _deliver_resolution (the only caller of the gate) is
+    # structurally unreachable here. data_protection IS wired so guidance
+    # metadata, if a case was guided before falling through to this sweep,
+    # decrypts correctly instead of being mistaken for "no revision" --
+    # if a revision is genuinely present, _deliver_resolution still fails
+    # closed (raises, caught per-row below) rather than silently
+    # delivering unrevalidated text.
+    data_protection = _data_protection_service(session)
+    return CaseApprovalService(
+        persistence=PostgresCaseApprovalPersistence(
+            session, data_protection=data_protection
+        ),
+        sme_runtime=build_sme_review_runtime(),
+        resolution_repository=PostgresResolutionProposalPersistence(
+            session, data_protection=data_protection
+        ),
+        governance_repository=PostgresGovernanceRepository(session),
+        session=session,
+    )
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator] - Celery decorators are dynamically typed; runtime wiring mirrors the other reconcile_* tasks.
@@ -121,6 +179,7 @@ async def _reconcile(session: AsyncSession, *, limit: int) -> dict[str, object]:
     skipped_pending = 0
     failed: list[dict[str, object]] = []
     action_repo = PostgresActionApprovalRepository(session)
+    case_approval_service = _build_case_approval_service(session)
     for candidate in candidates:
         approval_case_id = str(candidate["approval_case_id"])
         tenant_id = str(candidate["tenant_id"])
@@ -129,6 +188,7 @@ async def _reconcile(session: AsyncSession, *, limit: int) -> dict[str, object]:
             outcome = await _reconcile_one(
                 session,
                 action_repo=action_repo,
+                case_approval_service=case_approval_service,
                 approval_case_id=approval_case_id,
                 tenant_id=tenant_id,
                 action_approval_id=str(action_approval_id),
@@ -154,6 +214,7 @@ async def _reconcile(session: AsyncSession, *, limit: int) -> dict[str, object]:
         "status": "completed",
         "candidates_scanned": len(candidates),
         "reconciled_count": len(reconciled),
+        "delivered_count": sum(1 for r in reconciled if r.get("delivered")),
         "skipped_pending_count": skipped_pending,
         "failed_count": len(failed),
         "reconciled": reconciled,
@@ -165,6 +226,7 @@ async def _reconcile_one(
     session: AsyncSession,
     *,
     action_repo: PostgresActionApprovalRepository,
+    case_approval_service: CaseApprovalService,
     approval_case_id: str,
     tenant_id: str,
     action_approval_id: str,
@@ -198,11 +260,26 @@ async def _reconcile_one(
             },
         )
     ).mappings().one_or_none()
-    await session.commit()
     if row is None:
         # Already resolved by the inline path or a concurrent run between
         # the detection scan and this update — not an error, just stale.
+        # Nothing was written this call, so no commit/rollback is needed.
         return None
+    delivered = False
+    if new_status is CaseApprovalStatus.APPROVED:
+        # Same transaction as the case-status update above, committed
+        # together below: a delivery failure here must roll the
+        # case-status change back too, so the case stays
+        # awaiting_approval and the next sweep retries both halves
+        # together rather than leaving an "approved" case whose reply
+        # never delivered with no automatic retry.
+        delivered = await case_approval_service.complete_reconciled_resolution(
+            approval_case_id=approval_case_id,
+            tenant_id=tenant_id,
+            resolved_by=resolved_by,
+            note=resolution_note,
+        )
+    await session.commit()
     logger.info(
         "case_approval_reconciled",
         extra={
@@ -210,6 +287,7 @@ async def _reconcile_one(
             "tenant_id": tenant_id,
             "action_approval_id": action_approval_id,
             "new_status": new_status.value,
+            "delivered": delivered,
             "resolved_by": resolved_by,
         },
     )
@@ -219,6 +297,7 @@ async def _reconcile_one(
         "action_approval_id": action_approval_id,
         "new_status": new_status.value,
         "resolved_by": resolved_by,
+        "delivered": delivered,
     }
 
 
