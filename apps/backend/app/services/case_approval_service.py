@@ -32,6 +32,8 @@ from app.approvals.persistence import (
     CaseApprovalQuery,
     CaseApprovalRecord,
 )
+from app.boundary.outbound import outbound_reply_context_from_dispatch_body
+from app.coordination.persistence import CoordinationPersistenceProtocol
 from app.escalation.runtime import EscalationAgentRuntime
 from app.governance.enums import Decision, EnforcementStage
 from app.governance.persistence import (
@@ -50,8 +52,10 @@ from app.resolution.enums import (
     ResolutionOutboundDraftStatus,
     ResolutionProposalStatus,
 )
+from app.resolution.identity import derive_resolution_outbound_draft_id
 from app.resolution.persistence import (
     ResolutionOutboundDraftPersistenceProtocol,
+    ResolutionOutboundDraftRecord,
     ResolutionProposalPersistenceProtocol,
     ResolutionProposalRecord,
 )
@@ -60,6 +64,14 @@ from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateProtocol,
     ResolutionGovernanceGateRequest,
     ResolutionGovernanceGateResult,
+)
+from app.services.outbound_auto_send_service import (
+    COMMUNICATION_SUBJECT_KIND,
+    CUSTOMER_REPLY_SEND_ACTION,
+    SUPPORTED_AUTO_SEND_CHANNELS,
+    OutboundAutoSendService,
+    OutboundSendTarget,
+    canonical_reply_for_governance,
 )
 from app.sme import SmeCaseContext, SmeReviewRuntime
 
@@ -151,6 +163,8 @@ class CaseApprovalService:
         action_approval_deny: ActionApprovalDeny | None = None,
         resolution_governance_gate: ResolutionGovernanceGateProtocol | None = None,
         post_commit_flush: PostCommitFlush | None = None,
+        coordination_repository: CoordinationPersistenceProtocol | None = None,
+        outbound_auto_send_service: OutboundAutoSendService | None = None,
     ) -> None:
         self._persistence = persistence
         self._sme_runtime = sme_runtime
@@ -163,6 +177,13 @@ class CaseApprovalService:
         self._action_approval_deny = action_approval_deny
         self._resolution_gate = resolution_governance_gate
         self._post_commit_flush = post_commit_flush
+        # Optional pair: both must be set to enable auto-send-on-approval
+        # (see _derive_outbound_send_target / _trigger_auto_send). Unset
+        # means "this construction site doesn't support it" -- e.g. the
+        # one-off historical backfill scripts, which deliberately require
+        # an explicit human send decision, never auto-send.
+        self._coordination_repository = coordination_repository
+        self._outbound_auto_send_service = outbound_auto_send_service
 
     async def list_cases(
         self,
@@ -725,6 +746,124 @@ class CaseApprovalService:
             expected_tenant_id=record.tenant_id,
         )
 
+    async def _resolution_outbound_draft_for_proposal(
+        self,
+        *,
+        proposal_id: str,
+        tenant_id: str,
+    ) -> ResolutionOutboundDraftRecord | None:
+        draft_id = derive_resolution_outbound_draft_id(
+            tenant_id=tenant_id, proposal_id=proposal_id
+        )
+        return await self._resolutions.get_resolution_outbound_draft(
+            str(draft_id),
+            expected_tenant_id=tenant_id,
+        )
+
+    async def _derive_outbound_send_target(
+        self,
+        *,
+        record: CaseApprovalRecord,
+        proposal: ResolutionProposalRecord,
+        tenant_id: str,
+    ) -> OutboundSendTarget | None:
+        """Re-derive who the customer reply actually goes to, from the
+        SAME original inbound dispatch envelope the build-time auto-send
+        path reads (``outbound_reply_context_from_dispatch_body``) -- the
+        real customer address from the inbound message itself (e.g. the
+        email's ``From`` header), never the SES/provider envelope address.
+
+        Returns None (no auto-send) when: this construction site doesn't
+        carry a coordination repository and auto-send service (e.g. the
+        one-off historical backfill scripts, which require an explicit
+        manual send); the dispatch lineage is missing; the dispatch
+        envelope can't be found; or the channel/recipient/thread can't be
+        derived from it. None never blocks delivery -- the draft still
+        reaches ready/send_eligible, just without an automatic send
+        trigger.
+        """
+        if (
+            self._coordination_repository is None
+            or self._outbound_auto_send_service is None
+        ):
+            return None
+        dispatch_id = proposal.dispatch_id or record.dispatch_id
+        if not dispatch_id:
+            return None
+        dispatch = await self._coordination_repository.get_envelope(
+            dispatch_id,
+            expected_tenant_id=tenant_id,
+        )
+        if dispatch is None:
+            return None
+        reply_context = outbound_reply_context_from_dispatch_body(
+            dispatch.payload_body
+        )
+        if (
+            reply_context.source_channel not in SUPPORTED_AUTO_SEND_CHANNELS
+            or reply_context.recipient is None
+            or reply_context.thread_context is None
+        ):
+            return None
+        target_metadata: dict[str, Any] = {}
+        if reply_context.phone_number_id is not None:
+            target_metadata["phone_number_id"] = reply_context.phone_number_id
+        if reply_context.recipient_display_name is not None:
+            target_metadata["recipient_display_name"] = (
+                reply_context.recipient_display_name
+            )
+        return OutboundSendTarget(
+            channel=reply_context.source_channel,
+            recipient=reply_context.recipient,
+            source=reply_context.source,
+            subject=reply_context.subject,
+            thread_context=reply_context.thread_context,
+            in_reply_to_message_id=reply_context.in_reply_to_message_id,
+            references_header=reply_context.references_header,
+            metadata=target_metadata,
+        )
+
+    async def _trigger_auto_send(
+        self,
+        *,
+        proposal: ResolutionProposalRecord,
+        draft: ResolutionOutboundDraftRecord,
+        target: OutboundSendTarget,
+        tenant_id: str,
+    ) -> None:
+        """Enqueue the now-ready draft to the SAME durable outbox the
+        build-time auto-send path uses (OutboundAutoSendService ->
+        outbound_send_outbox -> worker_outbound_send -> SES/WhatsApp) --
+        one send mechanism, two triggers. The outbox insert is a no-op
+        commit within the caller's transaction (no internal commit), and
+        is idempotent on (tenant_id, draft_id, channel, recipient,
+        action), so this call is safe to run again on a re-approval or
+        reconciler re-sweep without double-sending.
+
+        A refusal here is either benign (the target/decision genuinely
+        isn't auto-send-eligible -- e.g. a denied governance verdict
+        never reaches this call at all, since _deliver_resolution only
+        runs after approval) or a binding bug (the decision we just
+        recorded doesn't satisfy the exact-match contract). The latter
+        must fail the whole approval rather than silently leave the
+        action fired with no reply queued.
+        """
+        if self._outbound_auto_send_service is None:
+            raise CaseApprovalRuntimeError(
+                "cannot auto-send without an OutboundAutoSendService"
+            )
+        result = await self._outbound_auto_send_service.request_auto_send(
+            draft=draft,
+            proposal=proposal,
+            target=target,
+            expected_tenant_id=tenant_id,
+        )
+        if result.reason is not None:
+            raise CaseApprovalRuntimeError(
+                "auto-send after approval failed: "
+                f"{result.reason.code}: {result.reason.message}"
+            )
+
     async def _deliver_resolution(
         self,
         *,
@@ -740,6 +879,18 @@ class CaseApprovalService:
             raise CaseApprovalRuntimeError(
                 "approved resolution proposal is missing"
             )
+        # Derived once, up front, and threaded through both branches below
+        # so whichever one runs records a decision carrying the exact
+        # metadata OutboundAutoSendService requires to auto-send -- the
+        # SAME mechanism the build-time auto-send path already uses, not
+        # a second send implementation. None (no coordination_repository
+        # configured here, or the dispatch/channel data isn't derivable)
+        # means this construction site/case never auto-sends -- the draft
+        # still reaches ready/send_eligible exactly as before, just
+        # waiting on the explicit manual send endpoint as a fallback.
+        target = await self._derive_outbound_send_target(
+            record=record, proposal=proposal, tenant_id=tenant_id
+        )
         decision_uuid = uuid.UUID(governance_decision_id)
         recommendation = _recommendation_from_metadata(record.metadata)
         new_reply = _recommended_reply(recommendation)
@@ -758,6 +909,7 @@ class CaseApprovalService:
                 tenant_id=tenant_id,
                 revised_reply=new_reply,
                 recommendation=recommendation,
+                target=target,
             )
             if revalidation.governance_decision_id is not None:
                 delivered_decision_uuid = revalidation.governance_decision_id
@@ -790,19 +942,31 @@ class CaseApprovalService:
                 record=record,
                 proposal=proposal,
                 tenant_id=tenant_id,
+                target=target,
             )
-        await self._resolutions.update_resolution_proposal_status(
+        updated_proposal = await self._resolutions.update_resolution_proposal_status(
             proposal_id,
             expected_tenant_id=tenant_id,
             status=ResolutionProposalStatus.SEND_ELIGIBLE,
             governance_decision_id=delivered_decision_uuid,
         )
-        await self._resolutions.update_resolution_outbound_draft_status_for_proposal(
+        updated_draft = await self._resolutions.update_resolution_outbound_draft_status_for_proposal(
             proposal_id,
             expected_tenant_id=tenant_id,
             status=ResolutionOutboundDraftStatus.READY,
             governance_decision_id=delivered_decision_uuid,
         )
+        if target is not None and updated_draft is not None:
+            # Bound to the SAME completion transaction as everything
+            # above: a send-enqueue failure here propagates and rolls
+            # the whole approval back, so the action and the reply-send
+            # are never split -- both happen or neither does.
+            await self._trigger_auto_send(
+                proposal=updated_proposal,
+                draft=updated_draft,
+                target=target,
+                tenant_id=tenant_id,
+            )
 
     async def _record_delivery_authorization_decision(
         self,
@@ -810,6 +974,7 @@ class CaseApprovalService:
         record: CaseApprovalRecord,
         proposal: ResolutionProposalRecord,
         tenant_id: str,
+        target: OutboundSendTarget | None,
     ) -> uuid.UUID:
         """Record an ALLOW decision keyed exactly the way
         EmailCustomerReplySendService/WhatsAppCustomerReplySendService's
@@ -820,6 +985,13 @@ class CaseApprovalService:
         this method called twice) is idempotent — the existing decision
         is reused, never re-evaluated or rewritten (decisions are
         write-once).
+
+        When ``target`` is available, the metadata also carries the full
+        set of fields OutboundAutoSendService's stricter exact-match
+        contract requires (subject_kind/governed_action/lineage ids/
+        reply_recipient/etc), so this SAME decision authorizes both the
+        manual send endpoint and the auto-send-on-approval path -- one
+        decision, two possible send triggers, never two send implementations.
         """
         decision_id = str(
             uuid.uuid5(
@@ -834,16 +1006,35 @@ class CaseApprovalService:
         )
         if existing is not None:
             return uuid.UUID(decision_id)
+        draft = await self._resolution_outbound_draft_for_proposal(
+            proposal_id=str(proposal.proposal_id), tenant_id=tenant_id
+        )
         now = datetime.now(timezone.utc)
         reply_sha256 = hashlib.sha256(
-            proposal.proposed_customer_reply.encode("utf-8")
+            (
+                canonical_reply_for_governance(draft)
+                if draft is not None
+                else proposal.proposed_customer_reply
+            ).encode("utf-8")
         ).hexdigest()
         metadata: dict[str, Any] = {
             "approval_case_id": record.approval_case_id,
             "proposal_id": str(proposal.proposal_id),
             "proposed_reply_sha256": reply_sha256,
-            "governed_action": "resolution.customer_reply.send",
+            "governed_action": CUSTOMER_REPLY_SEND_ACTION,
         }
+        if draft is not None and target is not None:
+            metadata.update(
+                {
+                    "session_id": draft.session_id,
+                    "execution_id": draft.execution_id,
+                    "dispatch_id": draft.dispatch_id,
+                    "draft_id": str(draft.draft_id),
+                    "source_channel": target.channel,
+                    "reply_recipient": target.recipient,
+                    "reply_thread_context": target.thread_context,
+                }
+            )
         reason = "case_approval_delivery_authorized"
         rule = PolicyEvaluationResultRecord(
             policy_name=_DELIVERY_AUTHORIZATION_CHAIN_ID,
@@ -865,7 +1056,7 @@ class CaseApprovalService:
             correlation_id=record.dispatch_id or record.execution_id,
             request_id=f"resolution:{proposal.proposal_id}",
             tenant_id=tenant_id,
-            subject_kind="resolution_proposal",
+            subject_kind=COMMUNICATION_SUBJECT_KIND,
             governance_version=_POLICY_VERSION,
             evaluated_rules=(rule,),
             metadata=metadata,
@@ -879,7 +1070,7 @@ class CaseApprovalService:
             resource=f"resolution_proposal:{proposal.proposal_id}",
             actor=record.resolved_by or "case_approval_service",
             tenant_id=tenant_id,
-            subject_kind="resolution_proposal",
+            subject_kind=COMMUNICATION_SUBJECT_KIND,
             started_at=now.isoformat(),
             ended_at=now.isoformat(),
             latency_ms=0.0,
@@ -921,6 +1112,7 @@ class CaseApprovalService:
         tenant_id: str,
         revised_reply: str,
         recommendation: Mapping[str, Any] | None,
+        target: OutboundSendTarget | None,
     ) -> ResolutionGovernanceGateResult:
         segments = _reply_segments(recommendation)
         if not segments:
@@ -963,6 +1155,11 @@ class CaseApprovalService:
                 ),
                 reply_segments=segments,
                 source_language=proposal.source_language,
+                source_channel=target.channel if target is not None else None,
+                reply_recipient=target.recipient if target is not None else None,
+                reply_thread_context=(
+                    target.thread_context if target is not None else None
+                ),
             )
         )
         if result.governance_verdict not in _DELIVERABLE_VERDICTS:

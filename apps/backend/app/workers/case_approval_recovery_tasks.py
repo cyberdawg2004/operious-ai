@@ -48,6 +48,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.tools.approvals import PostgresActionApprovalRepository
 from app.approvals.enums import CaseApprovalStatus
 from app.approvals.persistence import PostgresCaseApprovalPersistence
+from app.boundary.outbound import PostgresOutboundSendOutboxPersistence
+from app.coordination.persistence import PostgresCoordinationPersistence
 from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
 from app.data_protection.kms import build_master_key_unwrap
@@ -58,6 +60,7 @@ from app.resolution.persistence import PostgresResolutionProposalPersistence
 from app.runtime import ResolutionGovernanceGate, build_resolution_governance_runtime
 from app.runtime.grounding import CitationCoverageGroundingChecker
 from app.services.case_approval_service import CaseApprovalService
+from app.services.outbound_auto_send_service import OutboundAutoSendService
 from app.sme import build_sme_review_runtime
 from app.tenant.persistence import PostgresTenantConfigurationRepository
 from app.workers.celery_app import celery_app
@@ -127,6 +130,13 @@ def _build_case_approval_service(session: AsyncSession) -> CaseApprovalService:
             )
         ),
         session=session,
+        coordination_repository=PostgresCoordinationPersistence(
+            session, data_protection=data_protection
+        ),
+        outbound_auto_send_service=OutboundAutoSendService(
+            governance_repository=governance_repository,
+            outbox_persistence=PostgresOutboundSendOutboxPersistence(session),
+        ),
     )
 
 

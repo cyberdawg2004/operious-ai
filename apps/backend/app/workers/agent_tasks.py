@@ -108,6 +108,10 @@ from app.boundary.outbound.send_outbox import (
     PostgresOutboundSendOutboxPersistence,
     as_outbound_send_outbox_id,
 )
+from app.boundary.outbound.reply_context import (
+    extract_outbound_reply_context,
+    payload_text,
+)
 from app.boundary.outbound_send_publisher import enqueue_outbound_send_outbox
 from app.boundary.translation import (
     InMemoryTranslationPersistence,
@@ -453,19 +457,6 @@ class _DispatchContentContext:
     reply_phone_number_id: str | None = None
     conversation_history: tuple[Mapping[str, Any], ...] = ()
     attachment_ids: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class _OutboundReplyContext:
-    source_channel: str | None = None
-    recipient: str | None = None
-    recipient_display_name: str | None = None
-    source: str | None = None
-    subject: str | None = None
-    thread_context: str | None = None
-    in_reply_to_message_id: str | None = None
-    references_header: str | None = None
-    phone_number_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1522,7 +1513,7 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
     if isinstance(canonical_payload, Mapping):
         typed_payload = cast(Mapping[str, Any], canonical_payload)
         extracted = _extract_text(typed_payload)
-        reply_context = _extract_outbound_reply_context(typed_payload)
+        reply_context = extract_outbound_reply_context(typed_payload)
         if extracted:
             return _DispatchContentContext(
                 content=extracted,
@@ -1541,7 +1532,7 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
                 conversation_history=conversation_history,
                 attachment_ids=_extract_attachment_ids(typed_payload),
             )
-    reply_context = _extract_outbound_reply_context(body)
+    reply_context = extract_outbound_reply_context(body)
     return _DispatchContentContext(
         content=_extract_text(body),
         source_language=source_language,
@@ -1555,49 +1546,6 @@ def _extract_content(dispatch: CoordinationRecord) -> _DispatchContentContext:
         reply_references_header=reply_context.references_header,
         reply_phone_number_id=reply_context.phone_number_id,
         conversation_history=conversation_history,
-    )
-
-
-def _extract_outbound_reply_context(
-    payload: Mapping[str, Any],
-) -> _OutboundReplyContext:
-    channel = _normalised_reply_channel(
-        _payload_text(payload, "channel") or _payload_text(payload, "channel_type")
-    )
-    if channel not in {"email", "whatsapp"}:
-        return _OutboundReplyContext()
-    message_id = _payload_text(payload, "message_id")
-    conversation_id = _payload_text(payload, "conversation_id")
-    thread_context = conversation_id or message_id
-    phone_number_id = _payload_text(payload, "phone_number_id")
-    source = _payload_text(payload, "to")
-    if channel == "whatsapp" and source is None:
-        source = phone_number_id
-    return _OutboundReplyContext(
-        source_channel=channel,
-        recipient=_payload_text(payload, "from"),
-        recipient_display_name=(
-            _payload_text(payload, "from_display_name")
-            if channel == "email"
-            else None
-        ),
-        source=source,
-        subject=(
-            _reply_subject(_payload_text(payload, "subject"))
-            if channel == "email"
-            else None
-        ),
-        thread_context=thread_context,
-        in_reply_to_message_id=message_id if channel == "email" else None,
-        references_header=(
-            _email_references_header(
-                conversation_id=conversation_id,
-                message_id=message_id,
-            )
-            if channel == "email"
-            else None
-        ),
-        phone_number_id=phone_number_id,
     )
 
 
@@ -1619,46 +1567,6 @@ def _extract_attachment_ids(payload: Mapping[str, Any]) -> tuple[str, ...]:
         if isinstance(attachment_id, str) and attachment_id.strip():
             ids.append(attachment_id.strip())
     return tuple(ids)
-
-
-def _normalised_reply_channel(value: str | None) -> str | None:
-    if value is None:
-        return None
-    channel = value.strip().lower()
-    if channel in {"email", "whatsapp"}:
-        return channel
-    return None
-
-
-def _payload_text(payload: Mapping[str, Any], key: str) -> str | None:
-    value = payload.get(key)
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    return text or None
-
-
-def _reply_subject(subject: str | None) -> str:
-    if subject is None:
-        return "Re: Support request"
-    if subject.lower().startswith("re:"):
-        return subject
-    return f"Re: {subject}"
-
-
-def _email_references_header(
-    *,
-    conversation_id: str | None,
-    message_id: str | None,
-) -> str | None:
-    references = tuple(
-        value
-        for value in (conversation_id, message_id)
-        if value is not None and value.strip()
-    )
-    if not references:
-        return None
-    return " ".join(dict.fromkeys(references))
 
 
 def _extract_source_language(body: Mapping[str, Any]) -> str:
@@ -1701,7 +1609,7 @@ def _extract_conversation_history(
 
 
 def _extract_text(payload: Mapping[str, Any]) -> str:
-    subject = _payload_text(payload, "subject")
+    subject = payload_text(payload, "subject")
     body: str | None = None
     for key in ("comment", "text", "message", "description", "transcript"):
         value = payload.get(key)

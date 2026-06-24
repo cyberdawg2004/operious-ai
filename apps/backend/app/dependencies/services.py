@@ -74,6 +74,7 @@ from app.boundary.persistence import (
 )
 from app.boundary.outbound import (
     PostgresEmailDeliveryRepository,
+    PostgresOutboundSendOutboxPersistence,
     SesV2EmailSender,
     PostgresWhatsAppDeliveryRepository,
     WhatsAppGraphSender,
@@ -166,6 +167,7 @@ from app.semantic.quarantine_publisher import CelerySemanticQuarantinePublisher
 from app.services.action_approval_service import ActionApprovalService
 from app.services.audit_export_service import AuditExportService
 from app.services.case_approval_service import CaseApprovalService
+from app.services.outbound_auto_send_service import OutboundAutoSendService
 from app.services.cognition_service import CognitionService
 from app.services.auth0_management import Auth0ManagementClientProtocol
 from app.services.conversation_service import (
@@ -1048,6 +1050,13 @@ def build_action_approval_service(
             )
         ),
         session=session,
+        coordination_repository=PostgresCoordinationPersistence(
+            session, data_protection=data_protection
+        ),
+        outbound_auto_send_service=OutboundAutoSendService(
+            governance_repository=governance_repository,
+            outbox_persistence=PostgresOutboundSendOutboxPersistence(session),
+        ),
     )
 
     async def _complete_case_for_action(
@@ -1207,6 +1216,14 @@ def get_case_approval_service(
             ),
         ),
         session=session,
+        coordination_repository=PostgresCoordinationPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        outbound_auto_send_service=OutboundAutoSendService(
+            governance_repository=governance_repository,
+            outbox_persistence=PostgresOutboundSendOutboxPersistence(session),
+        ),
     )
 
 

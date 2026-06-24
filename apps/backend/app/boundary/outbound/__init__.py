@@ -44,6 +44,11 @@ from app.boundary.outbound.send_outbox import (
     OutboundSendOutboxStatus,
     PostgresOutboundSendOutboxPersistence,
 )
+from app.boundary.outbound.reply_context import (
+    OutboundReplyContext,
+    extract_outbound_reply_context,
+    outbound_reply_context_from_dispatch_body,
+)
 
 __all__ = [
     "InMemoryWhatsAppDeliveryRepository",
@@ -72,6 +77,9 @@ __all__ = [
     "WhatsAppGraphSender",
     "WhatsAppTextMessageRequest",
     "WhatsAppTextMessageResponse",
+    "OutboundReplyContext",
+    "extract_outbound_reply_context",
+    "outbound_reply_context_from_dispatch_body",
     "derive_whatsapp_customer_reply_delivery_id",
     "derive_email_customer_reply_delivery_id",
     "format_jira_payload",

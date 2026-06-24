@@ -31,7 +31,7 @@ from app.resolution.persistence import (
 
 CUSTOMER_REPLY_SEND_ACTION = "customer_reply.send"
 SUPPORTED_AUTO_SEND_CHANNELS = frozenset(("email", "whatsapp"))
-_COMMUNICATION_SUBJECT_KIND = "communication"
+COMMUNICATION_SUBJECT_KIND = "communication"
 _SECRET_KEY_FRAGMENTS = (
     "authorization",
     "credential",
@@ -165,7 +165,7 @@ class OutboundAutoSendService:
                     message="governed auto-send decision was not found",
                 ),
             )
-        canonical_reply = _canonical_reply_for_governance(draft)
+        canonical_reply = canonical_reply_for_governance(draft)
         if not _decision_is_exact_send_allow(
             decision=decision,
             tenant_id=tenant_id,
@@ -277,7 +277,7 @@ def _decision_is_exact_send_allow(
     return (
         decision.tenant_id == tenant_id
         and decision.decision == Decision.ALLOW.value
-        and decision.subject_kind == _COMMUNICATION_SUBJECT_KIND
+        and decision.subject_kind == COMMUNICATION_SUBJECT_KIND
         and _metadata_text(metadata, "proposal_id") == str(proposal.proposal_id)
         and _metadata_text(metadata, "session_id") == _required_lineage_text(
             draft.session_id
@@ -331,7 +331,7 @@ def _safe_outbox_metadata(
     }
 
 
-def _canonical_reply_for_governance(draft: ResolutionOutboundDraftRecord) -> str:
+def canonical_reply_for_governance(draft: ResolutionOutboundDraftRecord) -> str:
     value = draft.metadata.get("canonical_reply")
     if isinstance(value, str) and value.strip():
         return value
@@ -395,10 +395,12 @@ def _sanitize_metadata_value(value: Any) -> Any:
 
 
 __all__ = [
+    "COMMUNICATION_SUBJECT_KIND",
     "CUSTOMER_REPLY_SEND_ACTION",
     "OutboundAutoSendRefusalReason",
     "OutboundAutoSendRequestResult",
     "OutboundAutoSendService",
     "OutboundSendTarget",
     "SUPPORTED_AUTO_SEND_CHANNELS",
+    "canonical_reply_for_governance",
 ]
