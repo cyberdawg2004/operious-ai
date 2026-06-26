@@ -52,6 +52,7 @@ from app.runtime.conversation_generation import (
     GroundedReplySegment,
     render_grounded_reply,
 )
+from app.runtime.money_goods_commitment import money_or_goods_commitment_kinds
 from app.runtime.resolution_autonomy_policy import (
     ResolutionAutonomyPolicy,
     resolve_resolution_autonomy_policy,
@@ -1378,6 +1379,10 @@ def _evaluate_gate(
 ) -> _GateDecision:
     reasons: list[str] = []
     text = f"{original_content} {reply}".lower()
+    commitment_kinds = money_or_goods_commitment_kinds(
+        recommended_actions=recommended_actions,
+        reply=reply,
+    )
     evidence_empty = len(evidence) == 0
     if category == UNCLASSIFIED_CATEGORY_ID:
         # Defense-in-depth: even if a future misconfiguration ever placed
@@ -1394,10 +1399,8 @@ def _evaluate_gate(
         reasons.append("fraud_risk")
     if _contains_any(text, _POLICY_EXCEPTION_KEYWORDS):
         reasons.append("policy_exception")
-    if _monetary_commitment_exceeds_threshold(
-        text, autonomy_policy.monetary_commitment_threshold_cents, taxonomy
-    ):
-        reasons.append("monetary_commitment_requires_approval")
+    if commitment_kinds:
+        reasons.append("money_or_goods_commitment_requires_human_approval")
     if _has_conflicting_evidence(evidence):
         reasons.append("conflicting_evidence")
     reasons.extend(

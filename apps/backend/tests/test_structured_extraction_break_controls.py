@@ -11,11 +11,10 @@ Verified properties:
         _default_payload, repair_dispatch.py's _target_resource_from_payload,
         and the amount->cents conversion all degrade to None/honest
         fallbacks, never a fabricated string or number.
-  BC-4  Honest absence blocks auto-eligibility (THE fail-closed proof): a
-        resolution gate evaluation with a refund action missing
-        order_id/amount routes to PENDING_HUMAN_APPROVAL, not
-        AUTO_APPROVED — through the same reasons-list mechanism a
-        monetary-threshold breach already uses.
+  BC-4  Money/goods always human (THE fail-closed proof): a refund action
+        routes to PENDING_HUMAN_APPROVAL even with complete extraction and
+        permissive tenant config; amount thresholds never auto-approve
+        money/goods disbursement.
   BC-5  Live-Anthropic proofs (requires_live_anthropic):
         - text extraction returns the real order_id from plain ticket text.
         - vision extraction (B2 pattern, requires_s3) reads a synthetic
@@ -306,10 +305,9 @@ def test_amount_to_cents_parses_or_fails_closed(
 # ─── BC-4: honest absence blocks auto-eligibility (THE fail-closed proof) ─
 
 
-def test_honest_absence_blocks_auto_eligibility() -> None:
-    """A refund action with NO extracted order_id/amount must route to
-    PENDING_HUMAN_APPROVAL, never AUTO_APPROVED — proving the system
-    refuses to silently treat "couldn't extract it" as "proceed anyway"."""
+def test_money_goods_commitment_is_always_human_even_with_complete_extraction() -> None:
+    """A refund action must require human approval regardless of threshold,
+    allowlist, or extraction completeness."""
     taxonomy = _refund_taxonomy()
     autonomy_policy = ResolutionAutonomyPolicy(
         reply_auto_send_categories=frozenset({"refund_eligible"}),
@@ -341,14 +339,14 @@ def test_honest_absence_blocks_auto_eligibility() -> None:
     )
     assert gate_missing.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     assert gate_missing.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert "money_or_goods_commitment_requires_human_approval" in gate_missing.reasons
     assert any(
         reason.startswith("missing_required_extraction_field:refund_request:")
         for reason in gate_missing.reasons
     )
 
-    # Negative control: with both required fields present at sufficient
-    # confidence, the SAME gate auto-approves (proving the check is
-    # precise, not just "always block refunds").
+    # Even with both required fields present at sufficient confidence, the
+    # SAME refund commitment must still stay human-reviewed.
     complete = ExtractedOrderFields(
         order_id=ExtractedField(value="ORD-1", confidence="high", source="text"),
         amount=ExtractedField(value="10.00", confidence="high", source="text"),
@@ -364,7 +362,60 @@ def test_honest_absence_blocks_auto_eligibility() -> None:
         recommended_actions=actions_complete,
         extracted_fields=complete,
     )
-    assert gate_complete.status is ResolutionProposalStatus.AUTO_APPROVED
+    assert gate_complete.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert gate_complete.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert "money_or_goods_commitment_requires_human_approval" in gate_complete.reasons
+
+
+def test_safe_non_money_reply_still_auto_approves_when_allowlisted() -> None:
+    taxonomy = ResolutionTaxonomyPolicy(
+        categories=(
+            ResolutionTaxonomyCategory(
+                id="troubleshooting",
+                label="Troubleshooting",
+                description="Safe troubleshooting guidance.",
+                recommended_actions=(
+                    {
+                        "type": "collect_context",
+                        "tool_name": "conversation.probe",
+                        "requires_execution": False,
+                    },
+                ),
+            ),
+        ),
+        monetary_remedy_keywords=frozenset(),
+        monetary_currency_symbols=frozenset(),
+        monetary_currency_codes=frozenset(),
+        unsupported_commitment_patterns=frozenset(),
+    )
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"troubleshooting"}),
+        monetary_commitment_threshold_cents=0,
+    )
+    gate = _evaluate_gate(
+        category="troubleshooting",
+        original_content="My device will not power on.",
+        reply="Please hold the power button for 10 seconds, then try again.",
+        evidence=(
+            {
+                "rank": 1,
+                "document_id": "66666666-6666-4666-8666-666666666666",
+                "title": "Troubleshooting guide",
+                "document_type": "sop",
+                "document_status": "active",
+                "score": 0.9,
+                "chunk_ordinal": 0,
+                "token_count": 64,
+            },
+        ),
+        autonomy_policy=autonomy_policy,
+        taxonomy=taxonomy,
+        recommended_actions=_recommended_actions("troubleshooting", taxonomy, None),
+        extracted_fields=None,
+    )
+
+    assert gate.status is ResolutionProposalStatus.AUTO_APPROVED
+    assert gate.autonomy_decision is ResolutionAutonomyDecision.AUTO_APPROVED
 
 
 def test_low_confidence_extraction_also_blocks_auto_eligibility() -> None:

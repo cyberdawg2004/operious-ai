@@ -32,6 +32,7 @@ from app.runtime.grounding import (
     GroundingChecker,
     GroundingCheckRequest,
 )
+from app.runtime.money_goods_commitment import money_or_goods_commitment_kinds
 from app.runtime.resolution_autonomy_policy import (
     ResolutionAutonomyPolicy,
     resolve_resolution_autonomy_policy,
@@ -131,6 +132,9 @@ class ResolutionCommunicationPolicy(BaseGovernancePolicy):
             )
 
         category = _metadata_str(metadata, "resolution_category") or ""
+        money_or_goods_commitment_present = bool(
+            _metadata_str_list(metadata, "money_or_goods_commitment_kinds")
+        )
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._repository,
             tenant_id=subject.tenant_id,
@@ -141,6 +145,7 @@ class ResolutionCommunicationPolicy(BaseGovernancePolicy):
             local_autonomy=local_autonomy,
             local_governance=_metadata_str(metadata, "local_governance_verdict"),
             local_supervisor=_metadata_str(metadata, "local_supervisor_verdict"),
+            money_or_goods_commitment_present=money_or_goods_commitment_present,
             autonomy_policy=autonomy_policy,
         )
         if approval_rule is not None:
@@ -321,6 +326,10 @@ def _subject_metadata(
     request: ResolutionGovernanceGateRequest,
     request_id: str,
 ) -> dict[str, object]:
+    money_or_goods_commitment_kinds_metadata = money_or_goods_commitment_kinds(
+        recommended_actions=request.recommended_actions,
+        reply=request.proposed_customer_reply,
+    )
     return {
         "request_id": request_id,
         "proposal_id": str(request.proposal_id),
@@ -347,6 +356,9 @@ def _subject_metadata(
         "proposed_reply_sha256": _sha256_text(request.proposed_customer_reply),
         "original_content_sha256": _sha256_text(request.original_content),
         "resolution_category": request.resolution_category,
+        "money_or_goods_commitment_kinds": list(
+            money_or_goods_commitment_kinds_metadata
+        ),
         "diagnostic_confidence": request.diagnostic_confidence,
         "diagnostic_summary": request.diagnostic_summary,
         "original_content_excerpt": request.original_content[:_SUMMARY_MAX_CHARS],
@@ -395,6 +407,7 @@ def _approval_rule(
     local_autonomy: str,
     local_governance: str | None,
     local_supervisor: str | None,
+    money_or_goods_commitment_present: bool,
     autonomy_policy: ResolutionAutonomyPolicy,
 ) -> str | None:
     if local_status != "auto_approved":
@@ -405,6 +418,8 @@ def _approval_rule(
         return "local_governance_not_allow"
     if local_supervisor != "pass":
         return "local_supervisor_not_pass"
+    if money_or_goods_commitment_present:
+        return "money_or_goods_commitment_requires_human_approval"
     if category not in autonomy_policy.reply_auto_send_categories:
         return "resolution_category_not_auto_safe"
     return None
@@ -482,6 +497,20 @@ def _metadata_list(
     for item in cast(list[object], value):
         if isinstance(item, Mapping):
             items.append(cast(Mapping[str, Any], item))
+    return tuple(items)
+
+
+def _metadata_str_list(
+    metadata: Mapping[str, object],
+    key: str,
+) -> tuple[str, ...]:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return ()
+    items: list[str] = []
+    for item in cast(list[object], value):
+        if isinstance(item, str) and item.strip():
+            items.append(item.strip())
     return tuple(items)
 
 

@@ -39,6 +39,7 @@ from app.runtime.grounding import (
     CitationCoverageGroundingChecker,
     StaticGroundingChecker,
 )
+from app.runtime.money_goods_commitment import money_or_goods_commitment_kinds
 from app.runtime.resolution_governance_gate import (
     ResolutionGovernanceGate,
     _approval_rule,
@@ -680,9 +681,9 @@ def test_unclassified_category_forces_human_approval_even_if_allowlisted() -> No
 
 def test_money_guard_blocks_auto_send_even_when_category_is_allowlisted() -> None:
     """LOAD-BEARING: a category allowlist alone is not sufficient to permit
-    auto-send when the reply commits to a refund/replacement at or above the
-    tenant's monetary threshold. If the money-guard were removed, this reply
-    would be auto-approved purely because "refund_requested" is allowlisted.
+    auto-send when the reply commits to money/goods. The amount and threshold
+    do not matter; if the money/goods guard were removed, this reply would be
+    auto-approved purely because "refund_requested" is allowlisted.
     """
     autonomy_policy = ResolutionAutonomyPolicy(
         reply_auto_send_categories=frozenset({"refund_requested"}),
@@ -700,7 +701,7 @@ def test_money_guard_blocks_auto_send_even_when_category_is_allowlisted() -> Non
     )
 
     assert monetary_gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
-    assert "monetary_commitment_requires_approval" in monetary_gate.reasons
+    assert "money_or_goods_commitment_requires_human_approval" in monetary_gate.reasons
 
     non_monetary_gate = _evaluate_gate(
         category="refund_requested",
@@ -809,6 +810,13 @@ def test_unsupported_commitment_patterns_includes_baseline_for_empty_taxonomy() 
     assert "we will refund" in _unsupported_commitment_patterns(_EMPTY_TAXONOMY)
 
 
+def test_money_or_goods_commitment_kinds_detect_reply_promise_without_action() -> None:
+    assert money_or_goods_commitment_kinds(
+        recommended_actions=(),
+        reply="We've blocked your card; a replacement will arrive in 5 business days.",
+    ) == ("reply_text:replacement",)
+
+
 @pytest.mark.asyncio
 async def test_bank_pilot_taxonomy_disputed_transaction_break_control() -> None:
     """LOAD-BEARING: proves the tenant-defined taxonomy correctly classifies a
@@ -854,7 +862,7 @@ async def test_bank_pilot_taxonomy_disputed_transaction_break_control() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bank_pilot_taxonomy_card_lost_proposal_is_auto_approved() -> None:
+async def test_bank_pilot_taxonomy_card_lost_proposal_requires_human_approval() -> None:
     repository = await _bank_pilot_repository()
     governance_repository = InMemoryGovernanceRepository()
     draft = GroundedReplyDraft(
@@ -899,8 +907,8 @@ async def test_bank_pilot_taxonomy_card_lost_proposal_is_auto_approved() -> None
     )
 
     assert record.resolution_category == "card_lost"
-    assert record.autonomy_decision is ResolutionAutonomyDecision.AUTO_APPROVED
-    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
 
 
 def test_approval_rule_denies_when_category_not_in_autonomy_allowlist() -> None:
@@ -910,6 +918,7 @@ def test_approval_rule_denies_when_category_not_in_autonomy_allowlist() -> None:
         local_autonomy="auto_approved",
         local_governance="allow",
         local_supervisor="pass",
+        money_or_goods_commitment_present=False,
         autonomy_policy=ResolutionAutonomyPolicy(frozenset(), 0),
     )
 
@@ -923,10 +932,25 @@ def test_approval_rule_allows_when_category_in_autonomy_allowlist() -> None:
         local_autonomy="auto_approved",
         local_governance="allow",
         local_supervisor="pass",
+        money_or_goods_commitment_present=False,
         autonomy_policy=ResolutionAutonomyPolicy(frozenset({"charging_issue"}), 0),
     )
 
     assert rule is None
+
+
+def test_approval_rule_requires_human_for_money_goods_commitment() -> None:
+    rule = _approval_rule(
+        category="charging_issue",
+        local_status="auto_approved",
+        local_autonomy="auto_approved",
+        local_governance="allow",
+        local_supervisor="pass",
+        money_or_goods_commitment_present=True,
+        autonomy_policy=ResolutionAutonomyPolicy(frozenset({"charging_issue"}), 0),
+    )
+
+    assert rule == "money_or_goods_commitment_requires_human_approval"
 
 
 @pytest.mark.asyncio
