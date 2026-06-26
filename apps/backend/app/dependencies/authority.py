@@ -86,6 +86,12 @@ from app.identity.authority import AuthorityContext
 #: problem.
 ERROR_CODE_AUTHORITY_REQUIRED: Final[str] = "authority_required"
 
+#: Stable error code for "verified principal authenticated, but carries
+#: no app-usable authority scope". A bearer that has neither a tenant
+#: axis nor the platform-admin capability must fail closed before any
+#: app surface can treat it as a usable session.
+ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED: Final[str] = "authorized_scope_required"
+
 #: Stable error code for "authority present but no tenant axis".
 #: This is a constitutional configuration error in the upstream
 #: identity provider (the authority should always carry a tenant
@@ -376,13 +382,30 @@ def request_authority_opt(request: Request) -> AuthorityContext | None:
     return getattr(request.state, "authority", None)
 
 
+def _authority_has_app_scope(authority: AuthorityContext) -> bool:
+    """Return ``True`` when the authority can legitimately enter an app.
+
+    Verified bearers must establish at least one durable authorization
+    path at the composition root:
+
+    * a tenant axis for tenant-scoped/operator surfaces, or
+    * the platform-admin capability for the platform console.
+    """
+
+    return authority.tenant_id is not None or (
+        PLATFORM_TENANT_ADMIN_CAPABILITY in authority.capabilities
+    )
+
+
 def require_authority(request: Request) -> AuthorityContext:
     """FastAPI dependency: return the request :class:`AuthorityContext`.
 
     Raises :exc:`fastapi.HTTPException` (401
     ``authority_required``) when the request carries no usable
-    authority. This is the wedge every authenticated handler
-    transitively depends on.
+    authority, and 403 ``authorized_scope_required`` when a
+    verified bearer authenticated successfully but carries no
+    app-usable authorization scope. This is the wedge every
+    authenticated handler transitively depends on.
 
     "No usable authority" covers two operationally distinct
     states the dependency treats identically:
@@ -404,6 +427,14 @@ def require_authority(request: Request) -> AuthorityContext:
     authority" and then mishandle the all-``None`` axes as
     legitimate identity material — exactly the failure mode the
     fail-closed doctrine forbids.
+
+    The verified-but-scope-less state is distinct from anonymity:
+    the credential was real, but the principal is not authorised
+    for any app surface. Accepting such a bearer would let a
+    social / misconfigured IdP identity establish a session-shaped
+    foothold despite carrying no tenant claim and no
+    ``platform.tenant.admin`` capability. The composition root
+    therefore rejects it before any route-specific handler runs.
     """
     authority = request_authority_opt(request)
     if authority is None or authority.is_fully_anonymous:
@@ -411,6 +442,13 @@ def require_authority(request: Request) -> AuthorityContext:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": ERROR_CODE_AUTHORITY_REQUIRED},
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    if getattr(request.state, "authority_source", None) == "verified" and (
+        not _authority_has_app_scope(authority)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED},
         )
     return authority
 
@@ -610,6 +648,7 @@ def request_tenant_scope_opt(request: Request) -> str | None:
 
 __all__ = [
     "ERROR_CODE_AUTHORITY_REQUIRED",
+    "ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED",
     "ERROR_CODE_CAPABILITY_REQUIRED",
     "ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED",
     "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",

@@ -6,7 +6,9 @@ the constitutional contract established by Wedge 2.75-ε:
 * :func:`require_tenant_scope` rejects anonymous and tenant-less
   authorities. This is the wedge that future tenant-scoped read
   handlers transitively depend on.
-* :func:`require_authority` rejects anonymous only.
+* :func:`require_authority` rejects anonymous and verified
+  principals that carry neither tenant scope nor platform-admin
+  capability.
 * :func:`request_tenant_scope_opt` returns ``None`` for both
   anonymous and tenant-less authorities — admin / internal use
   only.
@@ -30,6 +32,7 @@ from starlette.requests import Request
 
 from app.dependencies.authority import (
     ERROR_CODE_AUTHORITY_REQUIRED,
+    ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED,
     ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED,
     ERROR_CODE_TENANT_AXIS_MISSING,
     OPERATOR_CAPABILITY,
@@ -45,7 +48,11 @@ from app.identity.authority import AuthorityContext
 from app.identity.primitives import TenantId
 
 
-def _request(authority: AuthorityContext | None = None) -> Request:
+def _request(
+    authority: AuthorityContext | None = None,
+    *,
+    source: str | None = None,
+) -> Request:
     """Lightweight Request stand-in with a stateful ``.state``.
 
     Starlette's :class:`Request` exposes ``request.state`` as a
@@ -65,6 +72,8 @@ def _request(authority: AuthorityContext | None = None) -> Request:
     )
     if authority is not None:
         req.state.authority = authority
+    if source is not None:
+        req.state.authority_source = source
     return req
 
 
@@ -74,6 +83,35 @@ def _request(authority: AuthorityContext | None = None) -> Request:
 def test_require_authority_returns_bound_authority() -> None:
     authority = AuthorityContext(tenant_id=TenantId("acme"))
     assert require_authority(_request(authority)) is authority
+
+
+def test_require_authority_allows_verified_platform_admin_without_tenant() -> (
+    None
+):
+    from app.identity.primitives import PrincipalId
+
+    authority = AuthorityContext(
+        principal_id=PrincipalId("platform-admin"),
+        capabilities=frozenset({PLATFORM_TENANT_ADMIN_CAPABILITY}),
+    )
+    assert (
+        require_authority(_request(authority, source="verified"))
+        is authority
+    )
+
+
+def test_require_authority_allows_header_attested_principal_without_tenant() -> (
+    None
+):
+    from app.identity.primitives import PrincipalId
+
+    authority = AuthorityContext(
+        principal_id=PrincipalId("header-principal")
+    )
+    assert (
+        require_authority(_request(authority, source="header"))
+        is authority
+    )
 
 
 def test_require_authority_raises_401_when_anonymous() -> None:
@@ -87,6 +125,25 @@ def test_require_authority_raises_401_when_anonymous() -> None:
         excinfo.value.headers is not None
         and excinfo.value.headers.get("WWW-Authenticate") == "Bearer"
     )
+
+
+def test_require_authority_raises_403_when_verified_scope_missing() -> (
+    None
+):
+    """A verified bearer without tenant scope or platform-admin
+    authority is authenticated but unusable, so app entry fails
+    closed before any route runs."""
+    from app.identity.primitives import PrincipalId
+
+    authority = AuthorityContext(
+        principal_id=PrincipalId("user-1")
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        require_authority(_request(authority, source="verified"))
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.detail == {
+        "code": ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED
+    }
 
 
 def test_require_authority_raises_401_when_bound_but_fully_anonymous() -> None:
@@ -216,6 +273,7 @@ def test_module_exports_stable_contract() -> None:
 
     assert sorted(mod.__all__) == [
         "ERROR_CODE_AUTHORITY_REQUIRED",
+        "ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED",
         "ERROR_CODE_CAPABILITY_REQUIRED",
         "ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED",
         "ERROR_CODE_OPERATOR_AUTHORITY_REQUIRED",

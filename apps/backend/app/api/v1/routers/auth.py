@@ -30,14 +30,12 @@ shape so the SDK can map status codes to client-side actions
 Tenant-scope dependency choice
 ──────────────────────────────
 ``/me`` depends on :func:`require_authority` rather than
-:func:`require_tenant_scope`. A verified principal whose
-authority lacks a tenant axis is constitutionally rare (the
-upstream IdP should always emit the tenant claim) but it is not
-an error per se — the response simply carries ``tenant_id =
-None`` and the frontend handles the no-tenant case (e.g. by
-rendering a tenant-selector UI). Tenant-scope enforcement
-belongs on tenant-SCOPED reads (sessions, governance decisions,
-…), not on the self-identity endpoint.
+:func:`require_tenant_scope` because the entry gate now owns the
+complete "is this verified principal authorised for ANY app
+surface?" decision. A verified bearer that lacks both a tenant
+axis and ``platform.tenant.admin`` is rejected there with 403
+``authorized_scope_required``; tenant-scoped reads still add the
+stricter tenant clamp via :func:`require_tenant_scope`.
 """
 
 from __future__ import annotations
@@ -59,7 +57,9 @@ router = APIRouter(tags=["auth"])
     description=(
         "Return the verified principal bound to this request. "
         "Returns 401 ``authority_required`` when no authority is "
-        "bound (anonymous request)."
+        "bound (anonymous request), and 403 "
+        "``authorized_scope_required`` when a verified bearer has "
+        "no tenant scope and no platform-admin capability."
     ),
 )
 async def me(

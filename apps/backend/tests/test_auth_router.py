@@ -12,6 +12,8 @@ Pinned contract:
 * Anonymous request → 401 ``authority_required``.
 * Verified Bearer token → 200 with the principal data and
   ``authority_source = "verified"``.
+* Verified Bearer token with no tenant claim and no
+  ``platform.tenant.admin`` → 403 ``authorized_scope_required``.
 * Invalid signature / wrong audience / wrong issuer / expired →
   401 ``verification_failed`` (every failure mode the middleware
   must convert into a uniform refusal).
@@ -262,13 +264,11 @@ def test_get_me_capabilities_are_sorted_for_determinism(
     assert response.json()["capabilities"] == ["a", "b", "m", "z"]
 
 
-def test_get_me_without_tenant_claim_still_returns_200(
+def test_get_me_without_tenant_claim_rejected_when_no_platform_scope(
     keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
 ) -> None:
-    """A verified principal whose token carries no ``tenant_id``
-    claim is constitutionally rare but not an error: the response
-    carries ``tenant_id = None`` and the frontend handles the
-    no-tenant case (e.g. by rendering a tenant-selector UI)."""
+    """A verified bearer with no tenant claim and no platform scope
+    cannot establish a usable app session."""
     private, kid, client = keypair_and_app
     token = _sign_rs256(
         private,
@@ -280,10 +280,32 @@ def test_get_me_without_tenant_claim_still_returns_200(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
+    assert response.status_code == 403
+    assert "authorized_scope_required" in response.text
+
+
+def test_get_me_platform_admin_without_tenant_claim_still_returns_200(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+) -> None:
+    private, kid, client = keypair_and_app
+    token = _sign_rs256(
+        private,
+        kid=kid,
+        claims=_standard_claims(
+            tenant_id=None,
+            capabilities=["platform.tenant.admin"],
+        ),
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["principal_id"] == "auth0|user-123"
     assert body["tenant_id"] is None
+    assert body["capabilities"] == ["platform.tenant.admin"]
     assert body["authority_source"] == "verified"
 
 
