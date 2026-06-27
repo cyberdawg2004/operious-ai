@@ -27,14 +27,15 @@ _COMMITMENT_REPLY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "refund",
         re.compile(
-            r"\b(?:we|we'll|we will|can|can process|can offer)\b.{0,80}\brefund\b"
+            r"\b(?:we|we'll|we will|can|can process|can offer|i'll|i will)\b"
+            r".{0,80}\brefund\w*\b"
         ),
     ),
-    ("refund", re.compile(r"\brefund is approved\b|\bapproved for refund\b")),
+    ("refund", re.compile(r"\brefund\w* is approved\b|\bapproved for (?:a )?refund\w*\b")),
     (
         "replacement",
         re.compile(
-            r"\b(?:we|we'll|we will)\b.{0,80}\breplace(?:ment)?\b"
+            r"\b(?:we|we'll|we will|i'll|i will)\b.{0,80}\breplac(?:e|ed|ing|ement)\b"
         ),
     ),
     (
@@ -63,6 +64,47 @@ _COMMITMENT_REPLY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "prepaid_label",
         re.compile(r"\bprepaid label\b|\bprepaid return label\b|\breturn label\b"),
+    ),
+    # --- Broad, fail-closed catch-all below this line ----------------------
+    # The named categories above are a denylist of phrasings we happen to
+    # have seen; they will never be exhaustive. A reply that promises a
+    # remedy in wording none of them anticipated must still route to human
+    # approval -- the absence of a named match is never grounds to treat a
+    # reply as safe. These patterns are deliberately broader and will
+    # over-flag relative to the named categories; that is the intended
+    # trade (false-positive-to-human is acceptable, false-negative-to-
+    # auto-send on a money/goods promise is not).
+    (
+        "remedy_promise",
+        re.compile(
+            r"\b(?:we(?:'ll| will)?|i'll|i will|let me|i'm going to|"
+            r"we're going to)\b.{0,80}\b(?:send|ship|mail|give|issue|cover|"
+            r"waive|reimburse|compensate|exchange|redo|comp|discount|"
+            r"upgrade|honor|take care of|sort (?:this|that|it) out|"
+            r"make (?:this|it) right|make you whole)\b"
+        ),
+    ),
+    (
+        "no_cost_commitment",
+        re.compile(
+            r"\bno (?:extra )?(?:cost|charge)\b|\bfree of charge\b|"
+            r"\bat no charge\b|\bon (?:us|the house)\b|\bcomplimentary\b"
+        ),
+    ),
+    (
+        "new_item_commitment",
+        re.compile(
+            r"\bnew (?:unit|item|device|product|one)\b.{0,40}\b(?:sent|"
+            r"shipped|on (?:its|the) way|being sent|out to you)\b|"
+            r"\bsend(?:ing)? (?:you )?a new (?:unit|item|device|product|one)\b"
+        ),
+    ),
+    (
+        "money_amount_commitment",
+        re.compile(
+            r"\b(?:we(?:'ll| will)?|i'll|i will|can|can offer|can process)\b"
+            r".{0,60}(?:[$£€]\s?\d|\d+(?:\.\d{2})?\s?(?:usd|dollars|gbp|eur))"
+        ),
     ),
 )
 

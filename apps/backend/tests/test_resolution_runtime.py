@@ -817,6 +817,243 @@ def test_money_or_goods_commitment_kinds_detect_reply_promise_without_action() -
     ) == ("reply_text:replacement",)
 
 
+# ─── Money/goods fail-closed floor: break-controls (i)-(vi) ──────────────
+#
+# The reply-text detector is a denylist of phrasings we happen to have
+# seen; it can never be exhaustive. These tests prove the floor is
+# fail-closed against wording NONE of the named categories anticipated
+# (i), independent of amount (iii), tenant config (v), and grounding (vi)
+# -- while confirming a genuinely safe, non-committal reply still
+# auto-sends (iv) so the floor does not over-correct into blocking
+# everything.
+
+
+def test_money_or_goods_commitment_kinds_detects_novel_remedy_promise_without_named_phrase() -> (
+    None
+):
+    """(i) A remedy promise in wording that matches none of the named
+    phrase categories (no "refund", "replace(ment)", "warranty", "credit",
+    "ship", or "prepaid label") must still be detected -- the absence of a
+    named match is never evidence of safety."""
+    kinds = money_or_goods_commitment_kinds(
+        recommended_actions=(),
+        reply=(
+            "We've blocked your card; we'll get a new one sent out to you "
+            "within 5 business days, no charge on our end."
+        ),
+    )
+    assert kinds
+    assert "reply_text:refund" not in kinds
+    assert "reply_text:replacement" not in kinds
+    assert "reply_text:warranty" not in kinds
+
+
+def test_money_or_goods_commitment_kinds_ignores_safe_troubleshooting_text() -> None:
+    """(iv) Purely informational/troubleshooting language with no
+    commitment verb and no remedy noun must not trip the broadened
+    detector -- otherwise the floor would over-correct and block safe
+    auto-send categories entirely."""
+    assert (
+        money_or_goods_commitment_kinds(
+            recommended_actions=(),
+            reply=(
+                "Your card has been blocked in our system; please watch your "
+                "mail for further account updates."
+            ),
+        )
+        == ()
+    )
+    assert (
+        money_or_goods_commitment_kinds(
+            recommended_actions=(),
+            reply="Please hold the power button for 10 seconds, then try again.",
+        )
+        == ()
+    )
+
+
+def test_money_guard_blocks_auto_send_for_novel_remedy_promise_even_with_permissive_config() -> (
+    None
+):
+    """(i)+(v): a category allowlist and a maximally permissive monetary
+    threshold are not sufficient to permit auto-send when the reply
+    commits to money/goods in novel wording -- no tenant config can
+    re-enable money/goods auto-approval."""
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"refund_requested"}),
+        monetary_commitment_threshold_cents=999_999_999,
+    )
+    gate = _evaluate_gate(
+        category="refund_requested",
+        original_content="Customer asked about a refund for their order.",
+        reply=(
+            "I'll get this sorted out for you and make sure you're taken "
+            "care of at no charge."
+        ),
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert "money_or_goods_commitment_requires_human_approval" in gate.reasons
+
+
+def test_money_guard_independent_of_amount_for_unknown_or_zero_amount() -> None:
+    """(iii): the guard keys on commitment KIND, never on a parsed amount --
+    a bound refund action with no amount anywhere in the request still
+    routes to human approval."""
+    taxonomy = ResolutionTaxonomyPolicy(
+        categories=(
+            ResolutionTaxonomyCategory(
+                id="refund_eligible",
+                label="Refund eligible",
+                description="Customer is eligible for a refund.",
+                recommended_actions=(
+                    {
+                        "type": "refund_request",
+                        "tool_name": "refund.request",
+                        "requires_execution": True,
+                    },
+                ),
+            ),
+        ),
+        monetary_remedy_keywords=frozenset(),
+        monetary_currency_symbols=frozenset(),
+        monetary_currency_codes=frozenset(),
+        unsupported_commitment_patterns=frozenset(),
+    )
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"refund_eligible"}),
+        monetary_commitment_threshold_cents=999_999_999,
+    )
+    gate = _evaluate_gate(
+        category="refund_eligible",
+        original_content="Please refund my order, not sure how much I paid.",
+        reply="We have reviewed your order and confirmed the details below.",
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=taxonomy,
+        recommended_actions=(
+            {"type": "refund_request", "tool_name": "refund.request"},
+        ),
+    )
+
+    assert gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert "money_or_goods_commitment_requires_human_approval" in gate.reasons
+
+
+@pytest.mark.asyncio
+async def test_bank_pilot_novel_remedy_promise_requires_human_approval_despite_grounding_allow() -> (
+    None
+):
+    """(i)+(v)+(vi) end-to-end: the bank-pilot tenant allowlists "card_lost"
+    for auto-send with a $0 monetary threshold (the most permissive config
+    possible), and the central grounding checker unconditionally ALLOWs.
+    A novel remedy promise -- wording that matches none of the named
+    phrase categories -- must still resolve to human approval. The money
+    floor does not rely on grounding to catch it."""
+    repository = await _bank_pilot_repository()
+    governance_repository = InMemoryGovernanceRepository()
+    draft = GroundedReplyDraft(
+        language="en",
+        segments=(
+            GroundedReplySegment(
+                kind="claim",
+                text=(
+                    "We've blocked your card; we'll get a new one sent out "
+                    "to you within 5 business days, no charge on our end."
+                ),
+                citation_ranks=(1,),
+            ),
+        ),
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=StaticGroundingChecker(allowed=True),
+                tenant_configuration_repository=repository,
+            )
+        ),
+        conversation_generator=_StaticConversationGenerator(draft),
+        tenant_configuration_repository=repository,
+    )
+
+    record = await runtime.create_proposal(
+        ResolutionProposalRequest(
+            tenant_id=BANK_TENANT_ID,
+            session_id=SESSION_ID,
+            execution_id=EXECUTION_ID,
+            dispatch_id=DISPATCH_ID,
+            diagnostic_event_id=DIAGNOSTIC_EVENT_ID,
+            diagnostic_summary="Card lost or stolen.",
+            diagnostic_category="card_lost",
+            diagnostic_confidence=0.93,
+            original_content="I lost my debit card and need a replacement.",
+            retrieved_citations=[_citation()],
+        )
+    )
+
+    assert record.resolution_category == "card_lost"
+    assert record.autonomy_decision is ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_bank_pilot_safe_non_committal_reply_still_auto_sends() -> None:
+    """(iv): the broadened detector must not over-correct -- a genuinely
+    safe, non-committal reply in the same allowlisted category still
+    reaches SEND_ELIGIBLE end-to-end."""
+    repository = await _bank_pilot_repository()
+    governance_repository = InMemoryGovernanceRepository()
+    draft = GroundedReplyDraft(
+        language="en",
+        segments=(
+            GroundedReplySegment(
+                kind="claim",
+                text=(
+                    "Your card has been blocked in our system; please watch "
+                    "your mail for further account updates."
+                ),
+                citation_ranks=(1,),
+            ),
+        ),
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=StaticGroundingChecker(allowed=True),
+                tenant_configuration_repository=repository,
+            )
+        ),
+        conversation_generator=_StaticConversationGenerator(draft),
+        tenant_configuration_repository=repository,
+    )
+
+    record = await runtime.create_proposal(
+        ResolutionProposalRequest(
+            tenant_id=BANK_TENANT_ID,
+            session_id=SESSION_ID,
+            execution_id=EXECUTION_ID,
+            dispatch_id=DISPATCH_ID,
+            diagnostic_event_id=DIAGNOSTIC_EVENT_ID,
+            diagnostic_summary="Card lost or stolen.",
+            diagnostic_category="card_lost",
+            diagnostic_confidence=0.93,
+            original_content="I lost my debit card and need a replacement.",
+            retrieved_citations=[_citation()],
+        )
+    )
+
+    assert record.resolution_category == "card_lost"
+    assert record.autonomy_decision is ResolutionAutonomyDecision.AUTO_APPROVED
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+
+
 @pytest.mark.asyncio
 async def test_bank_pilot_taxonomy_disputed_transaction_break_control() -> None:
     """LOAD-BEARING: proves the tenant-defined taxonomy correctly classifies a
