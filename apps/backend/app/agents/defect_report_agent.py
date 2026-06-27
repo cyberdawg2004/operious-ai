@@ -19,6 +19,7 @@ from app.cognition.exceptions import CognitionLLMProviderError
 from app.cognition.llm import (
     DiagnosticLLMClient,
     DiagnosticLLMMessage,
+    message_text,
 )
 from app.cognition.models import DiagnosticLLMCompletion, DiagnosticLLMUsage
 from app.events import (
@@ -320,7 +321,7 @@ class DeterministicDefectReportLLMClient:
         tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
         del system_prompt, max_output_tokens, temperature, tenant_id
-        prompt = "\n".join(message.content for message in messages)
+        prompt = "\n".join(message_text(message.content) for message in messages)
         incident_count = max(1, prompt.count("\n") // 8)
         payload = {
             "title": "Detected recurring hardware defect pattern",

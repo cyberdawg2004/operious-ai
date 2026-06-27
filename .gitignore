@@ -98,3 +98,13 @@ coverage.xml
 *.dump
 .vercel
 .env*
+
+# Local-only tooling/artifact trees -- never product code, never release
+# evidence. Confirmed before ignoring: no secrets/credentials (just the
+# vendored AWS CLI installer/binaries, a Terraform scaffold with only a
+# placeholder db_password, and forensic-audit text reports), and nothing
+# here was ever staged or committed.
+/aws/
+/awscliv2.zip
+/infra/
+/audit-artifacts/

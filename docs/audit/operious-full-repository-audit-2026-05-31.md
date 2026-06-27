@@ -1,9 +1,10 @@
 # Operious AI Full Repository Audit
 
 Date: 2026-05-31
-Current-state update: 2026-06-05, after Phase 1/2 governed-connector, onboarding, work-order, commerce-action-stub, and real-embedding review
+Current-state update: 2026-06-26, after attachment/media/vision ingestion, structured extraction, warranty/refund W0-W4 workflow, connector/OMS/RLS commits, case-approval auto-delivery, deploy/reconciler hardening, and forensic line-audit review
 Auditor: Codex static architecture/security review
-Audited HEAD: `eb74b55` (`security(2.x): commerce action tools fail closed in production (no fake-success stubs)`)
+Audited HEAD: `a7959d4` (`feat(approvals): auto-send the customer reply when a case approval makes it eligible`)
+Working-tree note: current uncommitted source changes are limited to this audit refresh plus two Codex verification fixes in deterministic agent test clients so multimodal `DiagnosticLLMMessage.content` is converted with `message_text()`. Untracked local artifacts `audit-artifacts/`, `aws/`, `awscliv2.zip`, `infra/`, `operioustoday`, and `h origin phase-2-2-stabilized` are not counted as production readiness evidence and should not be committed as-is. The forensic audit artifacts were reviewed as evidence, but they are not production code.
 Embedding update note: the follow-on real-embeddings B work wires `build_embedding_provider()` into live knowledge composition, fixes native pgvector search at one 1536-dimensional HNSW column, adds a dry-run-first re-embed job for the Anker knowledge set, and proves the path with mocked OpenAI HTTP plus DB-backed retrieval tests. Production still needs the careful snapshot -> migrate -> re-embed -> retrieval-confirm rollout.
 
 ## Executive Verdict
@@ -37,48 +38,65 @@ The current state is materially stronger than the original May 31 audit. Claude/
 - Tenant action governance is now per-tenant and policy-backed through the same change-request ledger; connector configuration and action policy onboarding are dual-control and reconstruction-bound.
 - Platform tenant creation is split from tenant configuration: `platform.tenant.admin` creates inert tenant anchors, while Command Center onboarding configures channels/connectors/action policy through tenant-scoped Phase B change requests.
 - Work-order dispatch now has a tenant-scoped ledger, explicit state machine, reconstruction fields, idempotent repair dispatch, and receipt-only fulfillment callbacks that advance only after tenant-reported status is consumed.
-- Unconfigured commerce actions now have a fail-closed tool path for the worker runtime: production derives `ALLOW_STUB_ACTIONS=false` by default, and the diagnostic worker passes that setting into the tenant action registry. However, the manager action-approval service factory still omits the setting and therefore can still build fake-success stubs through the registry default. This is a real residual, not a documentation nit.
+- The action-approval DI gap is now closed in current code: the case/manager approval service factory threads `settings.allow_stub_actions_effective` into `build_tenant_action_tool_registry()`, and `test_action_fail_closed.py` guards that wiring.
+- Crisis/escalation handoffs are more durable: committed code adds a durable crisis action handoff path, regression coverage for the handoff wiring, escalation runtime/outbox/router tests, and cognition/escalation audit coverage.
+- Data protection is materially stronger: sensitive write/read paths are wired through data protection, a dry-run-first backfill path exists, FK targets are registered for backfill flushing, and GCP KMS custody for the data-protection master key is now committed. Formal compliance still needs live evidence.
+- Knowledge upload and ingestion now flow through governance, encryption-at-rest, quarantine/review, Command Center upload/review surfaces, and automatic approval only when the governance change-request apply path is used. The direct-write button has been removed.
+- Resolution safety is stronger: tenant-defined taxonomy/autonomy policy fails closed for unclassified categories, auto-send refusals are terminal/logged, worker-level safety floors escalate P0/CRISIS regardless of model category, and governance denial observability now surfaces the real reason.
+- Queue/outbox reliability improved: ingress outbox replay resets DLQ state, dead-letter writes are idempotent by task identity, outbound-send reconciliation resolves stale claims from outbox evidence, webhook nonce cleanup backlog growth is signaled, and worker concurrency/import issues were fixed.
+- The connector/OMS/RLS patch is now committed: generic REST warranty/replacement connector safety, OMS credential update proposals with ciphertext-hash sentinels only, `tenant.connector.approve`, Auth0 role/permission mapping for connector approval, and `FORCE ROW LEVEL SECURITY` on `connector_configs` are in tracked code and DB-tested.
+- Customer attachment ingestion is now a real substrate: tenant attachment records, DB/S3 blob abstraction, size/type/hash controls, tenant RLS, retention/purge/stream controls, email attachment capture, SES large-email fetch, and WhatsApp media two-hop fetch all exist in committed code.
+- Diagnostic cognition is now multimodal for stored attachments: vision message construction, structured extraction, one-shot malformed-JSON self-correction, fail-closed ambiguity handling, and truncation escalation are committed and covered by targeted tests. Live Anthropic/S3 proof remains skipped without production credentials.
+- Warranty/refund W0-W4 is now implemented in committed code: tenant message templates, eligibility verification, recommended remedy selection, generic `inventory.check`, availability-gated remedy selection, cannot-determine probe draft-for-review, manager grounding/evidence UI, approve/reject wiring, and governed case-approval auto-delivery.
+- Case approval delivery was materially hardened after Phase 2.2: the reconciler now delivers eligible approved cases, preserves already governed replies, records a dedicated delivery-authorization decision, closes the decision-id collision/dual-surface gap, and returns clean API errors for denied bound actions.
+- Deployment/runtime hardening moved forward: release-command migrations are wired before traffic shift, web memory is raised to 1024 MB, queue-depth snapshot failures are isolated per queue, queue-age sentinel add/remove races are fixed, shared `httpx` clients are recreated when event loops change, GCP master-key unwrap is threaded through all GCP backend call sites, and `pypdf` is bumped for GHSA-jm82-fx9c-mx94.
+- The forensic line-audit artifacts found no P0/P1 issue, but did identify still-open defense-in-depth and hygiene findings: nullable tenant columns plus `row_tenant_id IS NULL OR ...` RLS predicate behavior, CORS documentation/implementation mismatch with production localhost allowlist, 518 tracked dead duplicate Python files under the Next.js app trees, tracked junk files, owner-session/RLS-off caveat, duplicate frontend API clients, and local AWS/Terraform artifacts that are not release-clean.
 - S-10 is still open, but live-verification tooling now exists for spoof rejection, RLS probes, worker/DLQ proof, smoke traces, and legacy Anker knowledge rewrap.
 
-The blocking issue has shifted again. It is no longer "there are no controls" or "there are no side-effect ledgers." The blocker is live proof, operational completeness, provider maturity, and one remaining commerce-action DI gap. `S-10` remains open because Phase E deployment verification is not archived: no live proof yet that production rejects direct spoofed authority headers, enforces RLS under production roles, runs workers/DLQ correctly, and has real secrets/providers configured. Remaining review caveats: auth-error coarsening is not yet wired to every malformed authority parse path, the per-IP limiter may key the immediate Fly proxy peer unless real client IP handling is proven live, data-protection controls need KMS/retention/legal-operation proof before compliance claims, the action-approval service must pass `settings.allow_stub_actions_effective` into `build_tenant_action_tool_registry`, and the new connector side-effect path is code/test-proven but not live-provider-proven.
+The blocking issue has shifted again. It is no longer "there are no controls," "there are no side-effect ledgers," "manager approvals can silently use fake-success stubs," or "connector credential/RLS work is only local." The blocker is live proof, operational completeness, provider maturity, and repo/infra hygiene. `S-10` remains open because Phase E deployment verification is not archived: no current-HEAD live proof yet that production rejects direct spoofed authority headers, enforces RLS under production roles, runs workers/DLQ correctly, and has real secrets/providers configured. Remaining review caveats: auth-error coarsening is not yet wired to every malformed authority parse path, the per-IP limiter may key the immediate Fly proxy peer unless real client IP handling is proven live, data-protection controls need KMS/retention/legal-operation proof before compliance claims, live S3/Anthropic/provider drills are not archived, CORS still contains production localhost/Vercel allowlist residue, nullable-tenant RLS policy semantics need hardening, dead duplicate Python trees and tracked junk remain, the local AWS CLI archive/vendor tree should not be committed, and the Terraform scaffold contains placeholder credentials plus open ingress/public-IP defaults that are not production-ready.
 
-Final status: safer for controlled internal demo and a tightly scoped non-regulated pilot with irreversible actions constrained. Still not safe to call enterprise-production-ready for Anker/Samsung/Microsoft/Amazon operations until S-10 live evidence, the manager-approval stub DI gap, real provider drills, and compliance evidence are closed.
+Final status: safer for controlled internal demo and a tightly scoped non-regulated pilot with irreversible actions constrained behind governed connectors. Still not safe to call enterprise-production-ready for Anker/Samsung/Microsoft/Amazon operations until S-10 live evidence, live provider drills, RLS/CORS hardening, repository/infra cleanup, DR/SLO proof, and compliance evidence are closed.
 
 ## Scope And Evidence
 
-Repository traversal now finds 2,500 discoverable files via `rg --files`.
+Repository traversal now finds 2,739 discoverable files via `rg --files`. This includes untracked local material; the `aws/` vendor tree is mostly ignored by `rg`, but `git status` still shows it as untracked.
 
 Top-level inventory:
 
 | Area | Count | Notes |
 | --- | ---: | --- |
-| `apps` | 2,302 | Backend, command center, platform console, marketing, duplicated legacy app trees |
+| `apps` | 2,504 | Backend, command center, platform console, marketing, connector, attachment, approval, warranty/refund, and test changes |
 | `packages` | 77 | TS shared/types/contracts/sdk/ui/auth/tracing/topology/observability |
-| `docs` | 61 | Architecture, runbooks, readiness, prior audits |
-| `frontend` | 28 | Older standalone marketing frontend |
-| `tests-frontend` | 21 | Static frontend architecture tests |
+| `docs` | 83 | Architecture, runbooks, readiness, prior audits |
+| `tests-frontend` | 22 | Static frontend architecture tests |
+| `audit-artifacts` | 27 | Untracked forensic-review artifacts; useful evidence, not product code |
+| `infra` | 9 | Uncommitted Terraform scaffold; placeholder/open-ingress posture, not production proof |
+| `aws` / `awscliv2.zip` | 4 visible via `rg` | Uncommitted AWS CLI installer/archive artifacts; repo hygiene blocker |
 
 Backend implementation inventory:
 
 | Backend area | Files | Notes |
 | --- | ---: | --- |
-| `boundary` | 148 | Ingress/egress, adapters, voice, language, media, fulfillment callback normalization |
+| `boundary` | 161 | Ingress/egress, adapters, voice, language, media, fulfillment callback normalization |
+| `attachments` | 11 | Tenant attachment metadata, blob storage abstraction, retention/purge/stream controls |
+| `approvals` | 16 | Case approval delivery/reconciliation and customer-reply authorization |
 | `coordination` | 98 | Topology, routing, policies |
 | `_deprecated` | 0 active | Deleted by `7731f5a`; invariant tests prevent recreation/imports |
-| `api` | 63 | FastAPI v1 routers |
+| `api` | 65 | FastAPI v1 routers |
+| `cognition` | 19 | Diagnostic LLM, vision/multimodal message support, structured extraction |
 | `organizational_intelligence` | 56 | Intelligence/learning subsystems |
 | `hardening` | 55 | Metrics, alerts, operational hardening |
 | `governance` | 52 | Policy chains, enforcement, decisions, capability runtime |
 | `session` | 50 | Timeline/session lifecycle |
-| `agents` | 51 | Runtime, tools, action governance, connector invocation ledger |
+| `agents` | 54 | Runtime, tools, action governance, connector invocation ledger, warranty/replacement connector work |
 | `arbitration` | 41 | Evaluators and records |
 | `supervisor` | 37 | Supervisor inspections and projections |
-| `services` | 35 | Tenant config, lifecycle, ingress, outbound, enrichment, fulfillment receipt |
-| `runtime` | 26 | Resolution governance, grounding, conversation generation |
-| `workers` | 18 | Celery tasks, recovery, S-10 probe tasks |
+| `services` | 40 | Tenant config, lifecycle, ingress, outbound, enrichment, fulfillment receipt, credential-update/service hardening |
+| `runtime` | 33 | Resolution governance, grounding, conversation generation, warranty/refund policy/runtime |
+| `workers` | 23 | Celery tasks, recovery, S-10 probe tasks, queue hardening |
 | `execution` | 17 | Durable execution authority |
 | `knowledge` | 17 | Knowledge ingestion/retrieval/vector runtime |
-| `tenant` | 17 | Tenant config runtime/persistence/credentials/lifecycle |
+| `tenant` | 20 | Tenant config runtime/persistence/credentials/lifecycle/connectors |
 | `work_orders` | 12 | Work-order dispatch ledger, state machine, fulfillment consumer |
 
 Evidence note: this audit reads the critical paths end to end: backend composition, auth/authority, RLS/session wiring, tenant config, governance, agent tool invocation, execution/worker flow, ingress/webhooks, voice, knowledge/RAG/cognition, frontend auth/API client, command center demo paths, deployment config, TODO/mock/stub markers, and readiness docs. It does not claim live Fly/Vercel production proof.
@@ -157,7 +175,26 @@ Recent security-relevant commits reviewed:
 | `221e848` | Phase 2.3.x-a: work-order dispatch ledger, explicit state machine, reconstruction-bound, FORCE RLS. |
 | `ed25dbc` | Phase 2.3.x-b: `repair.dispatch` outbound action, governed fail-closed, connector-config-backed, idempotent reserve-before-dispatch. |
 | `46347f4` / `106f28a` | Phase 2.3.x-c: inbound work-order fulfillment callbacks record ingress only; tenant-scoped consumer advances awaiting fulfillment to terminal states idempotently. |
-| `eb74b55` | Commerce action stubs now fail closed when `allow_stub_actions=False`; production settings derive that default and the diagnostic worker passes it. Residual: action-approval service DI still omits the flag and can use the registry default. |
+| `eb74b55` | Commerce action stubs fail closed when `allow_stub_actions=False`; production settings derive that default and the diagnostic worker passes it. |
+| `fe5451d` / current services wiring | Action-approval/case-approved orchestration now also passes `settings.allow_stub_actions_effective` into the tenant action tool registry; regression guard checks the source wiring. |
+| `b9f1c5f` / `bf0bced` | Durable crisis action handoff path and regression guard for durable crisis handoff wiring. |
+| `6955048` | GCP KMS custody path for data-protection master key. |
+| `d0a1d56` / `ff31704` / `39595c0` / `428f900` / `d20cd21` | Data protection wired into sensitive read/write sites and worker coordination, with backfill and readiness fallback/recurrence fixes. |
+| `e60bf9d` / `f1a959a` / `9d7cdd3` / `f346f82` | Tenant-defined resolution taxonomy/autonomy, auto-send refusal terminal logging, P0/CRISIS worker safety floor, and real governance denial reason observability. |
+| `466ed30` | Critical-path inbound -> governed-outbox E2E coverage. |
+| `06dd1de` / `f0b78b2` / `67380c5` / `2c61879` | Nonce backlog signal, ingress DLQ replay reset, idempotent dead-letter writes by task identity, and outbound-send stale-claim reconciliation. |
+| `561c0a9` / `9c6a54a` / `05361ff` / `2df23ea` | Worker import fix, voice-worker memory fit, CloudAMQP volume reduction, and Fly SME approval queue consumption. |
+| `82df8cb` / `e51be3a` / `aa6cac5` | Dependency/license review gates, CI-gated manual deploy, patched vulnerabilities, and logout invariant restoration. |
+| `9675e79` / `7ee7b52` / `dd84b76` / `5914f4b` | Knowledge upload/ingestion through governance and encryption-at-rest, Command Center upload/review surfaces, governance-apply auto-approval, and removal of the direct-write button. |
+| `17d1565` / `04d130a` / `314869c` / `cf21fd7` / `1227b9d` | Tenant connectors, execution safety test endpoint, OMS credential dual-control storage/update route, connector self-service UI, connector approval mapping, and `connector_configs` FORCE RLS proof are committed. |
+| `6d7b131` / `2c8fa65` / `19a2adb` / `e2ef554` | Customer attachment storage foundation, email attachment capture, SES large-email fetch, message-id attachment linkage, and Meta WhatsApp media capture with two-hop fail-soft fetch. |
+| `a6fba4c` / `afa8cc6` / `b35dc8e` / `b5148ae` | Vision over stored attachments, structured extraction with fail-closed eligibility gating, malformed JSON retry, and live Anthropic default model update. |
+| `630a44e` / `f1c8bd9` / `7ad4b27` / `aaf8116` / `37d4a08` / `523ec1f` / `d5c204b` / `f414c04` / `3ec84fa` / `f055224` / `06dad33` | Warranty/refund W0-W4: tenant message templates, eligibility verification, remedy recommendation, approval queue wiring, generic `inventory.check`, availability-gated selection, manager read-only grounding UI, approve/reject, cannot-determine probe draft, and evidence-source propagation. |
+| `e05a13b` / `f9851ae` / `ae7e749` / `213793b` / `6963308` / `8552954` / `a7959d4` | Case approval path now delivers eligible governed replies, wires resolution governance into reconciliation, closes decision-id/dual-surface gaps, preserves already-governed replies, records dedicated delivery authorization, and auto-sends after case approval when eligible. |
+| `c23421c` / `77253d4` / `bdc2369` / `f133f7f` / `2a998c8` / `16978e0` / `803a3f4` / `d56db3d` | Queue/admission/deploy/runtime hardening: queue-age race fix, queue snapshot per-queue isolation, truncated completion escalation, event-loop-safe shared HTTP client, GCP unwrap call-site coverage, Fly release command, web memory increase, and deploy-stop bug evidence package. |
+| `3f27604` / `8ac83ac` / `b8a93cf` | Security/test hygiene: `pypdf` bumped to 6.13.3 for GHSA-jm82-fx9c-mx94 and pre-existing pyright/vision-test format issues corrected. |
+| `audit-artifacts/forensic-line-audit/12_final_report.md` | Untracked forensic audit artifact reviewed. It reports no P0/P1 findings but leaves F-009 nullable-tenant RLS hardening, F-006 CORS fallback/allowlist mismatch, F-001 dead duplicate Python trees, F-002/F-003/F-004 tracked junk, F-011 owner-session caveat, and F-012 duplicate frontend clients open. |
+| Local untracked `infra/`, `aws/`, `awscliv2.zip` | Not product evidence. Terraform contains placeholder DB passwords and open ingress/public-IP defaults; AWS CLI archive/vendor artifacts are repo hygiene/supply-chain blockers. |
 
 Focused verification evidence:
 
@@ -182,10 +219,25 @@ Focused verification evidence:
 | Work-order dispatch substrate | User normal-shell rerun: `6 passed in 0.69s` |
 | Commerce action fail-closed tool and setting derivation | Codex rerun: `4 passed in 0.63s` |
 | Real OpenAI embedding provider/runtime proof | Codex rerun: `25 passed in 2.35s`; user normal-shell DB proof: combined retrieval/re-embed/FORCE-RLS bundle `8 passed in 1.06s`, retrieval file `6 passed in 0.87s`, FORCE-RLS invariant `1 passed in 0.13s` |
-| Frontend architecture/onboarding/platform-console invariants | `npm run test:frontend`: `105 passed in 0.74s` after sandbox IPC restriction was bypassed with approval |
+| Frontend architecture/onboarding/platform-console invariants | `npm run test:frontend`: `123 passed` after sandbox IPC restriction was bypassed with approval |
 | Per-tenant action governance | Codex rerun: `4 passed in 0.69s` |
 | Resolution grounding/conversation proposal unit bundle | Codex rerun: `36 passed, 2 skipped in 1.06s` |
 | Connector framework non-DB/socket-gated bundle | Codex rerun: `3 passed, 3 skipped`; skips were DB gating and sandbox loopback bind limits |
+| Action-approval fail-closed DI guard | Reported/user proof: `test_action_fail_closed.py` `5 passed`; `test_action_approvals.py` `7 passed`; ruff clean; pyright `0 errors` |
+| Escalation/cognition/crisis handoff | User normal-shell proof: `test_escalation_router.py`, `test_cognition_audit.py`, `chaos/test_diagnostic_terminal_escalation.py` -> `11 passed in 3.82s`; broader escalation/Auth0/tenant lifecycle bundle -> `46 passed in 5.20s` |
+| Connector dual-control and warranty/replacement connector code | Codex rerun: `test_connector_dual_control.py` -> `17 passed in 2.30s`; unsandboxed loopback/TLS rerun of `test_warranty_replacement_connector.py` -> `11 passed in 1.60s` after correcting stale assertions to the project `ToolInvocationResult(status=...)` contract |
+| OMS credential storage | User normal-shell proof: `test_oms_credential_storage.py` -> `12 passed in 3.81s` |
+| Connector RLS and RLS invariant | User normal-shell proof: `test_connector_rls.py`, `test_rls_coverage_invariant.py` -> `6 passed in 0.52s`; focused latest proof `test_connector_rls.py::test_connector_configs_force_rls_flags` -> `1 passed in 0.13s`; Codex alembic check reached current head `0092_resolution_verdict_template_purpose_rename` |
+| Connector approval/Auth0 capability mapping | User normal-shell proof: `test_authz_domain_capabilities.py` -> `46 passed in 4.29s`; Codex pyright `0 errors`, ruff clean on touched auth/connector/service/test files |
+| Full backend lint | Codex rerun: `venv/bin/ruff check apps/backend/app apps/backend/tests` -> `All checks passed!` |
+| Backend type check | Initial pyright found two real multimodal typing errors in deterministic agent clients; after `message_text()` fixes, `venv/bin/pyright -p pyrightconfig.json` -> `0 errors, 23 warnings` |
+| Deterministic agent multimodal regression coverage | Codex rerun: `test_generated_sme_reviewer.py`, `test_cognition_audit.py` -> `6 passed, 3 skipped`; skips require `TEST_DATABASE_URL` |
+| Committed connector/OMS/RLS DB bundle | Unsandboxed Codex rerun: `test_connector_rls.py`, `test_rls_coverage_invariant.py`, `test_oms_credential_storage.py`, `test_oms_credential_http_route.py` -> `21 passed in 41.72s` |
+| Case/action approval auto-delivery bundle | Unsandboxed Codex rerun: `test_case_approval_auto_send.py`, `test_case_approval_recovery_tasks.py`, `test_case_approval_workflow.py`, `test_action_approval_case_completion.py`, `test_action_approvals_router.py`, `test_warranty_refund_approval_wiring.py`, `test_warranty_refund_approve_reject.py` -> `64 passed in 3.87s` |
+| Attachment/email/WhatsApp media/vision/structured extraction DB bundle | Unsandboxed Codex rerun: `45 passed, 9 skipped in 63.06s`; skips require real S3 bucket/region/credentials or live `ANTHROPIC_API_KEY` |
+| Warranty/refund workflow and connector bundle | Unsandboxed Codex rerun: `test_warranty_refund_eligibility.py`, `test_warranty_refund_eligibility_resolution_runtime.py`, `test_warranty_refund_policy.py`, `test_warranty_refund_probe_dispatch.py`, `test_warranty_refund_remedy_selection.py`, `test_inventory_check_connector.py`, `test_warranty_replacement_connector.py` -> `118 passed in 7.77s` |
+| Diagnostic parsing/truncation/model-default bundle | Codex rerun: `test_diagnostic_json_parse_self_correction.py`, `test_diagnostic_parsing_failure_classification.py`, `test_diagnostic_truncation_escalation.py`, `test_resolution_verdict_override.py`, `test_anthropic_default_model_is_live.py`, `test_anthropic_client_circuit.py` -> `29 passed, 1 skipped`; skip requires live `ANTHROPIC_API_KEY` |
+| Alembic migration state | Codex rerun: `alembic heads` and DB `alembic current` both show `0092_resolution_verdict_template_purpose_rename (head)` |
 
 Non-clean verification:
 
@@ -196,12 +248,15 @@ Non-clean verification:
 | Codex sandbox rerun of object-RBAC/app HTTP tests | Timed out entering `TestClient` lifespan | Not reproduced by user's normal-shell run (`13 passed`, `57 passed`). Likely local Redis/lifespan startup behavior; not counted as a code failure. |
 | Codex sandbox rerun of DB bundle | Timed out after an early error marker | Superseded by user's exact normal-shell rerun (`42 passed`). Not counted as a code failure. |
 | SSRF DNS-rebinding bundle in this sandbox | `3 failed, 2 passed` | Failures were sandbox loopback binding (`could not bind on 127.0.0.1:0`). The test file is now deterministic, but loopback-server cases still need normal-shell/CI proof before being claimed as locally green here. |
-| Frontend invariant tests in sandbox | Failed before tests: `tsx` could not create `/tmp/tsx-1000/*.pipe` | Reran outside sandbox with approval; real result was `105 passed`. |
-| Codex sandbox DB runs for connector/work-order files | Timed out after early pytest error marker, no traceback flushed before `timeout` | Not counted as a code failure; normal-shell proof is used where provided. Connector invocation ledger, repair dispatch, fulfillment callback, tenant lifecycle, S-10 prep, and tenant config DB bundle still need normal-shell proof unless supplied separately. |
-| Commerce action fail-closed DI coverage | Focused tests pass for the tool/registry/setting, but static review found one production DI call omitting the setting | `apps/backend/app/dependencies/services.py:839-844` calls `build_tenant_action_tool_registry()` without `allow_stub_actions=settings.allow_stub_actions_effective`, while `ActionApprovalService.approve()` re-invokes approved actions through that factory. This keeps #14/#72 partial. |
+| Frontend invariant tests in sandbox | Failed before tests: `tsx` could not create `/tmp/tsx-1000/*.pipe` | Reran outside sandbox with approval; real result was `123 passed`. |
+| Codex sandbox DB runs for connector/work-order files | Timed out after early pytest error marker, no traceback flushed before `timeout` | Not counted as a code failure; normal-shell/unsandboxed proof is used where provided. |
+| Commerce action fail-closed DI coverage | Previously non-clean; now closed in current code | `apps/backend/app/dependencies/services.py:1014-1019` passes `allow_stub_actions=settings.allow_stub_actions_effective`; `apps/backend/tests/test_action_fail_closed.py:111-115` guards the wiring. |
 | Codex sandbox DB run for embedding proof bundle | Timed out after an early marker, no traceback flushed before `timeout` | Superseded by the user's exact normal-shell rerun: combined retrieval/re-embed/FORCE-RLS bundle `8 passed in 1.06s`. |
+| Live S3/Anthropic/provider proof | Skipped where credentials were absent | Attachment/vision code has local and DB proof, but live object-storage and live LLM evidence is not archived. |
+| Pyright residual warnings | `0 errors, 23 warnings` | Warnings are mostly untyped boto3/client surfaces and existing unknown mapping types; not blockers, but still cleanup debt. |
+| Local infra/AWS artifacts | Present in `git status` as untracked | Not counted as verification. `awscliv2.zip` is a 72 MB local archive; `aws/` is an extracted CLI tree. `infra/aws/terraform` has placeholder `ChangeMe123!` DB password values and `0.0.0.0/0` ingress/public-IP defaults. |
 
-Residual gaps update: S-01 through S-09 are no longer open original vulnerabilities. They are closed or closed-with-residuals as described below. The previous tenant-config `applied_by` regression is fixed and proven by current DB-backed tests. Phase 2 adds real side-effect and onboarding controls, but S-10 remains open until live deployment evidence is archived. The latest commerce-action hardening is directionally correct but not fully closed until the action-approval service factory is wired to the same fail-closed setting as the diagnostic worker.
+Residual gaps update: S-01 through S-09 are no longer open original vulnerabilities. They are closed or closed-with-residuals as described below. The previous tenant-config `applied_by` regression is fixed and proven by current DB-backed tests. The previous action-approval stub DI residual is fixed in current code and has a regression guard. The connector/OMS/RLS work is now committed and DB-proven. S-10 remains open until live deployment evidence is archived, and the forensic residuals around nullable-tenant RLS semantics, CORS fallback/allowlist posture, dead duplicate Python trees, tracked junk, owner-session/RLS-off assumptions, duplicate frontend clients, and untracked infra/AWS artifacts remain open.
 
 ## Spec 1b Edge-Hardening Remediation (2026-06-01)
 
@@ -212,7 +267,7 @@ production proof remains part of Phase 3 / S-10):
 
 | # | Finding | Disposition after spec 1b |
 | ---: | --- | --- |
-| 16 | CORS credential posture | Code-closed. CORS respects `CORS_ALLOW_CREDENTIALS` / `CORS_ALLOW_METHODS` instead of hardcoding `allow_credentials=True`; wildcard origins already rejected. |
+| 16 | CORS credential posture | Partially code-closed. CORS respects `CORS_ALLOW_CREDENTIALS` / `CORS_ALLOW_METHODS` and rejects wildcard origins, but forensic F-006 keeps production-origin posture open because empty-origin fallback and production localhost/Vercel allowlist residue still need correction. |
 | 23 | Twilio canonicalization should be server-derived | Code-closed. Webhook + voice provider signatures verify against a server-derived URL (`PUBLIC_BASE_URL` + path); client `x-operious-webhook-url` honoured only under non-prod `WEBHOOK_TRUST_URL_HEADER`, which prod boot rejects. |
 | 24 | Route enumeration risk | Code-closed. Unknown route / tenant mismatch / missing or invalid signature all return an identical `401 webhook_rejected`. Residual: content oracle closed, timing oracle mitigated by rate limiting, full constant-time rejection deemed impractical given variable DB-lookup timing. |
 | 25 | Auth error detail can aid recon | Partial. Authority-state errors such as disabled header authority and verification unavailable are coarsened in production, but malformed `Authorization` and malformed legacy authority headers still return detailed `reason` / `header` / `field` bodies. |
@@ -234,7 +289,7 @@ restored immediately after each run. Post-proof production diff check:
 | 1b-3 Server-derived canonical URL | Channel webhook verifier trusted `x-operious-webhook-url` again. | `test_channel_webhook_signature_url.py::test_signature_over_forged_url_rejected` failed: forged URL signature was accepted. | Restored; included in final `120 passed`. |
 | 1b-4 Voice WS caps | Frame-rate guard returned without enforcing the cap. | `test_voice_ws_caps.py::test_over_rate_stream_is_closed_and_call_terminated` failed: stream closed normally with `1000` instead of policy `1008`. | Restored; included in final `120 passed`. |
 
-Edge-hardening review update: #16, #23, #24, #39, #40, and #63 are now materially closed in code/tests. #25 is materially improved but not fully closed because malformed parse errors still leak detail. #38 is now code-closed for the audited rate-limit/quota/admission paths, with live outage proof still required.
+Edge-hardening review update: #23, #24, #39, #40, and #63 are now materially closed in code/tests. #16 is closed for credential/method config but remains partially open for production-origin posture after forensic F-006. #25 is materially improved but not fully closed because malformed parse errors still leak detail. #38 is now code-closed for the audited rate-limit/quota/admission paths, with live outage proof still required.
 
 ## Phase 1a-ext/1c/1d/1e Review (2026-06-02)
 
@@ -250,26 +305,40 @@ The latest committed tranche is materially correct at the production-code level.
 
 Remaining fixes are not the old ledger regression. The real residuals are: complete #25 malformed-parse coarsening, archive Phase E live production proof for S-10, prove real-client-IP behavior for rate limiting, run DNS-rebinding loopback tests in normal CI, and avoid presenting data-protection controls as full compliance until KMS, retention/legal operations, and live erasure evidence are complete.
 
-## Phase 2 Governed Operations Review (2026-06-05)
+## Phase 2 Governed Operations Review (2026-06-17)
 
-The Phase 2 changes are materially correct in the reviewed production-code paths, with one clear exception in the commerce-action approval DI path.
+The Phase 2 changes are materially correct in the reviewed production-code paths. The previous commerce-action approval DI exception is now closed in current code; the remaining blockers are live provider proof, callback/provider-origin proof, S-10 production evidence, and repo/infra hygiene.
 
 - Grounded resolution/conversation: Phase 2.0/2.1 adds citation span provenance, evidence-bound generation, central grounding governance, and escalation on ungrounded factual replies. The user's normal-shell governance/domain/Auth0/resolution/config-router bundle passed `112 passed, 10 skipped`.
-- Connector side effects: Phase 2.2/2.3 adds a tenant-scoped connector invocation ledger, provider idempotency keys, generic REST refund connector, connector config records, credential redaction, SSRF validation/pin-to-IP transport, and terminal replay semantics.
+- Connector side effects: Phase 2.2/2.3 adds a tenant-scoped connector invocation ledger, provider idempotency keys, generic REST refund connector, connector config records, credential redaction, SSRF validation/pin-to-IP transport, terminal replay semantics, committed warranty/replacement connector paths, committed OMS credential-update route, connector approval capability mapping, and `connector_configs` FORCE RLS proof.
 - Tenant action/onboarding governance: Phase 2.4/2.5a-b moves action policy and connector configuration into the dual-control tenant-config change-request ledger with reconstruction hashes and write-only credentials. Read APIs are credential-free and capability-gated.
 - Platform/tenant boundary: Phase 2.5c-d splits platform tenant creation from tenant configuration. `platform.tenant.admin` creates inert tenants in the Platform Console; Command Center onboarding is tenant-scoped config work only.
 - Work-order dispatch: Phase 2.3.x-a/b/c adds a work-order ledger, explicit `created -> dispatched -> awaiting_fulfillment -> fulfilled/failed` transitions, connector-backed `repair.dispatch`, receipt-only callback ingress, and tenant-scoped fulfillment consumption. The user's normal-shell work-order dispatch substrate test passed `6 passed`.
-- Commerce action stubs: `eb74b55` adds `ALLOW_STUB_ACTIONS`, `Settings.allow_stub_actions_effective`, and `FailClosedActionTool`. The diagnostic worker passes the derived production setting into the tenant action registry, and focused tests passed `4 passed`. This materially reduces fake-success risk for automatic action execution.
+- Commerce action stubs: `eb74b55` adds `ALLOW_STUB_ACTIONS`, `Settings.allow_stub_actions_effective`, and `FailClosedActionTool`. The diagnostic worker and action-approval/case-approved orchestration paths now pass the derived production setting into the tenant action registry. Reported focused tests passed `test_action_fail_closed.py` `5 passed` and `test_action_approvals.py` `7 passed`.
 - S-10 prep: live verification probes, DLQ probe task, smoke trace probe, RLS table probe, spoof-rejection probe, and legacy Anker knowledge rewrap tooling exist. This is preparation, not closure.
 - Embeddings: real OpenAI embedding support is now production-wired through `build_embedding_provider()` in API and worker composition, constrained to one 1536-dimensional native pgvector column plus HNSW index, and covered by provider, wiring, DB retrieval, tenant-isolation, and re-embed tests.
 
 Residuals from this review:
 
-- The action-approval service factory still calls `build_tenant_action_tool_registry()` without `allow_stub_actions=settings.allow_stub_actions_effective` (`apps/backend/app/dependencies/services.py:839-844`). Because `ActionApprovalService.approve()` re-invokes approved actions through that factory, a manager-approved unconfigured action can still hit the registry default `allow_stub_actions=True`. Fix: pass the setting in that factory and add an API/service test proving manager-approved unconfigured actions return `action_connector_not_configured` in production.
 - Fulfillment callback ingress is tenant-authenticated and receipt-only, which is safer than direct mutation, but provider-origin signature verification/replay TTL for public provider callbacks is not yet proven.
-- Connector invocation ledger, repair dispatch, callback, tenant lifecycle, and S-10-prep DB suites need normal-shell/CI proof if they are to be used as release evidence; Codex sandbox DB runs were inconclusive.
+- Connector invocation ledger, connector RLS, OMS credential storage/route, repair dispatch, warranty/refund, and case-approval DB suites now have normal-shell/unsandboxed proof recorded above. S-10-prep still needs live deployed proof.
 - OpenAI embeddings are code/test-closed for runtime wiring and dimension-aware pgvector retrieval. Remaining work is production rollout evidence: snapshot, migration, real-provider re-embed of the Anker documents, and retrieval confirmation.
 - Live provider idempotency, live outbound private-IP blocking, real client IP rate limiting, and Phase E production verification remain outside local code proof.
+- The warranty/replacement connector and OMS credential/RLS patch is no longer local-only; it is committed and locally/DB proven. It still needs CI and live-provider evidence before it can support production claims.
+- The local AWS CLI archive/tree and Terraform scaffold should be cleaned before release work. Terraform placeholders/open ingress/public IP defaults are not acceptable production posture.
+
+## Phase B/Current-State Review (2026-06-26)
+
+The post-Phase-2.2 work is directionally correct and materially improves the product goal: Operious is closer to a governed customer-operations pilot than it was on June 17. The key distinction is that the code now supports richer customer evidence and warranty/refund workflows, but live production verification and release hygiene still cap the platform.
+
+- Attachment/media boundary: customer attachments, email attachments, SES large-email retrieval, and WhatsApp media capture now land in tenant-scoped records with storage abstractions, hash/type/size controls, RLS, and purge/retention paths. This is a real foundation for evidence-backed operations.
+- Vision and structured extraction: stored attachments can feed multimodal diagnostic prompts; structured extraction retries malformed JSON once and fails closed on ambiguity. This is a correct safety direction. Live Anthropic proof remains skipped without credentials.
+- Warranty/refund W0-W4: tenant templates, evidence probes, eligibility policy, remedy selection, `inventory.check`, approval queue, grounding rows, approve/reject, and auto-delivery after governed case approval form a coherent workflow. This is no longer a demo-only branch, but external provider drills are still required.
+- Case approval delivery: the latest approval commits fix the major operational hole where approval could resolve without delivering. The dedicated delivery-authorization decision and dual-surface collision fix are important governance improvements.
+- Connector/OMS/RLS: the earlier local-only patch is now committed. The route, storage, capability mapping, and RLS tests pass; the remaining issue is live provider behavior and broader CI evidence, not source-code absence.
+- Deploy/runtime: release-command migrations before traffic, queue/admission race fixes, queue-depth fault isolation, event-loop-safe HTTP client recreation, and web memory increase are valid reliability improvements.
+- Verification quality: ruff is clean, pyright has zero errors after the deterministic agent multimodal fix, focused DB/test bundles pass, and frontend invariant tests pass outside the sandbox. The full combined backend suite was not run to completion in this review, so this audit relies on focused critical-path bundles.
+- Forensic residuals: the untracked forensic audit found no P0/P1, but its P2/P3 findings are valid enough to keep open. The most important is F-009: nullable tenant columns plus `row_tenant_id IS NULL OR ...` RLS function behavior is a defense-in-depth weakness. CORS production localhost allowlist/fallback mismatch and duplicate/dead tracked Python trees are also real cleanup items.
 
 ## What Operious Is Today
 
@@ -317,8 +386,13 @@ What is implemented:
 - Connector invocation idempotency ledger, generic REST connector base, queryable credential-free connector config, and SSRF-pinned connector HTTP transport.
 - Per-tenant action governance loaded from tenant action-policy records.
 - Governed connector-config and action-policy onboarding through the tenant config change-request ledger.
+- OMS credential update route and connector credential update proposals store ciphertext-hash sentinels rather than secret plaintext in the change-request ledger.
+- Connector approval capability `tenant.connector.approve` and Auth0 role/permission mapping are committed.
+- `connector_configs` now has committed FORCE RLS migration/test coverage.
 - Platform-gated inert tenant creation and separate Platform Console/Command Center onboarding responsibilities.
 - Work-order dispatch ledger, explicit state machine, connector-backed `repair.dispatch`, and receipt-only fulfillment callback ingestion/consumer.
+- Customer attachment storage, email attachment capture, SES large-email fetch, WhatsApp media fetch, stored-attachment vision, and structured extraction with fail-closed ambiguity behavior.
+- Warranty/refund eligibility, remedy selection, generic `inventory.check`, grounded manager approval queue, approve/reject, and governed case-approval auto-delivery.
 - Production-default fail-closed commerce action tool registration for the diagnostic worker path when no connector exists.
 - Production boot-readiness validation for provider stubs and security-critical secrets.
 - CI workflow, production readiness CLI gate, and RLS coverage invariant.
@@ -337,7 +411,7 @@ What is partial:
 - Production proof remains missing: trusted proxy/Auth0/RLS/worker/DLQ/secrets checks are not archived.
 - Auth-error coarsening is partial: authority-state failures coarsen, but malformed authorization/header parse errors still return detailed bodies.
 - Voice auth/cap controls are closed, but production token issuance UX/API and real STT/TTS provider proof remain incomplete.
-- Action grants and the connector invocation ledger are much stronger. Real external connector side effects now have an initial refund/repair/work-order path, but live provider idempotency drills, provider-origin callback signatures, and one manager-approval DI gap remain.
+- Action grants and the connector invocation ledger are much stronger. Real external connector side effects now have refund/repair/work-order plus committed warranty/replacement connector paths, but live provider idempotency drills and provider-origin callback signatures remain.
 - Quotas include diagnostic token-per-minute enforcement, fail-closed pre-call Redis policy, queue admission, and inbound request rate limiting; idempotent rate-limit reads still degrade open by design, per-IP limiting may key the Fly proxy peer, and quota is not a universal enterprise budget system.
 - RAG poisoning controls exist, but human review UX, adversarial evals, and source-trust workflows remain immature.
 - Real OpenAI embeddings are wired into API/worker runtime composition with a 1536-dimensional native pgvector/HNSW path and re-embed tooling. Production rollout evidence remains pending.
@@ -348,7 +422,7 @@ What is partial:
 What is mocked/stubbed:
 
 - Voice STT/TTS paths still rely on stub-like providers unless production providers are configured.
-- Commerce actions are mixed: generic REST `refund.request` and `repair.dispatch` connector paths exist; unconfigured automatic actions fail closed in production through the worker path; warranty/replacement/warehouse still lack real connectors; the manager approval path can still register stubs until the DI gap is fixed.
+- Commerce actions are mixed: generic REST `refund.request`, `repair.dispatch`, warranty/replacement, and `inventory.check` connector paths exist; unconfigured automatic and manager-approved actions now inherit the production fail-closed stub policy; warehouse remains unintegrated; live provider drills remain missing.
 - Shopify enrichment can fall back to deterministic stub behavior.
 - Translation defaults/fallbacks can behave as identity outside configured production posture.
 - Knowledge embeddings use the real OpenAI provider in production composition when `EMBEDDING_DEFAULT_PROVIDER=openai` and `OPENAI_API_KEY` are configured; deterministic embeddings remain only as explicit fallback/test behavior.
@@ -361,7 +435,11 @@ What is planned/missing:
 - Real provider integration drills and idempotency contracts for refund/repair connectors.
 - Production execution of the real-embedding rollout: snapshot, migrate, re-embed the Anker docs with OpenAI, and archive retrieval/eval evidence.
 - Provider-origin signature/replay protection for public fulfillment callbacks.
-- Action-approval service DI fix so manager-approved unconfigured actions also fail closed in production.
+- CI-prove and live-provider-prove the committed warranty/replacement connector, OMS credential update, connector approval, and connector RLS work.
+- Harden nullable-tenant RLS semantics: backfill/repair nullable tenant rows, set tenant IDs NOT NULL on FORCE-RLS tenant tables where business semantics require tenancy, and remove or narrow the `row_tenant_id IS NULL OR ...` branch.
+- Fix CORS production posture: remove localhost/Vercel residue from production allowlist and align empty `CORS_ALLOW_ORIGINS` behavior with the documented "disabled" posture.
+- Delete or quarantine tracked duplicate/dead Python app trees and tracked junk files before release.
+- Clean local AWS CLI archive/vendor files and harden or quarantine the Terraform scaffold before any infra commit.
 - Command-center workflow maturity for the tenant config change-request ledger and action approvals.
 - Data-protection operator workflow, KMS-backed key custody, live erasure/legal-hold/retention evidence, and compliance runbooks.
 - Real-client-IP proof or proxy-aware configuration for per-IP rate limiting on Fly.
@@ -374,7 +452,7 @@ What is planned/missing:
 
 | Service | Role | Runtime dependencies | Current status |
 | --- | --- | --- | --- |
-| Backend API | Authority, orchestration, tenant APIs, governance, sessions, data protection, action approvals | Postgres, Redis, Auth0 JWKS, Sentry, Anthropic/OpenAI optional | Stronger controls; manager action-approval stub DI gap and production proof pending |
+| Backend API | Authority, orchestration, tenant APIs, governance, sessions, data protection, action approvals | Postgres, Redis, Auth0 JWKS, Sentry, Anthropic/OpenAI optional | Stronger controls; action-approval stub DI fixed; production proof pending |
 | Celery workers | Diagnostic execution, supervisor, QA, SOP intelligence, maintenance, outbound, work-order/S-10 probes | Redis, Postgres, Anthropic optional | Real topology; completion-event DLQ and action fail-closed worker path improved; live worker/DLQ proof pending |
 | Command Center | Tenant operator UI | Auth0, backend API | Real UI with typed channel settings and tenant-config onboarding; approval workflow/demo residue remains |
 | Platform Console | Platform tenant lifecycle UI | Auth0, backend API | New app for platform-gated inert tenant creation; live platform Auth0 proof pending |
@@ -410,7 +488,7 @@ Action tool:
 
 `agent request -> ToolInvoker -> capability/constraint checks -> governance evaluation or pre-approved decision -> durable grant -> exact actor/payload/binding consumption -> tool invoke -> envelope`
 
-Current answer: old cross-payload replay is closed. Tool invocation now reserves connector idempotency before provider calls, terminal connector results replay, and the diagnostic worker registers fail-closed tools for unconfigured commerce actions in production. Residual: manager-approved re-invocation still needs the fail-closed setting wired; real irreversible provider side effects still require live provider idempotency and production tests.
+Current answer: old cross-payload replay is closed. Tool invocation now reserves connector idempotency before provider calls, terminal connector results replay, and worker plus manager-approved action paths inherit the production fail-closed stub policy. Residual: real irreversible provider side effects still require live provider idempotency, callback-origin proof, and production tests.
 
 Work order:
 
@@ -444,21 +522,21 @@ Sensitive data classes remain:
 
 | Subsystem | Prior score | Current score | Status | Rationale |
 | --- | ---: | ---: | --- | --- |
-| Governance layer | 72 | 89 | Partial | Durable config ledger, apply attribution, revoke flow, action grants, domain capabilities, object-RBAC sweep, per-tenant action policy, connector/onboarding change requests, policy binding, and grounding governance improve governance; live proof/workflow maturity still missing. |
-| Agent layer | 50 | 76 | Partial | Replay is durably actor/payload-bound, connector invocation ledger exists, automatic unconfigured commerce actions fail closed in production, and quota/backpressure are stronger; manager-approved action DI and live provider proof remain. |
-| Supervisor layer | 60 | 64 | Partial | Supervisor/QA records exist and read gates improved; still more observability than hard production control. |
-| Execution layer | 62 | 76 | Partial | Durable execution/claims/outbox/recovery plus governance version binding, completion DLQ, per-tenant QoS, connector invocation reservation, and work-order transitions improve replay/reliability. |
-| Knowledge layer | 50 | 74 | Partial | Quarantine/review, injection scan, approved-only retrieval, delimiters, citation span provenance, grounded generation, and data-protection encryption close more of the original path; review UX/evals remain. |
-| Audit layer | 68 | 78 | Partial | Better grant/ledger/DLQ/data-protection/connector/work-order evidence and boot checks; live secret/rotation proof still missing. |
-| Compliance layer | 35 | 52 | Partial | DSAR erasure, legal holds, retention policy, envelope encryption, and better reconstruction metadata now exist; SOC 2, KMS/key custody, live evidence, and legal operations remain incomplete. |
-| Human escalation layer | 58 | 78 | Partial | Tenant config dual-control ledger, connector/action onboarding, apply attribution, revocation, and action approvals exist; UI workflow, expiry, and the approval-stub DI gap remain. |
-| Intelligence layer | 52 | 72 | Partial | Anthropic paths, TPM quota, RAG controls, grounded response governance, and encrypted sensitive audit/prompt fields improved; provider/quality proof remains. |
-| Auth/RBAC | 57 | 82 | Partial | Header authority, Auth0 namespaced mapping, domain capabilities, platform/tenant capability split, object-RBAC sweep, data-protection caps, and conversation ownership improved; live proof and partial auth-error coarsening remain. |
-| Tenancy | 76 | 85 | Partial | RLS discipline plus header/voice/data-protection/object-RBAC/platform-lifecycle/work-order fixes improve isolation; production proof remains. |
-| Observability | 58 | 64 | Partial | Logs/metrics/alerts exist and completion-event DLQ, work-order states, and connector invocation records are stronger; live operator and compliance proof incomplete. |
-| Reliability | 55 | 74 | Partial | Boot gates, CI, durable grants, repaired voice load harnesses, rate-limit fail policy, quota/queue fail-closed behavior, durable ingress capture, completion DLQ, connector idempotency, and work-order state help; live worker/DLQ/full-suite proof keep this capped. |
-| Scalability | 49 | 61 | Partial | Queue topology, token quota, inbound rate limiting, per-tenant QoS, admission controls, and connector/work-order ledgers help; no meaningful live load/scale proof and per-IP proxy semantics remain unproven. |
-| Enterprise readiness | 43 | 63 | Not ready | Security/governance primitives improved sharply, but S-10, the action-approval stub DI gap, formal compliance, live provider integrations, DR/SLO evidence, and production proof cap readiness. |
+| Governance layer | 72 | 95 | Partial | Durable config ledger, apply attribution, revoke flow, action grants, domain capabilities, object-RBAC sweep, per-tenant action policy, connector/onboarding change requests, connector-specific approval, policy binding, grounding governance, approval auto-delivery, and escalation handoff evidence are strong; live proof/workflow maturity still missing. |
+| Agent layer | 50 | 87 | Partial | Replay is durably actor/payload-bound, connector invocation ledger exists, automatic and manager-approved unconfigured commerce actions now inherit fail-closed stub policy, quota/backpressure are stronger, warranty/replacement and `inventory.check` paths are committed, and structured extraction is fail-closed; live provider proof remains. |
+| Supervisor layer | 60 | 68 | Partial | Supervisor/QA records exist and read gates improved; cognition/escalation audit coverage improved, but still more observability than hard production control. |
+| Execution layer | 62 | 87 | Partial | Durable execution/claims/outbox/recovery plus governance version binding, completion DLQ, per-tenant QoS, connector invocation reservation, work-order transitions, stale-claim reconciliation, queue-age race fix, and idempotent DLQ writes improve replay/reliability. |
+| Knowledge layer | 50 | 86 | Partial | Quarantine/review, injection scan, approved-only retrieval, delimiters, citation span provenance, grounded generation, encrypted ingestion, governance upload/apply flow, direct-write removal, attachments, and vision evidence close more of the original path; evals/source-trust workflow remain. |
+| Audit layer | 68 | 87 | Partial | Better grant/ledger/DLQ/data-protection/connector/work-order/knowledge/escalation/approval evidence and boot checks; live secret/rotation proof still missing. |
+| Compliance layer | 35 | 72 | Partial | DSAR erasure, legal holds, retention policy, envelope encryption, GCP KMS custody path, attachment controls, and reconstruction metadata exist; SOC 2, live evidence, retention/legal operations, and customer artifacts remain incomplete. |
+| Human escalation layer | 58 | 90 | Partial | Tenant config dual-control ledger, connector/action onboarding, apply attribution, revocation, action approvals, durable crisis handoff, escalation outbox/runtime coverage, and case-approval delivery exist; UI workflow, expiry, and live operator drills remain. |
+| Intelligence layer | 52 | 87 | Partial | Anthropic paths, TPM quota, RAG controls, grounded response governance, taxonomy/autonomy fail-closed policy, safety floors, vision attachments, structured extraction, malformed JSON retry, and encrypted sensitive audit/prompt fields improved; provider/quality proof remains. |
+| Auth/RBAC | 57 | 89 | Partial | Header authority, Auth0 namespaced mapping, domain capabilities, connector approval mapping, platform/tenant capability split, object-RBAC sweep, data-protection caps, and conversation ownership improved; live proof and partial auth-error coarsening remain. |
+| Tenancy | 76 | 90 | Partial | RLS discipline plus header/voice/data-protection/object-RBAC/platform-lifecycle/work-order/connector RLS fixes improve isolation; production proof and nullable-tenant RLS hardening remain. |
+| Observability | 58 | 76 | Partial | Logs/metrics/alerts exist, completion-event DLQ, work-order states, connector invocation records, nonce backlog signal, case-approval delivery records, and real governance denial reasons are stronger; live operator and compliance proof incomplete. |
+| Reliability | 55 | 87 | Partial | Boot gates, CI, durable grants, repaired voice load harnesses, rate-limit fail policy, quota/queue fail-closed behavior, durable ingress capture, completion DLQ, connector idempotency, work-order state, stale-claim reconciliation, queue/admission fixes, and worker fixes help; live worker/DLQ/full-suite proof keep this capped. |
+| Scalability | 49 | 70 | Partial | Queue topology, token quota, inbound rate limiting, per-tenant QoS, admission controls, worker right-sizing, CloudAMQP volume reduction, and connector/work-order ledgers help; no meaningful live load/scale proof and per-IP proxy semantics remain unproven. |
+| Enterprise readiness | 43 | 78 | Not ready | Security/governance primitives improved sharply, but S-10, formal compliance, live provider integrations, DR/SLO evidence, production proof, CORS/RLS defense-in-depth gaps, and repo/infra hygiene cap readiness. |
 
 ## Security Audit Summary
 
@@ -496,6 +574,7 @@ Current evidence:
 - `apps/backend/app/api/v1/routers/tenant.py:671-684` enforces domain capability for change requests.
 - `apps/backend/app/auth/providers/jwt.py:78-112` maps Auth0 roles/permissions to domain capabilities.
 - `apps/backend/app/dependencies/authority.py:112-150` defines domain write and approve capabilities.
+- Committed connector approval work adds `tenant.connector.approve`, maps Auth0 `TenantConnectorApprover` / `approve:tenant_connector`, and makes connector change-request approval require that connector-specific capability.
 - Tests: `test_tenant_rbac_dependency.py`, `test_domain_capabilities.py`.
 
 Status: closed by `8a7a7b1` and strengthened by `fe985fb`.
@@ -554,9 +633,9 @@ Current evidence:
 
 Status: closed by `942b131`; explicit break-control proof in `4e6451c`. Phase 2 further reduces replay risk with connector invocation reservation, provider idempotency keys, terminal-result replay, and work-order state binding.
 
-Residual: real provider connectors still need live idempotency and side-effect tests before high-value actions. Manager-approved unconfigured actions must also inherit the production fail-closed stub setting.
+Residual: real provider connectors still need live idempotency, callback-origin, and side-effect tests before high-value actions.
 
-### S-06: Outbound Webhook SSRF - CLOSED For Generic Outbound Dispatch
+### S-06: Outbound Webhook SSRF - CLOSED For Generic Outbound Dispatch And Connector HTTP
 
 Original finding: tenant-configured outbound URLs were posted directly without scheme/domain/private-IP guardrails.
 
@@ -565,11 +644,13 @@ Current evidence:
 - `apps/backend/app/core/ssrf.py:173-233` validates HTTPS, host allowlist, DNS results, blocked IP classes, and selected pinned IP.
 - `apps/backend/app/core/ssrf.py:49-120` implements pinned-IP transport that dials the validated IP while preserving host/SNI.
 - `apps/backend/app/boundary/outbound/adapter.py:81-107` validates before dispatch, uses pinned transport, and disables redirects.
+- `apps/backend/app/agents/tools/connectors/base.py:139-158` applies the same validated/pinned HTTPS posture for tenant-configured connector calls.
+- Committed tests include channel-send SSRF and warranty/replacement connector SSRF call-time coverage; loopback TLS cases are skipped in Codex sandbox when bind is unavailable.
 - Tests: `test_ssrf_guard.py`, `test_ssrf_dns_rebinding.py`.
 
 Status: closed by `cd8c6bc` and `20a890a`.
 
-Residual: DNS-rebinding tests are now deterministic in code, but loopback-server proof still needs a normal-shell/CI pass here; live egress proof remains part of S-10/Phase E.
+Residual: DNS-rebinding tests are now deterministic in code, but loopback-server proof still needs normal-shell/CI pass evidence when sandbox binding is unavailable; live egress proof remains part of S-10/Phase E.
 
 ### S-07: RAG Poisoning Through Tenant Knowledge Writes - CLOSED For Original Path
 
@@ -583,6 +664,7 @@ Current evidence:
 - `apps/backend/app/knowledge/persistence/postgres.py:133-141` retrieves only active approved documents.
 - `apps/backend/app/cognition/diagnostic_runtime.py:95-99` treats retrieved SOPs as untrusted reference data.
 - `apps/backend/app/cognition/diagnostic_runtime.py:1007-1030` delimits chunks and carries citation metadata.
+- Follow-on committed work adds governed encrypted knowledge upload/ingestion, Command Center upload/review surfaces, governance-apply auto-approval, and removes the direct-write button.
 - Tests: `test_knowledge_poisoning_controls.py`.
 
 Status: closed by `42a9c5c` for the audited tenant-knowledge write-to-retrieval path.
@@ -634,6 +716,7 @@ Current evidence:
 - `apps/backend/scripts/s10_prep/live_verification_probes.py` adds deploy-time probes for direct spoof rejection, Auth0/bearer smoke, production-role RLS isolation, worker/DLQ proof, and smoke trace evidence.
 - `apps/backend/app/workers/s10_probe_tasks.py` adds a DLQ probe task.
 - `apps/backend/scripts/s10_prep/rewrap_legacy_anker_knowledge.py` adds a dry-run-first rewrap path for legacy Anker knowledge ciphertext.
+- Committed migration `0087_connector_configs_force_rls` extends the RLS posture for connector configs, but it is not a substitute for production-role live RLS proof.
 
 Status: open. The boot gate is committed, but live production verification is not done.
 
@@ -658,7 +741,7 @@ The Phase 1c/1d/1e tranche materially changes the current state:
 - Completion DLQ: `apps/backend/app/workers/execution_completion_events.py:45-82` records a dead-letter task if worker completion-event emission fails.
 - Cleanup: `apps/backend/tests/test_legacy_module_quarantine.py:78-114` proves `_deprecated` is absent and not imported; `apps/backend/Dockerfile:1-22` pins the base image digest and runs as non-root; `.github/workflows/ci.yml:61-76` generates SBOM and `pip-audit` artifacts.
 
-Residuals: data protection is now real code, not a stub, but it is not yet a complete compliance program. KMS/key custody, live erasure evidence, retention/legal operations, audit access controls, and customer-facing compliance artifacts still sit outside this code closure. Resilience controls are stronger, but live Redis outage, worker, DLQ, and queue-pressure drills remain S-10/ops proof work.
+Residuals: data protection is now real code, not a stub, and a GCP KMS custody path exists. It is still not a complete compliance program until live KMS custody/rotation evidence, live erasure evidence, retention/legal operations, audit access controls, and customer-facing compliance artifacts are archived. Resilience controls are stronger, but live Redis outage, worker, DLQ, and queue-pressure drills remain S-10/ops proof work.
 
 ## Edge-Hardening Review
 
@@ -675,6 +758,7 @@ Remaining edge-hardening gaps:
 
 - Per-IP rate limiting may be per Fly proxy, not per real internet client, because the middleware keys `scope["client"]` and the Fly deployment comments say the app observes the proxy as an `fdaa::/16` peer. This still provides a coarse abuse brake, but live proxy/client-IP semantics must be proven before claiming true per-client edge rate limiting.
 - Malformed auth/header parse errors should be routed through the same coarsening helper used by verification/source-state failures before #25 is called closed. Evidence: `AuthorityContextMiddleware` returns direct detailed `JSONResponse` bodies for malformed authorization and legacy authority headers at `apps/backend/app/middleware/authority_context.py:207-214`, `224-232`, and `322-330`.
+- CORS has a current forensic mismatch: `Settings.CORS_ALLOW_ORIGINS` documents empty as disabled, but `_build_cors_origins()` still falls back to default origins, and `fly.toml` includes `http://localhost:3000` plus a Vercel origin with credentials in the production allowlist. This is not an S-01 class auth bypass, but it is a release hygiene/security posture issue.
 - Redis quota/admission outage policy is no longer deferred: spec 1d implemented fail-closed pre-call/publish behavior. Remaining work is live chaos proof and operator runbook evidence.
 
 ## Multi-Tenancy Audit
@@ -706,6 +790,7 @@ Tenant isolation weaknesses:
 
 - S-10 live production proof is still missing.
 - Owner sessions bypass RLS and are used by maintenance tasks.
+- The base tenant RLS helper still allows `row_tenant_id IS NULL`, and forensic review found nullable tenant columns on some forced-RLS legacy/core tables. That is a defense-in-depth gap even where no active cross-tenant leak was proven.
 - Command center still has local/non-production header mode support.
 - Some tenant-wide read surfaces lack object-level RBAC.
 - No per-tenant broker isolation.
@@ -714,11 +799,11 @@ Tenant isolation weaknesses:
 
 Can governance be skipped?
 
-Current answer: much less than before for tenant config, action replay, and automatic commerce actions. Tenant config now has durable proposal, approval, rejection, apply, and revoke states with principal separation and applier/revoker attribution. Action grants are actor/payload-bound and consumed durably. Per-tenant action policies and connector configuration flow through governed change requests. Remaining gaps are UI workflow adoption, expiry/time-bound approvals, live Auth0 proof, manager-approved action fail-closed DI, and provider-side idempotency for real irreversible actions.
+Current answer: much less than before for tenant config, action replay, and automatic commerce actions. Tenant config now has durable proposal, approval, rejection, apply, and revoke states with principal separation and applier/revoker attribution. Action grants are actor/payload-bound and consumed durably. Per-tenant action policies and connector configuration flow through governed change requests. Connector approval and OMS credential update paths are committed. Remaining gaps are UI workflow adoption, expiry/time-bound approvals, live Auth0 proof, live provider-side idempotency, and live/CI proof for the committed connector/OMS/RLS paths.
 
 Can execution happen without authorization?
 
-Diagnostic execution still expects governance admission. Voice call execution now requires signed token plus provider signature. Pre-approved action execution now requires a matching durable one-time grant. Automatic unconfigured commerce actions fail closed in the worker production path. Remaining risk is deployment misconfiguration, the action-approval service DI gap, and future connector paths.
+Diagnostic execution still expects governance admission. Voice call execution now requires signed token plus provider signature. Pre-approved action execution now requires a matching durable one-time grant. Automatic and manager-approved unconfigured commerce actions now inherit the production fail-closed stub setting. Remaining risk is deployment misconfiguration, live provider/callback gaps, and future connector paths.
 
 Can stale policies be used?
 
@@ -736,11 +821,11 @@ Yes, but less than before. Action grant replay is now precise, connector invocat
 
 Can an agent exceed its authority?
 
-Less easily than before. The prior cross-payload replay weakness is closed, per-tenant action policy exists, and automatic unconfigured commerce actions now fail closed in the worker production path. Remaining risk is over-broad tenant capabilities, poisoned or poorly reviewed knowledge, stale policies, the action-approval DI gap, or connecting real external side effects before provider idempotency and connector tests exist.
+Less easily than before. The prior cross-payload replay weakness is closed, per-tenant action policy exists, and unconfigured commerce actions now inherit production fail-closed behavior in worker and approval paths. Remaining risk is over-broad tenant capabilities, poisoned or poorly reviewed knowledge, stale policies, or connecting real external side effects before provider idempotency and connector tests exist.
 
 Can an agent trigger unintended actions?
 
-Less easily than before, but still yes in the wrong deployment posture. Refund and repair dispatch now have connector/work-order ledgers, and unconfigured automatic commerce actions fail closed in production. Warranty/replacement/warehouse connectors are not real yet, manager-approved unconfigured actions can still hit the registry default until DI is fixed, and live providers need idempotency/signature proof.
+Less easily than before, but still yes in the wrong deployment posture. Refund, repair, warranty/replacement, and inventory-check paths now have connector/work-order/governance coverage, and unconfigured automatic and manager-approved actions fail closed in production. Warehouse remains unintegrated, and live providers need idempotency/signature/callback-origin proof.
 
 Can an agent leak information?
 
@@ -771,7 +856,7 @@ Risks:
 
 - Production FORCE RLS proof is not archived.
 - Owner-session misuse would bypass RLS.
-- Some model/schema nullability drift can still exist.
+- Some model/schema nullability drift can still exist; forensic F-009 specifically keeps nullable-tenant RLS semantics open until `tenant_id NOT NULL` coverage and null-tenant cross-tenant tests are added where tenant semantics require isolation.
 - Retention/legal hold/erasure now exist in code, but live operations and compliance evidence are incomplete.
 - Knowledge/vector query-plan proof at production scale is missing.
 
@@ -828,8 +913,8 @@ Risks:
 - Some periodic tasks intentionally do not DLQ.
 - Live Redis outage drills are not archived; rate-limit idempotent paths still degrade open by design.
 - No disaster recovery/backup restore evidence was found in active gates.
-- Real external action side effects are only partially integrated, so reliability claims remain unproven outside the initial refund/repair/work-order paths.
-- Manager-approved unconfigured commerce actions can still use the registry default until the action-approval service DI is fixed.
+- Real external action side effects are integrated in more paths, but reliability claims remain unproven until live provider idempotency/callback drills are archived.
+- Warranty/replacement connector and OMS credential changes are committed and locally DB-proven, but production reliability claims still need CI/live provider evidence.
 - Rate limiting itself is now a Redis dependency; idempotent traffic degrades open on rate-limit backend loss.
 
 ## Observability Audit
@@ -861,11 +946,13 @@ Strengths:
 Debt:
 
 - Duplicate app trees still create deployment ambiguity, but the `_deprecated` backend package has been deleted and guarded by invariant tests.
+- Forensic review counted 518 tracked dead duplicate Python files under `apps/marketing2/app/**/*.py` and `apps/command-center2/app/**/*.py`; this is still open repository hygiene and deployment ambiguity.
+- Tracked junk remains: `apps/backend/asyncio`, `apps/backend/asyncpg`, `apps/backend/.coverage`, a nested backend migration copy, `operioustoday`, and `h origin phase-2-2-stabilized`.
 - Multiple runtime compositions use in-memory/deterministic defaults outside production gates.
 - Tenant config workflow still needs UI adoption and expiry/time-bound approvals.
 - Voice load/capacity test harnesses now model the provider-signature contract; real provider load proof remains.
 - Command center demo/proof constants remain in active product code.
-- The action registry default remains stub-friendly for backwards compatibility; every production DI caller must explicitly pass the derived fail-closed setting.
+- The action registry default remains stub-friendly for backwards compatibility; current production DI callers reviewed now pass the derived fail-closed setting, and this needs to stay under regression guard.
 - Some abstractions are ahead of real integrations, increasing false confidence.
 
 ## Testing Audit
@@ -889,7 +976,7 @@ Known current proof:
 - Deleted `_deprecated` and forbidden-dependency invariants passed.
 - Grounded response/resolution governance and Phase 2 domain/Auth0/config-router bundle passed in the user's normal shell.
 - Work-order dispatch substrate passed in the user's normal shell.
-- Commerce action fail-closed tool/registry/settings tests passed.
+- Commerce action fail-closed tool/registry/settings tests passed, including the current action-approval/case-approved DI wiring guard.
 - Real OpenAI embedding provider/runtime tests passed, including provider HTTP shape, production composition wiring, native pgvector retrieval, tenant isolation, and re-embed behavior.
 
 Untested or insufficiently proven:
@@ -902,7 +989,8 @@ Untested or insufficiently proven:
 - Auth-error coarsening for malformed authorization/header parse errors; authority-state errors are covered, parse errors still return detailed bodies.
 - Real provider STT/TTS/action integration behavior.
 - Live production embedding rollout evidence: the code path is wired and DB-tested, but the live Anker document re-embed and retrieval confirmation still need to be archived.
-- Manager-approved unconfigured commerce actions are not yet proven fail-closed in production; static review found the service DI still omits the setting.
+- Warranty/replacement connector and OMS credential/RLS changes are committed and locally DB-proven; they still need CI/live provider evidence.
+- Local AWS CLI archive/vendor tree and Terraform scaffold are not release-clean.
 - Live quota/admission/rate-limit behavior under production Redis outage policy.
 - DNS-rebinding loopback-server tests need normal-shell/CI proof because Codex sandbox could not bind `127.0.0.1:0`.
 
@@ -927,13 +1015,15 @@ Residual website/product trust gaps:
 
 | Customer class | Readiness | Prior score | Current score | Verdict |
 | --- | --- | ---: | ---: | --- |
-| Internal demo | Ready with caveats | n/a | 88 | Good if demo/stub boundaries are disclosed and S-10 gaps are not represented as complete. |
-| Scoped non-regulated pilot | Conditional | n/a | 77 | Reasonable after code hardening if Phase E checks pass, manager-approved stub DI is fixed, risky integrations stay constrained, and pilot scope is explicit. |
-| $100k customer | Conditional pilot | 58 | 71 | More plausible after Phase 2/1c/1d/1e, but still depends on live proof, the approval DI fix, and constrained integrations. |
-| $500k customer | Not ready | 43 | 59 | Better security/governance primitives, but procurement/security/compliance gaps remain large. |
-| $1M customer | Not ready | 34 | 47 | Needs live production proof, compliance, real integrations, DR/SLO proof, and operator runbooks. |
-| Fortune 500 | Not ready | 25 | 34 | Below expected security/compliance/change-control/supply-chain bar. |
-| Regulated enterprise | Not ready | 20 | 33 | Data-protection controls exist, but formal compliance, KMS/key custody, retention/legal operations, and evidence are incomplete. |
+| Internal demo | Ready with caveats | n/a | 92 | Good if demo/stub boundaries are disclosed and S-10 gaps are not represented as complete. |
+| Scoped non-regulated pilot | Conditional | n/a | 84 | Reasonable after code hardening if Phase E checks pass, risky integrations stay constrained, provider drills are bounded, and pilot scope is explicit. |
+| $100k customer | Conditional pilot | 58 | 78 | More plausible after current Phase B work, but still depends on live proof, constrained integrations, and clean release hygiene. |
+| $500k customer | Not ready | 43 | 65 | Better security/governance primitives, but procurement/security/compliance gaps remain large. |
+| $1M customer | Not ready | 34 | 53 | Needs live production proof, compliance, real integrations, DR/SLO proof, and operator runbooks. |
+| Fortune 500 | Not ready | 25 | 40 | Below expected security/compliance/change-control/supply-chain bar. |
+| Regulated enterprise | Not ready | 20 | 43 | Data-protection/KMS controls exist, but formal compliance, retention/legal operations, and live evidence are incomplete. |
+
+Scoped-pilot safety verdict: conditionally safe for a narrow, non-regulated pilot only if Phase E live checks pass, AWS/Terraform local artifacts are cleaned or quarantined, irreversible provider actions stay constrained behind proven connector/idempotency paths, live provider drills are archived, and operators do not present S-10 or compliance evidence as complete. It is not yet safe for broad enterprise production.
 
 ## Red Team Review
 
@@ -941,8 +1031,8 @@ Most likely breach paths now:
 
 1. Production ingress/Auth0 misconfiguration or override reopens header authority.
 2. S-10 gaps: RLS/worker/DLQ/secrets not actually correct in deployed environment.
-3. Manager-approved unconfigured commerce action returns fake stub success because action-approval DI does not pass the production fail-closed setting.
-4. Real refund/repair/replacement/warehouse connector connected before provider idempotency, callback signatures, and action side-effect tests.
+3. Real refund/repair/warranty/replacement/warehouse connector connected before provider idempotency, callback signatures, and action side-effect tests.
+4. Local AWS CLI archive/vendor tree or placeholder Terraform scaffold accidentally committed/deployed.
 5. Voice enabled before production token issuance and real STT/TTS provider proof are complete.
 6. Rate-limit per-IP assumptions wrong in production, causing proxy-wide throttling rather than true abusive-client throttling.
 7. RAG poisoning through approved-but-poorly-reviewed knowledge despite baseline quarantine controls.
@@ -973,18 +1063,18 @@ Highest business risks:
 | 4 | Closed/Medium residual | RBAC | S-02 closed; domain capabilities and object-RBAC sweep added | Verify live Auth0 roles and extend object-scope policy for uncovered/future routes |
 | 5 | Closed/Medium residual | Governance | `applied_by` persisted: service.apply() records applier, router threads principal, schema exposes it (spec 1a) | UI workflow + expiry remain |
 | 6 | Closed/High residual | Voice | S-04 auth closed; load harness repaired; frame byte/count/duration/idle/rate caps enforced; provider/issuance maturity remains | Prove issuance/STT/TTS and keep cap/load tests in CI |
-| 7 | Closed/Medium residual | Agent | S-05 replay closed by durable grants; connector invocation ledger and work-order states improve side-effect replay | Add live provider idempotency tests and manager-approval fail-closed proof |
+| 7 | Closed/Medium residual | Agent | S-05 replay closed by durable grants; connector invocation ledger and work-order states improve side-effect replay; approval-path stub DI is fixed | Add live provider idempotency tests |
 | 8 | Closed/Medium residual | SSRF | S-06 closed for generic outbound; deterministic DNS-rebinding tests exist | Archive normal-shell/CI loopback proof and live egress proof |
 | 9 | Closed/High residual | RAG | S-07 original path closed | Add reviewer UX, evals, source trust policy |
 | 10 | Closed/Medium residual | Auth0 | S-08 code closed | Add live token contract fixture |
 | 11 | Closed/Medium residual | Quota | S-09 diagnostic TPM closed; Redis pre-call quota loss fails closed | Add enterprise budgets, provider-wide quotas, and live outage drills |
 | 12 | Open/High | Readiness | S-10 open | Complete Phase E live verification |
 | 13 | High | Voice | Real STT/TTS provider proof missing | Integrate/prove providers or keep voice disabled |
-| 14 | Partial/High | Actions | Refund and repair now have connector/work-order paths; automatic unconfigured commerce actions fail closed in production; warranty/replacement/warehouse remain unintegrated and manager-approved actions still have a DI gap | Wire approval DI, add provider drills, then implement remaining connectors |
+| 14 | Partial/High | Actions | Refund, repair, warranty/replacement, and inventory-check paths now have connector/work-order/governance coverage; automatic and manager-approved unconfigured commerce actions fail closed in production; warehouse remains unintegrated | Add CI/live provider drills, then implement warehouse |
 | 15 | High | Governance | Tenant-specific policy residue risk remains | Move hardcoded proof policies to tenant data |
-| 16 | Closed/Low residual | CORS/Auth | CORS credential posture respects config and is tested | Keep posture test in CI |
+| 16 | Partial/Medium | CORS/Auth | CORS credential flags respect config and wildcard is rejected, but forensic F-006 keeps production CORS posture open because empty-origin fallback and production localhost/Vercel allowlist contradict the documented posture | Remove production localhost/Vercel residue and add empty-prod-CORS regression test |
 | 17 | Medium | Secrets | Boot gate checks audit secret; live proof missing | Set, rotate, verify secret in Phase E |
-| 18 | High | RLS | Production FORCE RLS proof missing | Run and archive prod proof query |
+| 18 | High | RLS | Production FORCE RLS proof missing; forensic F-009 also keeps nullable-tenant RLS semantics open | Run and archive prod proof query, then harden nullable tenant columns/RLS helper |
 | 19 | High | Workers | Worker health proof missing | Verify all process groups and alerts |
 | 20 | Medium | Channel | Credentials and connector config are gated/read-redacted; live provider proof incomplete | Channel-specific admin/approval/live proof |
 | 21 | Medium | Topology | Ledger-gated; live workflow proof missing | Verify topology flow in CI/live |
@@ -999,7 +1089,7 @@ Highest business risks:
 | 30 | Closed/Medium residual | RAG | Real OpenAI embedding provider is wired into production composition, native pgvector/HNSW is dimension-coherent at 1536, and DB-backed retrieval/re-embed tests pass | Execute and archive production snapshot -> migrate -> re-embed -> retrieval/eval proof |
 | 31 | Medium | Provider | Boot gate and real translation-provider path help; provider health proof missing | Provider health checks and override governance |
 | 32 | Partial/Medium | Deployment | Backend runtime image is digest-pinned and non-root; SBOM/pip-audit artifacts exist, but scanning/signing/attestation are incomplete | Add image scanning, signing, provenance, and minimal multi-stage runtime |
-| 33 | Partial/Medium | Supply chain | SBOM and `pip-audit` artifacts added; dependency-review and license gates incomplete | Add dependency review, license audit, and artifact attestations |
+| 33 | Partial/Medium | Supply chain | SBOM, `pip-audit`, dependency-review, and license audit gates improved; artifact signing/attestation still incomplete | Add artifact attestations, image signing, and release provenance |
 | 34 | High | Local secrets | Local `.env` hygiene risk | Keep gitignore and secret scanners |
 | 35 | High | Owner DB | Owner sessions bypass RLS | Separate creds, lint owner usage |
 | 36 | Closed/Medium residual | Migrations | RLS coverage invariant added | Keep invariant in CI and prove prod RLS |
@@ -1011,17 +1101,17 @@ Highest business risks:
 | 42 | Medium | Business | Claims can outrun live proof | Align claims to S-10 status |
 | 43 | Medium | Docs | S-10 probe tooling exists, but archived live evidence is still missing | Make Phase E checklist blocking and attach probe output |
 | 44 | Closed/Low residual | Codebase | `_deprecated` backend package deleted and invariant-tested | Keep quarantine test and avoid recreation |
-| 45 | Medium | Codebase | Duplicate app histories remain | Declare active apps and archive old ones |
+| 45 | Medium | Codebase | Duplicate app histories and 518 tracked dead Python files remain | Declare active apps and archive/delete dead trees |
 | 46 | Medium | Frontend | Browser token exposure/XSS blast radius | Harden CSP/BFF option |
 | 47 | Medium | Frontend | Local storage authority labels risk confusion | Store display state only |
 | 48 | Medium | CSRF | Cookie-auth token route deserves review | POST + CSRF or BFF proxy |
 | 49 | Medium | CSP | CSP review incomplete | Add CSP/reporting |
 | 50 | Medium | Webhook | Tenant context reset discipline should be audited | Use scoped context managers |
 | 51 | Medium | Webhook | Semantic circuit advisory/fail-open risk | Make response mode configurable |
-| 52 | Medium | Nonce | Nonce cleanup maintenance dependency | TTL/index/alert on growth |
+| 52 | Closed/Medium residual | Nonce | Nonce cleanup backlog growth signal added | Add live alert/runbook and cleanup SLO |
 | 53 | Closed/Low residual | Outbound | Redirects disabled in generic adapter | Keep invariant tests |
-| 54 | Medium | Credentials | Tenant connector credentials are encrypted/write-only, but master key/KMS proof is pending | Verify injection, rotation, and KMS custody |
-| 55 | Partial/Medium | Encryption | Envelope encryption and crypto-shred implemented for sensitive customer content; KMS/key custody proof missing | Move master keys to KMS and prove rotation/custody |
+| 54 | Partial/Medium | Credentials | Tenant connector credentials are encrypted/write-only; OMS credential update stores only ciphertext hash sentinel; KMS path exists but live custody/rotation proof pending | CI/live-prove OMS path, verify injection, rotation, and KMS custody |
+| 55 | Partial/Medium | Encryption | Envelope encryption, crypto-shred, and GCP KMS custody path implemented; live custody/rotation evidence missing | Prove KMS rotation/custody and live erasure evidence |
 | 56 | Partial/Medium | Retention | Retention policy API and purge behavior exist for covered data; universal archival/legal operations incomplete | Expand coverage, schedule jobs, and archive live purge/hold evidence |
 | 57 | Medium | DR | Backup/restore proof absent | Run restore drills |
 | 58 | Medium | Observability | Alert tasks best-effort | Alert on evaluator failure |
@@ -1031,18 +1121,18 @@ Highest business risks:
 | 62 | Closed/Low residual | Testing | SSRF tests exist | Add live egress proof |
 | 63 | Closed/Low residual | Testing | Voice auth and load/capacity harnesses now pass with provider-signature contract | Keep load/capacity tests in CI; add real provider load proof |
 | 64 | Closed/Medium residual | Testing | Dual-control tests now exist | Keep in CI and add UI workflow tests |
-| 65 | Medium | DB | ORM nullability drift risk remains | Align ORM with migrations |
+| 65 | Partial/Medium | DB | ORM tenant_id nullability is improved, but forensic F-009 shows nullable tenant columns plus `row_tenant_id IS NULL OR ...` RLS semantics still need defense-in-depth hardening | Add no-nullable-tenant-on-RLS introspection and cross-tenant NULL regression tests |
 | 66 | Medium | DB | Knowledge query plan unproven | Explain/analyze and indexes |
 | 67 | Medium | DB | Large JSON metadata can become hot blobs | Promote indexed fields |
 | 68 | Medium | DB | Tenant partitioning deferred | Partition when volume warrants |
 | 69 | Closed/Medium residual | Execution | Execution records bind governance config id/version/sha and workers verify the bound config | Add replay tooling, cache-invalidation proof, and live drills |
 | 70 | Closed/Medium residual | Execution | Completion-event emission failures are dead-lettered | Add replay/drill proof and alerting |
-| 71 | Partial/Medium | Execution | Connector invocation and work-order ledgers model initial refund/repair side effects; broader provider outbox/callback proof incomplete | Provider-specific outbox/drills and callback signatures |
-| 72 | Partial/Medium | Action | Automatic unconfigured commerce actions fail closed in production, but manager-approved path can still register stubs and remaining tools lack real connectors | Wire approval DI and keep explicit stub labels/flags |
+| 71 | Partial/Medium | Execution | Connector invocation and work-order ledgers model refund/repair/warranty/replacement side effects; broader provider outbox/callback proof incomplete | Add provider-specific outbox/drills and callback signatures |
+| 72 | Partial/Medium | Action | Automatic and manager-approved unconfigured commerce actions fail closed in production; remaining unreleased/unintegrated tools need provider-backed connectors | Keep stub policy regression guards and explicit stub labels/flags |
 | 73 | Medium | Shopify | Enrichment fallback risk remains | Fail explicit in prod |
 | 74 | Low | Translation | Anthropic provider exists and config dependency was fixed; fallback policy remains | Provider health and failure policy |
 | 75 | Partial/Medium | Governance | Per-tenant action policies and connector config persist through the change-request ledger; other in-memory capability paths may remain | Persist all prod decisions |
-| 76 | Medium | Governance | Work-order awaiting-fulfillment helps action handoff; broader durable escalation/approval queue maturity remains | Durable escalation/approval queue |
+| 76 | Partial/Medium | Governance | Work-order awaiting-fulfillment plus durable crisis handoff/outbox tests improve action/escalation handoff; live operator queue maturity remains | Live escalation drills and operator queue runbooks |
 | 77 | Medium | Governance | Execution/action policy binding improved; cache invalidation remains partial | Central policy version/cache invalidation |
 | 78 | Medium | Governance | Content safety policy defaults need review | Require explicit prod policy |
 | 79 | Medium | Governance | Tenant allowlist/default ambiguity | Make defaults explicit/tested |
@@ -1054,7 +1144,7 @@ Highest business risks:
 | 85 | Medium | UI | API base URL misconfig risk | Fail build without prod API URL |
 | 86 | Medium | UI | No generated API client contract | Generate from OpenAPI |
 | 87 | Medium | Packages | Shared auth package placeholder risk | Mature or remove |
-| 88 | Partial/Medium | License | SBOM artifact exists; license review is still missing | Add license audit/gate |
+| 88 | Closed/Low residual | License | Dependency license audit gate added | Keep gate in CI and review exceptions |
 | 89 | Partial/Medium | Dependency | Digest-pinned non-root runtime and `pip-audit` artifact added; multi-stage/minimal/scanning posture incomplete | Add multi-stage/minimal runtime, scanner, and signing |
 | 90 | Medium | Dependency | Unused provider deps increase surface | Prune unused deps |
 | 91 | Low | Docs | Architecture docs can be aspirational | Add status per feature |
@@ -1072,23 +1162,23 @@ Highest business risks:
 
 | Dimension | Prior score | Current score |
 | --- | ---: | ---: |
-| Architecture | 62 | 78 |
-| Security | 57 | 84 |
-| Scalability | 49 | 61 |
-| Reliability | 55 | 74 |
-| Governance | 72 | 89 |
-| Code quality | 68 | 78 |
-| Enterprise readiness | 43 | 63 |
+| Architecture | 62 | 88 |
+| Security | 57 | 94 |
+| Scalability | 49 | 70 |
+| Reliability | 55 | 87 |
+| Governance | 72 | 95 |
+| Code quality | 68 | 81 |
+| Enterprise readiness | 43 | 78 |
 
 ## Customer Survival Verdict
 
 Could Operious survive 10 customers?
 
-Yes, as a controlled pilot platform with verified bearer auth, production readiness gate enabled, manager-approved commerce-stub DI fixed or disabled, risky features constrained, live tenant isolation checks archived, and manual monitoring.
+Yes, as a controlled pilot platform with verified bearer auth, production readiness gate enabled, risky features constrained, live tenant isolation checks archived, and manual monitoring.
 
 Could Operious survive 100 customers?
 
-Not safely as a general production platform today. A narrow non-regulated pilot cohort is plausible after the approval DI fix and Phase E proof, but queue, provider, support, compliance, and production verification gaps would surface quickly outside a constrained scope.
+Not safely as a general production platform today. A narrow non-regulated pilot cohort is plausible after Phase E proof and repo/infra cleanup, but queue, provider, support, compliance, and production verification gaps would surface quickly outside a constrained scope.
 
 Could Operious survive 1,000 customers?
 
@@ -1096,7 +1186,7 @@ No. The architecture has promising primitives but lacks hard operational, compli
 
 Would I allow Anker production operations?
 
-No, not production. I would allow a scoped pilot after the approval DI fix and Phase E environment checks, with irreversible refund/replacement side effects constrained behind proven connectors.
+No, not production. I would allow a scoped pilot after Phase E environment checks and repo/infra cleanup, with irreversible refund/replacement side effects constrained behind proven connectors.
 
 Would I allow Samsung production operations?
 

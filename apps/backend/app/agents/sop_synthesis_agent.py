@@ -11,7 +11,7 @@ from typing import Any, cast
 from pydantic import ValidationError
 
 from app.cognition.exceptions import CognitionLLMProviderError
-from app.cognition.llm import DiagnosticLLMClient, DiagnosticLLMMessage
+from app.cognition.llm import DiagnosticLLMClient, DiagnosticLLMMessage, message_text
 from app.cognition.models import DiagnosticLLMCompletion, DiagnosticLLMUsage
 from app.cognition.sop_improvement_models import SOPImprovementLLMOutput
 from app.knowledge.runtime import KnowledgeRuntime
@@ -101,7 +101,7 @@ class DeterministicSOPImprovementLLMClient:
         tenant_id: str | None = None,
     ) -> DiagnosticLLMCompletion:
         del system_prompt, max_output_tokens, temperature, tenant_id
-        prompt = "\n".join(message.content for message in messages)
+        prompt = "\n".join(message_text(message.content) for message in messages)
         category = _prompt_value(prompt, "Category") or "unknown_diagnostic"
         occurrences = _prompt_value(prompt, "Occurrences") or "repeated failures"
         addition = (
