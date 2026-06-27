@@ -287,6 +287,15 @@ class ResolutionGovernanceGateRequest:
     source_channel: str | None = None
     reply_recipient: str | None = None
     reply_thread_context: str | None = None
+    # True only for an APPROVED verdict-override reply (see
+    # reply_is_approved_verdict_override in create_proposal): a tenant-
+    # authored, dual-control-approved template that only ever renders
+    # because a specialized verdict already confirmed eligibility. Its
+    # factual claims are grounded in that verdict, not a KB citation, so
+    # the central grounding gate exempts it from per-claim KB-citation
+    # checking instead of grading it against citations it was never meant
+    # to carry. Never set for LLM-drafted free text.
+    reply_is_preapproved_template: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,7 +417,18 @@ class ResolutionRuntime:
             == ResolutionVerdictOutcome.APPROVED.value
         )
         if verdict_reply is not None:
+            # reply_segments was captured from the ORIGINAL LLM draft above
+            # (line ~367), before this override exists. Recompute it from
+            # the text that will actually be sent -- every derived artifact
+            # of the reply must move in lockstep with the reply itself, or
+            # a downstream gate (grounding) grades a draft the customer
+            # will never see while the real outbound text goes unchecked.
             reply = verdict_reply
+            reply_segments = (
+                GroundedReplySegment(
+                    kind="claim", text=verdict_reply, citation_ranks=()
+                ).to_dict(),
+            )
         autonomy_policy = await resolve_resolution_autonomy_policy(
             repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
@@ -466,6 +486,7 @@ class ResolutionRuntime:
                 source_channel=request.source_channel,
                 reply_recipient=request.reply_recipient,
                 reply_thread_context=request.reply_thread_context,
+                reply_is_preapproved_template=reply_is_approved_verdict_override,
             )
         )
 

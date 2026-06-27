@@ -22,8 +22,20 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.cognition.extraction import ExtractedField, ExtractedOrderFields
+from app.governance.persistence import InMemoryGovernanceRepository
 from app.resolution.enums import ResolutionGovernanceVerdict, ResolutionProposalStatus
 from app.resolution.persistence import InMemoryResolutionProposalPersistence
+from app.runtime.conversation_generation import (
+    ConversationGenerationRequest,
+    ConversationGenerationResult,
+    GroundedReplyDraft,
+    GroundedReplySegment,
+)
+from app.runtime.grounding import CitationCoverageGroundingChecker
+from app.runtime.resolution_governance_gate import (
+    ResolutionGovernanceGate,
+    build_resolution_governance_runtime,
+)
 from app.runtime.resolution_runtime import (
     ResolutionGovernanceGateRequest,
     ResolutionGovernanceGateResult,
@@ -82,6 +94,103 @@ class _AllowAllGovernanceGate:
             governance_verdict=ResolutionGovernanceVerdict.ALLOW,
             governance_decision_id="stub-decision-allow",
         )
+
+
+class _CapturingGovernanceGate:
+    """Records the request it receives, then delegates to a real gate.
+
+    Lets a test assert on exactly what create_proposal sent to central
+    governance (e.g. reply_segments) while still exercising the real
+    ALLOW/DENY decision via the wrapped gate.
+    """
+
+    def __init__(self, *, delegate: object) -> None:
+        self._delegate = delegate
+        self.captured: list[ResolutionGovernanceGateRequest] = []
+
+    async def evaluate_resolution_proposal(
+        self,
+        request: ResolutionGovernanceGateRequest,
+    ) -> ResolutionGovernanceGateResult:
+        self.captured.append(request)
+        return await self._delegate.evaluate_resolution_proposal(request)
+
+
+class _NoDocumentsRepository:
+    """Document repository with nothing in it -- every citation rank is
+    unresolvable, so CitationCoverageGroundingChecker denies any "claim"
+    segment that isn't exempted from grounding."""
+
+    async def get_knowledge_document(self, document_id, *, expected_tenant_id):
+        del document_id, expected_tenant_id
+        return None
+
+
+def _citation() -> dict[str, object]:
+    return {
+        "rank": 1,
+        "document_id": "55555555-5555-4555-8555-555555555555",
+        "title": "Power Bank Troubleshooting",
+        "document_type": "product_guide",
+        "document_status": "active",
+        "score": 0.92,
+        "chunk_ordinal": 0,
+        "token_count": 128,
+    }
+
+
+class _UngroundedDraftConversationGenerator:
+    """Always drafts a "claim" segment with no resolvable citation --
+    mirrors what an LLM draft looked like in the live bug before the
+    verdict override ever ran (citing something that doesn't resolve)."""
+
+    async def generate_reply(
+        self, request: ConversationGenerationRequest
+    ) -> ConversationGenerationResult:
+        del request
+        draft = GroundedReplyDraft(
+            language="en",
+            segments=(
+                GroundedReplySegment(
+                    kind="claim",
+                    text=(
+                        "We are unable to automatically verify the proof "
+                        "of purchase attached to your request."
+                    ),
+                    citation_ranks=(1,),
+                ),
+            ),
+        )
+        return ConversationGenerationResult(
+            draft=draft,
+            provider="test",
+            model="test",
+            raw_text="{}",
+        )
+
+
+def _real_governed_runtime(
+    *,
+    repository: InMemoryTenantConfigurationRepository,
+    governance_repository: InMemoryGovernanceRepository,
+) -> tuple[ResolutionRuntime, _CapturingGovernanceGate]:
+    real_gate = ResolutionGovernanceGate(
+        governance_runtime=build_resolution_governance_runtime(
+            persistence=governance_repository,
+            grounding_checker=CitationCoverageGroundingChecker(
+                document_repository=_NoDocumentsRepository()
+            ),
+            tenant_configuration_repository=repository,
+        )
+    )
+    capturing_gate = _CapturingGovernanceGate(delegate=real_gate)
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=capturing_gate,
+        tenant_configuration_repository=repository,
+        conversation_generator=_UngroundedDraftConversationGenerator(),
+    )
+    return runtime, capturing_gate
 
 
 def _fields_eligible() -> ExtractedOrderFields:
@@ -235,6 +344,7 @@ def _request(
     source_channel: str | None = "email",
     extracted_fields: ExtractedOrderFields,
     session_id: str = _SESSION_ID,
+    citations: tuple[dict[str, object], ...] = (),
 ) -> ResolutionProposalRequest:
     return ResolutionProposalRequest(
         tenant_id=tenant_id,
@@ -248,6 +358,7 @@ def _request(
         original_content="Is my widget still under warranty?",
         source_channel=source_channel,
         extracted_fields=extracted_fields,
+        retrieved_citations=citations,
     )
 
 
@@ -509,3 +620,145 @@ async def test_send_governance_decision_unchanged_by_verdict_override_presence()
         == record_with_template.governance_verdict
     )
     assert record_with_template.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+
+
+# ─── live-bug regression: override must update EVERY derived artifact,    ─
+# ─── and central grounding must grade the override text, not a stale draft
+
+_REASK_DRAFT_CLAIM_TEXT = (
+    "We are unable to automatically verify the proof of purchase attached "
+    "to your request."
+)
+
+
+@pytest.mark.asyncio
+async def test_override_recomputes_reply_segments_from_override_text_not_stale_draft() -> (
+    None
+):
+    """(ii) reply_segments sent to central governance must reflect the
+    OVERRIDE text, never the original LLM draft captured before the
+    override ran. This is the exact stale-derivative bug found live: the
+    draft's uncited "we can't verify proof of purchase" claim was graded
+    instead of the actual, accurate override reply.
+    """
+    repository = await _repository_with_warranty_policies()
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.approved.replacement",
+            channel="email",
+            content=(
+                "Hi! We've verified your purchase (order {order_id}, "
+                "{seller}) and confirmed it's within the warranty period. "
+                "We're processing a replacement for you."
+            ),
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    capturing_gate = _CapturingGovernanceGate(delegate=_AllowAllGovernanceGate())
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=capturing_gate,
+        tenant_configuration_repository=repository,
+        conversation_generator=_UngroundedDraftConversationGenerator(),
+    )
+
+    record = await runtime.create_proposal(
+        _request(extracted_fields=_fields_eligible(), citations=(_citation(),))
+    )
+
+    assert len(capturing_gate.captured) == 1
+    sent_segments = capturing_gate.captured[0].reply_segments
+    sent_text = " ".join(str(segment.get("text", "")) for segment in sent_segments)
+    assert _REASK_DRAFT_CLAIM_TEXT not in sent_text
+    assert "processing a replacement" in sent_text
+    assert "processing a replacement" in record.proposed_customer_reply
+    assert capturing_gate.captured[0].reply_is_preapproved_template is True
+
+
+@pytest.mark.asyncio
+async def test_override_allowed_by_real_grounding_despite_unresolvable_stale_draft_citation() -> (
+    None
+):
+    """(i) End-to-end with the REAL governance gate and a grounding checker
+    backed by a document repository that has NOTHING in it (so the stale
+    pre-override draft's claim -- which DOES carry a citation_ranks=(1,) --
+    would be denied as unresolvable if it were graded). The eligible
+    verdict + approved template must still reach PENDING_HUMAN_APPROVAL,
+    never DENIED, never dropped to escalation -- proving the override text
+    is exempted, not merely "happens to pass"."""
+    repository = await _repository_with_warranty_policies()
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.approved.replacement",
+            channel="email",
+            content=(
+                "Hi! We've verified your purchase (order {order_id}, "
+                "{seller}) and confirmed it's within the warranty period. "
+                "We're processing a replacement for you."
+            ),
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    governance_repository = InMemoryGovernanceRepository()
+    runtime, capturing_gate = _real_governed_runtime(
+        repository=repository, governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(
+        _request(extracted_fields=_fields_eligible(), citations=(_citation(),))
+    )
+
+    assert record.governance_verdict is not ResolutionGovernanceVerdict.DENY
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert record.status is not ResolutionProposalStatus.DENIED
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id), expected_tenant_id=_TENANT
+    )
+    assert decision is not None
+    assert decision.decision == "require_approval"
+    grounding_rules = [
+        rule
+        for rule in decision.evaluated_rules
+        if rule.policy_name == "resolution.grounding"
+    ]
+    assert grounding_rules
+    assert grounding_rules[0].rule_id == "preapproved_template_exempt"
+    assert grounding_rules[0].decision == "allow"
+
+
+@pytest.mark.asyncio
+async def test_genuine_ungrounded_reply_without_override_still_denied_by_real_grounding() -> (
+    None
+):
+    """(iii) The exemption must NOT leak to ordinary LLM-drafted replies.
+    Same draft text, same empty document repository, but NO verdict
+    override available (no approved template saved) -- the genuinely
+    uncited claim must still be denied exactly as before."""
+    repository = await _repository_with_warranty_policies()
+    # No approved template saved -- _apply_resolution_verdict_override
+    # returns None, so reply_is_preapproved_template stays False and the
+    # LLM draft's own (uncited) claim is what central governance grades.
+    governance_repository = InMemoryGovernanceRepository()
+    runtime, capturing_gate = _real_governed_runtime(
+        repository=repository, governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(
+        _request(extracted_fields=_fields_eligible(), citations=(_citation(),))
+    )
+
+    assert capturing_gate.captured[0].reply_is_preapproved_template is False
+    assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert record.status is ResolutionProposalStatus.DENIED
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id), expected_tenant_id=_TENANT
+    )
+    assert decision is not None
+    assert decision.decision == "deny"
+    grounding_rules = [
+        rule
+        for rule in decision.evaluated_rules
+        if rule.policy_name == "resolution.grounding"
+    ]
+    assert grounding_rules
+    assert grounding_rules[0].rule_id == "ungrounded_claim"

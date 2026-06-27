@@ -183,6 +183,31 @@ class GroundingPolicy(BaseGovernancePolicy):
         if not isinstance(subject, CommunicationGovernanceSubject):
             return (_grounding_deny("communication_subject_required"),)
         metadata = dict(subject.metadata)
+        if bool(metadata.get("reply_is_preapproved_template")):
+            # A tenant-authored, dual-control-approved verdict-override
+            # template (see ResolutionGovernanceGateRequest.reply_is_
+            # preapproved_template) is not LLM-drafted free text: its
+            # factual claims are grounded in the resolution verdict that
+            # gated its rendering (e.g. the warranty eligibility
+            # determination), not in a retrievable KB span. Per-claim
+            # KB-citation grounding does not apply to it -- there is no
+            # knowledge document to cite for a runtime-computed fact like
+            # "this order is within the warranty window". This exemption
+            # is scoped exclusively to the override path; an LLM-drafted
+            # reply with an uncited claim is graded exactly as before.
+            return (
+                PolicyEvaluationResult(
+                    policy_name=GroundingPolicy.name,
+                    rule_id="preapproved_template_exempt",
+                    decision=Decision.ALLOW,
+                    severity=ViolationSeverity.LOW,
+                    reason=(
+                        "reply is a tenant-authored, verdict-justified "
+                        "override template, exempt from per-claim "
+                        "KB-citation grounding"
+                    ),
+                ),
+            )
         if self._checker is None:
             trace = _grounding_trace(
                 status="ungrounded",
@@ -365,6 +390,7 @@ def _subject_metadata(
         "source_language": request.source_language,
         "reply_segments": [dict(segment) for segment in request.reply_segments],
         "evidence": [dict(item) for item in request.evidence],
+        "reply_is_preapproved_template": request.reply_is_preapproved_template,
     }
 
 
