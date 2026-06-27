@@ -225,6 +225,31 @@ test('action policy change payload includes policy_id only on update', () => {
   strictEqual(updated.payload.policy_id, 'pol-1');
 });
 
+// ─── Generic governance policy mapping (resolution_autonomy, etc.) ────────
+
+test('governance policy change payload includes policy_id only on update', () => {
+  const created = payloads.buildGovernancePolicyChangePayload({
+    policyType: 'resolution_autonomy',
+    parameters: { category_allowlist: ['shipping_delay'] },
+    status: 'draft',
+    effectiveFrom: '2026-06-04T00:00:00.000Z',
+  });
+  strictEqual(created.change_type, 'policy');
+  strictEqual(created.payload._schema_version, '1');
+  strictEqual(created.payload.policy_type, 'resolution_autonomy');
+  strictEqual('policy_id' in created.payload, false);
+
+  const updated = payloads.buildGovernancePolicyChangePayload({
+    policyId: 'pol-2',
+    policyType: 'resolution_autonomy',
+    parameters: { category_allowlist: ['shipping_delay', 'tracking_lost'] },
+    status: 'draft',
+  });
+  strictEqual(updated.payload.operation, 'update');
+  strictEqual(updated.payload.policy_id, 'pol-2');
+  strictEqual(updated.payload.policy_type, 'resolution_autonomy');
+});
+
 // ─── Constraint C: client-side change_type filter ─────────────────────────
 
 test('client-side filter keeps connector, every policy type, and knowledge upload changes', () => {
@@ -405,6 +430,48 @@ test('channels view does not expose unsafe direct verify', () => {
   ok(!src.includes('/verify'));
   ok(src.includes('createWhatsAppSelfServiceChannel'));
   ok(src.includes('createSesSelfServiceChannel'));
+});
+
+// ─── Dual-control bypass closure: governance policies are proposed, not
+// directly written. resolution_autonomy (the auto-send allowlist),
+// warranty_refund_rules, and resolution_taxonomy have no dedicated editor
+// like action_tools' ActionPolicyView -- GovernancePoliciesView is their
+// only editor, and it must go through the same governed ledger.
+
+test('governance policies view proposes a change request, never writes a policy directly', () => {
+  const src = readText(join(CC2, 'components', 'integration-views.tsx'));
+  ok(
+    src.includes('proposeConfigChangeRequest'),
+    'GovernancePoliciesView must submit through the change-request ledger',
+  );
+  ok(
+    src.includes('buildGovernancePolicyChangePayload'),
+    'GovernancePoliciesView must use the safe generic policy payload builder',
+  );
+  ok(
+    !src.includes('createGovernancePolicy('),
+    'no direct create-policy write may remain in the Command Center frontend',
+  );
+  ok(
+    !src.includes('updateGovernancePolicy('),
+    'no direct update-policy write may remain in the Command Center frontend',
+  );
+});
+
+test('the api client still exposes createGovernancePolicy/updateGovernancePolicy only as the backend-rejected legacy direct path', () => {
+  // The functions may remain in api.ts (the backend now structurally
+  // rejects them for every known policy_type), but no Command Center
+  // component may call them -- the governed proposal flow is the only UI
+  // path. This guards against a future regression reintroducing the call.
+  const apiSrc = readText(join(CC2, 'lib', 'api.ts'));
+  ok(apiSrc.includes('export function createGovernancePolicy'));
+  ok(apiSrc.includes('export function updateGovernancePolicy'));
+  const componentsDir = join(CC2, 'components');
+  for (const file of ['integration-views.tsx', 'connector-config-views.tsx', 'onboarding-wizard.tsx']) {
+    const src = readText(join(componentsDir, file));
+    ok(!src.includes('createGovernancePolicy('), `${file} must not call createGovernancePolicy`);
+    ok(!src.includes('updateGovernancePolicy('), `${file} must not call updateGovernancePolicy`);
+  }
 });
 
 // ─── Constraint D: governed lifecycle is shown, never a direct write ───────

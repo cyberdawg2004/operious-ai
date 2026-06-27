@@ -5,7 +5,6 @@ import {
   createChannelConfiguration,
   createSesSelfServiceChannel,
   createWhatsAppSelfServiceChannel,
-  createGovernancePolicy,
   formatApiError,
   getApiBaseUrl,
   getConfiguredOperatorLabel,
@@ -16,10 +15,10 @@ import {
   listGovernancePolicies,
   listOperationalAlerts,
   listTopologyConfigurations,
+  proposeConfigChangeRequest,
   updateSesSelfServiceChannel,
   updateChannelConfiguration,
   updateWhatsAppSelfServiceChannel,
-  updateGovernancePolicy,
   type ApiPage,
   type DeadLetterExecution,
   type OperationalAlert,
@@ -29,6 +28,7 @@ import {
   type TenantTopologyConfiguration,
   type TenantWhatsAppSelfServiceRequest,
 } from "@/lib/api";
+import { buildGovernancePolicyChangePayload } from "@/lib/config-change-payloads";
 import type { AuthSessionState } from "@/lib/use-auth-session";
 import { useApiResource } from "@/lib/use-api-resource";
 import {
@@ -37,6 +37,7 @@ import {
   LoadingState,
   PendingIntegrationState,
 } from "@/components/data-state";
+import { GovernedNotice, ProposedNotice } from "@/components/connector-config-views";
 
 type RecordListProps<T> = {
   eyebrow: string;
@@ -426,6 +427,7 @@ export function GovernancePoliciesView({
   const [modal, setModal] = useState<PolicyModal>({ type: "none" });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const load = useCallback(() => listGovernancePolicies(), []);
   const { data, error, isLoading, reload } = useApiResource(load);
 
@@ -435,6 +437,13 @@ export function GovernancePoliciesView({
     setIsSubmitting(false);
   };
 
+  // Every governance policy_type (resolution_autonomy, action_tools,
+  // warranty_refund_rules, resolution_taxonomy, and any future type) shapes
+  // autonomy, auto-send, or money/goods eligibility. The backend rejects
+  // direct apply for all of them, so this form proposes a change request
+  // (dual control: a different principal must approve it) rather than
+  // writing the policy directly -- consistent with how ActionPolicyView
+  // already proposes action_tools changes.
   const submitPolicy = async (
     event: React.FormEvent<HTMLFormElement>,
     policy?: TenantGovernancePolicy
@@ -445,23 +454,20 @@ export function GovernancePoliciesView({
     const form = new FormData(event.currentTarget);
     try {
       const parameters = parseJsonObject(String(form.get("parameters") || "{}"));
-      const status = String(form.get("status") || "draft") as TenantGovernancePolicy["status"];
+      const status = String(form.get("status") || "draft");
       const effectiveFrom = new Date(String(form.get("effective_from") || "")).toISOString();
-      if (policy) {
-        await updateGovernancePolicy(policy.policy_id, {
-          parameters,
-          status,
-          effective_from: effectiveFrom,
-        });
-      } else {
-        await createGovernancePolicy({
-          policy_type: String(form.get("policy_type") || ""),
-          parameters,
-          status,
-          effective_from: effectiveFrom,
-        });
-      }
+      const body = buildGovernancePolicyChangePayload({
+        policyType: policy ? policy.policy_type : String(form.get("policy_type") || ""),
+        parameters,
+        status,
+        effectiveFrom,
+        policyId: policy?.policy_id,
+      });
+      await proposeConfigChangeRequest(body);
       closeModal();
+      setNotice(
+        "Policy change proposed. It now awaits approval by a different principal in Pending Approvals."
+      );
       reload();
     } catch (caught: unknown) {
       setFormError(formatApiError(caught));
@@ -474,10 +480,12 @@ export function GovernancePoliciesView({
       <ViewHeader
         eyebrow="GOVERNANCE · POLICIES"
         title="Governance Policies"
-        actionLabel="New Policy"
+        actionLabel="Propose policy change"
         onAction={() => setModal({ type: "create" })}
       />
       {headerAddon}
+      <GovernedNotice />
+      {notice && <ProposedNotice message={notice} onDismiss={() => setNotice(null)} />}
       {isLoading && <LoadingState />}
       {error && !isLoading && (
         <ErrorState title="Governance policies unavailable" message={error} onAction={reload} />
@@ -508,7 +516,7 @@ export function GovernancePoliciesView({
                   onClick={() => setModal({ type: "edit", policy })}
                   className="h-9 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
                 >
-                  Edit
+                  Propose update
                 </button>
               }
             />
@@ -966,7 +974,7 @@ function PolicyForm({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-        {policy ? "Edit Policy" : "New Policy"}
+        {policy ? "Propose Policy Update" : "Propose New Policy"}
       </h2>
       {error && <FormError message={error} />}
       <TextInput name="policy_type" label="Policy type" defaultValue={policy?.policy_type ?? ""} disabled={Boolean(policy)} required />
@@ -988,7 +996,7 @@ function PolicyForm({
         label="Parameters"
         defaultValue={JSON.stringify(policy?.parameters ?? {}, null, 2)}
       />
-      <SubmitButton isSubmitting={isSubmitting} label={policy ? "Save policy" : "Create policy"} />
+      <SubmitButton isSubmitting={isSubmitting} label={policy ? "Propose update" : "Propose policy"} />
     </form>
   );
 }

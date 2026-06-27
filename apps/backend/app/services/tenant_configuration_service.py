@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from app.agents.tools.action_governance import ACTION_TOOLS_POLICY_TYPE
 from app.agents.tools.connectors.base import (
     SSRFValidator,
     validate_connector_endpoint_url,
@@ -20,6 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.ssrf import SSRFValidationError, validate_public_https_url
+from app.runtime.resolution_autonomy_policy import RESOLUTION_AUTONOMY_POLICY_TYPE
+from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
+from app.runtime.warranty_refund_policy import WARRANTY_REFUND_RULES_POLICY_TYPE
 from app.sop_intelligence import ApprovalRecord, ApprovalStatus
 from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
@@ -41,6 +45,7 @@ from app.tenant.identity import (
 )
 from app.tenant.exceptions import (
     TenantConfigurationDirectApplyDisabledError,
+    TenantConfigurationDualControlRequiredError,
     TenantConfigurationNotFoundError,
 )
 from app.tenant.persistence import (
@@ -559,6 +564,9 @@ class TenantConfigurationService:
         commit: bool = True,
     ) -> TenantGovernancePolicyRecord:
         _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        _require_policy_type_direct_apply_allowed(
+            policy_type, bypass=bypass_direct_apply_gate
+        )
         if approval is None:
             approval = _approved_configuration_change(
                 tenant_id=tenant_id,
@@ -600,6 +608,14 @@ class TenantConfigurationService:
         commit: bool = True,
     ) -> TenantGovernancePolicyRecord:
         _require_direct_apply_enabled(bypass=bypass_direct_apply_gate)
+        if not bypass_direct_apply_gate:
+            existing = await self._runtime.get_governance_policy(
+                tenant_id=tenant_id,
+                policy_id=policy_id,
+            )
+            _require_policy_type_direct_apply_allowed(
+                existing.policy_type, bypass=False
+            )
         if approval is None:
             approval = _approved_configuration_change(
                 tenant_id=tenant_id,
@@ -870,6 +886,48 @@ def _require_direct_apply_enabled(*, bypass: bool = False) -> None:
         return
     raise TenantConfigurationDirectApplyDisabledError(
         "direct tenant configuration mutation is disabled; use change requests"
+    )
+
+
+#: Every governance policy_type registered in the product today. Every one
+#: of them shapes autonomy, auto-send, or money/goods eligibility:
+#: - resolution_autonomy: autonomy decisions + the auto-send category
+#:   allowlist (the control this gate was added to close a bypass for).
+#: - action_tools: per-tool refund/replacement/warranty eligibility rules.
+#: - warranty_refund_rules: money/goods remedy eligibility.
+#: - resolution_taxonomy: category -> recommended-action mapping, which
+#:   feeds the same autonomy/auto-send gates.
+#: None is safety-irrelevant, so direct apply is blocked for all of them,
+#: structurally -- regardless of ``tenant_config_self_approval_allowed``.
+#: A NEW policy_type must be deliberately classified and added here (or
+#: left out only if it is genuinely benign/cosmetic) when it is introduced
+#: -- fail-closed doctrine: when in doubt, add it. Synthetic policy_type
+#: strings used only in test fixtures (never read by any production
+#: decision) are intentionally NOT listed here and remain free for direct
+#: apply in tests that opt into ``TENANT_CONFIG_ALLOW_SELF_APPROVAL``.
+_DUAL_CONTROL_REQUIRED_POLICY_TYPES: frozenset[str] = frozenset(
+    {
+        RESOLUTION_AUTONOMY_POLICY_TYPE,
+        ACTION_TOOLS_POLICY_TYPE,
+        WARRANTY_REFUND_RULES_POLICY_TYPE,
+        RESOLUTION_TAXONOMY_POLICY_TYPE,
+    }
+)
+
+
+def _require_policy_type_direct_apply_allowed(
+    policy_type: str,
+    *,
+    bypass: bool,
+) -> None:
+    if bypass:
+        return
+    if policy_type not in _DUAL_CONTROL_REQUIRED_POLICY_TYPES:
+        return
+    raise TenantConfigurationDualControlRequiredError(
+        f"policy_type={policy_type!r} is safety-relevant and requires "
+        "dual control via the change-request ledger; direct apply is not "
+        "permitted"
     )
 
 

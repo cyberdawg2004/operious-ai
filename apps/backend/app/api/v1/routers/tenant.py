@@ -112,6 +112,7 @@ from app.tenant.enums import (
     TenantTopologyStatus,
 )
 from app.tenant.exceptions import (
+    TenantConfigurationDualControlRequiredError,
     TenantConfigurationError,
     TenantConfigurationNotFoundError,
     TenantTopologyCycleError,
@@ -907,14 +908,23 @@ async def create_governance_policy(
     authority: AuthorityContext = Depends(require_tenant_policy_direct_apply),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyResponse:
-    record = await service.create_governance_policy(
-        tenant_id=expected_tenant_id,
-        policy_type=request.policy_type,
-        parameters=request.parameters,
-        status=request.status,
-        approved_by=_principal_or_400(authority),
-        effective_from=request.effective_from,
-    )
+    try:
+        record = await service.create_governance_policy(
+            tenant_id=expected_tenant_id,
+            policy_type=request.policy_type,
+            parameters=request.parameters,
+            status=request.status,
+            approved_by=_principal_or_400(authority),
+            effective_from=request.effective_from,
+        )
+    except TenantConfigurationDualControlRequiredError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "dual_control_required_for_policy_type",
+                "policy_type": request.policy_type,
+            },
+        ) from exc
     return TenantGovernancePolicyResponse.from_record(record)
 
 
@@ -942,6 +952,11 @@ async def update_governance_policy(
         raise HTTPException(
             status_code=404,
             detail={"code": "governance_policy_not_found"},
+        ) from exc
+    except TenantConfigurationDualControlRequiredError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "dual_control_required_for_policy_type"},
         ) from exc
     return TenantGovernancePolicyResponse.from_record(record)
 

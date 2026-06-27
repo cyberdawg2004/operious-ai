@@ -225,6 +225,45 @@ export function buildActionPolicyChangePayload(
   return { change_type: "policy", payload };
 }
 
+export type GovernancePolicyChangeInput = {
+  policyType: string;
+  parameters: Record<string, unknown>;
+  status?: string;
+  effectiveFrom?: string;
+  policyId?: string;
+};
+
+/**
+ * Build a `policy` change request body for ANY governance policy_type
+ * (resolution_autonomy, warranty_refund_rules, resolution_taxonomy, and any
+ * future type) -- the generic counterpart of `buildActionPolicyChangePayload`
+ * for policy types that don't have their own dedicated editor. Every
+ * governance policy_type is safety-relevant (autonomy/auto-send, money/
+ * goods, or the category->action mapping those depend on) and the backend
+ * structurally rejects direct apply for all of them, so this is the only
+ * way to mutate one: propose -> a different principal approves -> apply.
+ */
+export function buildGovernancePolicyChangePayload(
+  input: GovernancePolicyChangeInput
+): ConfigChangeRequestBody {
+  const payload: Record<string, unknown> = {
+    _schema_version: CONFIG_CHANGE_SCHEMA_VERSION,
+    policy_type: input.policyType,
+    parameters: input.parameters,
+  };
+  if (input.policyId) {
+    payload.operation = "update";
+    payload.policy_id = input.policyId;
+  }
+  if (input.status) {
+    payload.status = input.status;
+  }
+  if (input.effectiveFrom) {
+    payload.effective_from = input.effectiveFrom;
+  }
+  return { change_type: "policy", payload };
+}
+
 export type ChannelCredentialInput = {
   configId: string;
   routingAddress?: string;

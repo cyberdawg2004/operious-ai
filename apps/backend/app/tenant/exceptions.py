@@ -19,6 +19,18 @@ class TenantConfigurationDirectApplyDisabledError(TenantConfigurationError):
     """Raised when legacy direct configuration mutation is disabled."""
 
 
+class TenantConfigurationDualControlRequiredError(TenantConfigurationError):
+    """Raised when a direct apply targets a safety-relevant policy_type.
+
+    Distinct from :class:`TenantConfigurationDirectApplyDisabledError`,
+    which is an environment-flag gate (disabled in production, opt-in
+    elsewhere). This error is structural and policy_type-scoped: it fires
+    regardless of ``tenant_config_self_approval_allowed`` so a safety-
+    relevant policy can never be mutated outside the change-request
+    ledger, even in an environment where legacy direct apply is enabled.
+    """
+
+
 class ApprovalRequiredError(TenantConfigurationError):
     """Raised when a chronological mutation lacks approved lineage."""
 
@@ -39,6 +51,7 @@ __all__ = [
     "ApprovalRequiredError",
     "ChronologyImmutabilityError",
     "TenantConfigurationDirectApplyDisabledError",
+    "TenantConfigurationDualControlRequiredError",
     "TenantConfigurationError",
     "TenantConfigurationNotFoundError",
     "TenantConfigurationPersistenceError",

@@ -471,6 +471,62 @@ async def test_knowledge_and_policy_endpoints_increment_versions(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy_type",
+    ["resolution_autonomy", "action_tools", "warranty_refund_rules", "resolution_taxonomy"],
+)
+async def test_direct_policy_write_rejected_with_clean_403_for_safety_relevant_types(
+    tenant_client: httpx.AsyncClient,
+    policy_type: str,
+) -> None:
+    """The dual-control bypass closure, at the HTTP boundary: even though
+    this fixture sets TENANT_CONFIG_ALLOW_SELF_APPROVAL=true (the most
+    permissive direct-apply environment short of the governed ledger
+    itself), a direct POST for any of the four safety-relevant policy
+    types is rejected with a clean 403 -- never a 500, never a write."""
+    response = await tenant_client.post(
+        "/api/v1/tenant/policies",
+        headers=_headers(),
+        json={
+            "policy_type": policy_type,
+            "parameters": {"category_allowlist": ["shipping_delay"]},
+            "effective_from": "2026-06-27T00:00:00Z",
+        },
+    )
+    assert response.status_code == 403
+    assert "dual_control_required_for_policy_type" in response.text
+
+    listed = await tenant_client.get(
+        "/api/v1/tenant/policies",
+        headers=_headers(),
+        params={"policy_type": policy_type},
+    )
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_direct_policy_write_still_works_for_non_safety_relevant_type(
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    """No over-rotation at the HTTP boundary: a policy_type outside the
+    known safety-relevant registry still direct-applies (mirrors the
+    pre-existing `refund_limit` coverage in
+    test_knowledge_and_policy_endpoints_increment_versions)."""
+    response = await tenant_client.post(
+        "/api/v1/tenant/policies",
+        headers=_headers(),
+        json={
+            "policy_type": "display_banner_copy",
+            "parameters": {"text": "Welcome"},
+            "effective_from": "2026-06-27T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["policy_type"] == "display_banner_copy"
+
+
+@pytest.mark.asyncio
 async def test_tenant_lists_do_not_cross_tenant_boundary(
     tenant_client: httpx.AsyncClient,
 ) -> None:

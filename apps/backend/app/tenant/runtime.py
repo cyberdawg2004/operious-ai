@@ -936,6 +936,14 @@ class TenantConfigurationRuntime:
         )
         return record
 
+    async def get_governance_policy(
+        self,
+        *,
+        tenant_id: str,
+        policy_id: TenantGovernancePolicyId,
+    ) -> TenantGovernancePolicyRecord:
+        return await self._require_policy(tenant_id=tenant_id, policy_id=policy_id)
+
     async def list_governance_policies(
         self,
         *,

@@ -1489,7 +1489,7 @@ function Submit({ isSubmitting, label }: { isSubmitting: boolean; label: string 
   );
 }
 
-function GovernedNotice() {
+export function GovernedNotice() {
   return (
     <div className="mb-4 rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
       Edits here are governed: they become change requests that stay pending
@@ -1498,7 +1498,7 @@ function GovernedNotice() {
   );
 }
 
-function ProposedNotice({
+export function ProposedNotice({
   message,
   onDismiss,
 }: {
