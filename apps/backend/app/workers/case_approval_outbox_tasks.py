@@ -5,19 +5,23 @@
 and enters ``awaiting_approval`` (or is re-reviewed after guidance), so the
 operator queue gets re-notified about the (possibly revised)
 recommendation. Nothing ever consumed those rows until this module: this
-sweep claims pending rows, resolves the tenant's configured Slack
-operator-alert channel, and posts a notification.
+sweep claims pending rows and emails the tenant's configured operator
+alert recipient, reusing the tenant's own EMAIL channel's SES sender
+credentials (the same ones used for customer-facing replies) -- no
+separate send credential is configured for operator alerts, only the
+recipient address.
 
 A row whose case has already left ``awaiting_approval`` (approved,
 rejected, escalated, or failed by the time this sweep runs) is published
 as a no-op -- there is nothing left to notify a human about, and this is
 also how the pre-existing backlog (rows written before this consumer
 existed, some for already-resolved cases) drains safely without flooding
-the configured channel with stale alerts.
+the operator inbox with stale alerts.
 
-A tenant with no active Slack channel configured fails the row (not
-dead-lettered, so it costs at most another claim-and-check next sweep)
-rather than abandoning it -- the tenant may configure Slack later.
+A tenant with no active EMAIL channel or no configured operator alert
+recipient fails the row (not dead-lettered, so it costs at most another
+claim-and-check next sweep) rather than abandoning it -- the tenant may
+configure either later.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Thread
 from typing import Any, Protocol, TypeVar
@@ -40,9 +45,9 @@ from app.approvals.persistence import (
     PostgresCaseApprovalPersistence,
 )
 from app.boundary.outbound import (
-    OutboundWebhookAdapter,
-    OutboundWebhookRequest,
-    OutboundWebhookResponse,
+    SesEmailSendRequest,
+    SesEmailSendResponse,
+    SesV2EmailSender,
 )
 from app.core.config import get_settings
 from app.data_protection.crypto import DataProtectionService
@@ -64,19 +69,40 @@ _T = TypeVar("_T")
 
 _PUBLISHER_ID = "case_approval_outbox_publisher"
 _TIMEOUT_SECONDS = 10.0
+_SUBJECT = "New case ready for approval"
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorEmailRoute:
+    """Resolved sender (the tenant's own EMAIL channel SES credentials)
+    plus the operator's notification recipient address."""
+
+    access_key_id: str
+    secret_access_key: str
+    region: str
+    from_email_address: str
+    recipient_email_address: str
+    session_token: str | None = None
+    endpoint_url: str | None = None
+    configuration_set_name: str | None = None
+
+
+class OperatorEmailNotConfigured(Exception):
+    pass
+
 
 # DI seams for tests -- production always uses the real, session-bound
-# Postgres tenant-channel resolution and the real OutboundWebhookAdapter;
-# tests substitute both to avoid needing configured tenant credential
+# Postgres tenant-channel resolution and the real SesV2EmailSender; tests
+# substitute both to avoid needing configured tenant credential
 # encryption keys or a real network call.
-class ResolveSlackWebhookUrl(Protocol):
-    async def __call__(self, *, tenant_id: str) -> str: ...
+class ResolveOperatorEmailRoute(Protocol):
+    async def __call__(self, *, tenant_id: str) -> OperatorEmailRoute: ...
 
 
-class OutboundWebhookAdapterProtocol(Protocol):
-    async def post(
-        self, request: OutboundWebhookRequest
-    ) -> OutboundWebhookResponse: ...
+class EmailSenderProtocol(Protocol):
+    async def send_email(
+        self, request: SesEmailSendRequest
+    ) -> SesEmailSendResponse: ...
 
 
 def _data_protection_service(session: AsyncSession) -> DataProtectionService | None:
@@ -118,26 +144,23 @@ async def publish_case_approval_outbox_runtime(
     *,
     limit: int = 100,
     session: AsyncSession | None = None,
-    resolve_webhook_url: ResolveSlackWebhookUrl | None = None,
-    adapter: OutboundWebhookAdapterProtocol | None = None,
+    resolve_route: ResolveOperatorEmailRoute | None = None,
+    sender: EmailSenderProtocol | None = None,
 ) -> dict[str, object]:
     # PRIVILEGED_PATH: cross-tenant maintenance sweep, bypasses RLS by
     # design -- mirrors reconcile_stale_case_approvals_runtime.
-    webhook_adapter = adapter or OutboundWebhookAdapter()
+    email_sender = sender or SesV2EmailSender()
     if session is not None:
         return await _publish_page(
-            session,
-            limit=limit,
-            resolve_webhook_url=resolve_webhook_url,
-            adapter=webhook_adapter,
+            session, limit=limit, resolve_route=resolve_route, sender=email_sender
         )
     session_factory = get_owner_session_factory()
     async with session_factory() as owned_session:
         return await _publish_page(
             owned_session,
             limit=limit,
-            resolve_webhook_url=resolve_webhook_url,
-            adapter=webhook_adapter,
+            resolve_route=resolve_route,
+            sender=email_sender,
         )
 
 
@@ -145,18 +168,18 @@ async def _publish_page(
     session: AsyncSession,
     *,
     limit: int,
-    resolve_webhook_url: ResolveSlackWebhookUrl | None,
-    adapter: OutboundWebhookAdapterProtocol,
+    resolve_route: ResolveOperatorEmailRoute | None,
+    sender: EmailSenderProtocol,
 ) -> dict[str, object]:
     data_protection = _data_protection_service(session)
     persistence = PostgresCaseApprovalPersistence(
         session, data_protection=data_protection
     )
 
-    async def _default_resolver(*, tenant_id: str) -> str:
-        return await _resolve_slack_webhook_url(session, tenant_id=tenant_id)
+    async def _default_resolver(*, tenant_id: str) -> OperatorEmailRoute:
+        return await _resolve_operator_email_route(session, tenant_id=tenant_id)
 
-    resolver: ResolveSlackWebhookUrl = resolve_webhook_url or _default_resolver
+    resolver: ResolveOperatorEmailRoute = resolve_route or _default_resolver
     pending = await persistence.list_outbox(
         CaseApprovalOutboxQuery(
             status=CaseApprovalOutboxStatus.PENDING.value,
@@ -172,8 +195,8 @@ async def _publish_page(
             outcome = await _publish_one(
                 persistence=persistence,
                 row=row,
-                resolve_webhook_url=resolver,
-                adapter=adapter,
+                resolve_route=resolver,
+                sender=sender,
             )
         except Exception as exc:  # noqa: BLE001 - one bad row must not abort the sweep.
             await session.rollback()
@@ -208,8 +231,8 @@ async def _publish_one(
     *,
     persistence: PostgresCaseApprovalPersistence,
     row: CaseApprovalOutboxRecord,
-    resolve_webhook_url: ResolveSlackWebhookUrl,
-    adapter: OutboundWebhookAdapterProtocol,
+    resolve_route: ResolveOperatorEmailRoute,
+    sender: EmailSenderProtocol,
 ) -> str:
     claim_id = str(uuid.uuid4())  # EPHEMERAL: claim-lease token, not a stored identity.
     claimed_at = datetime.now(timezone.utc)
@@ -242,32 +265,39 @@ async def _publish_one(
         return "skipped_stale"
 
     try:
-        webhook_url = await resolve_webhook_url(tenant_id=row.tenant_id)
-    except SlackChannelNotConfigured:
+        route = await resolve_route(tenant_id=row.tenant_id)
+    except OperatorEmailNotConfigured as exc:
         await persistence.mark_outbox_failed(
             outbox_id=row.outbox_id,
             claim_id=claim_id,
-            error="no active slack channel configured for tenant",
+            error=str(exc) or "operator alert email is not configured for tenant",
             failed_at=datetime.now(timezone.utc),
             dead_letter=False,
             expected_tenant_id=row.tenant_id,
         )
-        return "no_slack_channel_configured"
+        return "operator_email_not_configured"
 
-    payload = _slack_payload(case)
     try:
-        response = await adapter.post(
-            OutboundWebhookRequest(
-                url=webhook_url,
-                payload=payload,
-                auth_header="",
-                channel_type=TenantChannelType.SLACK.value,
+        await sender.send_email(
+            SesEmailSendRequest(
+                region=route.region,
+                access_key_id=route.access_key_id,
+                secret_access_key=route.secret_access_key,
+                session_token=route.session_token,
+                from_email_address=route.from_email_address,
+                recipient_email_address=route.recipient_email_address,
+                subject=_SUBJECT,
+                body_text=_email_body(case),
+                endpoint_url=route.endpoint_url,
+                configuration_set_name=route.configuration_set_name,
                 timeout_seconds=_TIMEOUT_SECONDS,
             )
         )
-        success = response.success
-        error_detail = None if success else f"http {response.status_code}"
-    except Exception as exc:  # noqa: BLE001 - network/SSRF errors are delivery failures, not sweep failures.
+        # send_email raises on any non-2xx response (SesV2SendError) or
+        # transport failure, so reaching here is the success signal.
+        success = True
+        error_detail = None
+    except Exception as exc:  # noqa: BLE001 - network/SES errors are delivery failures, not sweep failures.
         success = False
         error_detail = f"{exc.__class__.__name__}: {exc}"[:240]
 
@@ -282,57 +312,114 @@ async def _publish_one(
     await persistence.mark_outbox_failed(
         outbox_id=row.outbox_id,
         claim_id=claim_id,
-        error=error_detail or "slack webhook post failed",
+        error=error_detail or "operator alert email send failed",
         failed_at=datetime.now(timezone.utc),
         dead_letter=False,
         expected_tenant_id=row.tenant_id,
     )
-    return error_detail or "slack webhook post failed"
+    return error_detail or "operator alert email send failed"
 
 
-class SlackChannelNotConfigured(Exception):
-    pass
-
-
-async def _resolve_slack_webhook_url(session: AsyncSession, *, tenant_id: str) -> str:
+async def _resolve_operator_email_route(
+    session: AsyncSession, *, tenant_id: str
+) -> OperatorEmailRoute:
     settings = get_settings()
     try:
         credential_encryptor = build_tenant_credential_encryptor_from_settings(
             settings
         )
     except TenantCredentialEncryptionError as exc:
-        # Treated the same as "no channel configured": the row must still
-        # reach mark_outbox_failed (not stay stuck in PUBLISHING), and a
-        # tenant credential custody misconfiguration is exactly as
-        # retry-worthy as an unconfigured channel.
-        raise SlackChannelNotConfigured(tenant_id) from exc
+        # Treated the same as "not configured": the row must still reach
+        # mark_outbox_failed (not stay stuck in PUBLISHING), and a tenant
+        # credential custody misconfiguration is exactly as retry-worthy
+        # as an unconfigured channel.
+        raise OperatorEmailNotConfigured(
+            "tenant credential custody is not configured"
+        ) from exc
     runtime = TenantConfigurationRuntime(
         repository=PostgresTenantConfigurationRepository(session),
         credential_encryptor=credential_encryptor,
     )
-    page = await runtime.list_channels(
+
+    email_page = await runtime.list_channels(
         tenant_id=tenant_id,
         query=TenantChannelConfigurationQuery(
-            channel_type=TenantChannelType.SLACK,
+            channel_type=TenantChannelType.EMAIL,
             status=TenantChannelStatus.ACTIVE,
             limit=1,
         ),
     )
-    if not page.items:
-        raise SlackChannelNotConfigured(tenant_id)
+    if not email_page.items:
+        raise OperatorEmailNotConfigured(
+            "no active email channel configured for tenant"
+        )
+    alert_page = await runtime.list_channels(
+        tenant_id=tenant_id,
+        query=TenantChannelConfigurationQuery(
+            channel_type=TenantChannelType.OPERATOR_ALERT_EMAIL,
+            status=TenantChannelStatus.ACTIVE,
+            limit=1,
+        ),
+    )
+    if not alert_page.items:
+        raise OperatorEmailNotConfigured(
+            "no operator alert email recipient configured for tenant"
+        )
+    recipient_email_address = alert_page.items[0].routing_address
+
     credentials = await runtime.load_channel_credentials(
         tenant_id=tenant_id,
-        channel_type=TenantChannelType.SLACK,
+        channel_type=TenantChannelType.EMAIL,
     )
-    webhook_url = credentials.get("webhook_url")
-    if not isinstance(webhook_url, str) or not webhook_url:
-        raise SlackChannelNotConfigured(tenant_id)
-    return webhook_url
+    access_key_id = _credential_string(credentials, "access_key_id", "aws_access_key_id")
+    secret_access_key = _credential_string(
+        credentials, "secret_access_key", "aws_secret_access_key"
+    )
+    region = _credential_string(credentials, "region", "aws_region", "ses_region")
+    from_email_address = _credential_string(
+        credentials, "source_email_address", "from_email_address"
+    )
+    return OperatorEmailRoute(
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        region=region,
+        from_email_address=from_email_address,
+        recipient_email_address=recipient_email_address,
+        session_token=_optional_credential_string(
+            credentials, "session_token", "aws_session_token"
+        ),
+        endpoint_url=_optional_credential_string(
+            credentials, "endpoint_url", "ses_endpoint_url"
+        ),
+        configuration_set_name=_optional_credential_string(
+            credentials, "configuration_set_name", "ses_configuration_set_name"
+        ),
+    )
 
 
-def _slack_payload(case: CaseApprovalRecord) -> dict[str, Any]:
+def _credential_string(credentials: dict[str, Any], *keys: str) -> str:
+    value = _optional_credential_string(credentials, *keys)
+    if value is None:
+        raise OperatorEmailNotConfigured(
+            f"tenant email channel is missing required credential {keys[0]!r}"
+        )
+    return value
+
+
+def _optional_credential_string(
+    credentials: dict[str, Any], *keys: str
+) -> str | None:
+    for key in keys:
+        value = credentials.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _email_body(case: CaseApprovalRecord) -> str:
     lines = [
-        "*New case ready for approval*",
+        "A new case is ready for approval.",
+        "",
         f"Category: {case.entry_category.value}",
     ]
     if case.product:
@@ -342,7 +429,7 @@ def _slack_payload(case: CaseApprovalRecord) -> dict[str, Any]:
     if case.issue_summary:
         lines.append(f"Issue: {case.issue_summary}")
     lines.append(f"Requested: {case.requested_at.isoformat()}")
-    return {"text": "\n".join(lines)}
+    return "\n".join(lines)
 
 
 def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:

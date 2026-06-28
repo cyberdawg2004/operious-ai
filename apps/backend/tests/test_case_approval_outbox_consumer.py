@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,9 +27,10 @@ from app.approvals.persistence import (
     CaseApprovalRecord,
     PostgresCaseApprovalPersistence,
 )
-from app.boundary.outbound import OutboundWebhookRequest, OutboundWebhookResponse
+from app.boundary.outbound import SesEmailSendRequest, SesEmailSendResponse
 from app.workers.case_approval_outbox_tasks import (
-    SlackChannelNotConfigured,
+    OperatorEmailNotConfigured,
+    OperatorEmailRoute,
     publish_case_approval_outbox_runtime,
 )
 from tests.conftest import requires_postgres
@@ -38,7 +38,8 @@ from tests.conftest import requires_postgres
 pytestmark = [requires_postgres]
 
 _TENANT_ID = "tenant-case-approval-outbox"
-_WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/fake"
+_FROM_ADDRESS = "support@anker-pilot.example.com"
+_RECIPIENT_ADDRESS = "ops-alerts@anker-pilot.example.com"
 
 
 @pytest.fixture
@@ -104,30 +105,44 @@ async def _seed_outbox(
     return await persistence.save_outbox(record, expected_tenant_id=case.tenant_id)
 
 
-class _RecordingAdapter:
-    def __init__(self, response: OutboundWebhookResponse) -> None:
+class _RecordingSender:
+    def __init__(self, response: SesEmailSendResponse) -> None:
         self.response = response
-        self.requests: list[OutboundWebhookRequest] = []
+        self.requests: list[SesEmailSendRequest] = []
 
-    async def post(self, request: OutboundWebhookRequest) -> OutboundWebhookResponse:
+    async def send_email(
+        self, request: SesEmailSendRequest
+    ) -> SesEmailSendResponse:
         self.requests.append(request)
         return self.response
 
 
-class _RaisingAdapter:
-    async def post(self, request: OutboundWebhookRequest) -> OutboundWebhookResponse:
+class _RaisingSender:
+    async def send_email(
+        self, request: SesEmailSendRequest
+    ) -> SesEmailSendResponse:
         del request
         raise RuntimeError("connection reset")
 
 
-async def _fixed_webhook_url(**kwargs: Any) -> str:
-    del kwargs
-    return _WEBHOOK_URL
+def _fixed_route() -> OperatorEmailRoute:
+    return OperatorEmailRoute(
+        access_key_id="AKIAFAKE",
+        secret_access_key="fake-secret",
+        region="us-east-1",
+        from_email_address=_FROM_ADDRESS,
+        recipient_email_address=_RECIPIENT_ADDRESS,
+    )
 
 
-async def _no_channel_configured(**kwargs: Any) -> str:
+async def _resolve_fixed_route(**kwargs: object) -> OperatorEmailRoute:
     del kwargs
-    raise SlackChannelNotConfigured("no channel")
+    return _fixed_route()
+
+
+async def _no_route_configured(**kwargs: object) -> OperatorEmailRoute:
+    del kwargs
+    raise OperatorEmailNotConfigured("no operator alert email recipient configured")
 
 
 @pytest.mark.asyncio
@@ -138,24 +153,25 @@ async def test_pending_row_for_awaiting_case_is_published_with_case_details(
     await _ensure_tenant(pg_session, pg_tenant_id)
     case = await _seed_case(pg_session, tenant_id=pg_tenant_id)
     outbox = await _seed_outbox(pg_session, case=case)
-    adapter = _RecordingAdapter(
-        OutboundWebhookResponse(status_code=200, response_body="ok", success=True)
+    sender = _RecordingSender(
+        SesEmailSendResponse(provider_message_id="msg-1", status_code=200)
     )
 
     result = await publish_case_approval_outbox_runtime(
         limit=100,
         session=pg_session,
-        resolve_webhook_url=_fixed_webhook_url,
-        adapter=adapter,
+        resolve_route=_resolve_fixed_route,
+        sender=sender,
     )
 
     assert result["published"] == [outbox.outbox_id]
-    assert len(adapter.requests) == 1
-    request = adapter.requests[0]
-    assert request.url == _WEBHOOK_URL
-    assert "PowerCore 26800" in request.payload["text"]
-    assert "ticket-123" in request.payload["text"]
-    assert "Won't hold a charge." in request.payload["text"]
+    assert len(sender.requests) == 1
+    request = sender.requests[0]
+    assert request.from_email_address == _FROM_ADDRESS
+    assert request.recipient_email_address == _RECIPIENT_ADDRESS
+    assert "PowerCore 26800" in request.body_text
+    assert "ticket-123" in request.body_text
+    assert "Won't hold a charge." in request.body_text
 
     persistence = PostgresCaseApprovalPersistence(pg_session)
     saved = await persistence.get_outbox_by_case(
@@ -167,7 +183,7 @@ async def test_pending_row_for_awaiting_case_is_published_with_case_details(
 
 
 @pytest.mark.asyncio
-async def test_row_for_already_resolved_case_is_published_with_no_post(
+async def test_row_for_already_resolved_case_is_published_with_no_send(
     pg_session: AsyncSession,
     pg_tenant_id: str,
 ) -> None:
@@ -180,43 +196,43 @@ async def test_row_for_already_resolved_case_is_published_with_no_post(
         pg_session, tenant_id=pg_tenant_id, status=CaseApprovalStatus.APPROVED
     )
     outbox = await _seed_outbox(pg_session, case=case)
-    adapter = _RecordingAdapter(
-        OutboundWebhookResponse(status_code=200, response_body="ok", success=True)
+    sender = _RecordingSender(
+        SesEmailSendResponse(provider_message_id="msg-1", status_code=200)
     )
 
     result = await publish_case_approval_outbox_runtime(
         limit=100,
         session=pg_session,
-        resolve_webhook_url=_fixed_webhook_url,
-        adapter=adapter,
+        resolve_route=_resolve_fixed_route,
+        sender=sender,
     )
 
     assert result["skipped_stale"] == [outbox.outbox_id]
-    assert adapter.requests == []
+    assert sender.requests == []
 
 
 @pytest.mark.asyncio
-async def test_no_active_slack_channel_marks_failed_not_dead_lettered(
+async def test_no_operator_email_configured_marks_failed_not_dead_lettered(
     pg_session: AsyncSession,
     pg_tenant_id: str,
 ) -> None:
     await _ensure_tenant(pg_session, pg_tenant_id)
     case = await _seed_case(pg_session, tenant_id=pg_tenant_id)
     outbox = await _seed_outbox(pg_session, case=case)
-    adapter = _RecordingAdapter(
-        OutboundWebhookResponse(status_code=200, response_body="ok", success=True)
+    sender = _RecordingSender(
+        SesEmailSendResponse(provider_message_id="msg-1", status_code=200)
     )
 
     result = await publish_case_approval_outbox_runtime(
         limit=100,
         session=pg_session,
-        resolve_webhook_url=_no_channel_configured,
-        adapter=adapter,
+        resolve_route=_no_route_configured,
+        sender=sender,
     )
 
     assert result["published"] == []
     assert result["skipped_stale"] == []
-    assert adapter.requests == []
+    assert sender.requests == []
 
     persistence = PostgresCaseApprovalPersistence(pg_session)
     saved = await persistence.get_outbox_by_case(
@@ -229,7 +245,7 @@ async def test_no_active_slack_channel_marks_failed_not_dead_lettered(
 
 
 @pytest.mark.asyncio
-async def test_webhook_post_failure_marks_failed_not_dead_lettered(
+async def test_send_failure_marks_failed_not_dead_lettered(
     pg_session: AsyncSession,
     pg_tenant_id: str,
 ) -> None:
@@ -240,8 +256,8 @@ async def test_webhook_post_failure_marks_failed_not_dead_lettered(
     result = await publish_case_approval_outbox_runtime(
         limit=100,
         session=pg_session,
-        resolve_webhook_url=_fixed_webhook_url,
-        adapter=_RaisingAdapter(),
+        resolve_route=_resolve_fixed_route,
+        sender=_RaisingSender(),
     )
 
     assert result["published"] == []
@@ -275,20 +291,20 @@ async def test_already_claimed_row_is_skipped_not_double_published(
     )
     assert claimed is not None
     await pg_session.commit()
-    adapter = _RecordingAdapter(
-        OutboundWebhookResponse(status_code=200, response_body="ok", success=True)
+    sender = _RecordingSender(
+        SesEmailSendResponse(provider_message_id="msg-1", status_code=200)
     )
 
     result = await publish_case_approval_outbox_runtime(
         limit=100,
         session=pg_session,
-        resolve_webhook_url=_fixed_webhook_url,
-        adapter=adapter,
+        resolve_route=_resolve_fixed_route,
+        sender=sender,
     )
 
     assert result["published"] == []
     assert result["skipped_stale"] == []
-    assert adapter.requests == []
+    assert sender.requests == []
     saved = await persistence.get_outbox_by_case(
         case.approval_case_id, expected_tenant_id=pg_tenant_id
     )

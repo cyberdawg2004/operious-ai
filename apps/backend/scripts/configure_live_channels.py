@@ -83,13 +83,13 @@ async def main() -> int:
                     configured=True,
                 )
             )
-        slack = _slack_config()
-        if slack is not None:
+        operator_alert_email = _operator_alert_email_address()
+        if operator_alert_email is not None:
             record = await runtime.configure_channel(
                 tenant_id=tenant_id,
-                channel_type=TenantChannelType.SLACK,
-                routing_address="operator-alerts",
-                credentials=slack,
+                channel_type=TenantChannelType.OPERATOR_ALERT_EMAIL,
+                routing_address=operator_alert_email,
+                credentials={},
                 webhook_secret="",
                 status=TenantChannelStatus.ACTIVE,
             )
@@ -143,12 +143,10 @@ def _email_config() -> dict[str, Any] | None:
     }
 
 
-def _slack_config() -> dict[str, Any] | None:
-    if not _env_present("LIVE_SLACK_OPERATOR_WEBHOOK_URL"):
+def _operator_alert_email_address() -> str | None:
+    if not _env_present("LIVE_OPERATOR_ALERT_EMAIL_ADDRESS"):
         return None
-    return {
-        "webhook_url": _required_env("LIVE_SLACK_OPERATOR_WEBHOOK_URL"),
-    }
+    return _required_env("LIVE_OPERATOR_ALERT_EMAIL_ADDRESS")
 
 
 def _env_present(name: str) -> bool:
