@@ -82,6 +82,7 @@ celery_app = Celery(
     include=[
         "app.workers.agent_tasks",
         "app.workers.approval_tasks",
+        "app.workers.case_approval_outbox_tasks",
         "app.workers.case_approval_recovery_tasks",
         "app.workers.defect_cluster_tasks",
         "app.workers.escalation_recovery_tasks",
@@ -228,6 +229,18 @@ celery_conf.update(
         # status update.
         "reconcile-stale-case-approvals-minutely": {
             "task": "reconcile_stale_case_approvals",
+            "schedule": 60.0,
+            "kwargs": {"limit": 100},
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        # Drains case_approval_outbox: a row is written every time a case
+        # finishes SME review and enters awaiting_approval (see
+        # app.services.case_approval_service.review_case) but nothing
+        # consumed those rows before this task -- see
+        # app.workers.case_approval_outbox_tasks for the publish/skip
+        # logic.
+        "publish-case-approval-outbox-minutely": {
+            "task": "publish_case_approval_outbox",
             "schedule": 60.0,
             "kwargs": {"limit": 100},
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},

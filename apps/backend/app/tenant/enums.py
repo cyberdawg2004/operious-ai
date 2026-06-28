@@ -25,6 +25,12 @@ class TenantChannelType(StrEnum):
     # credentials_enc = OPCRED2 envelope (auth_type + token/api_key/username+password)
     # webhook_secret = "" (unused)
     OMS = "oms"
+    # SLACK: Outbound-only operator alert channel (e.g. case-approval
+    # notifications). routing_address = a human label (e.g.
+    # "operator-alerts"), unused semantically.
+    # credentials_enc = {"webhook_url": "https://hooks.slack.com/..."}
+    # webhook_secret = "" (unused, required by schema)
+    SLACK = "slack"
 
 
 class TenantStatus(StrEnum):

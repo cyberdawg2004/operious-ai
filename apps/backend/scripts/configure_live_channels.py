@@ -83,6 +83,24 @@ async def main() -> int:
                     configured=True,
                 )
             )
+        slack = _slack_config()
+        if slack is not None:
+            record = await runtime.configure_channel(
+                tenant_id=tenant_id,
+                channel_type=TenantChannelType.SLACK,
+                routing_address="operator-alerts",
+                credentials=slack,
+                webhook_secret="",
+                status=TenantChannelStatus.ACTIVE,
+            )
+            results.append(
+                ChannelResult(
+                    channel=record.channel_type.value,
+                    routing_address=record.routing_address,
+                    status=record.status.value,
+                    configured=True,
+                )
+            )
         await session.commit()
 
     if not results:
@@ -122,6 +140,14 @@ def _email_config() -> dict[str, Any] | None:
         "region": _required_env("LIVE_SES_REGION"),
         "configuration_set_name": _optional_env("LIVE_SES_CONFIGURATION_SET_NAME"),
         "endpoint_url": _optional_env("LIVE_SES_ENDPOINT_URL"),
+    }
+
+
+def _slack_config() -> dict[str, Any] | None:
+    if not _env_present("LIVE_SLACK_OPERATOR_WEBHOOK_URL"):
+        return None
+    return {
+        "webhook_url": _required_env("LIVE_SLACK_OPERATOR_WEBHOOK_URL"),
     }
 
 
