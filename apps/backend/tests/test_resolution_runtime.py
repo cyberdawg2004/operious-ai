@@ -180,6 +180,7 @@ def _governed_resolution_runtime(
                 tenant_configuration_repository=tenant_configuration_repository,
             )
         ),
+        governance_repository=governance_repository,
         tenant_configuration_repository=tenant_configuration_repository,
     )
 
@@ -1781,6 +1782,62 @@ def test_safety_keyword_in_original_content_still_triggers_safety_risk() -> None
 
     assert "safety_risk" in gate.reasons
     assert gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_local_denial_with_lenient_central_verdict_persists_its_own_deny_decision() -> (
+    None
+):
+    """Live-bug regression (found by the pilot-readiness walk harness): the
+    LOCAL gate's unsupported-commitment guard denies the proposal
+    (status=DENIED) while CENTRAL governance -- seeing a cited claim and
+    no severe flags -- only requires approval, never deny.
+    _map_central_governance_result previously reused that lenient central
+    decision_id for the proposal's lineage. That left the proposal with no
+    human-visible path at all: escalation creation requires the linked
+    decision to itself be DENY/ESCALATE
+    (EscalationAgentRuntime.create_for_governance_decision), and
+    case_approval_records creation is gated on PENDING_HUMAN_APPROVAL, not
+    DENIED -- a silent drop. The proposal's governance_decision_id must
+    instead point to a NEW, separately persisted decision that itself says
+    DENY, so escalation creation succeeds.
+    """
+    governance_repository = InMemoryGovernanceRepository()
+    tenant_configuration_repository = await _resolution_autonomy_repository()
+    draft = GroundedReplyDraft(
+        language="en",
+        segments=(
+            GroundedReplySegment(
+                kind="claim",
+                text="We will refund your purchase in full.",
+                citation_ranks=(1,),
+            ),
+        ),
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=ResolutionGovernanceGate(
+            governance_runtime=build_resolution_governance_runtime(
+                persistence=governance_repository,
+                grounding_checker=StaticGroundingChecker(allowed=True),
+                tenant_configuration_repository=tenant_configuration_repository,
+            )
+        ),
+        governance_repository=governance_repository,
+        conversation_generator=_StaticConversationGenerator(draft),
+        tenant_configuration_repository=tenant_configuration_repository,
+    )
+
+    record = await runtime.create_proposal(_request())
+
+    assert record.status is ResolutionProposalStatus.DENIED
+    assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert record.governance_decision_id is not None
+    persisted = await governance_repository.get_decision(
+        str(record.governance_decision_id), expected_tenant_id=TENANT_ID
+    )
+    assert persisted is not None
+    assert persisted.decision == "deny"
 
 
 @pytest.mark.asyncio

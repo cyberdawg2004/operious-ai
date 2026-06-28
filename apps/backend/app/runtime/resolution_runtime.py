@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -25,6 +25,14 @@ from app.cognition.extraction import (
     ExtractedOrderFields,
 )
 from app.governance.capability import OperationalAct
+from app.governance.enums import EnforcementStage
+from app.governance.identity.decision_ids import generate_decision_id
+from app.governance.persistence import (
+    BaseGovernanceRepository,
+    GovernanceDecisionRecord,
+    PolicyEvaluationResultRecord,
+    PolicyViolationRecord,
+)
 from app.identity import AuthorityContext, TenantId
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -352,6 +360,7 @@ class ResolutionRuntime:
         *,
         persistence: ResolutionProposalPersistenceProtocol,
         governance_gate: ResolutionGovernanceGateProtocol | None = None,
+        governance_repository: BaseGovernanceRepository | None = None,
         conversation_generator: ConversationGenerationRuntimeProtocol | None = None,
         tenant_configuration_repository: TenantConfigurationRepository | None = None,
         auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
@@ -361,6 +370,7 @@ class ResolutionRuntime:
             raise ValueError("auto_approve_threshold must be between 0 and 1")
         self._persistence = persistence
         self._governance_gate = governance_gate
+        self._governance_repository = governance_repository
         self._auto_approve_threshold = auto_approve_threshold
         self._tenant_configuration_repository = tenant_configuration_repository
         self._conversation_generator = (
@@ -603,7 +613,90 @@ class ResolutionRuntime:
                 governance_verdict=ResolutionGovernanceVerdict.DENY,
                 reason="resolution_governance_gate_failed",
             )
-        return _map_central_governance_result(request, result)
+        gate_decision = _map_central_governance_result(request, result)
+        if (
+            gate_decision.status is ResolutionProposalStatus.DENIED
+            and result.governance_verdict is not ResolutionGovernanceVerdict.DENY
+            and self._governance_repository is not None
+        ):
+            # The LOCAL gate overrode a lenient central verdict (e.g.
+            # require_approval) to DENIED. Reusing the lenient central
+            # decision_id here would leave the proposal's lineage pointing
+            # at a decision that disagrees with its own final verdict, and
+            # downstream escalation creation requires the linked decision
+            # to itself be DENY/ESCALATE (see
+            # EscalationAgentRuntime.create_for_governance_decision) -- so
+            # a denied-by-local-override proposal would otherwise have no
+            # escalation path and no case-approval path, a silent drop.
+            # Persist a new decision that reflects the actual override so
+            # the proposal's lineage and the escalation invariant agree.
+            override_decision_id = await self._persist_local_override_decision(
+                request=request,
+                superseded_decision_id=result.governance_decision_id,
+            )
+            gate_decision = replace(
+                gate_decision, governance_decision_id=override_decision_id
+            )
+        return gate_decision
+
+    async def _persist_local_override_decision(
+        self,
+        *,
+        request: ResolutionGovernanceGateRequest,
+        superseded_decision_id: uuid.UUID | None,
+    ) -> uuid.UUID:
+        assert self._governance_repository is not None
+        decision_id = generate_decision_id()
+        decided_at = datetime.now(tz=timezone.utc).isoformat()
+        reasons = request.local_reasons or ("local_governance_denied",)
+        violations = tuple(
+            PolicyViolationRecord(
+                policy_name="resolution.communication.local_override",
+                rule_id=reason,
+                decision="deny",
+                severity=40,
+                detail=f"local gate denied: {reason}",
+            )
+            for reason in reasons
+        )
+        evaluated_rules = tuple(
+            PolicyEvaluationResultRecord(
+                policy_name="resolution.communication.local_override",
+                rule_id=reason,
+                decision="deny",
+                severity=40,
+                reason=f"local gate denied: {reason}",
+                evaluated_at=decided_at,
+            )
+            for reason in reasons
+        )
+        record = GovernanceDecisionRecord(
+            decision_id=str(decision_id),
+            decision="deny",
+            stage=EnforcementStage.PRE_EXECUTION.value,
+            policy_chain_id="resolution.communication.local_override",
+            reason=f"deny: local_governance_override ({', '.join(reasons)})",
+            decided_at=decided_at,
+            correlation_id=str(request.dispatch_id),
+            request_id=f"resolution:{request.proposal_id}",
+            tenant_id=request.tenant_id,
+            subject_kind="communication",
+            violations=violations,
+            evaluated_rules=evaluated_rules,
+            metadata={
+                "session_id": str(request.session_id),
+                "execution_id": str(request.execution_id),
+                "dispatch_id": str(request.dispatch_id),
+                "superseded_central_decision_id": (
+                    str(superseded_decision_id)
+                    if superseded_decision_id is not None
+                    else None
+                ),
+            },
+        )
+        assert self._governance_repository is not None
+        await self._governance_repository.record_decision(record)
+        return decision_id
 
 
 class ResolutionOutboundDraftRuntime:

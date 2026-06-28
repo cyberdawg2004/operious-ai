@@ -1700,6 +1700,7 @@ async def _append_resolution_proposal_after_diagnostic(
                         tenant_configuration_repository=tenant_configuration_repository,
                     )
                 ),
+                governance_repository=governance_repo,
                 conversation_generator=GroundedConversationGenerationRuntime(
                     llm_client=_diagnostic_llm_client()
                 ),
