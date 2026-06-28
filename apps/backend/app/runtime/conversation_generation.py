@@ -69,16 +69,19 @@ _DIGIT_PATTERN = re.compile(r"\d")
 
 # Several _UNSAFE_ACKNOWLEDGMENT_PATTERN keywords are topic nouns as often
 # as they are factual claims -- "happy to help with your warranty
-# question" and "your Logitech warranty inquiry" (a prompt-sanctioned
-# process meta-statement, "this case will be escalated...") both name the
-# SUBJECT of the conversation, asserting nothing about coverage,
+# question", "your Logitech warranty inquiry" (a prompt-sanctioned
+# process meta-statement, "this case will be escalated..."), and "check
+# Anker's official warranty policy page" all name the SUBJECT of the
+# conversation or point to a RESOURCE, asserting nothing about coverage,
 # eligibility, or commitment; "your item is under warranty" or "your
 # refund has been approved" assert a fact. A keyword immediately followed
-# by a word that itself just refers to the customer's inquiry is a
-# topical reference, not an assertion -- mirrors the personal/topical
-# distinction _PERSONAL_COVERAGE_PATTERN already makes for "cover".
+# by a word that itself just refers to the customer's inquiry or names a
+# resource is a topical reference, not an assertion -- mirrors the
+# personal/topical distinction _PERSONAL_COVERAGE_PATTERN already makes
+# for "cover".
 _TOPICAL_INQUIRY_REFERENCE_PATTERN = re.compile(
-    r"\A\s*(?:question|inquiry|inquiries|request|case|issue|claim)\b",
+    r"\A\s*(?:question|inquiry|inquiries|request|case|issue|claim|page|"
+    r"site|website|document|documentation|listing|faq)\b",
     re.IGNORECASE,
 )
 

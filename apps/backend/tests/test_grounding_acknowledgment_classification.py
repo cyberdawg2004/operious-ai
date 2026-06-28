@@ -982,3 +982,26 @@ async def test_warranty_question_courtesy_with_cited_claim_is_send_eligible() ->
     assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
     assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
     assert resolution_proposal_is_send_eligible(record) is True
+
+
+# Live-bug regression (pilot-walk scenario 3, second manifestation): the
+# same harness run that confirmed the warranty-question fix above also hit
+# a different LLM phrasing -- "check Anker's official policy page" -- in
+# the same non-deterministic generation step. "policy" was followed by
+# "page" (a resource reference), not one of the originally recognized
+# topical-inquiry words.
+#
+# NOTE: the real LLM output was "warranty policy page" -- a compound
+# where "warranty" is ALSO independently matched and is followed by
+# "policy", not "page" directly. That two-keyword compound is not yet
+# exempted (would need a lookahead past one intervening matched keyword);
+# this test pins the single-keyword case that IS fixed.
+_POLICY_PAGE_REFERRAL = (
+    "I'd recommend checking Anker's official policy page for "
+    "the exact terms, as they can vary by product."
+)
+
+
+def test_is_safe_acknowledgment_allows_policy_page_referral() -> None:
+    original_content = _request().original_content
+    assert _is_safe_acknowledgment(_POLICY_PAGE_REFERRAL, original_content) is True
