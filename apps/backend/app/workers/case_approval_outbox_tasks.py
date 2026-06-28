@@ -180,6 +180,7 @@ async def _publish_page(
         return await _resolve_operator_email_route(session, tenant_id=tenant_id)
 
     resolver: ResolveOperatorEmailRoute = resolve_route or _default_resolver
+    requeued = await _requeue_failed_rows(persistence, session=session, limit=limit)
     pending = await persistence.list_outbox(
         CaseApprovalOutboxQuery(
             status=CaseApprovalOutboxStatus.PENDING.value,
@@ -221,10 +222,42 @@ async def _publish_page(
         else:
             failed.append({"outbox_id": row.outbox_id, "error": outcome})
     return {
+        "requeued": requeued,
         "published": published,
         "skipped_stale": skipped_stale,
         "failed": failed,
     }
+
+
+async def _requeue_failed_rows(
+    persistence: PostgresCaseApprovalPersistence,
+    *,
+    session: AsyncSession,
+    limit: int,
+) -> list[str]:
+    """Reset non-dead-lettered failed rows back to PENDING so this same
+    sweep retries them. Without this, a row that failed (e.g. before the
+    tenant's operator alert recipient was configured) would never be
+    picked up again -- list_outbox(status=PENDING) alone never sees a
+    FAILED row. Cheap to do unconditionally every sweep: the only failure
+    mode today (operator email not configured, or the send itself
+    failing) costs at most one claim+fail cycle per row with no retry
+    backoff needed at this outbox's volume."""
+
+    stale_failed = await persistence.list_outbox(
+        CaseApprovalOutboxQuery(
+            status=CaseApprovalOutboxStatus.FAILED.value,
+            dead_letter=False,
+            limit=limit,
+        ),
+        expected_tenant_id=None,  # cross-tenant sweep, see PRIVILEGED_PATH above
+    )
+    requeued: list[str] = []
+    for row in stale_failed.items:
+        await persistence.republish_outbox(row, expected_tenant_id=row.tenant_id)
+        await session.commit()
+        requeued.append(row.outbox_id)
+    return requeued
 
 
 async def _publish_one(

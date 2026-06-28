@@ -245,6 +245,61 @@ async def test_no_operator_email_configured_marks_failed_not_dead_lettered(
 
 
 @pytest.mark.asyncio
+async def test_previously_failed_row_is_requeued_and_retried_same_sweep(
+    pg_session: AsyncSession,
+    pg_tenant_id: str,
+) -> None:
+    """Live-bug regression: list_outbox(status=PENDING) alone never sees
+    a FAILED row, so a row that failed before the tenant's operator alert
+    recipient was configured would otherwise never be retried. The sweep
+    must requeue non-dead-lettered failed rows back to PENDING first, so
+    this same call retries and publishes them."""
+    await _ensure_tenant(pg_session, pg_tenant_id)
+    case = await _seed_case(pg_session, tenant_id=pg_tenant_id)
+    outbox = await _seed_outbox(pg_session, case=case)
+    failing_sender = _RecordingSender(
+        SesEmailSendResponse(provider_message_id="msg-1", status_code=200)
+    )
+    first = await publish_case_approval_outbox_runtime(
+        limit=100,
+        session=pg_session,
+        resolve_route=_no_route_configured,
+        sender=failing_sender,
+    )
+    assert first["failed"] == [
+        {
+            "outbox_id": outbox.outbox_id,
+            "error": "operator_email_not_configured",
+        }
+    ]
+    persistence = PostgresCaseApprovalPersistence(pg_session)
+    after_first = await persistence.get_outbox_by_case(
+        case.approval_case_id, expected_tenant_id=pg_tenant_id
+    )
+    assert after_first is not None
+    assert after_first.status is CaseApprovalOutboxStatus.FAILED
+
+    sender = _RecordingSender(
+        SesEmailSendResponse(provider_message_id="msg-2", status_code=200)
+    )
+    second = await publish_case_approval_outbox_runtime(
+        limit=100,
+        session=pg_session,
+        resolve_route=_resolve_fixed_route,
+        sender=sender,
+    )
+
+    assert second["requeued"] == [outbox.outbox_id]
+    assert second["published"] == [outbox.outbox_id]
+    assert len(sender.requests) == 1
+    after_second = await persistence.get_outbox_by_case(
+        case.approval_case_id, expected_tenant_id=pg_tenant_id
+    )
+    assert after_second is not None
+    assert after_second.status is CaseApprovalOutboxStatus.PUBLISHED
+
+
+@pytest.mark.asyncio
 async def test_send_failure_marks_failed_not_dead_lettered(
     pg_session: AsyncSession,
     pg_tenant_id: str,
