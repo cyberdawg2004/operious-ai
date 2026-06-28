@@ -1725,6 +1725,64 @@ async def test_concrete_gate_warranty_inquiry_with_safety_keyword_still_escalate
     assert resolution_proposal_is_send_eligible(record) is False
 
 
+def test_safety_keyword_in_reply_text_alone_does_not_trigger_safety_risk() -> None:
+    """Live-bug regression (pilot-readiness walk scenario 1): the model's
+    own reply asking a cautious diagnostic safety question -- e.g. "any
+    signs of heat, swelling, or burning smell?" -- must not itself trigger
+    safety_risk. Only the customer's own words are authoritative evidence a
+    hazard actually occurred; mirrors
+    resolution_contains_safety_floor_keywords, which also only ever scans
+    the ticket, never the generated reply. Before this fix, the gate
+    scanned `f"{original_content} {reply}"` together, so this entirely
+    customer-safe ticket was denied and escalated purely because the model
+    probed for hazard signs as good support practice.
+    """
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"charging_issue"}),
+        monetary_commitment_threshold_cents=10_000,
+    )
+
+    gate = _evaluate_gate(
+        category="charging_issue",
+        original_content=(
+            "My power bank powers on briefly, blinks once, then shuts off "
+            "and won't charge."
+        ),
+        reply=(
+            "Could you confirm whether you see any unusual signs such as "
+            "heat, swelling, or any burning smell during the reset attempt?"
+        ),
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert "safety_risk" not in gate.reasons
+    assert gate.status is ResolutionProposalStatus.AUTO_APPROVED
+
+
+def test_safety_keyword_in_original_content_still_triggers_safety_risk() -> None:
+    """Customer-reported hazard language must still trigger safety_risk
+    regardless of what the generated reply says -- the fix narrows the
+    scan to original_content, it does not remove the check."""
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"charging_issue"}),
+        monetary_commitment_threshold_cents=10_000,
+    )
+
+    gate = _evaluate_gate(
+        category="charging_issue",
+        original_content="My power bank caught fire while charging.",
+        reply="We have reviewed your request and confirmed the details below.",
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert "safety_risk" in gate.reasons
+    assert gate.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+
+
 @pytest.mark.asyncio
 async def test_resolution_proposal_reads_are_tenant_scoped() -> None:
     persistence = InMemoryResolutionProposalPersistence()

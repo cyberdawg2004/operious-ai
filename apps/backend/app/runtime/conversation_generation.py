@@ -124,20 +124,32 @@ def _is_safe_acknowledgment(text: str, original_content: str) -> bool:
     return True
 
 
+_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
+
+
 def _all_digit_phrases_echoed(text: str, original_content: str) -> bool:
     """True only if every digit-bearing token, plus an adjacent word, is a
     verbatim (case/whitespace-insensitive) substring of the customer's
-    original message."""
+    original message.
+
+    The adjacent-word window is taken from within the same SENTENCE only.
+    A multi-sentence acknowledgment (e.g. a product-number reference
+    immediately followed by a separate "sorry to hear" sentence) must not
+    have its echo window cross the sentence boundary -- the next
+    sentence's first word can never appear after the customer's own digit
+    in their original message, which would fail closed on a genuine echo.
+    """
 
     normalized_source = " ".join(original_content.lower().split())
-    tokens = [token.strip(string.punctuation) for token in text.split()]
-    for index, token in enumerate(tokens):
-        if not token or not _DIGIT_PATTERN.search(token):
-            continue
-        window = [part for part in tokens[max(0, index - 1) : index + 2] if part]
-        phrase = " ".join(window).lower()
-        if phrase not in normalized_source:
-            return False
+    for sentence in _SENTENCE_SPLIT_PATTERN.split(text):
+        tokens = [token.strip(string.punctuation) for token in sentence.split()]
+        for index, token in enumerate(tokens):
+            if not token or not _DIGIT_PATTERN.search(token):
+                continue
+            window = [part for part in tokens[max(0, index - 1) : index + 2] if part]
+            phrase = " ".join(window).lower()
+            if phrase not in normalized_source:
+                return False
     return True
 
 

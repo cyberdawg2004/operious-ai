@@ -1441,7 +1441,13 @@ def _evaluate_gate(
         reasons.append("unclassified_category_requires_human_approval")
     if evidence_empty:
         reasons.append("missing_citations")
-    if _contains_any(text, _SAFETY_KEYWORDS):
+    # Safety keywords are scanned on the CUSTOMER's own text only, never the
+    # generated reply -- mirrors resolution_contains_safety_floor_keywords,
+    # which also only ever sees the ticket. A cautious diagnostic question
+    # the model asks ("any signs of heat, swelling, or burning smell?") is
+    # the model probing for a hazard, not the customer reporting one; only
+    # the customer's own words are authoritative evidence a hazard occurred.
+    if _contains_any(original_content.lower(), _SAFETY_KEYWORDS):
         reasons.append("safety_risk")
     if _contains_any(text, _LEGAL_KEYWORDS):
         reasons.append("legal_or_chargeback_risk")

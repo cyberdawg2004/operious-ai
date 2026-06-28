@@ -854,3 +854,47 @@ async def test_genuine_uncited_personal_coverage_claim_still_denies_full_proposa
     assert record.status is ResolutionProposalStatus.DENIED
     assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
     assert resolution_proposal_is_send_eligible(record) is False
+
+
+# ---------------------------------------------------------------------------
+# Live-bug regression (pilot-readiness walk scenario 1): a digit-bearing
+# acknowledgment sentence immediately followed by a second sentence had its
+# echo window cross the sentence boundary, picking up the next sentence's
+# first word as the digit's "neighbor" -- which can never match the
+# customer's own message, failing closed on a genuine echo.
+# ---------------------------------------------------------------------------
+
+_TWO_SENTENCE_PRODUCT_MODEL_GREETING = (
+    "Thank you for reaching out and for the detailed information about "
+    "your PowerCore 26800. We're sorry to hear you're experiencing this "
+    "issue."
+)
+_TWO_SENTENCE_PRODUCT_MODEL_CONTENT = (
+    "Hi, my PowerCore 26800 powers on for a second, the LED blinks once, "
+    "then it shuts off completely and won't charge my phone anymore."
+)
+
+
+def test_is_safe_acknowledgment_allows_echoed_digit_at_sentence_boundary() -> None:
+    """The digit "26800" is the last token of the first sentence; before
+    the fix, its echo window picked up "We're" (the next sentence's first
+    word) as the neighbor, producing "26800 we're" -- never a substring of
+    the ticket -- so a genuine echo of the customer's own product number
+    was wrongly denied."""
+    assert (
+        _is_safe_acknowledgment(
+            _TWO_SENTENCE_PRODUCT_MODEL_GREETING,
+            _TWO_SENTENCE_PRODUCT_MODEL_CONTENT,
+        )
+        is True
+    )
+
+
+def test_is_safe_acknowledgment_still_denies_unechoed_digit_across_sentences() -> None:
+    """The per-sentence echo window must not become so lenient that a
+    genuinely novel digit in a later sentence of a multi-sentence
+    acknowledgment escapes detection."""
+    text = "Thanks for reaching out. Your account now shows a 500 balance."
+    original_content = _request().original_content
+    assert "500" not in original_content
+    assert _is_safe_acknowledgment(text, original_content) is False
