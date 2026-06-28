@@ -396,7 +396,12 @@ def test_unsupported_commitment_patterns_includes_baseline_and_tenant_patterns()
 
     # baseline patterns are never lost, even when a tenant adds its own
     assert "we will refund" in patterns
-    assert "covered under warranty" in patterns
+    # "covered under warranty" / "warranty covers" moved out of this bare-
+    # substring baseline set into a personal-context-aware regex (see
+    # _PERSONAL_WARRANTY_COVERAGE_PATTERN) -- a bare substring match can't
+    # tell "your item is covered under warranty" (a promise) from "Anker's
+    # warranty covers quality defects" (a general explanation).
+    assert "covered under warranty" not in patterns
     # tenant-specific patterns are additive
     assert "lifetime guarantee" in patterns
 

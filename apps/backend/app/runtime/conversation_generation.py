@@ -27,19 +27,26 @@ Return ONLY compact JSON matching this schema:
 }
 
 Rules:
-- "acknowledgment" segments are short, non-factual courtesy or empathy text
-  only (e.g. greetings, apologies for the inconvenience, offers to help).
-  They must not state or imply any fact about the product, the customer's
-  account or situation, eligibility, policy, compensation, or shipping.
-  Acknowledgment segments must not include citation_ranks.
+- "acknowledgment" segments are short, non-factual text that asserts
+  NOTHING about the customer's case: greetings, apologies for the
+  inconvenience, offers to help, courtesy bridges ("happy to help with
+  that"), and meta-statements about the support PROCESS itself (e.g. "a
+  team member will review this", "this case will be escalated"). The
+  required no-grounded-evidence disclaimer below is also an
+  acknowledgment, not a claim. Acknowledgments must not state or imply
+  any fact about the product, the customer's account, eligibility,
+  compensation, or shipping -- a generic statement of what a policy says
+  in the abstract still needs citation; only the process/courtesy text
+  itself is exempt. Acknowledgment segments must not include
+  citation_ranks.
 - Every customer-facing factual claim MUST cite one or more retrieved
   evidence ranks in citation_ranks.
 - Do not place citation markers such as [1] in text. The renderer owns
   citation markers.
 - Questions must not include citation_ranks.
 - Use only facts present in retrieved evidence. If evidence is missing or
-  irrelevant, emit one uncited claim explaining that no grounded automatic
-  reply can be produced; governance will escalate it.
+  irrelevant, emit exactly this acknowledgment: "No grounded automatic
+  reply can be produced for this request." -- governance will escalate it.
 - Do not promise refunds, replacements, warranty coverage, credits,
   shipping, or policy exceptions.
 - Keep the reply concise, professional, and helpful.
@@ -54,7 +61,7 @@ _UNSAFE_ACKNOWLEDGMENT_PATTERN = re.compile(
     r"\b("
     r"refund\w*|replac\w*|warrant\w*|eligib\w*|credit\w*|compensat\w*|"
     r"discount\w*|exchang\w*|reimburs\w*|guarant\w*|entitle\w*|"
-    r"polic\w*|cover\w*|approv\w*|denial|denied|ship\w*|rma|return\w*"
+    r"polic\w*|approv\w*|denial|denied|ship\w*|rma|return\w*"
     r")\b",
     re.IGNORECASE,
 )
@@ -65,15 +72,38 @@ _DIGIT_PATTERN = re.compile(r"\d")
 # the same digits appear in the customer's own message.
 _COMMITMENT_DIGIT_PATTERN = re.compile(r"[$€£¥]\s*\d|\d\s*%")
 
+# "cover" is uniquely two-sided -- "what our documentation covers" is a
+# topical/meta reference, "your item is covered" is a factual entitlement
+# claim -- so unlike the keywords above, it only disqualifies an
+# acknowledgment when paired with a personal/case marker nearby (mirrors
+# resolution_runtime.py's _PERSONAL_WARRANTY_COVERAGE_PATTERN, which fixes
+# the identical ambiguity in the local promise-pattern guard).
+_PERSONAL_COVERAGE_PATTERN = re.compile(
+    r"\b(?:you(?:'re| are)?|your|this (?:order|item|unit|device|product|"
+    r"claim|case|purchase))\b.{0,60}\bcover\w*\b"
+    r"|"
+    r"\bcover\w*\b.{0,60}\b(?:you(?:'re| are)?|your)\b",
+    re.IGNORECASE,
+)
+
+# The fixed, governance-authored disclaimer the prompt instructs the model
+# to use when no grounded answer is possible. It asserts nothing about the
+# customer's case -- it's a statement about the system's OWN inability to
+# ground a reply -- so it is recognized and exempted directly rather than
+# run through the factual-claim heuristics above.
+_NO_GROUNDED_REPLY_DISCLAIMER_PATTERN = re.compile(
+    r"no grounded (?:automatic )?reply can be produced", re.IGNORECASE
+)
+
 
 def _is_safe_acknowledgment(text: str, original_content: str) -> bool:
     """Conservative check for non-factual courtesy/empathy text.
 
     Returns False (unsafe) if the text contains any signal of a verifiable
     factual assertion -- policy, eligibility, compensation, shipping, a
-    monetary/percentage commitment, or a numeric detail that the customer
-    did not themselves state. Callers must fail closed by reclassifying
-    unsafe "acknowledgment" segments to "claim".
+    personal coverage claim, a monetary/percentage commitment, or a numeric
+    detail that the customer did not themselves state. Callers must fail
+    closed by reclassifying unsafe "acknowledgment" segments to "claim".
 
     A bare digit (e.g. a product/model number like "PowerCore 10000") is
     permitted only when it -- together with its immediate neighboring word
@@ -81,7 +111,11 @@ def _is_safe_acknowledgment(text: str, original_content: str) -> bool:
     customer told us is not a new factual assertion.
     """
 
+    if _NO_GROUNDED_REPLY_DISCLAIMER_PATTERN.search(text):
+        return True
     if _UNSAFE_ACKNOWLEDGMENT_PATTERN.search(text):
+        return False
+    if _PERSONAL_COVERAGE_PATTERN.search(text):
         return False
     if _COMMITMENT_DIGIT_PATTERN.search(text):
         return False
@@ -257,6 +291,17 @@ def parse_grounded_reply_draft(
         ranks = _citation_ranks(segment.get("citation_ranks"))
         if kind in {"question", "acknowledgment"} and ranks:
             raise ValueError("question/acknowledgment segments cannot carry citations")
+        if (
+            kind == "claim"
+            and not ranks
+            and _NO_GROUNDED_REPLY_DISCLAIMER_PATTERN.search(text)
+        ):
+            # Defense in depth: the prompt instructs the model to tag this
+            # fixed disclaimer as "acknowledgment", but if it emits it as
+            # an uncited "claim" anyway, recognize the disclaimer directly
+            # rather than let it spuriously deny on a statement about the
+            # system's own limitation, not the customer's case.
+            kind = "acknowledgment"
         if kind == "acknowledgment" and not _is_safe_acknowledgment(
             text, original_content
         ):

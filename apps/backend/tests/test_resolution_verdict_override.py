@@ -213,6 +213,14 @@ def _fields_ineligible_wrong_seller() -> ExtractedOrderFields:
     )
 
 
+def _fields_missing_purchase_date() -> ExtractedOrderFields:
+    return ExtractedOrderFields(
+        order_id=ExtractedField(value="ORD-1", confidence="high", source="text"),
+        seller=ExtractedField(value="amazon.com", confidence="high", source="document"),
+        # purchase_date omitted -> fully-absent ExtractedField() -> cannot_determine.
+    )
+
+
 async def _save_policy(
     repository: InMemoryTenantConfigurationRepository,
     *,
@@ -762,3 +770,107 @@ async def test_genuine_ungrounded_reply_without_override_still_denied_by_real_gr
     ]
     assert grounding_rules
     assert grounding_rules[0].rule_id == "ungrounded_claim"
+
+
+# ─── Class A widened: the grounding exemption keys on the OVERRIDE        ─
+# ─── MECHANISM, not the APPROVED outcome (live bug: scenarios 5 and 6) ───
+
+
+@pytest.mark.asyncio
+async def test_denied_override_allowed_by_real_grounding_despite_no_citations() -> (
+    None
+):
+    """(i) A DENIED-outcome override template ("this item falls outside our
+    warranty period...") is exactly as tenant-authored and pre-approved as
+    an APPROVED one. It must reach PENDING_HUMAN_APPROVAL (the local
+    money/goods-bound-action floor), never DENIED -- live bug: an
+    ineligible warranty claim with a correct denial template was hard-
+    denied by central grounding and silently dropped to escalation."""
+    repository = await _repository_with_warranty_policies()
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.denied.authorized_reseller",
+            channel="email",
+            content=(
+                "Hi! We've reviewed order {order_id}. Unfortunately we "
+                "can't process a warranty claim for purchases from "
+                "{seller}, as it isn't one of our authorized resellers."
+            ),
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    governance_repository = InMemoryGovernanceRepository()
+    runtime, _ = _real_governed_runtime(
+        repository=repository, governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(
+        _request(
+            extracted_fields=_fields_ineligible_wrong_seller(),
+            citations=(_citation(),),
+        )
+    )
+
+    assert "ebay.com" in record.proposed_customer_reply
+    assert record.governance_verdict is not ResolutionGovernanceVerdict.DENY
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id), expected_tenant_id=_TENANT
+    )
+    assert decision is not None
+    grounding_rules = [
+        rule
+        for rule in decision.evaluated_rules
+        if rule.policy_name == "resolution.grounding"
+    ]
+    assert grounding_rules
+    assert grounding_rules[0].rule_id == "preapproved_template_exempt"
+
+
+@pytest.mark.asyncio
+async def test_needs_more_info_override_allowed_by_real_grounding_despite_no_citations() -> (
+    None
+):
+    """(ii) A NEEDS_MORE_INFO-outcome override (the cannot_determine probe
+    template) gets the same treatment -- live bug: a missing-evidence
+    warranty inquiry with a correct probe-for-more-info template was hard-
+    denied by central grounding instead of reaching the human queue."""
+    repository = await _repository_with_warranty_policies()
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.needs_more_info.missing_purchase_date",
+            channel="email",
+            content=(
+                "Hi! To process your warranty claim for order {order_id}, "
+                "we still need your purchase date. Could you reply with "
+                "that so we can confirm your warranty status?"
+            ),
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    governance_repository = InMemoryGovernanceRepository()
+    runtime, _ = _real_governed_runtime(
+        repository=repository, governance_repository=governance_repository
+    )
+
+    record = await runtime.create_proposal(
+        _request(
+            extracted_fields=_fields_missing_purchase_date(),
+            citations=(_citation(),),
+        )
+    )
+
+    assert "purchase date" in record.proposed_customer_reply
+    assert record.governance_verdict is not ResolutionGovernanceVerdict.DENY
+    assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    decision = await governance_repository.get_decision(
+        str(record.governance_decision_id), expected_tenant_id=_TENANT
+    )
+    assert decision is not None
+    grounding_rules = [
+        rule
+        for rule in decision.evaluated_rules
+        if rule.policy_name == "resolution.grounding"
+    ]
+    assert grounding_rules
+    assert grounding_rules[0].rule_id == "preapproved_template_exempt"

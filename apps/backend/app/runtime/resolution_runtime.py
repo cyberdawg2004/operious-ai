@@ -196,10 +196,26 @@ _BASELINE_UNSUPPORTED_PROMISE_PATTERNS = frozenset(
         "we will replace",
         "we'll replace",
         "approved for replacement",
-        "covered under warranty",
-        "warranty covers",
         "guaranteed replacement",
     }
+)
+# "covered under warranty" / "warranty covers" are uniquely two-sided: they
+# read as a PERSONAL commitment in "your item is covered under warranty"
+# but as a GENERAL policy explanation in "Anker's warranty covers quality-
+# related defects" -- a bare substring match (like every other baseline
+# phrase above, which already inherently imply a personal commitment)
+# can't tell them apart, so a pure-inquiry answer that explains coverage
+# in the abstract was wrongly hard-denied as an unsupported promise. These
+# two phrases alone get a personal-context-aware regex instead: only a
+# commitment when a personal/case marker (you/your/this order/this item/
+# this claim/this case) appears near the phrase.
+_PERSONAL_WARRANTY_COVERAGE_PATTERN = re.compile(
+    r"\b(?:you(?:'re| are)?|your|this (?:order|item|unit|device|product|"
+    r"claim|case))\b.{0,60}\b(?:covered under warranty|warranty covers)\b"
+    r"|"
+    r"\b(?:covered under warranty|warranty covers)\b.{0,60}\b"
+    r"(?:you(?:'re| are)?|your)\b",
+    re.IGNORECASE,
 )
 _OPTIONAL_EVIDENCE_TEXT_FIELDS = (
     "chunk_id",
@@ -287,14 +303,17 @@ class ResolutionGovernanceGateRequest:
     source_channel: str | None = None
     reply_recipient: str | None = None
     reply_thread_context: str | None = None
-    # True only for an APPROVED verdict-override reply (see
-    # reply_is_approved_verdict_override in create_proposal): a tenant-
-    # authored, dual-control-approved template that only ever renders
-    # because a specialized verdict already confirmed eligibility. Its
-    # factual claims are grounded in that verdict, not a KB citation, so
-    # the central grounding gate exempts it from per-claim KB-citation
-    # checking instead of grading it against citations it was never meant
-    # to carry. Never set for LLM-drafted free text.
+    # True for ANY verdict-override reply (see
+    # reply_is_verdict_override_template in create_proposal), regardless of
+    # outcome (approved / denied / needs_more_info): a tenant-authored,
+    # dual-control-approved template that only ever renders because a
+    # specialized verdict already resolved the case. Its factual claims
+    # are grounded in that verdict, not a KB citation -- "this item falls
+    # outside our warranty period" is exactly as pre-approved a statement
+    # as "we're processing a replacement". The central grounding gate
+    # exempts it from per-claim KB-citation checking instead of grading
+    # text it was never meant to carry citations for. Never set for
+    # LLM-drafted free text.
     reply_is_preapproved_template: bool = False
 
 
@@ -416,6 +435,16 @@ class ResolutionRuntime:
             and verdict_summary.get("outcome")
             == ResolutionVerdictOutcome.APPROVED.value
         )
+        # Central grounding exemption keys on the MECHANISM (is this any
+        # verdict-override template?), not the outcome. A denied or needs-
+        # more-info override is JUST AS tenant-authored and dual-control-
+        # approved as an approved one -- "this item falls outside our
+        # warranty period" is exactly as pre-approved a commitment as
+        # "we're processing a replacement". The grounding gate exists to
+        # catch LLM-INVENTED claims; an authored template has none. Wider
+        # than reply_is_approved_verdict_override (which stays scoped to
+        # APPROVED for the unrelated local promise-pattern guard above).
+        reply_is_verdict_override_template = verdict_reply is not None
         if verdict_reply is not None:
             # reply_segments was captured from the ORIGINAL LLM draft above
             # (line ~367), before this override exists. Recompute it from
@@ -486,7 +515,7 @@ class ResolutionRuntime:
                 source_channel=request.source_channel,
                 reply_recipient=request.reply_recipient,
                 reply_thread_context=request.reply_thread_context,
-                reply_is_preapproved_template=reply_is_approved_verdict_override,
+                reply_is_preapproved_template=reply_is_verdict_override_template,
             )
         )
 
@@ -1433,8 +1462,9 @@ def _evaluate_gate(
     reasons.extend(
         _warranty_refund_cannot_determine_reasons(recommended_actions)
     )
-    if not skip_unsupported_commitment_check and _contains_any(
-        reply.lower(), _unsupported_commitment_patterns(taxonomy)
+    if not skip_unsupported_commitment_check and (
+        _contains_any(reply.lower(), _unsupported_commitment_patterns(taxonomy))
+        or _PERSONAL_WARRANTY_COVERAGE_PATTERN.search(reply.lower())
     ):
         return _GateDecision(
             supervisor_verdict=ResolutionSupervisorVerdict.FAIL,

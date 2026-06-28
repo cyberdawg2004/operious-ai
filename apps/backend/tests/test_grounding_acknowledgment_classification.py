@@ -720,3 +720,137 @@ async def test_acknowledgment_with_dollar_commitment_still_denied_even_if_digits
     assert record.status is ResolutionProposalStatus.DENIED
     assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
     assert resolution_proposal_is_send_eligible(record) is False
+
+
+# ---------------------------------------------------------------------------
+# Class B (live bug, scenarios 3 & 7): a courtesy bridge ("happy to share
+# what our documentation covers") and the fixed no-grounded-reply
+# disclaimer were tagged as citation-required "claim" segments with no
+# citations, spuriously denying replies whose substantive claims WERE
+# properly cited. Neither asserts a fact about the customer's case.
+# ---------------------------------------------------------------------------
+
+_COURTESY_BRIDGE = (
+    "It's great that you're thinking ahead about this — happy to share "
+    "what our documentation covers."
+)
+_NO_GROUNDED_REPLY_DISCLAIMER = (
+    "No grounded automatic reply can be produced for this request."
+)
+_PERSONAL_COVERAGE_CLAIM = "Your PowerCore 10000 is covered under warranty."
+
+
+def test_is_safe_acknowledgment_allows_courtesy_bridge_mentioning_documentation() -> (
+    None
+):
+    """(i) "covers" used topically ("what our documentation covers") is not
+    a personal entitlement claim and must stay exempt."""
+    original_content = _request().original_content
+    assert _is_safe_acknowledgment(_COURTESY_BRIDGE, original_content) is True
+
+
+def test_is_safe_acknowledgment_allows_the_no_grounded_reply_disclaimer() -> None:
+    """(i) The fixed governance-authored disclaimer asserts nothing about
+    the customer's case -- it must stay exempt even though earlier in the
+    same family of sentences "warranty"/"covered" would otherwise be
+    flagged."""
+    original_content = _request().original_content
+    assert (
+        _is_safe_acknowledgment(_NO_GROUNDED_REPLY_DISCLAIMER, original_content)
+        is True
+    )
+
+
+def test_is_safe_acknowledgment_still_denies_personal_coverage_claim() -> None:
+    """(ii) "your X is covered under warranty" is a genuine personal
+    entitlement claim about the customer's specific product -- must stay
+    unsafe (citation-required), unlike the topical/meta cases above."""
+    original_content = _request().original_content
+    assert (
+        _is_safe_acknowledgment(_PERSONAL_COVERAGE_CLAIM, original_content) is False
+    )
+
+
+def test_claim_kind_no_grounded_reply_disclaimer_is_reclassified_to_acknowledgment() -> (
+    None
+):
+    """Defense in depth: even if the model emits the disclaimer as an
+    uncited "claim" (ignoring the prompt's "acknowledgment" instruction),
+    the parser recognizes and exempts it directly."""
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "claim",
+                    "text": _NO_GROUNDED_REPLY_DISCLAIMER,
+                    "citation_ranks": [],
+                },
+            ],
+        }
+    )
+
+    draft = parse_grounded_reply_draft(
+        raw, expected_language="en", original_content=_request().original_content
+    )
+
+    assert draft.segments[0].kind == "acknowledgment"
+
+
+@pytest.mark.asyncio
+async def test_courtesy_bridge_with_cited_claim_is_send_eligible_not_denied() -> None:
+    """(i) Live-bug regression: a reply whose only uncited segment is the
+    courtesy bridge must reach SEND_ELIGIBLE, not DENIED -- the substantive
+    claim is properly cited and the bridge asserts nothing about the
+    customer's case. Tagged "acknowledgment" here (what the model's own
+    instructions call for); the live bug was the PARSER's old unconditional
+    "cover" trigger force-reclassifying it to "claim" against the model's
+    own correct tag."""
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "acknowledgment",
+                    "text": _COURTESY_BRIDGE,
+                    "citation_ranks": [],
+                },
+                {"kind": "claim", "text": _CLAIM_TEXT, "citation_ranks": [1]},
+            ],
+        }
+    )
+    generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
+
+    record = await (await _runtime(generator)).create_proposal(_request())
+
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
+    assert resolution_proposal_is_send_eligible(record) is True
+
+
+@pytest.mark.asyncio
+async def test_genuine_uncited_personal_coverage_claim_still_denies_full_proposal() -> (
+    None
+):
+    """(ii) Don't weaken real grounding: a genuine, uncited, personal
+    coverage claim must still deny the whole proposal."""
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "claim",
+                    "text": _PERSONAL_COVERAGE_CLAIM,
+                    "citation_ranks": [],
+                },
+                {"kind": "claim", "text": _CLAIM_TEXT, "citation_ranks": [1]},
+            ],
+        }
+    )
+    generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
+
+    record = await (await _runtime(generator)).create_proposal(_request())
+
+    assert record.status is ResolutionProposalStatus.DENIED
+    assert record.governance_verdict is ResolutionGovernanceVerdict.DENY
+    assert resolution_proposal_is_send_eligible(record) is False

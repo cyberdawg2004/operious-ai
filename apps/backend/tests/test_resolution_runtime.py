@@ -810,6 +810,83 @@ def test_unsupported_commitment_patterns_includes_baseline_for_empty_taxonomy() 
     assert "we will refund" in _unsupported_commitment_patterns(_EMPTY_TAXONOMY)
 
 
+# ─── Class B (live bug, scenario 3): "warranty covers" / "covered under  ─
+# ─── warranty" must distinguish a GENERAL explanation from a PERSONAL    ─
+# ─── commitment, not bare-substring-match either one the same way.       ─
+
+
+def test_general_warranty_explanation_does_not_trip_unsupported_promise_guard() -> (
+    None
+):
+    """(iii) A pure-inquiry answer explaining what the warranty covers IN
+    THE ABSTRACT must not be hard-denied as an unsupported promise -- live
+    bug: this exact phrasing denied a correctly-grounded answer to "what's
+    your warranty period?"."""
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"warranty_replacement_inquiry"}),
+        monetary_commitment_threshold_cents=10_000,
+    )
+    gate = _evaluate_gate(
+        category="warranty_replacement_inquiry",
+        original_content="What's your warranty period?",
+        reply=(
+            "Anker's warranty covers quality-related defects for products "
+            "sold by Anker or authorized resellers during the applicable "
+            "warranty period."
+        ),
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert gate.status is not ResolutionProposalStatus.DENIED
+    assert (
+        "unsupported_refund_replacement_or_warranty_promise" not in gate.reasons
+    )
+
+
+def test_personal_warranty_coverage_commitment_still_routes_to_human() -> None:
+    """(iii) A REAL personal commitment ("you are covered, we'll replace
+    it") must still route to human review -- the fix narrows the guard for
+    general explanation, it does not weaken it for an actual promise."""
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"warranty_replacement_inquiry"}),
+        monetary_commitment_threshold_cents=10_000,
+    )
+    gate = _evaluate_gate(
+        category="warranty_replacement_inquiry",
+        original_content="Is my widget still under warranty?",
+        reply="Good news -- you are covered, we'll replace it.",
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert gate.status is ResolutionProposalStatus.DENIED
+    assert "unsupported_refund_replacement_or_warranty_promise" in gate.reasons
+
+
+def test_personal_warranty_coverage_phrase_alone_still_denied() -> None:
+    """(iii) The two-sided phrases themselves, when paired with a personal
+    marker either before or after, remain unsupported-promise denials --
+    this isn't limited to the combination with "we'll replace"."""
+    autonomy_policy = ResolutionAutonomyPolicy(
+        reply_auto_send_categories=frozenset({"warranty_replacement_inquiry"}),
+        monetary_commitment_threshold_cents=10_000,
+    )
+    gate = _evaluate_gate(
+        category="warranty_replacement_inquiry",
+        original_content="Is my widget still under warranty?",
+        reply="Your widget is covered under warranty.",
+        evidence=(_citation(),),
+        autonomy_policy=autonomy_policy,
+        taxonomy=_EMPTY_TAXONOMY,
+    )
+
+    assert gate.status is ResolutionProposalStatus.DENIED
+    assert "unsupported_refund_replacement_or_warranty_promise" in gate.reasons
+
+
 def test_money_or_goods_commitment_kinds_detect_reply_promise_without_action() -> None:
     assert money_or_goods_commitment_kinds(
         recommended_actions=(),
