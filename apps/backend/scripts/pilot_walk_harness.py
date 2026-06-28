@@ -442,7 +442,7 @@ def _print_report(dispositions: list[ScenarioDisposition]) -> None:
 
 async def _run(args: argparse.Namespace) -> int:
     from app.main import app
-    from app.db.session import get_session_factory
+    from app.db.session import get_owner_session_factory
 
     if args.scenarios.strip().lower() == "all":
         scenarios = list(all_scenarios())
@@ -450,8 +450,11 @@ async def _run(args: argparse.Namespace) -> int:
         ids = [int(s.strip()) for s in args.scenarios.split(",") if s.strip()]
         scenarios = [scenario_by_id(i) for i in ids]
 
-    session_factory = get_session_factory()
-    async with session_factory() as session:
+    # Owner session for harness-side setup reads only (RLS bypass for
+    # admin lookups) -- the actual injected webhook below still runs on
+    # the regular session factory, matching the real request path.
+    owner_session_factory = get_owner_session_factory()
+    async with owner_session_factory() as session:
         routing_address, webhook_secret = await _resolve_email_channel(
             session=session, tenant_id=args.tenant_id
         )
