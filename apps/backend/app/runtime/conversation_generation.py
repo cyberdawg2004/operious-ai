@@ -67,6 +67,21 @@ _UNSAFE_ACKNOWLEDGMENT_PATTERN = re.compile(
 )
 _DIGIT_PATTERN = re.compile(r"\d")
 
+# Several _UNSAFE_ACKNOWLEDGMENT_PATTERN keywords are topic nouns as often
+# as they are factual claims -- "happy to help with your warranty
+# question" and "your Logitech warranty inquiry" (a prompt-sanctioned
+# process meta-statement, "this case will be escalated...") both name the
+# SUBJECT of the conversation, asserting nothing about coverage,
+# eligibility, or commitment; "your item is under warranty" or "your
+# refund has been approved" assert a fact. A keyword immediately followed
+# by a word that itself just refers to the customer's inquiry is a
+# topical reference, not an assertion -- mirrors the personal/topical
+# distinction _PERSONAL_COVERAGE_PATTERN already makes for "cover".
+_TOPICAL_INQUIRY_REFERENCE_PATTERN = re.compile(
+    r"\A\s*(?:question|inquiry|inquiries|request|case|issue|claim)\b",
+    re.IGNORECASE,
+)
+
 # A digit adjacent to a currency symbol or percent sign is always a
 # quantitative commitment (amount, discount, fee) -- never exempt, even if
 # the same digits appear in the customer's own message.
@@ -113,7 +128,7 @@ def _is_safe_acknowledgment(text: str, original_content: str) -> bool:
 
     if _NO_GROUNDED_REPLY_DISCLAIMER_PATTERN.search(text):
         return True
-    if _UNSAFE_ACKNOWLEDGMENT_PATTERN.search(text):
+    if _has_non_topical_unsafe_keyword(text):
         return False
     if _PERSONAL_COVERAGE_PATTERN.search(text):
         return False
@@ -122,6 +137,22 @@ def _is_safe_acknowledgment(text: str, original_content: str) -> bool:
     if _DIGIT_PATTERN.search(text):
         return _all_digit_phrases_echoed(text, original_content)
     return True
+
+
+def _has_non_topical_unsafe_keyword(text: str) -> bool:
+    """True if any _UNSAFE_ACKNOWLEDGMENT_PATTERN match is NOT immediately
+    followed by a topical-inquiry-reference word. Checked per-match (not a
+    single whole-text search) so a genuine claim elsewhere in the same
+    segment -- e.g. "...your warranty case and we've approved a
+    replacement" -- is still caught by its own ("approved"/"replac*")
+    match even though "warranty case" alone is topical."""
+
+    for match in _UNSAFE_ACKNOWLEDGMENT_PATTERN.finditer(text):
+        following = text[match.end() :]
+        if _TOPICAL_INQUIRY_REFERENCE_PATTERN.match(following):
+            continue
+        return True
+    return False
 
 
 _SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")

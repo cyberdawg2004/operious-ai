@@ -898,3 +898,87 @@ def test_is_safe_acknowledgment_still_denies_unechoed_digit_across_sentences() -
     original_content = _request().original_content
     assert "500" not in original_content
     assert _is_safe_acknowledgment(text, original_content) is False
+
+
+# ---------------------------------------------------------------------------
+# Live-bug regression (pilot-readiness walk scenarios 3 & 7):
+# _UNSAFE_ACKNOWLEDGMENT_PATTERN's keyword list could not distinguish
+# "happy to help with your warranty QUESTION" (names the topic the
+# customer asked about) from "your item is under warranty" (a coverage
+# claim) -- both contain "warrant*". Genuinely topical phrasing was
+# force-reclassified to "claim" with no citations and denied as
+# "uncited_claim", even for a prompt-sanctioned process meta-statement
+# ("this case will be escalated...for your warranty inquiry").
+# ---------------------------------------------------------------------------
+
+_WARRANTY_QUESTION_COURTESY = (
+    "Thanks for reaching out — happy to help with your warranty question!"
+)
+_ESCALATION_META_STATEMENT_WITH_TOPIC_WORD = (
+    "This case will be escalated to a team member who can point you in "
+    "the right direction for your Logitech warranty inquiry."
+)
+
+
+def test_is_safe_acknowledgment_allows_topical_warranty_question_reference() -> None:
+    original_content = _request().original_content
+    assert (
+        _is_safe_acknowledgment(_WARRANTY_QUESTION_COURTESY, original_content)
+        is True
+    )
+
+
+def test_is_safe_acknowledgment_allows_escalation_meta_statement_with_topic_word() -> (
+    None
+):
+    """The prompt's own example of a valid acknowledgment ("this case will
+    be escalated") must stay exempt even when it names the topic
+    ("warranty inquiry") the case is about."""
+    original_content = _request().original_content
+    assert (
+        _is_safe_acknowledgment(
+            _ESCALATION_META_STATEMENT_WITH_TOPIC_WORD, original_content
+        )
+        is True
+    )
+
+
+def test_is_safe_acknowledgment_still_denies_claim_adjacent_to_topical_phrase() -> (
+    None
+):
+    """Defense in depth: a genuine claim co-located with a topical phrase
+    in the same segment must still be caught by its OWN keyword match --
+    the topical exemption is per-occurrence, not whole-text."""
+    text = (
+        "Happy to help with your warranty question -- and good news, your "
+        "refund has been approved."
+    )
+    original_content = _request().original_content
+    assert _is_safe_acknowledgment(text, original_content) is False
+
+
+@pytest.mark.asyncio
+async def test_warranty_question_courtesy_with_cited_claim_is_send_eligible() -> None:
+    """Live-bug regression (scenario 3): a reply whose only uncited
+    segment is the topical warranty-question courtesy opener must reach
+    SEND_ELIGIBLE, not DENIED."""
+    raw = json.dumps(
+        {
+            "language": "en",
+            "segments": [
+                {
+                    "kind": "acknowledgment",
+                    "text": _WARRANTY_QUESTION_COURTESY,
+                    "citation_ranks": [],
+                },
+                {"kind": "claim", "text": _CLAIM_TEXT, "citation_ranks": [1]},
+            ],
+        }
+    )
+    generator = GroundedConversationGenerationRuntime(llm_client=_FakeLLMClient(raw))
+
+    record = await (await _runtime(generator)).create_proposal(_request())
+
+    assert record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert record.governance_verdict is ResolutionGovernanceVerdict.ALLOW
+    assert resolution_proposal_is_send_eligible(record) is True
