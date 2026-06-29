@@ -449,11 +449,32 @@ def _optional_credential_string(
     return None
 
 
+# Mirrors categoryTitle() in apps/command-center2/frontend/components/
+# case-approvals-inbox.tsx -- the email and the Reply Reviews tab must
+# describe the same case the same way. That function is the canonical
+# source (it's what the operator sees on screen); keep this in sync with
+# it by hand, since a Python worker can't import a TS component. Any
+# CaseApprovalEntryCategory not listed here falls back to the raw enum
+# value, exactly like that switch's default case.
+_ENTRY_CATEGORY_LABELS: dict[str, str] = {
+    "resolution_require_approval": "Resolution — approval required",
+    "resolution_needs_human_approval": "Resolution — needs human approval",
+    "refund_warranty": "Refund / warranty",
+    "low_confidence": "Low-confidence resolution",
+    "coordination_human_review": "Coordination — human review",
+    "crisis_action": "Crisis action",
+}
+
+
+def _friendly_entry_category_label(category: str) -> str:
+    return _ENTRY_CATEGORY_LABELS.get(category, category)
+
+
 def _email_body(case: CaseApprovalRecord) -> str:
     lines = [
         "A new case is ready for approval.",
         "",
-        f"Category: {case.entry_category.value}",
+        f"Category: {_friendly_entry_category_label(case.entry_category.value)}",
     ]
     if case.product:
         lines.append(f"Product: {case.product}")
@@ -462,6 +483,11 @@ def _email_body(case: CaseApprovalRecord) -> str:
     if case.issue_summary:
         lines.append(f"Issue: {case.issue_summary}")
     lines.append(f"Requested: {case.requested_at.isoformat()}")
+    lines.append("")
+    lines.append("Review it under Needs Attention → Reply Reviews in the Command Center.")
+    command_center_base_url = get_settings().command_center_base_url_normalized
+    if command_center_base_url:
+        lines.append(f"{command_center_base_url}/dashboard/case-approvals")
     return "\n".join(lines)
 
 

@@ -267,6 +267,15 @@ class Settings(BaseSettings):
     # this being true (see ``production_readiness``).
     WEBHOOK_TRUST_URL_HEADER: bool = False
 
+    # ── Command Center deep links (operator-facing emails) ────────────
+    # The Command Center frontend's public origin (scheme + host, no
+    # trailing slash) -- one shared operator UI for every tenant (the
+    # operator's tenant scope comes from their login, not the URL), used
+    # to build "click here to act on this" links in operator-alert
+    # emails (e.g. pending case approvals). Left unset, those emails omit
+    # the link line rather than emit a broken URL.
+    COMMAND_CENTER_BASE_URL: str = ""
+
     # ── Auth error coarsening (spec 1b #25) ──────────────────────────
     # When true (default in production via property below), external auth
     # failures return a generic body; the precise reason is logged only.
@@ -627,6 +636,11 @@ class Settings(BaseSettings):
     def public_base_url_normalized(self) -> str:
         """The public origin with surrounding whitespace and trailing slash removed."""
         return self.PUBLIC_BASE_URL.strip().rstrip("/")
+
+    @property
+    def command_center_base_url_normalized(self) -> str:
+        """The Command Center origin, trailing slash removed; "" if unset."""
+        return self.COMMAND_CENTER_BASE_URL.strip().rstrip("/")
 
     @property
     def coarse_auth_errors_effective(self) -> bool:
