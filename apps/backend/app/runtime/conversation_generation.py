@@ -50,6 +50,23 @@ Rules:
 - Do not promise refunds, replacements, warranty coverage, credits,
   shipping, or policy exceptions.
 - Keep the reply concise, professional, and helpful.
+
+Structure:
+- If you need to ask for more than one distinct piece of information,
+  emit EACH ask as its OWN separate "question" segment -- never bundle
+  multiple asks into one sentence joined by "and"/commas (e.g. do NOT
+  write a single question segment asking for the model number, the
+  cable used, AND whether troubleshooting steps were tried -- emit three
+  separate question segments instead). The renderer turns 2+ question
+  segments into a numbered list automatically; one ask per segment is
+  what makes that list correct.
+- Keep each acknowledgment and claim segment to 1-2 short sentences, not
+  a paragraph. Prefer several short segments over one long one.
+- Prefer this shape when it fits the case: a brief acknowledgment
+  opening, a short claim with the relevant context, one question
+  segment per distinct ask, and (optionally) a brief closing
+  acknowledgment about next steps. Do not pad the reply to fill this
+  shape -- omit any part that is not needed for this case.
 """
 
 # Conservative, deterministic signal of a factual assertion that must not be
@@ -298,43 +315,74 @@ class GroundedConversationGenerationRuntime:
 def render_grounded_reply(draft: GroundedReplyDraft) -> str:
     """Render structured segments into formatted prose with owned citations.
 
-    Acknowledgment/claim segments stay merged into one flowing paragraph --
-    the prompt already keeps these concise, so joining them with a plain
-    space reads as ordinary prose rather than over-fragmenting into one
-    sentence per line. A single QUESTION segment joins that same flow (a
-    lone ask reads naturally as the paragraph's closing sentence), but two
-    or more QUESTION segments -- multiple distinct asks -- get their own
-    paragraph as a numbered list: a run-on sentence genuinely is harder to
-    parse once there's more than one thing being asked for. This is a
-    presentation-only change -- segment kind/text/citation_ranks, and
-    therefore grounding, are untouched.
+    Walks segments in order, building paragraph-sized blocks: consecutive
+    acknowledgment/claim segments merge into one flowing prose block (the
+    prompt already keeps these short, so a plain-space join reads as
+    ordinary prose, not one sentence per line); a run of 2+ consecutive
+    QUESTION segments -- multiple distinct asks -- becomes its own
+    numbered-list block, since a run-on sentence is genuinely harder to
+    parse once there's more than one thing being asked for. A lone
+    QUESTION (a run of exactly 1) is not promoted to a list of one --
+    it merges into the prose block immediately before it (or starts one,
+    if it's the first segment), so a single ask still reads as a normal
+    closing sentence.
+
+    Order is preserved, so a trailing acknowledgment after a numbered
+    list (e.g. a "what happens next" closer) renders as its own
+    paragraph AFTER the list, not folded backward into the opening
+    prose -- this is what lets the full opener -> context -> numbered
+    asks -> next-step shape come through when the model produces it.
+
+    Presentation-only: segment kind/text/citation_ranks, and therefore
+    grounding, are untouched.
     """
 
-    body_parts: list[str] = []
-    questions: list[str] = []
-    for segment in draft.segments:
+    blocks: list[tuple[str, list[str]]] = []
+
+    def prose_block() -> list[str]:
+        if blocks and blocks[-1][0] == "prose":
+            return blocks[-1][1]
+        texts: list[str] = []
+        blocks.append(("prose", texts))
+        return texts
+
+    segments = draft.segments
+    index = 0
+    while index < len(segments):
+        segment = segments[index]
         text = " ".join(segment.text.split())
         if not text:
+            index += 1
             continue
         if segment.kind == "claim" and segment.citation_ranks:
             marker = ",".join(str(rank) for rank in segment.citation_ranks)
             text = f"{text} [{marker}]"
-        if segment.kind == "question":
-            questions.append(text)
+        if segment.kind != "question":
+            prose_block().append(text)
+            index += 1
+            continue
+        run = [text]
+        index += 1
+        while index < len(segments) and segments[index].kind == "question":
+            run_text = " ".join(segments[index].text.split())
+            if run_text:
+                run.append(run_text)
+            index += 1
+        if len(run) >= 2:
+            blocks.append(("list", run))
         else:
-            body_parts.append(text)
+            prose_block().append(run[0])
 
     paragraphs: list[str] = []
-    if body_parts and len(questions) == 1:
-        body_parts.append(questions.pop())
-    if body_parts:
-        paragraphs.append(" ".join(body_parts))
-    if len(questions) >= 2:
-        paragraphs.append(
-            "\n".join(f"{rank}. {text}" for rank, text in enumerate(questions, start=1))
-        )
-    elif questions:
-        paragraphs.append(" ".join(questions))
+    for kind, texts in blocks:
+        if not texts:
+            continue
+        if kind == "list":
+            paragraphs.append(
+                "\n".join(f"{rank}. {text}" for rank, text in enumerate(texts, start=1))
+            )
+        else:
+            paragraphs.append(" ".join(texts))
     return "\n\n".join(paragraphs).strip()
 
 
