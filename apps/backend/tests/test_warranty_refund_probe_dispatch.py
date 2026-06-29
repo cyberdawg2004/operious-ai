@@ -204,12 +204,13 @@ async def _repository_with_policies(*, tenant_id: str = _TENANT) -> InMemoryTena
 def _request(
     *,
     tenant_id: str = _TENANT,
+    session_id: str = _SESSION_ID,
     source_channel: str | None = "email",
     extracted_fields: ExtractedOrderFields,
 ) -> ResolutionProposalRequest:
     return ResolutionProposalRequest(
         tenant_id=tenant_id,
-        session_id=_SESSION_ID,
+        session_id=session_id,
         execution_id=_EXECUTION_ID,
         dispatch_id=_DISPATCH_ID,
         diagnostic_event_id=None,
@@ -255,6 +256,87 @@ async def test_cannot_determine_with_approved_template_drafts_filled_probe() -> 
     # gate still forces human review regardless of the reply's content.
     assert record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
     assert record.governance_verdict.value != "allow"
+
+
+@pytest.mark.asyncio
+async def test_single_missing_field_renders_friendly_label_not_raw_field_name() -> None:
+    """Break-control (i): {missing_fields} must render a customer-facing
+    label ("the store or seller you purchased from"), not the raw
+    extraction field name ("seller")."""
+    repository = await _repository_with_policies()
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.needs_more_info.missing_seller",
+            channel="email",
+            content="Hi! For order {order_id}, we still need: {missing_fields}.",
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        tenant_configuration_repository=repository,
+    )
+    fields_missing_seller = ExtractedOrderFields(
+        order_id=ExtractedField(value="ORD-1", confidence="high", source="text"),
+        purchase_date=ExtractedField(
+            value="2026-01-01", confidence="high", source="text"
+        ),
+    )
+
+    record = await runtime.create_proposal(
+        _request(extracted_fields=fields_missing_seller)
+    )
+
+    assert (
+        "we still need: the store or seller you purchased from."
+        in record.proposed_customer_reply
+    )
+    assert "we still need: seller." not in record.proposed_customer_reply
+
+
+@pytest.mark.asyncio
+async def test_multiple_missing_fields_render_as_numbered_list_with_friendly_labels() -> (
+    None
+):
+    """Break-control (ii): 2+ missing fields render as a numbered list of
+    friendly labels, not a comma-joined blob of raw field names."""
+    repository = await _repository_with_policies()
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.needs_more_info.missing_order_id",
+            channel="email",
+            content="Hi! To process your warranty claim, we still need: {missing_fields}.",
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        tenant_configuration_repository=repository,
+    )
+    fields_missing_order_id_and_seller = ExtractedOrderFields(
+        purchase_date=ExtractedField(
+            value="2026-01-01", confidence="high", source="text"
+        ),
+    )
+
+    record = await runtime.create_proposal(
+        _request(extracted_fields=fields_missing_order_id_and_seller)
+    )
+
+    assert (
+        "1. your order number\n2. the store or seller you purchased from"
+        in record.proposed_customer_reply
+    )
+    assert "order id, seller" not in record.proposed_customer_reply
+
+    # Break-control (iii): deterministic -- same input twice, identical text.
+    record_repeat = await runtime.create_proposal(
+        _request(
+            session_id="55555555-5555-4555-8555-555555555555",
+            extracted_fields=fields_missing_order_id_and_seller,
+        )
+    )
+    assert record_repeat.proposed_customer_reply == record.proposed_customer_reply
 
 
 # ─── placeholder substitution: real data in, gaps marked, never fabricated ─

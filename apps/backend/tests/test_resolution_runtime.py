@@ -53,9 +53,11 @@ from app.runtime.resolution_runtime import (
     ResolutionProposalRequest,
     ResolutionRuntime,
     _evaluate_gate,
+    _friendly_missing_field_label,
     _map_central_governance_result,
     _monetary_commitment_exceeds_threshold,
     _recommended_actions,
+    _render_missing_fields,
     _resolution_category,
     _unsupported_commitment_patterns,
     resolution_contains_safety_floor_keywords,
@@ -2573,3 +2575,37 @@ async def test_delivery_revalidation_denial_is_a_clean_verdict_not_a_crash() -> 
     )
 
     assert delivery_result.governance_verdict is ResolutionGovernanceVerdict.DENY
+
+
+def test_friendly_missing_field_label_covers_every_extracted_field_name() -> None:
+    """Break-control (iv), domain-agnostic test: every name in the generic
+    extraction field vocabulary has a customer-facing label, and none of
+    them mention any tenant's product line -- a bank or telecom tenant's
+    order_id/amount/currency get the exact same generic phrasing."""
+    for name in ("order_id", "product_sku", "purchase_date", "seller", "amount", "currency"):
+        label = _friendly_missing_field_label(name)
+        assert label != name
+        assert "anker" not in label.lower()
+        assert "powercore" not in label.lower()
+
+
+def test_friendly_missing_field_label_falls_back_for_unknown_field() -> None:
+    """A field outside the known map still renders something readable
+    (the generic underscore-to-space fallback) instead of raising."""
+    assert _friendly_missing_field_label("shipping_address") == "shipping address"
+
+
+def test_render_missing_fields_single_field_is_a_plain_phrase() -> None:
+    assert _render_missing_fields(["seller"]) == "the store or seller you purchased from"
+
+
+def test_render_missing_fields_multiple_fields_render_as_numbered_list() -> None:
+    rendered = _render_missing_fields(["order_id", "seller"])
+
+    assert rendered == (
+        "\n1. your order number\n2. the store or seller you purchased from"
+    )
+
+
+def test_render_missing_fields_empty_list_is_empty_string() -> None:
+    assert _render_missing_fields([]) == ""

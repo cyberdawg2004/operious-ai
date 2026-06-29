@@ -1358,7 +1358,7 @@ def _probe_substitution_values(
     extracted_fields: ExtractedOrderFields | None,
 ) -> dict[str, str | None]:
     values: dict[str, str | None] = {
-        "missing_fields": ", ".join(_humanize_field(field) for field in missing_fields),
+        "missing_fields": _render_missing_fields(missing_fields),
     }
     if claim_type is not None:
         values["claim_type"] = _humanize_field(claim_type)
@@ -1374,6 +1374,46 @@ def _humanize_field(name: str) -> str:
     # template prose (e.g. "we still need: purchase date, seller"), not
     # as a standalone capitalized label.
     return name.replace("_", " ")
+
+
+# Customer-facing labels for the generic extraction field vocabulary
+# (EXTRACTED_ORDER_FIELD_NAMES) -- this set is domain-agnostic e-commerce
+# transaction vocabulary, not tied to any tenant's product line, so the
+# labels stay generic too (no tenant- or product-specific wording). A
+# field outside this map (or a future addition to EXTRACTED_ORDER_FIELD_
+# NAMES that hasn't been given a label yet) falls back to _humanize_field
+# rather than raising -- a slightly-less-polished label beats an error.
+_MISSING_FIELD_FRIENDLY_LABELS: Mapping[str, str] = {
+    "order_id": "your order number",
+    "product_sku": "the product model or SKU",
+    "purchase_date": "the purchase date",
+    "seller": "the store or seller you purchased from",
+    "amount": "the purchase amount",
+    "currency": "the purchase currency",
+}
+
+
+def _friendly_missing_field_label(name: str) -> str:
+    return _MISSING_FIELD_FRIENDLY_LABELS.get(name, _humanize_field(name))
+
+
+def _render_missing_fields(missing_fields: list[str]) -> str:
+    """Render the set of missing fields for a template's {missing_fields}.
+
+    A single missing field reads as a plain phrase ("your order
+    number") -- the common case, since most needs-more-info purpose
+    keys only ever have one missing field by construction (see
+    warranty_refund_eligibility's required-evidence ordering). Two or
+    more render as a numbered list, matching the numbered-list
+    convention used elsewhere for multiple distinct items, rather than
+    a comma-joined blob that gets harder to parse as the count grows.
+    """
+    labels = [_friendly_missing_field_label(field) for field in missing_fields]
+    if len(labels) <= 1:
+        return labels[0] if labels else ""
+    return "\n" + "\n".join(
+        f"{rank}. {label}" for rank, label in enumerate(labels, start=1)
+    )
 
 
 def _eligibility_determination_to_dict(
