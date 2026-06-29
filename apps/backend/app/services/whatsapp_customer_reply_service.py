@@ -34,6 +34,7 @@ from app.resolution.persistence.records import (
     ResolutionOutboundDraftRecord,
     ResolutionProposalRecord,
 )
+from app.runtime.customer_whatsapp_template import render_customer_whatsapp_body
 from app.tenant.enums import TenantChannelType
 from app.tenant.persistence import TenantChannelConfigurationRecord
 
@@ -276,7 +277,7 @@ class WhatsAppCustomerReplySendService:
                         phone_number_id=credentials.phone_number_id,
                         access_token=credentials.access_token,
                         recipient_phone_number=recipient,
-                        body=draft.draft_body,
+                        body=render_customer_whatsapp_body(body=draft.draft_body),
                         timeout_seconds=_DEFAULT_TIMEOUT_SECONDS,
                     )
                 )

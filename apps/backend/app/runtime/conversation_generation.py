@@ -296,9 +296,22 @@ class GroundedConversationGenerationRuntime:
 
 
 def render_grounded_reply(draft: GroundedReplyDraft) -> str:
-    """Render structured segments into natural prose with owned citations."""
+    """Render structured segments into formatted prose with owned citations.
 
-    rendered: list[str] = []
+    Acknowledgment/claim segments stay merged into one flowing paragraph --
+    the prompt already keeps these concise, so joining them with a plain
+    space reads as ordinary prose rather than over-fragmenting into one
+    sentence per line. A single QUESTION segment joins that same flow (a
+    lone ask reads naturally as the paragraph's closing sentence), but two
+    or more QUESTION segments -- multiple distinct asks -- get their own
+    paragraph as a numbered list: a run-on sentence genuinely is harder to
+    parse once there's more than one thing being asked for. This is a
+    presentation-only change -- segment kind/text/citation_ranks, and
+    therefore grounding, are untouched.
+    """
+
+    body_parts: list[str] = []
+    questions: list[str] = []
     for segment in draft.segments:
         text = " ".join(segment.text.split())
         if not text:
@@ -306,8 +319,23 @@ def render_grounded_reply(draft: GroundedReplyDraft) -> str:
         if segment.kind == "claim" and segment.citation_ranks:
             marker = ",".join(str(rank) for rank in segment.citation_ranks)
             text = f"{text} [{marker}]"
-        rendered.append(text)
-    return " ".join(rendered).strip()
+        if segment.kind == "question":
+            questions.append(text)
+        else:
+            body_parts.append(text)
+
+    paragraphs: list[str] = []
+    if body_parts and len(questions) == 1:
+        body_parts.append(questions.pop())
+    if body_parts:
+        paragraphs.append(" ".join(body_parts))
+    if len(questions) >= 2:
+        paragraphs.append(
+            "\n".join(f"{rank}. {text}" for rank, text in enumerate(questions, start=1))
+        )
+    elif questions:
+        paragraphs.append(" ".join(questions))
+    return "\n\n".join(paragraphs).strip()
 
 
 def parse_grounded_reply_draft(
