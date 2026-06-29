@@ -28,6 +28,7 @@ from app.resolution.persistence import (
     ResolutionOutboundDraftRecord,
     ResolutionProposalRecord,
 )
+from app.tenant.template_placeholders import contains_unresolved_placeholder_marker
 
 CUSTOMER_REPLY_SEND_ACTION = "customer_reply.send"
 SUPPORTED_AUTO_SEND_CHANNELS = frozenset(("email", "whatsapp"))
@@ -163,6 +164,30 @@ class OutboundAutoSendService:
                 reason=OutboundAutoSendRefusalReason(
                     code="governance_miss",
                     message="governed auto-send decision was not found",
+                ),
+            )
+        # draft.draft_body, not the governance/canonical text below, is
+        # what email_customer_reply_service / whatsapp_customer_reply_
+        # service literally transmit -- the two can differ when the
+        # canonical (pre-translation) text governance evaluated isn't
+        # what the customer actually receives. A rendered "[missing:
+        # name]" marker means some template placeholder had no value for
+        # this specific case (e.g. a template asking about {seller} when
+        # extraction never found one). validate_template_placeholders
+        # already keeps an unknown placeholder name out of an approved
+        # template, but a known, fillable placeholder can still go
+        # unfilled for a particular ticket -- this is the per-case
+        # backstop. Never auto-send a reply a customer would see with a
+        # literal marker in it; route to human review instead.
+        if contains_unresolved_placeholder_marker(draft.draft_body):
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=OutboundAutoSendRefusalReason(
+                    code="unresolved_placeholder",
+                    message=(
+                        "auto-send held for review: rendered reply contains "
+                        "an unresolved template placeholder"
+                    ),
                 ),
             )
         canonical_reply = canonical_reply_for_governance(draft)

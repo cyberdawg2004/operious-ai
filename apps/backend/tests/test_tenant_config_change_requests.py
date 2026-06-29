@@ -101,6 +101,23 @@ def _knowledge_payload(title: str = "Warranty FAQ") -> dict[str, Any]:
     }
 
 
+def _template_payload(
+    *,
+    title: str,
+    content: str,
+    purpose: str,
+    channel: str = "email",
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "content": content,
+        "document_type": TenantKnowledgeDocumentType.TEMPLATE.value,
+        "status": TenantKnowledgeDocumentStatus.ACTIVE.value,
+        "template_purpose": purpose,
+        "template_channel": channel,
+    }
+
+
 def _connector_payload(
     *,
     endpoint_template: str = "https://refunds.example.com/refunds/{order_id}",
@@ -258,6 +275,152 @@ async def test_propose_creates_pending_request(pg_session: AsyncSession) -> None
     assert record.proposed_by == "principal-a"
     assert record.proposed_payload["_schema_version"] == "1"
     assert record.approved_by is None
+
+
+# ---------------------------------------------------------------------------
+# Placeholder guard (fail-open -> fail-closed): a template referencing a
+# placeholder outside fillable_template_placeholders() would otherwise
+# never be caught anywhere -- extract_placeholders had zero callers -- and would
+# silently render a literal "[missing: name]" string into a customer-
+# facing reply. validate_template_placeholders now runs at propose AND at
+# apply (both go through _validate_payload), rejecting it before a change
+# request can even reach PROPOSED, let alone be applied.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_break_control_i_unknown_placeholder_rejected_at_propose(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+
+    with pytest.raises(
+        TenantConfigChangeRequestLifecycleError,
+        match="references placeholder.*customer_name",
+    ):
+        await service.propose(
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.KNOWLEDGE,
+            payload=_template_payload(
+                title="Bad template",
+                content="Hi {customer_name}, thanks for reaching out.",
+                purpose="resolution.approved.test_bad_placeholder",
+            ),
+            proposed_by="principal-a",
+        )
+
+
+@pytest.mark.asyncio
+async def test_break_control_iii_valid_template_proposes_approves_applies(
+    pg_session: AsyncSession,
+) -> None:
+    """A template using only fillable placeholders must flow through
+    propose -> approve -> apply with no false block."""
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+
+    proposed = await service.propose(
+        tenant_id=tenant_id,
+        change_type=TenantConfigChangeType.KNOWLEDGE,
+        payload=_template_payload(
+            title="Valid probe template",
+            content=(
+                "Hi! To process your warranty claim for order {order_id}, "
+                "we still need: {missing_fields}. Could you reply with "
+                "that so we can continue?"
+            ),
+            purpose="resolution.needs_more_info.test_valid",
+        ),
+        proposed_by="principal-a",
+    )
+    assert proposed.status is TenantConfigChangeRequestStatus.PROPOSED
+
+    approved = await service.approve(
+        change_request_id=proposed.change_request_id,
+        approved_by="principal-b",
+        expected_tenant_id=tenant_id,
+    )
+    assert approved.status is TenantConfigChangeRequestStatus.APPROVED
+
+    applied = await service.apply(
+        change_request_id=proposed.change_request_id,
+        expected_tenant_id=tenant_id,
+        applied_by="principal-b",
+    )
+    assert applied.status is TenantConfigChangeRequestStatus.APPLIED
+    assert applied.outcome_payload is not None
+    assert applied.outcome_payload["kind"] == "knowledge_document"
+
+
+@pytest.mark.asyncio
+async def test_break_control_iv_existing_five_templates_still_validate(
+    pg_session: AsyncSession,
+) -> None:
+    """The real anker-pilot template content (decrypted from prod) must
+    still pass the new guard unchanged -- no regression."""
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+    real_templates = {
+        "resolution.approved.refund": (
+            "Hi, thanks for reaching out. We've verified your purchase "
+            "(order {order_id}, purchased {purchase_date} from {seller}) "
+            "and confirmed it's within the warranty period. As a "
+            "replacement isn't currently available, we're processing a "
+            "refund for you. A member of our team will confirm the "
+            "refund details and timing shortly."
+        ),
+        "resolution.approved.replacement": (
+            "Hi, thanks for reaching out. We've verified your purchase "
+            "(order {order_id}, purchased {purchase_date} from {seller}) "
+            "and confirmed it's within the warranty period. We're "
+            "processing a warranty replacement for you. A member of our "
+            "team will confirm the next steps and shipping details "
+            "shortly. If you have any photos or a short video of the "
+            "issue, those can help us move faster, but they're not "
+            "required to proceed."
+        ),
+        "resolution.denied.authorized_reseller": (
+            "Hi, thanks for reaching out. Our warranty applies to "
+            "purchases made through authorized sellers. The order you "
+            "provided ({order_id}) shows a seller we're not able to "
+            "verify as authorized, so we're unable to process a warranty "
+            "claim directly. We'd recommend contacting the seller you "
+            "purchased from for support. If you have additional proof of "
+            "purchase from an authorized channel, please reply and we'll "
+            "be glad to take another look."
+        ),
+        "resolution.denied.within_warranty_window": (
+            "Hi, thanks for reaching out, and we're sorry to hear about "
+            "the issue. Based on the purchase date on your order "
+            "({order_id}, purchased {purchase_date}), this item falls "
+            "outside our warranty period, so we're unable to process a "
+            "warranty claim in this case. If you believe this is in "
+            "error, or your purchase date differs from what we have, "
+            "please reply and a member of our team will take a closer "
+            "look."
+        ),
+        "resolution.needs_more_info.missing_purchase_date": (
+            "Hi! To process your warranty claim for order {order_id}, we "
+            "still need: {missing_fields}. Could you reply with that so "
+            "we can continue?"
+        ),
+    }
+    for purpose, content in real_templates.items():
+        record = await service.propose(
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.KNOWLEDGE,
+            payload=_template_payload(
+                title=f"regression-{purpose}",
+                content=content,
+                purpose=purpose,
+            ),
+            proposed_by="principal-a",
+        )
+        assert record.status is TenantConfigChangeRequestStatus.PROPOSED, purpose
 
 
 @pytest.mark.asyncio

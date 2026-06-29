@@ -111,6 +111,64 @@ async def test_ready_exact_persisted_allow_creates_one_send_intent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_break_control_ii_unresolved_placeholder_marker_blocks_auto_send() -> (
+    None
+):
+    """A rendered reply still containing a literal "[missing: name]"
+    marker (a known, fillable placeholder that had no value for this
+    specific case) must never auto-send -- this is the send-time
+    backstop alongside the authoring-time placeholder guard."""
+    reply_with_marker = (
+        "Hi! To process your warranty claim, we still need: "
+        "[missing: seller]. Could you reply with that?"
+    )
+    service, outbox = await _service(
+        decision_metadata_overrides={
+            "proposed_reply_sha256": _sha256(reply_with_marker)
+        },
+    )
+    draft = _draft_with_body(reply_with_marker)
+
+    result = await service.request_auto_send(
+        draft=draft,
+        proposal=_proposal(),
+        target=_target(),
+        expected_tenant_id=TENANT_ID,
+        created_at=NOW,
+    )
+
+    assert result.outbox is None
+    assert result.reason is not None
+    assert result.reason.code == "unresolved_placeholder"
+    page = await outbox.list_outbound_send_outbox(
+        OutboundSendOutboxQuery(tenant_id=TENANT_ID)
+    )
+    assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_clean_reply_with_no_placeholder_marker_is_not_blocked() -> None:
+    """A rendered reply with no literal substring resembling the marker
+    must flow through normally -- no false block."""
+    service, outbox = await _service()
+
+    result = await service.request_auto_send(
+        draft=_draft(),
+        proposal=_proposal(),
+        target=_target(),
+        expected_tenant_id=TENANT_ID,
+        created_at=NOW,
+    )
+
+    assert result.outbox is not None
+    assert result.reason is None
+    page = await outbox.list_outbound_send_outbox(
+        OutboundSendOutboxQuery(tenant_id=TENANT_ID)
+    )
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("decision", "metadata_overrides"),
     [
@@ -525,6 +583,27 @@ def _draft() -> ResolutionOutboundDraftRecord:
         created_at=NOW,
         updated_at=NOW,
         metadata={"canonical_reply": REPLY, "localized_reply": REPLY},
+    )
+
+
+def _draft_with_body(body: str) -> ResolutionOutboundDraftRecord:
+    return ResolutionOutboundDraftRecord(
+        draft_id=as_resolution_outbound_draft_id(DRAFT_ID),
+        tenant_id=TENANT_ID,
+        proposal_id=as_resolution_proposal_id(PROPOSAL_ID),
+        session_id=SESSION_ID,
+        execution_id=EXECUTION_ID,
+        dispatch_id=DISPATCH_ID,
+        diagnostic_event_id=None,
+        governance_decision_id=DECISION_ID,
+        status=ResolutionOutboundDraftStatus.READY,
+        draft_body=body,
+        draft_body_sha256=_sha256(body),
+        resolution_category="technical_support",
+        confidence=0.91,
+        created_at=NOW,
+        updated_at=NOW,
+        metadata={"canonical_reply": body, "localized_reply": body},
     )
 
 

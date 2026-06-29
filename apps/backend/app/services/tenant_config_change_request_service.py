@@ -63,6 +63,10 @@ from app.tenant.enums import (
     TenantTopologyStatus,
 )
 from app.tenant.credentials import validate_channel_credentials
+from app.tenant.template_placeholders import (
+    TemplatePlaceholderError,
+    validate_template_placeholders,
+)
 from app.tenant.identity import (
     as_channel_configuration_id,
     as_governance_policy_id,
@@ -1019,6 +1023,7 @@ async def _validate_payload(
                 "template_purpose",
                 "template_channel",
             )
+            _validate_template_placeholders_payload(payload)
         else:
             required = ("title", "content", "document_type")
     elif change_type is TenantConfigChangeType.POLICY:
@@ -1198,6 +1203,22 @@ def _validate_warranty_refund_policy_payload(payload: Mapping[str, Any]) -> None
         raise TenantConfigChangeRequestLifecycleError(
             f"invalid warranty_refund_rules policy parameters: {exc}"
         ) from exc
+
+
+def _validate_template_placeholders_payload(payload: Mapping[str, Any]) -> None:
+    """Reject a proposed template that references a placeholder outside
+    the fillable set at the earliest possible point — before a change
+    request can even be PROPOSED, let alone approved. Without this, an
+    unknown placeholder was never caught anywhere and would silently
+    render as a literal "[missing: name]" string in a customer-facing
+    reply."""
+    content = payload.get("content")
+    if not isinstance(content, str):
+        return  # the required-fields check above already covers this
+    try:
+        validate_template_placeholders(content)
+    except TemplatePlaceholderError as exc:
+        raise TenantConfigChangeRequestLifecycleError(str(exc)) from exc
 
 
 def _validate_connector_payload(payload: Mapping[str, Any]) -> None:
