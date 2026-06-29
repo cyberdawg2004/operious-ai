@@ -113,7 +113,6 @@ def _classify(content: str) -> tuple[str, float]:
             "charging",
             "charger",
             "battery",
-            "powercore",
             "power bank",
             "cable",
         ),
