@@ -317,10 +317,10 @@ function Header({ count }: { count: number }) {
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <span className="font-technical text-[10px] uppercase tracking-[0.18em] text-ink-tertiary">
-          Governance / Approvals
+          Governance / Message Approvals
         </span>
         <h2 className="mt-1 text-[22px] font-semibold text-ink-primary">
-          Case Approvals
+          Message Approvals
         </h2>
       </div>
       <div className="inline-flex h-8 items-center gap-2 self-start rounded-md border border-border-subtle bg-surface px-3 font-technical text-[11px] uppercase tracking-[0.10em] text-ink-secondary sm:self-auto">

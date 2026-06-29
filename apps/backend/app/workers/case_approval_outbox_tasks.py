@@ -450,7 +450,7 @@ def _optional_credential_string(
 
 
 # Mirrors categoryTitle() in apps/command-center2/frontend/components/
-# case-approvals-inbox.tsx -- the email and the Reply Reviews tab must
+# case-approvals-inbox.tsx -- the email and the Needs Attention tab must
 # describe the same case the same way. That function is the canonical
 # source (it's what the operator sees on screen); keep this in sync with
 # it by hand, since a Python worker can't import a TS component. Any
@@ -470,6 +470,13 @@ def _friendly_entry_category_label(category: str) -> str:
     return _ENTRY_CATEGORY_LABELS.get(category, category)
 
 
+# Mirrors TAB_LABELS["reply-reviews"] in apps/command-center2/frontend/
+# components/attention-inbox.tsx -- the tab that renders case_approval_
+# records. Keep this in sync by hand if that tab is ever renamed again;
+# a drifted name here is exactly the bug this notification fix closed.
+_REPLY_QUEUE_TAB_NAME = "Message Approvals"
+
+
 def _email_body(case: CaseApprovalRecord) -> str:
     lines = [
         "A new case is ready for approval.",
@@ -484,7 +491,9 @@ def _email_body(case: CaseApprovalRecord) -> str:
         lines.append(f"Issue: {case.issue_summary}")
     lines.append(f"Requested: {case.requested_at.isoformat()}")
     lines.append("")
-    lines.append("Review it under Needs Attention → Reply Reviews in the Command Center.")
+    lines.append(
+        f"Review it under Needs Attention → {_REPLY_QUEUE_TAB_NAME} in the Command Center."
+    )
     command_center_base_url = get_settings().command_center_base_url_normalized
     if command_center_base_url:
         lines.append(f"{command_center_base_url}/dashboard/case-approvals")

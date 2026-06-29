@@ -60,7 +60,7 @@ def test_unknown_category_falls_back_to_raw_value() -> None:
 def test_break_control_ii_names_the_reply_reviews_surface() -> None:
     body = _email_body(_case())
 
-    assert "Needs Attention → Reply Reviews" in body
+    assert "Needs Attention → Message Approvals" in body
 
 
 def test_break_control_iii_includes_deep_link_when_configured(monkeypatch) -> None:

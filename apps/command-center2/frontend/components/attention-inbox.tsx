@@ -11,11 +11,26 @@ type TabId = "action-approvals" | "reply-reviews" | "escalations" | "knowledge-u
 
 const TAB_ORDER: TabId[] = ["action-approvals", "reply-reviews", "escalations", "knowledge-uploads"];
 
+// "Action Sign-offs" vs "Message Approvals" -- deliberately NOT "Action
+// Approvals" / "Reply Reviews": those two names read as near-synonyms,
+// which is what sent an operator looking for a reply approval into the
+// action-approvals tab and finding nothing. The pair must read as an
+// obvious split: authorizing a REAL-WORLD ACTION (money/goods) vs
+// approving a MESSAGE (text). Display-only -- tab ids, routes, and the
+// underlying queues are unchanged.
 const TAB_LABELS: Record<TabId, string> = {
-  "action-approvals": "Action Approvals",
-  "reply-reviews": "Reply Reviews",
+  "action-approvals": "Action Sign-offs",
+  "reply-reviews": "Message Approvals",
   escalations: "Escalations",
   "knowledge-uploads": "Knowledge Uploads",
+};
+
+const TAB_DESCRIPTIONS: Record<TabId, string> = {
+  "action-approvals":
+    "Sign off on refunds, replacements, and other actions that move money or goods.",
+  "reply-reviews": "Approve customer-facing reply messages before they send.",
+  escalations: "Cases that couldn't be resolved automatically and need a human look.",
+  "knowledge-uploads": "Approve new or updated tenant knowledge documents and templates.",
 };
 
 /**
@@ -98,6 +113,8 @@ export function AttentionInbox() {
         })}
       </div>
 
+      <p className="mb-5 text-[13px] text-ink-tertiary">{TAB_DESCRIPTIONS[currentTab]}</p>
+
       <div className={cn(currentTab !== "action-approvals" && "hidden")}>
         <ApprovalInbox embedded onCountChange={setActionApprovalsCount} />
       </div>
@@ -115,7 +132,7 @@ export function AttentionInbox() {
 }
 
 /** Whichever tab has the most pending items, once all three counts have
- * loaded; "Action Approvals" while loading or if everything is empty. */
+ * loaded; "Action Sign-offs" while loading or if everything is empty. */
 function defaultTab(counts: Record<TabId, number | null>): TabId {
   if (TAB_ORDER.some((id) => counts[id] === null)) return "action-approvals";
   const withCounts = TAB_ORDER.map((id) => ({ id, count: counts[id] ?? 0 }));
