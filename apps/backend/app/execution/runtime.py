@@ -46,6 +46,7 @@ from app.execution.persistence import (
     OutboxPage,
     OutboxQuery,
 )
+from app.execution.publisher import ExecutionPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -1178,6 +1179,125 @@ class ExecutionRuntime:
             refused=tuple(refused),
         )
 
+    async def reconcile_stuck_pending_outbox_records(
+        self,
+        *,
+        stale_before: datetime,
+        publisher: ExecutionPublisher,
+        tenant_id: str | None = None,
+        max_publish_attempts: int = 3,
+        reason: str = "stale pending retry",
+        limit: int = 100,
+    ) -> ExecutionOutboxReconcileSweepResult:
+        """Re-attempt (or terminally fail) PENDING outbox rows that already
+        show evidence of a prior failed publish attempt and have sat
+        unclaimed past ``stale_before``.
+
+        A fresh, never-yet-attempted PENDING row, and a PENDING row reset
+        by the PUBLISHING-claim-lease reconciler (a different situation --
+        a claim lease expired, not a confirmed failed attempt), are never
+        candidates here regardless of age -- see
+        ``list_stuck_pending_outbox_records`` for the exact fingerprint
+        this filters on. This exists because nothing else ever
+        re-attempts a row that a prior reconcile cycle reset to PENDING:
+        ``reconcile_failed_execution_outbox_records`` only scans FAILED
+        rows, and the normal publish path only claims a row once,
+        synchronously, right after it is created.
+        """
+
+        if stale_before.tzinfo is None:
+            raise ValueError("stale_before must be timezone-aware")
+        if max_publish_attempts < 1:
+            raise ValueError("max_publish_attempts must be positive")
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        if not reason:
+            raise ValueError("retry reason must be non-empty")
+        page = await self._persistence.list_stuck_pending_outbox_records(
+            tenant_id=tenant_id,
+            stale_before=stale_before,
+            limit=limit,
+        )
+        reconciled: list[ExecutionOutboxReconcileResult] = []
+        refused: list[ExecutionOutboxReconcileResult] = []
+        for outbox in page.records:
+            result = await self._reclaim_stuck_pending_outbox(
+                outbox=outbox,
+                publisher=publisher,
+                max_publish_attempts=max_publish_attempts,
+                reason=reason,
+            )
+            if result.reconciled:
+                reconciled.append(result)
+            else:
+                refused.append(result)
+        return ExecutionOutboxReconcileSweepResult(
+            scanned=len(page.records),
+            reconciled=tuple(reconciled),
+            refused=tuple(refused),
+        )
+
+    async def _reclaim_stuck_pending_outbox(
+        self,
+        *,
+        outbox: ExecutionOutboxRecord,
+        publisher: ExecutionPublisher,
+        max_publish_attempts: int,
+        reason: str,
+    ) -> ExecutionOutboxReconcileResult:
+        execution = await self._persistence.get_execution(outbox.execution_id)
+        if execution is None:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False, outbox=outbox, reason="execution_not_found"
+            )
+        if execution.state in _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=outbox,
+                reason=f"execution_terminal:{execution.state.value}",
+            )
+        claim = await self.claim_outbox_for_execution(
+            execution_id=outbox.execution_id,
+            publisher_id=_STUCK_PENDING_RECONCILER_PUBLISHER_ID,
+        )
+        if not claim.claimed or claim.outbox is None or claim.outbox.claim_id is None:
+            return ExecutionOutboxReconcileResult(
+                reconciled=False,
+                outbox=claim.outbox or outbox,
+                reason=claim.reason or "claim_refused",
+            )
+        claim_id = claim.outbox.claim_id
+        if outbox.publish_attempt_count >= max_publish_attempts:
+            # Exhausted: terminally fail rather than attempt yet another
+            # retry. reconcile_failed_execution_outbox_records already
+            # refuses a FAILED row at this same budget, so this keeps
+            # both reconcilers' retry ceilings consistent.
+            await self.mark_outbox_failed(
+                outbox_id=claim.outbox.outbox_id,
+                claim_id=claim_id,
+                error="stale_pending_retry_budget_exhausted",
+            )
+            updated = await self.get_outbox(outbox.outbox_id)
+            return ExecutionOutboxReconcileResult(reconciled=True, outbox=updated)
+        try:
+            await publisher.publish_execution(
+                str(outbox.execution_id), tenant_id=execution.tenant_id
+            )
+        except Exception as exc:  # noqa: BLE001 - a retry failure is a delivery outcome, not a sweep failure.
+            await self.mark_outbox_failed(
+                outbox_id=claim.outbox.outbox_id,
+                claim_id=claim_id,
+                error=f"{reason}: {exc.__class__.__name__}: {exc}"[:480],
+            )
+            updated = await self.get_outbox(outbox.outbox_id)
+            return ExecutionOutboxReconcileResult(reconciled=True, outbox=updated)
+        await self.mark_outbox_published(
+            outbox_id=claim.outbox.outbox_id,
+            claim_id=claim_id,
+        )
+        updated = await self.get_outbox(outbox.outbox_id)
+        return ExecutionOutboxReconcileResult(reconciled=True, outbox=updated)
+
     async def require_claim(
         self,
         *,
@@ -1282,6 +1402,8 @@ _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES = frozenset(
         ExecutionState.DEAD_LETTERED,
     }
 )
+
+_STUCK_PENDING_RECONCILER_PUBLISHER_ID = "execution_outbox_stuck_pending_reconciler"
 
 
 def _outbox_failed_at(outbox: ExecutionOutboxRecord) -> datetime | None:

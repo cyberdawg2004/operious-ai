@@ -581,6 +581,33 @@ class InMemoryExecutionPersistence(ExecutionPersistenceProtocol):
         sliced = rows[:limit]
         return OutboxPage(records=tuple(sliced), total=len(rows), offset=0)
 
+    async def list_stuck_pending_outbox_records(
+        self,
+        *,
+        tenant_id: str | None,
+        stale_before: datetime,
+        limit: int,
+    ) -> OutboxPage:
+        rows: list[ExecutionOutboxRecord] = []
+        for outbox in self._outbox.values():
+            execution = self._executions.get(outbox.execution_id)
+            if execution is None:
+                continue
+            if tenant_id is not None and execution.tenant_id != tenant_id:
+                continue
+            if execution.state in _TERMINAL_OUTBOX_RETRY_EXECUTION_STATES:
+                continue
+            if outbox.state is not ExecutionOutboxState.PENDING:
+                continue
+            if "failed_recovery.retry_attempt_count" not in outbox.metadata:
+                continue
+            if outbox.created_at > stale_before:
+                continue
+            rows.append(outbox)
+        rows.sort(key=lambda row: (row.created_at, str(row.outbox_id)))
+        sliced = rows[:limit]
+        return OutboxPage(records=tuple(sliced), total=len(rows), offset=0)
+
     async def requeue_failed_outbox(
         self,
         *,

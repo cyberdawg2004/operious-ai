@@ -222,6 +222,15 @@ celery_conf.update(
             "schedule": 60.0,
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
+        # Catches a PENDING execution outbox row that reconcile-failed-
+        # execution-outbox already reset once but nothing ever
+        # re-attempted -- see
+        # ExecutionRuntime.reconcile_stuck_pending_outbox_records.
+        "reconcile-stuck-pending-execution-outbox-minutely": {
+            "task": "reconcile_stuck_pending_execution_outbox",
+            "schedule": 60.0,
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
         # Catches a case_approval_records row left in awaiting_approval
         # after its bound action already resolved — see
         # app.workers.case_approval_recovery_tasks for why the inline

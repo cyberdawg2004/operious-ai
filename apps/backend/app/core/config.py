@@ -472,6 +472,10 @@ class Settings(BaseSettings):
     EXECUTION_RECOVERY_BATCH_SIZE: int = 100
     EXECUTION_OUTBOX_FAILED_RETRY_COOLDOWN_SECONDS: int = 30
     EXECUTION_OUTBOX_FAILED_RETRY_MAX_ATTEMPTS: int = 3
+    # A PENDING outbox row a prior reconcile cycle reset (last_error is
+    # set) is only re-attempted once it has sat unclaimed for this long --
+    # see ExecutionRuntime.reconcile_stuck_pending_outbox_records.
+    EXECUTION_OUTBOX_STUCK_PENDING_STALE_SECONDS: int = 900
     ESCALATION_OUTBOX_CLAIM_LEASE_SECONDS: int = 300
     INGRESS_DISPATCH_CLAIM_LEASE_SECONDS: int = 300
     INGRESS_DISPATCH_RECOVERY_BATCH_SIZE: int = 100

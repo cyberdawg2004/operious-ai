@@ -17,11 +17,13 @@ from app.db.session import get_owner_session_factory
 from app.execution import (
     ExecutionOutboxReconcileResult,
     ExecutionOutboxReconcileSweepResult,
+    ExecutionPublisher,
     ExecutionRecoveryResult,
     ExecutionRecoverySweepResult,
     ExecutionRuntime,
     PostgresExecutionPersistence,
 )
+from app.execution.celery_publisher import CeleryExecutionPublisher
 from app.services.queue_operations_service import QueueOperationsService
 from app.workers.celery_app import celery_app
 from app.queues import QUEUE_WEBHOOK_MAINTENANCE
@@ -192,6 +194,68 @@ def reconcile_failed_execution_outbox(
 
 
 @celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="reconcile_stuck_pending_execution_outbox",
+    queue=QUEUE_WEBHOOK_MAINTENANCE,
+    bind=True,
+    ignore_result=True,
+    max_retries=5,
+    default_retry_delay=30,
+)
+def reconcile_stuck_pending_execution_outbox(
+    _self: Any,
+    *,
+    stale_before: str | None = None,
+    stale_seconds: int | None = None,
+    max_publish_attempts: int | None = None,
+    limit: int | None = None,
+    tenant_id: str | None = None,
+    reason: str = "stale pending retry",
+) -> dict[str, object]:
+    """Re-attempt (or terminally fail) a bounded page of PENDING outbox
+    rows that already show evidence of a prior failed publish attempt and
+    have sat unclaimed too long -- nothing else ever retries a row a
+    prior reconcile cycle reset to PENDING."""
+
+    settings = get_settings()
+    if stale_seconds is not None and stale_seconds < 1:
+        raise ValueError("stale_seconds must be positive")
+    if max_publish_attempts is not None and max_publish_attempts < 1:
+        raise ValueError("max_publish_attempts must be positive")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    reconciled_at = datetime.now(tz=timezone.utc)
+    threshold = (
+        _parse_datetime(stale_before)
+        if stale_before is not None
+        else reconciled_at
+        - timedelta(
+            seconds=(
+                stale_seconds
+                if stale_seconds is not None
+                else settings.EXECUTION_OUTBOX_STUCK_PENDING_STALE_SECONDS
+            )
+        )
+    )
+    return _run_async(
+        reconcile_stuck_pending_execution_outbox_runtime(
+            stale_before=threshold,
+            limit=(
+                limit
+                if limit is not None
+                else settings.EXECUTION_RECOVERY_BATCH_SIZE
+            ),
+            max_publish_attempts=(
+                max_publish_attempts
+                if max_publish_attempts is not None
+                else settings.EXECUTION_OUTBOX_FAILED_RETRY_MAX_ATTEMPTS
+            ),
+            tenant_id=tenant_id,
+            reason=reason,
+        )
+    )
+
+
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
     name="recover_dead_letter_replays",
     queue=QUEUE_WEBHOOK_MAINTENANCE,
     bind=True,
@@ -315,6 +379,34 @@ async def reconcile_failed_execution_outbox_runtime(
             max_publish_attempts=max_publish_attempts,
             tenant_id=tenant_id,
             reason=reason,
+        )
+        await session.commit()
+        return _serialize_outbox_sweep(sweep)
+
+
+async def reconcile_stuck_pending_execution_outbox_runtime(
+    *,
+    stale_before: datetime,
+    limit: int = 100,
+    max_publish_attempts: int = 3,
+    tenant_id: str | None = None,
+    reason: str = "stale pending retry",
+    publisher: ExecutionPublisher | None = None,
+) -> dict[str, object]:
+    # PRIVILEGED_PATH: cross-tenant maintenance, bypasses RLS
+    # by design, must never read or return tenant data to caller
+    session_factory = get_owner_session_factory()
+    async with session_factory() as session:
+        runtime = ExecutionRuntime(
+            persistence=PostgresExecutionPersistence(session)
+        )
+        sweep = await runtime.reconcile_stuck_pending_outbox_records(
+            stale_before=stale_before,
+            publisher=publisher or CeleryExecutionPublisher(),
+            tenant_id=tenant_id,
+            max_publish_attempts=max_publish_attempts,
+            reason=reason,
+            limit=limit,
         )
         await session.commit()
         return _serialize_outbox_sweep(sweep)
@@ -456,6 +548,8 @@ def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
 __all__ = [
     "reconcile_failed_execution_outbox",
     "reconcile_failed_execution_outbox_runtime",
+    "reconcile_stuck_pending_execution_outbox",
+    "reconcile_stuck_pending_execution_outbox_runtime",
     "recover_dead_letter_replays",
     "recover_dead_letter_replays_runtime",
     "recover_stale_executions",

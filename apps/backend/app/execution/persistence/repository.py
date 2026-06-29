@@ -172,6 +172,14 @@ class ExecutionPersistenceProtocol(Protocol):
         limit: int,
     ) -> OutboxPage: ...
 
+    async def list_stuck_pending_outbox_records(
+        self,
+        *,
+        tenant_id: str | None,
+        stale_before: datetime,
+        limit: int,
+    ) -> OutboxPage: ...
+
     async def requeue_failed_outbox(
         self,
         *,

@@ -783,6 +783,53 @@ class PostgresExecutionPersistence(BaseRepository):
             offset=0,
         )
 
+    async def list_stuck_pending_outbox_records(
+        self,
+        *,
+        tenant_id: str | None,
+        stale_before: datetime,
+        limit: int,
+    ) -> OutboxPage:
+        # The metadata key 'failed_recovery.retry_attempt_count' is the
+        # load-bearing filter: it is only ever written by
+        # requeue_failed_outbox when it resets a FAILED row back to
+        # PENDING after a confirmed publish failure. A freshly created,
+        # never-yet-attempted PENDING row never has this key, regardless
+        # of age. Deliberately narrower than "last_error IS NOT NULL" --
+        # requeue_stale_outbox (the PUBLISHING-claim-lease reconciler)
+        # ALSO sets last_error when it resets a row, but that is a
+        # different situation (a claim lease expired, not a confirmed
+        # failed attempt) and must not be retried by this reconciler.
+        stmt = (
+            select(ExecutionOutboxRow)
+            .join(
+                ExecutionRow,
+                ExecutionRow.execution_id == ExecutionOutboxRow.execution_id,
+            )
+            .where(
+                ExecutionOutboxRow.state == ExecutionOutboxState.PENDING.value,
+                ExecutionOutboxRow.metadata_json.has_key(
+                    "failed_recovery.retry_attempt_count"
+                ),
+                ExecutionOutboxRow.created_at <= stale_before,
+                ExecutionRow.state.not_in(
+                    _TERMINAL_OUTBOX_RETRY_EXECUTION_STATE_VALUES
+                ),
+            )
+            .order_by(ExecutionOutboxRow.created_at, ExecutionOutboxRow.outbox_id)
+            .limit(limit)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(ExecutionRow.tenant_id == tenant_id)
+        rows = (await self.session.execute(stmt)).scalars().all()  # bounded-load-ok
+        records = tuple(_row_to_outbox(row) for row in rows)
+        return OutboxPage(
+            records=records,
+            total=len(records),
+            limit=limit,
+            offset=0,
+        )
+
     async def requeue_failed_outbox(
         self,
         *,
