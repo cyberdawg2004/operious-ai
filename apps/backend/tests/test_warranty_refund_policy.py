@@ -112,6 +112,8 @@ def test_parse_valid_parameters() -> None:
 
     assert policy.warranty_window_days == 730
     assert policy.authorized_resellers == frozenset({"amazon.com", "official-store.com"})
+    assert policy.window_days_by_claim_type == {}
+    assert policy.window_days_for("warranty_claim") == 730
     assert policy.required_evidence_for("defective") == (
         "order_id",
         "purchase_date",
@@ -168,6 +170,23 @@ def _unknown_evidence_field(p: dict[str, object]) -> None:
     p["required_evidence_by_claim_type"] = {"defective": ["not_a_real_field"]}
 
 
+def _negative_window_days_override(p: dict[str, object]) -> None:
+    p["window_days_by_claim_type"] = {"defective": -1}
+
+
+def _string_window_days_override(p: dict[str, object]) -> None:
+    p["window_days_by_claim_type"] = {"defective": "30"}
+
+
+def _window_days_override_for_unknown_claim_type(p: dict[str, object]) -> None:
+    p["window_days_by_claim_type"] = {"unknown_claim_type": 30}
+
+
+def _window_days_override_without_purchase_date(p: dict[str, object]) -> None:
+    p["required_evidence_by_claim_type"] = {"claim_without_date": ["order_id", "seller"]}
+    p["window_days_by_claim_type"] = {"claim_without_date": 30}
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -180,6 +199,10 @@ def _unknown_evidence_field(p: dict[str, object]) -> None:
         _drop_required_evidence,
         _empty_required_evidence,
         _unknown_evidence_field,
+        _negative_window_days_override,
+        _string_window_days_override,
+        _window_days_override_for_unknown_claim_type,
+        _window_days_override_without_purchase_date,
     ],
 )
 def test_rejects_malformed_parameters(
@@ -205,6 +228,38 @@ def test_remedy_sequence_is_optional() -> None:
     del parameters["remedy_sequence_by_claim_type"]
     policy = parse_warranty_refund_policy(_record(parameters=parameters))
     assert policy.remedy_sequence_by_claim_type == {}
+
+
+def test_window_days_by_claim_type_is_optional_and_falls_back_to_global() -> None:
+    policy = parse_warranty_refund_policy(_record(parameters=_valid_parameters()))
+    assert policy.window_days_by_claim_type == {}
+    assert policy.window_days_for("defective") == 730
+    assert policy.window_days_for("bank_dispute") == 730
+
+
+def test_window_days_by_claim_type_parses_generic_override_and_zero() -> None:
+    parameters = _valid_parameters()
+    parameters["required_evidence_by_claim_type"] = {
+        "bank_dispute": ["order_id", "purchase_date", "seller"],
+        "telecom_refund": ["order_id", "purchase_date", "seller"],
+    }
+    parameters["remedy_sequence_by_claim_type"] = {
+        "bank_dispute": ["refund"],
+        "telecom_refund": ["replacement"],
+    }
+    parameters["window_days_by_claim_type"] = {
+        "bank_dispute": 14,
+        "telecom_refund": 0,
+    }
+    policy = parse_warranty_refund_policy(_record(parameters=parameters))
+
+    assert policy.window_days_by_claim_type == {
+        "bank_dispute": 14,
+        "telecom_refund": 0,
+    }
+    assert policy.window_days_for("bank_dispute") == 14
+    assert policy.window_days_for("telecom_refund") == 0
+    assert policy.window_days_for("other_claim_type") == 730
 
 
 # ─── remedy_requires_availability_check (W3) ──────────────────────────────
@@ -279,8 +334,10 @@ async def test_resolve_with_no_active_record_returns_none() -> None:
 @pytest.mark.asyncio
 async def test_resolve_with_valid_active_record_returns_parsed_policy() -> None:
     repository = InMemoryTenantConfigurationRepository()
+    parameters = _valid_parameters()
+    parameters["window_days_by_claim_type"] = {"defective": 30}
     await repository.save_governance_policy(
-        _record(parameters=_valid_parameters()), expected_tenant_id=TENANT_ID
+        _record(parameters=parameters), expected_tenant_id=TENANT_ID
     )
 
     policy = await resolve_warranty_refund_policy(
@@ -289,6 +346,8 @@ async def test_resolve_with_valid_active_record_returns_parsed_policy() -> None:
     )
     assert policy is not None
     assert policy.warranty_window_days == 730
+    assert policy.window_days_for("defective") == 30
+    assert policy.window_days_for("replacement_order") == 730
 
 
 @pytest.mark.asyncio
@@ -388,13 +447,15 @@ async def test_dual_control_propose_approve_apply_creates_resolvable_policy(
     tenant_id = f"tenant-wr-ledger-{uuid.uuid4().hex}"
     await set_pg_rls_tenant(pg_session, tenant_id)
     service = _change_request_service(pg_session)
+    parameters = _valid_parameters()
+    parameters["window_days_by_claim_type"] = {"defective": 30}
 
     proposed = await service.propose(
         tenant_id=tenant_id,
         change_type=TenantConfigChangeType.POLICY,
         payload={
             "policy_type": WARRANTY_REFUND_RULES_POLICY_TYPE,
-            "parameters": _valid_parameters(),
+            "parameters": parameters,
             "status": TenantGovernancePolicyStatus.ACTIVE.value,
             "effective_from": _NOW.isoformat(),
         },
@@ -418,6 +479,7 @@ async def test_dual_control_propose_approve_apply_creates_resolvable_policy(
         tenant_id=tenant_id,
     )
     assert policy is not None
+    assert policy.window_days_for("defective") == 30
     assert policy.warranty_window_days == 730
 
 

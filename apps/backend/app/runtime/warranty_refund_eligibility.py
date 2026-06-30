@@ -124,7 +124,7 @@ def determine_eligibility(
         check = _warranty_window_check(
             extracted_fields,
             parsed_purchase_date=parsed_purchase_date,
-            warranty_window_days=policy.warranty_window_days,
+            warranty_window_days=policy.window_days_for(claim_type),
             now=now,
         )
         grounding.append(check)

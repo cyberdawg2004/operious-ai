@@ -53,12 +53,16 @@ class WarrantyRefundPolicy:
     authorized_resellers: frozenset[str]
     required_evidence_by_claim_type: Mapping[str, tuple[str, ...]]
     remedy_sequence_by_claim_type: Mapping[str, tuple[str, ...]]
+    window_days_by_claim_type: Mapping[str, int] = field(default_factory=dict)
     remedy_requires_availability_check: Mapping[str, bool] = field(
         default_factory=_empty_availability_check_map
     )
 
     def required_evidence_for(self, claim_type: str) -> tuple[str, ...] | None:
         return self.required_evidence_by_claim_type.get(claim_type)
+
+    def window_days_for(self, claim_type: str) -> int:
+        return self.window_days_by_claim_type.get(claim_type, self.warranty_window_days)
 
     def remedy_requires_check(self, remedy: str) -> bool:
         return self.remedy_requires_availability_check.get(remedy, False)
@@ -142,6 +146,10 @@ def _parse_warranty_refund_parameters(
         parameters.get("remedy_sequence_by_claim_type"),
         known_claim_types=frozenset(required_evidence_by_claim_type),
     )
+    window_days_by_claim_type = _parse_window_days_by_claim_type(
+        parameters.get("window_days_by_claim_type"),
+        required_evidence_by_claim_type=required_evidence_by_claim_type,
+    )
     known_remedies = frozenset(
         step
         for sequence in remedy_sequence_by_claim_type.values()
@@ -156,6 +164,7 @@ def _parse_warranty_refund_parameters(
         authorized_resellers=authorized_resellers,
         required_evidence_by_claim_type=required_evidence_by_claim_type,
         remedy_sequence_by_claim_type=remedy_sequence_by_claim_type,
+        window_days_by_claim_type=window_days_by_claim_type,
         remedy_requires_availability_check=remedy_requires_availability_check,
     )
 
@@ -239,6 +248,39 @@ def _parse_remedy_sequence_by_claim_type(
     return result
 
 
+def _parse_window_days_by_claim_type(
+    value: object,
+    *,
+    required_evidence_by_claim_type: Mapping[str, tuple[str, ...]],
+) -> Mapping[str, int]:
+    if value is None:
+        return {}
+    entry = _require_mapping(value, "window_days_by_claim_type")
+    result: dict[str, int] = {}
+    for claim_type, raw_window_days in entry.items():
+        if not claim_type.strip():
+            raise WarrantyRefundPolicyParseError(
+                "window_days_by_claim_type keys must be non-empty strings"
+            )
+        claim_type = claim_type.strip()
+        required_evidence = required_evidence_by_claim_type.get(claim_type)
+        if required_evidence is None:
+            raise WarrantyRefundPolicyParseError(
+                f"window_days_by_claim_type[{claim_type!r}] has no "
+                "corresponding entry in required_evidence_by_claim_type"
+            )
+        if "purchase_date" not in required_evidence:
+            raise WarrantyRefundPolicyParseError(
+                f"window_days_by_claim_type[{claim_type!r}] requires "
+                "purchase_date evidence to be meaningful"
+            )
+        result[claim_type] = _require_non_negative_int(
+            raw_window_days,
+            f"window_days_by_claim_type[{claim_type!r}]",
+        )
+    return result
+
+
 def _parse_remedy_requires_availability_check(
     value: object,
     *,
@@ -273,6 +315,14 @@ def _require_positive_int(value: object, field: str) -> int:
         raise WarrantyRefundPolicyParseError(f"{field} must be an integer")
     if value <= 0:
         raise WarrantyRefundPolicyParseError(f"{field} must be positive")
+    return value
+
+
+def _require_non_negative_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise WarrantyRefundPolicyParseError(f"{field} must be an integer")
+    if value < 0:
+        raise WarrantyRefundPolicyParseError(f"{field} must be non-negative")
     return value
 
 

@@ -37,6 +37,7 @@ def _policy(
     authorized_resellers: frozenset[str] = frozenset({"amazon.com"}),
     required_evidence_by_claim_type: dict[str, tuple[str, ...]] | None = None,
     remedy_sequence_by_claim_type: dict[str, tuple[str, ...]] | None = None,
+    window_days_by_claim_type: dict[str, int] | None = None,
 ) -> WarrantyRefundPolicy:
     return WarrantyRefundPolicy(
         warranty_window_days=warranty_window_days,
@@ -46,6 +47,7 @@ def _policy(
             or {"defective": ("order_id", "purchase_date", "seller")}
         ),
         remedy_sequence_by_claim_type=remedy_sequence_by_claim_type or {},
+        window_days_by_claim_type=window_days_by_claim_type or {},
     )
 
 
@@ -212,6 +214,79 @@ def test_ineligible_when_outside_warranty_window() -> None:
     assert determination.verdict is EligibilityVerdict.INELIGIBLE
     by_name = {check.name: check for check in determination.grounding}
     assert by_name["within_warranty_window"].passed is False
+
+
+def test_claim_type_override_applies_instead_of_global_window() -> None:
+    fields = _complete_fields(purchase_date="2026-05-12")
+    determination = determine_eligibility(
+        claim_type="bank_dispute",
+        extracted_fields=fields,
+        policy=_policy(
+            warranty_window_days=730,
+            required_evidence_by_claim_type={
+                "bank_dispute": ("order_id", "purchase_date", "seller")
+            },
+            window_days_by_claim_type={"bank_dispute": 14},
+        ),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.INELIGIBLE
+    by_name = {check.name: check for check in determination.grounding}
+    assert by_name["within_warranty_window"].passed is False
+    assert by_name["within_warranty_window"].rule == "warranty_window_days=14"
+
+
+def test_claim_type_without_override_uses_global_fallback_window() -> None:
+    fields = _complete_fields(purchase_date="2026-05-12")
+    determination = determine_eligibility(
+        claim_type="replacement_like_claim",
+        extracted_fields=fields,
+        policy=_policy(
+            warranty_window_days=730,
+            required_evidence_by_claim_type={
+                "replacement_like_claim": ("order_id", "purchase_date", "seller")
+            },
+            window_days_by_claim_type={"refund_like_claim": 14},
+        ),
+        now=_NOW,
+    )
+    assert determination.verdict is EligibilityVerdict.ELIGIBLE
+    by_name = {check.name: check for check in determination.grounding}
+    assert by_name["within_warranty_window"].passed is True
+    assert by_name["within_warranty_window"].rule == "warranty_window_days=730"
+
+
+def test_zero_day_override_is_honored_not_treated_as_unset() -> None:
+    same_day = determine_eligibility(
+        claim_type="telecom_refund",
+        extracted_fields=_complete_fields(purchase_date="2026-06-01"),
+        policy=_policy(
+            warranty_window_days=730,
+            required_evidence_by_claim_type={
+                "telecom_refund": ("order_id", "purchase_date", "seller")
+            },
+            window_days_by_claim_type={"telecom_refund": 0},
+        ),
+        now=_NOW,
+    )
+    previous_day = determine_eligibility(
+        claim_type="telecom_refund",
+        extracted_fields=_complete_fields(purchase_date="2026-05-31"),
+        policy=_policy(
+            warranty_window_days=730,
+            required_evidence_by_claim_type={
+                "telecom_refund": ("order_id", "purchase_date", "seller")
+            },
+            window_days_by_claim_type={"telecom_refund": 0},
+        ),
+        now=_NOW,
+    )
+    assert same_day.verdict is EligibilityVerdict.ELIGIBLE
+    assert previous_day.verdict is EligibilityVerdict.INELIGIBLE
+    failed_check = {check.name: check for check in previous_day.grounding}[
+        "within_warranty_window"
+    ]
+    assert failed_check.rule == "warranty_window_days=0"
 
 
 def test_ineligible_when_unauthorized_reseller() -> None:
@@ -413,6 +488,38 @@ def test_same_evidence_different_tenant_policies_different_verdicts() -> None:
     assert lenient_determination.verdict is EligibilityVerdict.ELIGIBLE
 
 
+def test_same_evidence_different_generic_claim_type_windows_different_verdicts() -> None:
+    fields = _complete_fields(purchase_date="2026-05-20", seller="amazon.com")
+
+    bank_policy = _policy(
+        warranty_window_days=730,
+        required_evidence_by_claim_type={
+            "bank_dispute": ("order_id", "purchase_date", "seller")
+        },
+        window_days_by_claim_type={"bank_dispute": 14},
+    )
+    telecom_policy = _policy(
+        warranty_window_days=730,
+        required_evidence_by_claim_type={
+            "telecom_refund": ("order_id", "purchase_date", "seller")
+        },
+        window_days_by_claim_type={"telecom_refund": 0},
+    )
+
+    bank_determination = determine_eligibility(
+        claim_type="bank_dispute", extracted_fields=fields, policy=bank_policy, now=_NOW
+    )
+    telecom_determination = determine_eligibility(
+        claim_type="telecom_refund",
+        extracted_fields=fields,
+        policy=telecom_policy,
+        now=_NOW,
+    )
+
+    assert bank_determination.verdict is EligibilityVerdict.ELIGIBLE
+    assert telecom_determination.verdict is EligibilityVerdict.INELIGIBLE
+
+
 def test_same_evidence_different_authorized_reseller_lists() -> None:
     fields = _complete_fields(seller="costco.com")
 
@@ -468,3 +575,27 @@ def test_module_imports_no_execution_capable_symbol() -> None:
         if any(forbidden in name.lower() for forbidden in forbidden_substrings)
     }
     assert offending == set(), f"unexpected execution-capable import(s): {offending}"
+
+
+def test_window_logic_contains_no_hardcoded_claim_type_or_30_day_literal() -> None:
+    import app.runtime.warranty_refund_eligibility as module
+
+    tree = ast.parse(inspect.getsource(module))
+    string_literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    int_literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, int)
+    }
+
+    forbidden_claim_types = {
+        "refund_request",
+        "warranty_claim",
+        "replacement_order",
+    }
+    assert forbidden_claim_types.isdisjoint(string_literals)
+    assert 30 not in int_literals
