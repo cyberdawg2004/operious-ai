@@ -10,6 +10,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-operious-ai-imad
   cancel-in-progress: false
