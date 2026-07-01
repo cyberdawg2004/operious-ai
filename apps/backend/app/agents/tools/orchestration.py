@@ -20,6 +20,13 @@ from app.agents.tools.grants import (
     AGENT_ACTION_ACTOR_KEY,
     compute_agent_execution_actor,
 )
+from app.agents.tools.operation_metadata import (
+    operation_metadata,
+    payload_for_operation,
+    resolve_operation,
+    target_resource_for_operation,
+    tool_name_for_action_type,
+)
 from app.agents.tools.invoker import ToolInvoker
 from app.approvals.ingress import ApprovalQueueIngressService
 from app.approvals.producers import (
@@ -37,14 +44,6 @@ _ACTION_PENDING_APPROVAL = "action_pending_approval"
 _ACTION_DENIED = "action_denied"
 _ACTION_SKIPPED = "action_skipped"
 _ACTION_ERROR = "action_error"
-
-_ACTION_TOOL_BY_TYPE = {
-    "warranty_claim": "warranty.claim",
-    "replacement_order": "replacement.order",
-    "refund_request": "refund.request",
-    "warehouse_repair": "warehouse.repair.report",
-}
-
 
 class ActionTimelineAppender(Protocol):
     async def append_event(
@@ -470,7 +469,7 @@ def _tool_name_for(action: Mapping[str, Any]) -> str | None:
     action_type = _text(action.get("type"))
     if action_type is None:
         return None
-    return _ACTION_TOOL_BY_TYPE.get(action_type)
+    return tool_name_for_action_type(action_type)
 
 
 def payload_for_recommended_action(
@@ -490,8 +489,6 @@ def payload_for_recommended_action(
             action_type=action_type,
             tool_name=tool_name,
         )
-    if tool_name == "warehouse.repair.report":
-        payload["session_id"] = proposal.session_id
     return payload
 
 
@@ -502,59 +499,14 @@ def _default_payload(
     action_type: str,
     tool_name: str,
 ) -> JsonObject:
-    # No fallback lies: order_id/product_sku come from real extraction
-    # merged into `action` upstream (resolution_runtime.py
-    # _merge_extracted_fields) — or they are None. A null in the
-    # connector/approval-queue payload is honest; the old
-    # f"session-{id}" / "unknown_sku" placeholders were strings a human
-    # reviewer could mistake for real data. The resolution gate
-    # (_evaluate_gate's missing_required_extraction_field reason) is what
-    # keeps a None order_id from reaching auto-execution for action types
-    # that require it — this function does not re-implement that check,
-    # it just stops lying about what it has.
-    order_id = _text(action.get("order_id"))
-    product_sku = _text(action.get("product_sku"))
-    if tool_name == "warranty.claim":
-        return {
-            "order_id": order_id,
-            "product_sku": product_sku,
-            "issue_category": _text(action.get("issue_category"))
-            or proposal.resolution_category,
-            "customer_description": proposal.proposed_customer_reply[:500]
-            or action_type,
-        }
-    if tool_name == "replacement.order":
-        return {
-            "order_id": order_id,
-            "product_sku": product_sku,
-            "replacement_reason": _text(action.get("replacement_reason"))
-            or proposal.resolution_category,
-            "shipping_address_hash": _text(action.get("shipping_address_hash"))
-            or "address_hash_unavailable",
-        }
-    if tool_name == "refund.request":
-        return {
-            "order_id": order_id,
-            "product_sku": product_sku,
-            "refund_amount_cents": _int(action.get("refund_amount_cents"))
-            or _amount_to_cents(_text(action.get("amount"))),
-            "refund_reason": _text(action.get("refund_reason"))
-            or proposal.resolution_category,
-        }
-    if tool_name == "warehouse.repair.report":
-        severity = _text(action.get("severity"))
-        if severity not in {"low", "medium", "high", "critical"}:
-            severity = "high"
-        return {
-            "product_sku": product_sku,
-            "batch_id": _text(action.get("batch_id")),
-            "defect_description": _text(action.get("defect_description"))
-            or proposal.proposed_customer_reply[:500]
-            or action_type,
-            "severity": severity,
-            "session_id": proposal.session_id,
-        }
-    return {}
+    operation = resolve_operation(tool_name=tool_name, action_type=action_type)
+    payload = payload_for_operation(
+        operation=operation,
+        action=action,
+        proposal=proposal,
+        action_type=action_type,
+    )
+    return {} if payload is None else payload
 
 
 def target_resource_for_action(
@@ -563,15 +515,19 @@ def target_resource_for_action(
     tool_name: str,
     payload: Mapping[str, JsonValue],
 ) -> str:
+    resolved = resolve_operation(tool_name=tool_name)
+    derived = target_resource_for_operation(
+        operation=resolved,
+        action=action,
+        payload=payload,
+        tool_name=tool_name,
+        action_type=_text(action.get("type")),
+    )
+    if derived is not None:
+        return derived
     explicit = _text(action.get("target_resource_id"))
     if explicit is not None:
         return explicit
-    order_id = _text(payload.get("order_id"))
-    product_sku = _text(payload.get("product_sku"))
-    if order_id is not None and product_sku is not None:
-        return f"order:{order_id}:sku:{product_sku}"
-    if product_sku is not None:
-        return f"sku:{product_sku}"
     return tool_name
 
 
@@ -584,6 +540,7 @@ def _request_metadata(
     target_resource: str,
     idempotency_key: str,
 ) -> JsonObject:
+    resolved = resolve_operation(tool_name=tool_name, action_type=action_type)
     metadata: JsonObject = {
         "session_id": proposal.session_id,
         "proposal_id": str(proposal.proposal_id),
@@ -597,6 +554,7 @@ def _request_metadata(
         "diagnostic_confidence": proposal.confidence,
         "resolution_category": proposal.resolution_category,
     }
+    metadata.update(operation_metadata(resolved))
     for key in (
         "issue_category",
         "refund_amount_cents",
@@ -625,6 +583,11 @@ def _approval_request_metadata(
     action_type: str,
     target_resource: str,
 ) -> JsonObject:
+    resolved = resolve_operation(
+        metadata=approval_record.metadata,
+        tool_name=approval_record.tool_name,
+        action_type=action_type,
+    )
     metadata = {
         str(key): _json_value(value)
         for key, value in approval_record.metadata.items()
@@ -641,6 +604,7 @@ def _approval_request_metadata(
             "idempotency_key": approval_record.idempotency_key,
         }
     )
+    metadata.update(operation_metadata(resolved))
     return metadata
 
 
@@ -672,35 +636,7 @@ def _text(value: object) -> str | None:
     return None
 
 
-def _required_proposal_reference(value: str | None, field_name: str) -> str:
-    if value is None:
-        raise ValueError(
-            f"resolution proposal {field_name} is required for action orchestration"
-        )
-    return value
-
-
-def _int(value: object) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
-
-
 def _amount_to_cents(amount_text: str | None) -> int | None:
-    """Parse an extracted dollar-amount string (e.g. "$49.99", "1,234.56")
-    into integer cents. Returns None on any parse failure — never a
-    fabricated number. A refund amount that can't be parsed is exactly
-    the "missing_required_extraction_field" case _evaluate_gate already
-    routes to human approval; this must not paper over that with a fake
-    default like the old `or 5000`.
-    """
     if amount_text is None:
         return None
     cleaned = amount_text.strip().lstrip("$").replace(",", "")
@@ -708,6 +644,14 @@ def _amount_to_cents(amount_text: str | None) -> int | None:
         return round(float(cleaned) * 100)
     except ValueError:
         return None
+
+
+def _required_proposal_reference(value: str | None, field_name: str) -> str:
+    if value is None:
+        raise ValueError(
+            f"resolution proposal {field_name} is required for action orchestration"
+        )
+    return value
 
 
 __all__ = [

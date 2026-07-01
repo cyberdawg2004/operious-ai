@@ -1,4 +1,4 @@
-"""Governance policy wiring for RT6 action tools."""
+"""Governance policy wiring for action-capable tools."""
 
 from __future__ import annotations
 
@@ -6,6 +6,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, FrozenSet, cast
 
+from app.agents.tools.operation_metadata import (
+    ApprovalPolicy,
+    RegisteredOperation,
+    ResolvedOperation,
+    RuleKind,
+    known_action_tool_names,
+    registered_operations,
+    resolve_operation,
+)
 from app.governance.context import GovernanceContext
 from app.governance.decisions import PolicyEvaluationResult
 from app.governance.enforcement.handlers import (
@@ -32,22 +41,7 @@ from app.tenant.persistence import (
 
 _CHAIN_ID = "agent.action_tools.pre_execution"
 ACTION_TOOLS_POLICY_TYPE = "action_tools"
-_REQUIRED_TOOL_RULES = frozenset(
-    {
-        "warranty.claim",
-        "replacement.order",
-        "refund.request",
-        "warehouse.repair.report",
-    }
-)
-_DISPATCH_TOOL_NAMES = frozenset(
-    {
-        "repair.dispatch",
-        "replacement.dispatch",
-        "warranty.dispatch",
-    }
-)
-KNOWN_ACTION_TOOL_NAMES = _REQUIRED_TOOL_RULES | _DISPATCH_TOOL_NAMES
+KNOWN_ACTION_TOOL_NAMES = known_action_tool_names()
 _POLICY_METADATA_KEYS = (
     "action_policy.policy_id",
     "action_policy.policy_type",
@@ -69,43 +63,39 @@ class ActionPolicyBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class WarrantyRule:
+class ConfidenceMembershipRule:
+    confidence_field: str
     confidence_gte: float
-    issue_category_in: frozenset[str]
+    membership_field: str
+    allowed_values: frozenset[str]
     else_decision: Decision
 
 
 @dataclass(frozen=True, slots=True)
-class ReplacementRule:
-    always: Decision
+class AlwaysRule:
+    decision: Decision
 
 
 @dataclass(frozen=True, slots=True)
-class RefundRule:
-    refund_amount_cents_lte: int
+class AmountThresholdRule:
+    amount_field: str
+    amount_lte: int
     else_decision: Decision
+    confidence_field: str | None = None
     confidence_gte: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class WarehouseRule:
-    allow_severity_in: frozenset[str]
-    require_approval_severity_in: frozenset[str]
-
-
-@dataclass(frozen=True, slots=True)
-class DispatchRule:
-    always: Decision
+class ValueBandsRule:
+    value_field: str
+    allow_values: frozenset[str]
+    require_approval_values: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
 class ParsedActionPolicy:
     binding: ActionPolicyBinding
-    warranty: WarrantyRule
-    replacement: ReplacementRule
-    refund: RefundRule
-    warehouse: WarehouseRule
-    dispatch: Mapping[str, DispatchRule]
+    rules: Mapping[str, object]
 
 
 class TenantActionPolicy(BaseGovernancePolicy):
@@ -167,34 +157,52 @@ class TenantActionPolicy(BaseGovernancePolicy):
                 ),
             )
         metadata = dict(context.subject.metadata)
-        tool_name = _metadata_str(metadata, "tool_name")
-        if tool_name is None:
+        operation = resolve_operation(
+            metadata=metadata,
+            tool_name=_metadata_str(metadata, "tool_name"),
+            action_type=_metadata_str(metadata, "action_type"),
+        )
+        if operation is None:
             return (
-                _deny(
-                    "action tool name is required",
+                _require_approval(
+                    "operation governance metadata is missing or unknown",
                     binding=policy.binding,
                 ),
             )
-        if tool_name == "warranty.claim":
-            return (_warranty_decision(metadata, policy),)
-        if tool_name == "replacement.order":
-            return (_replacement_decision(policy),)
-        if tool_name == "refund.request":
-            return (_refund_decision(metadata, policy),)
-        if tool_name == "warehouse.repair.report":
-            return (_warehouse_decision(metadata, policy),)
-        if tool_name in policy.dispatch:
-            return (_dispatch_decision(tool_name, policy),)
-        if tool_name in _DISPATCH_TOOL_NAMES:
+        if operation.commitment_kind is None:
+            return (
+                _require_approval(
+                    "operation commitment kind is missing or invalid",
+                    binding=policy.binding,
+                ),
+            )
+        if operation.approval_policy is ApprovalPolicy.ALWAYS_REQUIRE_APPROVAL:
+            return (
+                _require_approval(
+                    "operation approval policy requires human review",
+                    binding=policy.binding,
+                ),
+            )
+        if operation.approval_policy is not ApprovalPolicy.TENANT_POLICY:
+            return (
+                _require_approval(
+                    "operation approval policy is missing or invalid",
+                    binding=policy.binding,
+                ),
+            )
+        rule = _rule_for(policy, operation)
+        if rule is None:
             return (
                 _deny(
-                    f"dispatch action tool {tool_name!r} is not configured",
+                    "operation is not configured in tenant policy",
                     binding=policy.binding,
                 ),
             )
         return (
-            _deny(
-                f"unknown action tool {tool_name!r}",
+            _evaluate_operation_rule(
+                metadata=metadata,
+                operation=operation,
+                rule=rule,
                 binding=policy.binding,
             ),
         )
@@ -237,106 +245,87 @@ def build_action_tool_governance_runtime(
     )
 
 
-def _warranty_decision(
-    metadata: dict[str, object],
+def _rule_for(
     policy: ParsedActionPolicy,
-) -> PolicyEvaluationResult:
-    confidence = _metadata_float(metadata, "diagnostic_confidence") or 0.0
-    issue_category = _metadata_str(metadata, "issue_category") or ""
-    rule = policy.warranty
-    if (
-        confidence >= rule.confidence_gte
-        and issue_category in rule.issue_category_in
-    ):
-        return _allow(
-            "warranty claim passed tenant policy thresholds",
-            binding=policy.binding,
-        )
-    if rule.else_decision is Decision.REQUIRE_APPROVAL:
-        return _require_approval(
-            "warranty claim requires manager approval",
-            binding=policy.binding,
-        )
-    return _deny("warranty claim denied by tenant policy", binding=policy.binding)
+    operation: ResolvedOperation,
+) -> object | None:
+    if operation.operation_id is None:
+        return None
+    return policy.rules.get(operation.operation_id)
 
 
-def _replacement_decision(policy: ParsedActionPolicy) -> PolicyEvaluationResult:
-    if policy.replacement.always is Decision.REQUIRE_APPROVAL:
-        return _require_approval(
-            "replacement orders require manager approval",
-            binding=policy.binding,
-        )
-    if policy.replacement.always is Decision.ALLOW:
-        return _allow(
-            "replacement order is allowed by tenant policy",
-            binding=policy.binding,
-        )
-    return _deny("replacement order denied by tenant policy", binding=policy.binding)
-
-
-def _refund_decision(
+def _evaluate_operation_rule(
     metadata: dict[str, object],
-    policy: ParsedActionPolicy,
+    *,
+    operation: ResolvedOperation,
+    rule: object,
+    binding: ActionPolicyBinding,
 ) -> PolicyEvaluationResult:
-    amount = _metadata_int(metadata, "refund_amount_cents")
-    if amount is None:
-        return _deny("refund amount is required", binding=policy.binding)
-    confidence = _metadata_float(metadata, "diagnostic_confidence")
-    rule = policy.refund
-    confidence_ok = (
-        rule.confidence_gte is None
-        or (confidence is not None and confidence >= rule.confidence_gte)
+    if isinstance(rule, ConfidenceMembershipRule):
+        confidence = _metadata_float(metadata, rule.confidence_field) or 0.0
+        membership_value = _metadata_str(metadata, rule.membership_field) or ""
+        if (
+            confidence >= rule.confidence_gte
+            and membership_value in rule.allowed_values
+        ):
+            return _allow(
+                "operation passed tenant policy thresholds",
+                binding=binding,
+            )
+        if rule.else_decision is Decision.REQUIRE_APPROVAL:
+            return _require_approval(
+                "operation requires manager approval",
+                binding=binding,
+            )
+        return _deny("operation denied by tenant policy", binding=binding)
+
+    if isinstance(rule, AmountThresholdRule):
+        amount = _metadata_int(metadata, rule.amount_field)
+        if amount is None:
+            return _deny("operation amount is required", binding=binding)
+        confidence_ok = True
+        if rule.confidence_gte is not None and rule.confidence_field is not None:
+            confidence = _metadata_float(metadata, rule.confidence_field)
+            confidence_ok = (
+                confidence is not None and confidence >= rule.confidence_gte
+            )
+        if amount <= rule.amount_lte and confidence_ok:
+            return _allow(
+                "operation amount is within auto-allow threshold",
+                binding=binding,
+            )
+        if rule.else_decision is Decision.REQUIRE_APPROVAL:
+            return _require_approval(
+                "operation exceeds auto-allow threshold",
+                binding=binding,
+            )
+        return _deny("operation denied by tenant policy", binding=binding)
+
+    if isinstance(rule, ValueBandsRule):
+        value = _metadata_str(metadata, rule.value_field)
+        if value in rule.allow_values:
+            return _allow("operation value is auto-allow", binding=binding)
+        if value in rule.require_approval_values:
+            return _require_approval(
+                "operation value requires approval",
+                binding=binding,
+            )
+        return _deny("operation value is invalid", binding=binding)
+
+    if isinstance(rule, AlwaysRule):
+        if rule.decision is Decision.ALLOW:
+            return _allow("operation is allowed by tenant policy", binding=binding)
+        if rule.decision is Decision.REQUIRE_APPROVAL:
+            return _require_approval(
+                "operation requires manager approval",
+                binding=binding,
+            )
+        return _deny("operation denied by tenant policy", binding=binding)
+
+    return _require_approval(
+        f"operation rule kind is unsupported for {operation.operation_id}",
+        binding=binding,
     )
-    if amount <= rule.refund_amount_cents_lte and confidence_ok:
-        return _allow(
-            "refund amount is within auto-allow threshold",
-            binding=policy.binding,
-        )
-    if rule.else_decision is Decision.REQUIRE_APPROVAL:
-        return _require_approval(
-            "refund exceeds auto-allow threshold",
-            binding=policy.binding,
-        )
-    return _deny("refund denied by tenant policy", binding=policy.binding)
-
-
-def _warehouse_decision(
-    metadata: dict[str, object],
-    policy: ParsedActionPolicy,
-) -> PolicyEvaluationResult:
-    severity = _metadata_str(metadata, "severity")
-    if severity in policy.warehouse.allow_severity_in:
-        return _allow(
-            "warehouse repair report severity is auto-allow",
-            binding=policy.binding,
-        )
-    if severity in policy.warehouse.require_approval_severity_in:
-        return _require_approval(
-            "warehouse repair report severity requires approval",
-            binding=policy.binding,
-        )
-    return _deny(
-        "warehouse repair report severity is invalid",
-        binding=policy.binding,
-    )
-
-
-def _dispatch_decision(
-    tool_name: str,
-    policy: ParsedActionPolicy,
-) -> PolicyEvaluationResult:
-    rule = policy.dispatch[tool_name]
-    if rule.always is Decision.ALLOW:
-        return _allow(
-            f"{tool_name} is allowed by tenant policy",
-            binding=policy.binding,
-        )
-    if rule.always is Decision.REQUIRE_APPROVAL:
-        return _require_approval(
-            f"{tool_name} requires manager approval",
-            binding=policy.binding,
-        )
-    return _deny(f"{tool_name} denied by tenant policy", binding=policy.binding)
 
 
 def _allow(
@@ -417,129 +406,111 @@ def _parse_action_tools_parameters(
     binding: ActionPolicyBinding,
 ) -> ParsedActionPolicy:
     tools = _require_mapping(parameters.get("tools"), "tools")
-    missing = sorted(_REQUIRED_TOOL_RULES.difference(tools))
+    required_keys = frozenset(
+        operation.policy_key
+        for operation in registered_operations()
+        if operation.required_policy_rule and operation.policy_key is not None
+    )
+    missing = sorted(required_keys.difference(tools))
     if missing:
         raise ActionPolicyParseError(
             f"missing required tool rule(s): {', '.join(missing)}"
         )
-    return ParsedActionPolicy(
-        binding=binding,
-        warranty=_parse_warranty_rule(_tool_rule(tools, "warranty.claim")),
-        replacement=_parse_replacement_rule(
-            _tool_rule(tools, "replacement.order")
-        ),
-        refund=_parse_refund_rule(_tool_rule(tools, "refund.request")),
-        warehouse=_parse_warehouse_rule(
-            _tool_rule(tools, "warehouse.repair.report")
-        ),
-        dispatch=_parse_dispatch_rules(tools),
-    )
-
-
-def _parse_warranty_rule(rule: Mapping[str, object]) -> WarrantyRule:
-    allow = _require_mapping(rule.get("allow"), "warranty.claim.allow")
-    return WarrantyRule(
-        confidence_gte=_require_float(
-            allow.get("confidence_gte"),
-            "warranty.claim.allow.confidence_gte",
-        ),
-        issue_category_in=_require_string_set(
-            allow.get("issue_category_in"),
-            "warranty.claim.allow.issue_category_in",
-        ),
-        else_decision=_require_policy_decision(
-            rule.get("else"),
-            "warranty.claim.else",
-            allowed=frozenset({Decision.REQUIRE_APPROVAL, Decision.DENY}),
-        ),
-    )
-
-
-def _parse_replacement_rule(rule: Mapping[str, object]) -> ReplacementRule:
-    return ReplacementRule(
-        always=_require_policy_decision(
-            rule.get("always"),
-            "replacement.order.always",
-            allowed=frozenset(
-                {Decision.ALLOW, Decision.REQUIRE_APPROVAL, Decision.DENY}
-            ),
+    parsed_rules: dict[str, object] = {}
+    for operation in registered_operations():
+        if operation.policy_key is None or operation.rule_kind is None:
+            continue
+        if operation.policy_key not in tools:
+            continue
+        parsed_rules[operation.operation_id] = _parse_operation_rule(
+            operation,
+            _tool_rule(tools, operation.policy_key),
         )
-    )
+    return ParsedActionPolicy(binding=binding, rules=parsed_rules)
 
 
-def _parse_refund_rule(rule: Mapping[str, object]) -> RefundRule:
-    allow = _require_mapping(rule.get("allow"), "refund.request.allow")
-    limit = allow.get("refund_amount_cents_lte")
-    if limit is None:
-        limit = allow.get("amount_cents_lte")
-    confidence_gte = allow.get("confidence_gte")
-    return RefundRule(
-        refund_amount_cents_lte=_require_int(
-            limit,
-            "refund.request.allow.refund_amount_cents_lte",
-        ),
-        confidence_gte=(
-            None
-            if confidence_gte is None
-            else _require_float(
-                confidence_gte,
-                "refund.request.allow.confidence_gte",
-            )
-        ),
-        else_decision=_require_policy_decision(
-            rule.get("else"),
-            "refund.request.else",
-            allowed=frozenset({Decision.REQUIRE_APPROVAL, Decision.DENY}),
-        ),
-    )
-
-
-def _parse_warehouse_rule(rule: Mapping[str, object]) -> WarehouseRule:
-    allow = _require_mapping(
-        rule.get("allow"),
-        "warehouse.repair.report.allow",
-    )
-    require_approval = _require_mapping(
-        rule.get("require_approval"),
-        "warehouse.repair.report.require_approval",
-    )
-    return WarehouseRule(
-        allow_severity_in=_require_string_set(
-            allow.get("severity_in"),
-            "warehouse.repair.report.allow.severity_in",
-        ),
-        require_approval_severity_in=_require_string_set(
-            require_approval.get("severity_in"),
-            "warehouse.repair.report.require_approval.severity_in",
-        ),
-    )
-
-
-def _parse_dispatch_rules(
-    tools: Mapping[str, object],
-) -> Mapping[str, DispatchRule]:
-    parsed: dict[str, DispatchRule] = {}
-    for tool_name in sorted(_DISPATCH_TOOL_NAMES):
-        if tool_name in tools:
-            parsed[tool_name] = _parse_dispatch_rule(
-                tool_name,
-                _tool_rule(tools, tool_name),
-            )
-    return parsed
-
-
-def _parse_dispatch_rule(
-    tool_name: str,
+def _parse_operation_rule(
+    operation: RegisteredOperation,
     rule: Mapping[str, object],
-) -> DispatchRule:
-    return DispatchRule(
-        always=_require_policy_decision(
-            rule.get("always"),
-            f"{tool_name}.always",
-            allowed=frozenset(
-                {Decision.ALLOW, Decision.REQUIRE_APPROVAL, Decision.DENY}
+) -> object:
+    assert operation.rule_kind is not None
+    assert operation.policy_key is not None
+    prefix = operation.policy_key
+    if operation.rule_kind is RuleKind.CONFIDENCE_MEMBERSHIP:
+        allow = _require_mapping(rule.get("allow"), f"{prefix}.allow")
+        return ConfidenceMembershipRule(
+            confidence_field="diagnostic_confidence",
+            confidence_gte=_require_float(
+                allow.get("confidence_gte"),
+                f"{prefix}.allow.confidence_gte",
+            ),
+            membership_field="issue_category",
+            allowed_values=_require_string_set(
+                allow.get("issue_category_in"),
+                f"{prefix}.allow.issue_category_in",
+            ),
+            else_decision=_require_policy_decision(
+                rule.get("else"),
+                f"{prefix}.else",
+                allowed=frozenset({Decision.REQUIRE_APPROVAL, Decision.DENY}),
             ),
         )
+    if operation.rule_kind is RuleKind.ALWAYS:
+        return AlwaysRule(
+            decision=_require_policy_decision(
+                rule.get("always"),
+                f"{prefix}.always",
+                allowed=frozenset(
+                    {Decision.ALLOW, Decision.REQUIRE_APPROVAL, Decision.DENY}
+                ),
+            )
+        )
+    if operation.rule_kind is RuleKind.AMOUNT_THRESHOLD:
+        allow = _require_mapping(rule.get("allow"), f"{prefix}.allow")
+        limit = allow.get("refund_amount_cents_lte")
+        if limit is None:
+            limit = allow.get("amount_cents_lte")
+        confidence_gte = allow.get("confidence_gte")
+        return AmountThresholdRule(
+            amount_field="refund_amount_cents",
+            amount_lte=_require_int(
+                limit,
+                f"{prefix}.allow.refund_amount_cents_lte",
+            ),
+            confidence_field="diagnostic_confidence",
+            confidence_gte=(
+                None
+                if confidence_gte is None
+                else _require_float(
+                    confidence_gte,
+                    f"{prefix}.allow.confidence_gte",
+                )
+            ),
+            else_decision=_require_policy_decision(
+                rule.get("else"),
+                f"{prefix}.else",
+                allowed=frozenset({Decision.REQUIRE_APPROVAL, Decision.DENY}),
+            ),
+        )
+    if operation.rule_kind is RuleKind.VALUE_BANDS:
+        allow = _require_mapping(rule.get("allow"), f"{prefix}.allow")
+        require_approval = _require_mapping(
+            rule.get("require_approval"),
+            f"{prefix}.require_approval",
+        )
+        return ValueBandsRule(
+            value_field="severity",
+            allow_values=_require_string_set(
+                allow.get("severity_in"),
+                f"{prefix}.allow.severity_in",
+            ),
+            require_approval_values=_require_string_set(
+                require_approval.get("severity_in"),
+                f"{prefix}.require_approval.severity_in",
+            ),
+        )
+    raise ActionPolicyParseError(
+        f"{prefix} uses unsupported rule kind {operation.rule_kind!r}"
     )
 
 
