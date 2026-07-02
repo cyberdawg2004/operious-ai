@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.schemas.action_approvals import (
@@ -35,20 +37,26 @@ _MAX_LIMIT = 100
 _DEFAULT_LIMIT = 50
 
 
+class ActionApprovalStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    denied = "denied"
+
+
 @router.get(
     "",
     response_model=ActionApprovalListResponse,
     dependencies=[Depends(require_tenant_operations_read)],
 )
 async def list_action_approvals(
-    status_filter: str = Query("pending", alias="status"),
+    status_filter: ActionApprovalStatus = Query(ActionApprovalStatus.pending, alias="status"),
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
     service: ActionApprovalService = Depends(get_action_approval_service),
 ) -> ActionApprovalListResponse:
     records = await service.list_by_status(
-        status=status_filter,
+        status=status_filter.value,
         tenant_id=expected_tenant_id,
         expected_tenant_id=expected_tenant_id,
         limit=limit,
