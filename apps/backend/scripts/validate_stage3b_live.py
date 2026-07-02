@@ -5,13 +5,19 @@ Proves:
 1. LIVE READ: prod egress reaches httpbin.org via probe_http=true (status:200)
 2. QUEUE → APPROVE → POST: money-act queues as pending, Imad approves, POST fires ONLY THEN
 3. FAIL-CLOSED: undeclared commitment_kind → human approval required, POST never auto-fires
+4. DUAL-CONTROL: service proposes, Imad approves (different principals)
 
 Usage:
-    export OPERIOUS_TOKEN="<your-auth0-token>"
+    export OPERIOUS_USER_TOKEN="<imad-auth0-token>"
+    export OPERIOUS_SERVICE_TOKEN="<service-m2m-token>"  # Optional, for propose
     python validate_stage3b_live.py --webhook-url "https://webhook.site/<your-uuid>"
 
-Get token: open browser dev tools → operious-ai-imad.fly.dev → Network → copy Authorization header
+Get user token: browser dev tools → operious-ai-imad.fly.dev → Network → Authorization header
+Get service token: Auth0 M2M client credentials flow (or use user token for both if testing)
 Get webhook URL: visit webhook.site → copy your unique URL
+
+If OPERIOUS_SERVICE_TOKEN is not set, uses OPERIOUS_USER_TOKEN for both propose and approve.
+This will trigger tenant_config_approver_must_differ (403) - expected for same-principal test.
 """
 
 import asyncio
@@ -52,18 +58,25 @@ def redact_token(text: str, token: str) -> str:
 
 
 class Stage3bValidator:
-    def __init__(self, token: str, webhook_url: str):
-        self.token = token
+    def __init__(self, user_token: str, webhook_url: str, service_token: str | None = None):
+        self.user_token = user_token
+        self.service_token = service_token or user_token  # Fall back to user token if no service token
         self.webhook_url = webhook_url
-        self.headers = {
-            "Authorization": f"Bearer {token}",
+        self.user_headers = {
+            "Authorization": f"Bearer {user_token}",
+            "Content-Type": "application/json",
+        }
+        self.service_headers = {
+            "Authorization": f"Bearer {self.service_token}",
             "Content-Type": "application/json",
         }
         self.results: dict[str, Any] = {}
+        self.using_service_token = service_token is not None
 
     def log(self, message: str, level: str = "INFO"):
-        """Print a log message with redacted token."""
-        safe_message = redact_token(message, self.token)
+        """Print a log message with redacted tokens."""
+        safe_message = redact_token(message, self.user_token)
+        safe_message = redact_token(safe_message, self.service_token)
         timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
         print(f"[{timestamp}] {level}: {safe_message}")
 
@@ -79,18 +92,21 @@ class Stage3bValidator:
         path: str,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        use_service_token: bool = False,
     ) -> httpx.Response:
-        """Make an API call with auth."""
+        """Make an API call with auth (user or service token)."""
         url = f"{API_BASE}{path}"
+        headers = self.service_headers if use_service_token else self.user_headers
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.request(
                 method,
                 url,
-                headers=self.headers,
+                headers=headers,
                 json=json,
                 params=params,
             )
-        self.log(f"{method} {path} -> {response.status_code}")
+        token_type = "service" if use_service_token else "user"
+        self.log(f"{method} {path} ({token_type}) -> {response.status_code}")
         return response
 
     async def ensure_connector_config(
@@ -117,7 +133,9 @@ class Stage3bValidator:
                 return True
 
         # Create via change request (REAL ROUTE: /tenant/config/change-requests)
-        self.log(f"Creating connector config {tool_name} via change request...")
+        # DUAL-CONTROL: service token proposes (if available), user token approves
+        token_type = "service" if self.using_service_token else "user"
+        self.log(f"Creating connector config {tool_name} via change request ({token_type} proposes)...")
 
         endpoint_host = endpoint_template.split("/")[2]  # Extract host from URL
 
@@ -146,6 +164,7 @@ class Stage3bValidator:
             "POST",
             "/tenant/config/change-requests",
             json=change_request,
+            use_service_token=self.using_service_token,  # Service proposes if available
         )
 
         if create_response.status_code not in (200, 201):
@@ -158,29 +177,41 @@ class Stage3bValidator:
 
         # Auto-approve if status is PROPOSED (real status value)
         if cr_data.get("status") == "PROPOSED":
-            self.log("Change request requires approval. Attempting auto-approve...")
+            self.log("Change request requires approval. Attempting approve (user token)...")
             # REAL ROUTE: /tenant/config/change-requests/{id}/approve (no body)
+            # DUAL-CONTROL: user token approves (service token proposed above)
             approve_response = await self.call_api(
                 "POST",
                 f"/tenant/config/change-requests/{cr_id}/approve",
+                use_service_token=False,  # Always use USER token to approve
             )
 
             if approve_response.status_code == 200:
                 self.log(f"✓ Change request {cr_id} approved and applied")
+                if self.using_service_token:
+                    self.log("✓ DUAL-CONTROL SATISFIED: service proposed, user approved", "INFO")
                 return True
             elif approve_response.status_code == 403:
-                self.log(
-                    f"✗ Dual-control enforced: proposer cannot approve their own change",
-                    "WARN"
-                )
-                self.log(f"   Change request ID: {cr_id}", "WARN")
-                self.log(f"   Options:", "WARN")
-                self.log(f"     1. Have a second authorized user approve this change request", "WARN")
-                self.log(f"     2. Press Ctrl+C to exit, create connector another way, re-run script", "WARN")
-                self.log(f"     3. Press Enter to skip connector creation and continue validation", "WARN")
-                input("\nPress Enter to continue (will skip this connector)...")
-                self.log("⚠ Skipping connector creation - continuing with existing configs", "WARN")
-                return False  # Indicate failure, script will abort step 1
+                error_detail = approve_response.json().get("detail", "")
+                if "approver_must_differ" in error_detail:
+                    self.log(
+                        f"✗ Dual-control enforced: proposer cannot approve their own change",
+                        "WARN"
+                    )
+                    self.log(f"   This is EXPECTED if using same token for both propose and approve.", "WARN")
+                    self.log(f"   Change request ID: {cr_id}", "WARN")
+                    self.log(f"   To fix: set OPERIOUS_SERVICE_TOKEN (Auth0 M2M) for propose", "WARN")
+                    self.log(f"   Options:", "WARN")
+                    self.log(f"     1. Set OPERIOUS_SERVICE_TOKEN and re-run", "WARN")
+                    self.log(f"     2. Have a second user approve: {cr_id}", "WARN")
+                    self.log(f"     3. Press Enter to skip and continue", "WARN")
+                    input("\nPress Enter to continue (will skip this connector)...")
+                    self.log("⚠ Skipping connector creation - dual-control test incomplete", "WARN")
+                    return False  # Indicate failure, script will abort step 1
+                else:
+                    self.log(f"✗ Approval forbidden (403): {error_detail}", "ERROR")
+                    input("Press Enter after resolving...")
+                    return False
             else:
                 self.log(
                     f"✗ Approval failed ({approve_response.status_code}): {approve_response.text}",
@@ -441,20 +472,29 @@ async def main():
         help="Webhook.site URL (get fresh one from webhook.site)",
     )
     parser.add_argument(
-        "--token",
-        help="Auth0 token (or set OPERIOUS_TOKEN env var)",
+        "--user-token",
+        help="User Auth0 token (or set OPERIOUS_USER_TOKEN env var)",
+    )
+    parser.add_argument(
+        "--service-token",
+        help="Service M2M token (or set OPERIOUS_SERVICE_TOKEN env var) - optional",
     )
     args = parser.parse_args()
 
-    # Get token from arg or env
-    token = args.token or os.getenv("OPERIOUS_TOKEN")
-    if not token:
-        print("ERROR: Token required. Set OPERIOUS_TOKEN env var or pass --token", file=sys.stderr)
+    # Get user token from arg or env (required)
+    user_token = args.user_token or os.getenv("OPERIOUS_USER_TOKEN") or os.getenv("OPERIOUS_TOKEN")
+    if not user_token:
+        print("ERROR: User token required. Set OPERIOUS_USER_TOKEN env var or pass --user-token", file=sys.stderr)
         print("Get token: browser dev tools → operious-ai-imad.fly.dev → Network → Authorization header", file=sys.stderr)
         sys.exit(1)
 
-    # Validate token is ASCII (catches copy-paste errors with ellipsis)
-    validate_token_ascii(token)
+    # Get service token from arg or env (optional)
+    service_token = args.service_token or os.getenv("OPERIOUS_SERVICE_TOKEN")
+
+    # Validate tokens are ASCII (catches copy-paste errors with ellipsis)
+    validate_token_ascii(user_token)
+    if service_token:
+        validate_token_ascii(service_token)
 
     # Validate webhook URL
     if not args.webhook_url.startswith("https://webhook.site/"):
@@ -466,10 +506,20 @@ async def main():
     print(f"   Tenant: {TENANT_ID}")
     print(f"   API: {API_BASE}")
     print(f"   Webhook: {args.webhook_url}")
-    print(f"   Token: ***REDACTED*** ({len(token)} chars)")
+    print(f"   User token: ***REDACTED*** ({len(user_token)} chars)")
+    if service_token:
+        print(f"   Service token: ***REDACTED*** ({len(service_token)} chars)")
+        print(f"   Dual-control: SERVICE proposes, USER approves (different principals)")
+    else:
+        print(f"   Service token: NOT SET (will use user token for both - expect 403)")
+        print(f"   Set OPERIOUS_SERVICE_TOKEN for proper dual-control test")
     print()
 
-    validator = Stage3bValidator(token=token, webhook_url=args.webhook_url)
+    validator = Stage3bValidator(
+        user_token=user_token,
+        webhook_url=args.webhook_url,
+        service_token=service_token,
+    )
     await validator.run()
 
 
