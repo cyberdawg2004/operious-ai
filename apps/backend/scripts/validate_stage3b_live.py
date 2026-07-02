@@ -161,18 +161,21 @@ class Stage3bValidator:
         """Ensure connector config exists (create via change request if needed)."""
         self.log(f"Checking connector config for {tool_name}...")
 
-        # Check if config exists (REAL ROUTE: /tenant/connectors with query params)
-        response = await self.call_api(
+        # Check if config exists — omit status filter (default is "active" on the
+        # server, but connector history endpoint /connectors/{tool_name} has no
+        # default filter; scan all statuses to detect any existing version)
+        all_response = await self.call_api(
             "GET",
-            "/tenant/connectors",
-            params={"tool_name": tool_name, "status": "active"},
+            f"/tenant/connectors/{tool_name}",  # History endpoint: all versions, no status default
         )
-
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("items"):
-                self.log(f"✓ Connector config {tool_name} already exists")
+        if all_response.status_code == 200:
+            data = all_response.json()
+            items = data.get("items", [])
+            if items:
+                statuses = [i.get("status") for i in items]
+                self.log(f"✓ Connector config {tool_name} exists ({len(items)} version(s), statuses={statuses})")
                 return True
+            self.log(f"No existing versions found for {tool_name}")
 
         # Create via change request (REAL ROUTE: /tenant/config/change-requests)
         # DUAL-CONTROL: service token proposes (if available), user token approves
