@@ -72,6 +72,8 @@ class Stage3bValidator:
         }
         self.results: dict[str, Any] = {}
         self.using_service_token = service_token is not None
+        # Resolved at runtime from JWT claim — may differ from TENANT_ID constant
+        self.resolved_tenant_id: str | None = None
 
     def log(self, message: str, level: str = "INFO"):
         """Print a log message with redacted tokens."""
@@ -108,6 +110,46 @@ class Stage3bValidator:
         token_type = "service" if use_service_token else "user"
         self.log(f"{method} {path} ({token_type}) -> {response.status_code}")
         return response
+
+    async def resolve_tenant_id(self) -> str:
+        """Resolve the exact tenant_id string the JWT carries.
+
+        The test endpoint guards: if tenant_id_in_URL != jwt_tenant_claim → 404.
+        We discover the JWT's tenant by fetching change requests — their responses
+        include a `tenant_id` field. Fallback: use TENANT_ID constant and warn.
+        """
+        if self.resolved_tenant_id:
+            return self.resolved_tenant_id
+
+        # GET /tenant/config/change-requests includes tenant_id in each record
+        response = await self.call_api(
+            "GET", "/tenant/config/change-requests", params={"limit": 1}
+        )
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get("items", [])
+            if items:
+                tenant_from_record = items[0].get("tenant_id")
+                if tenant_from_record:
+                    if tenant_from_record != TENANT_ID:
+                        self.log(
+                            f"⚠ JWT tenant_id '{tenant_from_record}' differs from "
+                            f"hardcoded '{TENANT_ID}' — using JWT value for path-scoped calls",
+                            "WARN",
+                        )
+                    self.resolved_tenant_id = tenant_from_record
+                    return tenant_from_record
+
+        # Fallback — no records yet, trust the constant
+        self.log(f"Could not resolve tenant_id from records, using constant: {TENANT_ID}", "WARN")
+        self.resolved_tenant_id = TENANT_ID
+        return TENANT_ID
+
+    def record_tenant_id_from_cr(self, cr_data: dict[str, Any]) -> None:
+        """Cache the tenant_id seen in a change request response."""
+        tenant = cr_data.get("tenant_id")
+        if tenant and not self.resolved_tenant_id:
+            self.resolved_tenant_id = tenant
 
     async def ensure_connector_config(
         self,
@@ -173,6 +215,7 @@ class Stage3bValidator:
 
         cr_data = create_response.json()
         cr_id = cr_data.get("change_request_id")  # Real field name from API
+        self.record_tenant_id_from_cr(cr_data)     # Cache tenant_id for path-scoped calls
         self.log(f"Change request created: {cr_id}")
 
         # Auto-approve if status is PROPOSED (real status value)
@@ -236,11 +279,15 @@ class Stage3bValidator:
         if not success:
             return False
 
+        # Resolve the exact tenant_id the JWT carries — the test endpoint requires
+        # URL path segment to exactly equal the JWT tenant claim (line 598 of tenant.py)
+        tenant_id = await self.resolve_tenant_id()
+
         # Test with probe_http=true
-        self.log(f"Testing {HTTPBIN_READ_TOOL} with probe_http=true...")
+        self.log(f"Testing {HTTPBIN_READ_TOOL} with probe_http=true (tenant={tenant_id})...")
         response = await self.call_api(
             "POST",
-            f"/tenant/{TENANT_ID}/connectors/{HTTPBIN_READ_TOOL}/test",
+            f"/tenant/{tenant_id}/connectors/{HTTPBIN_READ_TOOL}/test",
             params={"probe_http": "true"},
         )
 
@@ -277,11 +324,11 @@ class Stage3bValidator:
         if not success:
             return False
 
-        # Check action_tools policy
+        # Check action_tools policy — /tenant/policies is claim-scoped (no tenant in path)
         self.log("Checking action_tools policy...")
         response = await self.call_api(
             "GET",
-            f"/tenant/{TENANT_ID}/policies",
+            "/tenant/policies",
             params={"policy_type": "action_tools"},
         )
 
