@@ -104,14 +104,15 @@ class GenericRestRepairDispatchConnector(ConnectorTool):
         try:
             result = await super().invoke(request, context)
         except Exception as exc:  # noqa: BLE001 - tool returns typed result.
+            exc_type = type(exc).__name__
             failed = await self._transition_failed(
                 work_order,
                 provider_status="tool_raised",
-                provider_error=f"{type(exc).__name__}: {exc}",
+                provider_error=f"{exc_type}: dispatch failed",
             )
             return _error_result(
                 code="dispatch_failed",
-                message=f"{type(exc).__name__}: {exc}",
+                message=f"{exc_type}: dispatch failed",
                 idempotency_key=provider_key,
                 work_order_id=str(failed.work_order_id),
                 provider_work_order_id=failed.provider_work_order_id,

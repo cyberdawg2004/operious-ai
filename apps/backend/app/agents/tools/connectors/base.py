@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import ssl
 from abc import abstractmethod
 from collections.abc import Mapping
@@ -10,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, ClassVar, Protocol
+
+logger = logging.getLogger(__name__)
 
 from app.agents.context import AgentExecutionContext
 from app.agents.results import ToolInvocationRequest, ToolInvocationResult
@@ -156,9 +159,17 @@ class ConnectorTool(BaseTool):
                 channel_type=channel_type,
             )
         except Exception as exc:  # noqa: BLE001 - fail closed on credential errors.
+            # Log the full exception server-side for debugging; never include
+            # the body in the caller-visible message because str(exc) for a
+            # credential load failure may echo a bearer token or API key.
+            logger.error(
+                "connector_credential_load_failed",
+                extra={"tenant_id": tenant_id, "tool": self.name},
+                exc_info=True,
+            )
             return _error_result(
                 code="credential_load_failed",
-                message=f"{type(exc).__name__}: {exc}",
+                message=f"{type(exc).__name__}: credential load failed",
                 idempotency_key=provider_key,
             )
         outbound = self.build_request(
@@ -198,7 +209,7 @@ class ConnectorTool(BaseTool):
             except Exception as exc:  # noqa: BLE001 - fail closed on transport errors.
                 return _error_result(
                     code="provider_transport_error",
-                    message=f"{type(exc).__name__}: {exc}",
+                    message=f"{type(exc).__name__}: provider transport error",
                     idempotency_key=provider_key,
                 )
 
@@ -213,7 +224,7 @@ class ConnectorTool(BaseTool):
         except Exception as exc:  # noqa: BLE001 - fail closed on parse errors.
             return _error_result(
                 code="provider_response_parse_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=f"{type(exc).__name__}: provider response parse error",
                 idempotency_key=provider_key,
             )
 
@@ -348,6 +359,12 @@ def _clean_text(value: object) -> str | None:
     return None
 
 
+connector_auth_headers = _auth_headers
+connector_clean_text = _clean_text
+connector_error_result = _error_result
+connector_provider_error_result = _provider_error_result
+
+
 __all__ = [
     "ConnectorHTTPResponse",
     "ConnectorHTTPRequest",
@@ -356,5 +373,9 @@ __all__ = [
     "ConnectorTool",
     "SSRFValidator",
     "TenantCredentialRuntime",
+    "connector_auth_headers",
+    "connector_clean_text",
+    "connector_error_result",
+    "connector_provider_error_result",
     "validate_connector_endpoint_url",
 ]

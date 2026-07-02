@@ -9,7 +9,10 @@ Domain-agnostic: names no vendor, domain, or business-action in code.
 
 from __future__ import annotations
 
+import logging
 import ssl
+
+logger = logging.getLogger(__name__)
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -25,11 +28,11 @@ from app.agents.tools.connectors.base import (
     ConnectorProviderFields,
     ConnectorResponseError,
     SSRFValidator,
-    _auth_headers,
-    _clean_text,
-    _error_result,
-    _provider_error_result,
-    _validate_url_off_loop,
+    connector_auth_headers,
+    connector_clean_text,
+    connector_error_result,
+    connector_provider_error_result,
+    validate_connector_endpoint_url,
 )
 from app.agents.tools.connectors.config import (
     ConnectorConfigError,
@@ -43,12 +46,12 @@ from app.agents.tools.connectors.refund import (
 )
 from app.agents.tools.grants import AGENT_ACTION_PROVIDER_IDEMPOTENCY_KEY
 from app.agents.tools.operation_metadata import (
+    APPROVAL_POLICY_METADATA_KEY,
+    COMMITMENT_KIND_METADATA_KEY,
+    OPERATION_ID_METADATA_KEY,
+    TARGET_RESOURCE_EXPR_METADATA_KEY,
     ApprovalPolicy,
     CommitmentKind,
-    _APPROVAL_POLICY,
-    _COMMITMENT_KIND,
-    _OPERATION_ID,
-    _TARGET_RESOURCE_EXPR,
 )
 from app.core.http import create_isolated_http_client
 from app.core.ssrf import (
@@ -102,13 +105,13 @@ class OperationDefinition:
     target_resource_expr: str | None = None
 
     def governance_metadata(self) -> JsonObject:
-        metadata: JsonObject = {_OPERATION_ID: self.operation_id}
+        metadata: JsonObject = {OPERATION_ID_METADATA_KEY: self.operation_id}
         if self.commitment_kind is not None:
-            metadata[_COMMITMENT_KIND] = self.commitment_kind.value
+            metadata[COMMITMENT_KIND_METADATA_KEY] = self.commitment_kind.value
         if self.approval_policy is not None:
-            metadata[_APPROVAL_POLICY] = self.approval_policy.value
+            metadata[APPROVAL_POLICY_METADATA_KEY] = self.approval_policy.value
         if self.target_resource_expr is not None:
-            metadata[_TARGET_RESOURCE_EXPR] = self.target_resource_expr
+            metadata[TARGET_RESOURCE_EXPR_METADATA_KEY] = self.target_resource_expr
         return metadata
 
     @property
@@ -183,19 +186,19 @@ class GenericConnectorTool(BaseTool):
         request: ToolInvocationRequest,
         context: AgentExecutionContext,
     ) -> ToolInvocationResult:
-        tenant_id = _clean_text(context.tenant_id)
+        tenant_id = connector_clean_text(context.tenant_id)
         if tenant_id is None:
-            return _error_result(
+            return connector_error_result(
                 code="missing_tenant",
                 message="connector invocation requires tenant_id",
             )
 
-        provider_key = _clean_text(
+        provider_key = connector_clean_text(
             request.metadata.get(AGENT_ACTION_PROVIDER_IDEMPOTENCY_KEY)
         )
         if self._operation.idempotency_strategy is IdempotencyStrategy.HEADER:
             if provider_key is None:
-                return _error_result(
+                return connector_error_result(
                     code="missing_provider_idempotency_key",
                     message="connector invocation requires provider idempotency key",
                 )
@@ -203,7 +206,7 @@ class GenericConnectorTool(BaseTool):
         try:
             config = await self._load_config(tenant_id=tenant_id)
         except ConnectorConfigError as exc:
-            return _error_result(
+            return connector_error_result(
                 code="connector_config_missing",
                 message=str(exc),
                 idempotency_key=provider_key,
@@ -215,16 +218,21 @@ class GenericConnectorTool(BaseTool):
                 connector_id=self._connector.connector_id,
             )
         except Exception as exc:  # noqa: BLE001 - fail closed on credential errors.
-            return _error_result(
+            logger.error(
+                "connector_credential_load_failed",
+                extra={"tenant_id": tenant_id, "connector": self._connector.connector_id},
+                exc_info=True,
+            )
+            return connector_error_result(
                 code="credential_load_failed",
-                message=f"{type(exc).__name__}: {exc}",
+                message=f"{type(exc).__name__}: credential load failed",
                 idempotency_key=provider_key,
             )
 
         payload = dict(request.payload)
         outbound = self._build_request(payload=payload, config=config)
         headers: dict[str, str] = {
-            **_auth_headers(credentials),
+            **connector_auth_headers(credentials),
             **dict(outbound.headers),
             "Content-Type": "application/json",
         }
@@ -234,7 +242,7 @@ class GenericConnectorTool(BaseTool):
         ):
             headers[config.idempotency_header_name] = provider_key
 
-        validated = await _validate_url_off_loop(
+        validated = await validate_connector_endpoint_url(
             validator=self._ssrf_validator,
             url=outbound.url,
             allowed_hosts=(config.endpoint_host.lower(),),
@@ -258,24 +266,24 @@ class GenericConnectorTool(BaseTool):
                     follow_redirects=False,
                 )
             except Exception as exc:  # noqa: BLE001 - fail closed on transport errors.
-                return _error_result(
+                return connector_error_result(
                     code="provider_transport_error",
-                    message=f"{type(exc).__name__}: {exc}",
+                    message=f"{type(exc).__name__}: provider transport error",
                     idempotency_key=provider_key,
                 )
 
         try:
             fields = self._parse_response(response, config=config)
         except ConnectorResponseError as exc:
-            return _provider_error_result(
+            return connector_provider_error_result(
                 provider_fields=exc.provider_fields,
                 message=str(exc),
                 idempotency_key=provider_key or "",
             )
         except Exception as exc:  # noqa: BLE001 - fail closed on parse errors.
-            return _error_result(
+            return connector_error_result(
                 code="provider_response_parse_error",
-                message=f"{type(exc).__name__}: {exc}",
+                message=f"{type(exc).__name__}: provider response parse error",
                 idempotency_key=provider_key,
             )
 
