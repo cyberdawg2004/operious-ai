@@ -153,7 +153,7 @@ class Stage3bValidator:
             return False
 
         cr_data = create_response.json()
-        cr_id = cr_data.get("id")
+        cr_id = cr_data.get("change_request_id")  # Real field name from API
         self.log(f"Change request created: {cr_id}")
 
         # Auto-approve if status is PROPOSED (real status value)
