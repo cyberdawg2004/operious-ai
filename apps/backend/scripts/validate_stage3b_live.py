@@ -269,49 +269,102 @@ class Stage3bValidator:
 
         return True
 
+    async def _probe_connector(self, tool_name: str) -> str | None:
+        """Try the test endpoint directly. Returns http_probe value or None on 404."""
+        tenant_id = await self.resolve_tenant_id()
+        self.log(f"Probing {tool_name} via test endpoint (tenant={tenant_id})...")
+        response = await self.call_api(
+            "POST",
+            f"/tenant/{tenant_id}/connectors/{tool_name}/test",
+            params={"probe_http": "true"},
+        )
+        if response.status_code == 404:
+            self.log(f"Test endpoint 404 — connector not found on prod for tool_name={tool_name}")
+            return None
+        if response.status_code != 200:
+            self.log(f"Test endpoint error {response.status_code}: {response.text}", "ERROR")
+            return None
+        return response.json().get("http_probe", "")
+
     async def step1_live_read(self) -> bool:
-        """Step 1: Prove live read from prod with HTTP probe."""
+        """Step 1: Prove live read from prod with HTTP probe.
+
+        Strategy: try the test endpoint directly first. If 404, the connector
+        doesn't exist yet — propose a CR and instruct Imad to approve it, then
+        re-run. The dual-control gate means we can't auto-approve; print the CR
+        id and pause.
+        """
         self.section("STEP 1: LIVE READ FROM PROD")
 
-        # Ensure httpbin.read connector exists
+        # Try the probe directly — bypass the broken detection logic
+        http_probe = await self._probe_connector(HTTPBIN_READ_TOOL)
+
+        if http_probe is not None:
+            # Connector exists and was reached
+            if http_probe.startswith("status:"):
+                status_code = http_probe.split(":")[1]
+                self.log(f"✓ PASS: HTTP probe returned {http_probe}")
+                self.log(f"✓ PROOF: Prod egress reached httpbin.org, got HTTP {status_code}")
+                self.results["live_read"] = {"status": "PASS", "http_probe": http_probe}
+                return True
+            else:
+                self.log(f"✗ FAIL: HTTP probe returned {http_probe}", "ERROR")
+                self.results["live_read"] = {"status": "FAIL", "http_probe": http_probe}
+                return False
+
+        # 404 — connector not on prod yet. Check for an existing pending CR first.
+        self.log("Connector not found. Checking for existing pending change request...")
+        cr_list = await self.call_api(
+            "GET", "/tenant/config/change-requests",
+            params={"status": "PROPOSED", "limit": 10},
+        )
+        if cr_list.status_code == 200:
+            existing = [
+                cr for cr in cr_list.json().get("items", [])
+                if cr.get("proposed_payload", {}).get("tool_name") == HTTPBIN_READ_TOOL
+                or cr.get("payload", {}).get("tool_name") == HTTPBIN_READ_TOOL
+            ]
+            if existing:
+                cr_id = existing[0].get("change_request_id")
+                self.log(f"Existing pending CR found: {cr_id} — needs approval")
+                self.log(f"")
+                self.log(f"  ACTION REQUIRED: Have a second authorized user approve this CR:")
+                self.log(f"  curl -X POST '{API_BASE}/tenant/config/change-requests/{cr_id}/approve' \\")
+                self.log(f"       -H 'Authorization: Bearer <approver-token>'")
+                self.log(f"  Then re-run this script.")
+                self.results["live_read"] = {"status": "PENDING_APPROVAL", "cr_id": cr_id}
+                input("\nPress Enter after approving, then this script will retry the probe... ")
+                http_probe2 = await self._probe_connector(HTTPBIN_READ_TOOL)
+                if http_probe2 and http_probe2.startswith("status:"):
+                    self.log(f"✓ PASS: HTTP probe returned {http_probe2}")
+                    self.results["live_read"] = {"status": "PASS", "http_probe": http_probe2}
+                    return True
+                self.log("✗ Still 404 after approval — connector may not have applied yet", "ERROR")
+                self.results["live_read"] = {"status": "FAIL", "reason": "not_applied_after_approve"}
+                return False
+
+        # No existing pending CR — propose a new one
+        self.log("Creating connector config httpbin.read via change request...")
         success = await self.ensure_connector_config(
             tool_name=HTTPBIN_READ_TOOL,
             endpoint_template="https://httpbin.org/json",
             http_method="GET",
         )
         if not success:
+            self.log("✗ Could not create connector — dual-control requires second approver", "ERROR")
+            self.log("  Re-run after the CR is approved by a second user.")
+            self.results["live_read"] = {"status": "FAIL", "reason": "dual_control_blocking"}
             return False
 
-        # Resolve the exact tenant_id the JWT carries — the test endpoint requires
-        # URL path segment to exactly equal the JWT tenant claim (line 598 of tenant.py)
-        tenant_id = await self.resolve_tenant_id()
-
-        # Test with probe_http=true
-        self.log(f"Testing {HTTPBIN_READ_TOOL} with probe_http=true (tenant={tenant_id})...")
-        response = await self.call_api(
-            "POST",
-            f"/tenant/{tenant_id}/connectors/{HTTPBIN_READ_TOOL}/test",
-            params={"probe_http": "true"},
-        )
-
-        if response.status_code != 200:
-            self.log(f"✗ Test endpoint failed: {response.text}", "ERROR")
-            return False
-
-        result = response.json()
-        self.log(f"Test result: {result}")
-
-        http_probe = result.get("http_probe", "")
-        if http_probe.startswith("status:"):
-            status_code = http_probe.split(":")[1]
-            self.log(f"✓ PASS: HTTP probe returned {http_probe}")
-            self.log(f"✓ PROOF: Prod egress reached httpbin.org, got HTTP {status_code}")
-            self.results["live_read"] = {"status": "PASS", "http_probe": http_probe}
+        # If we get here the CR was approved and applied — retry probe
+        http_probe3 = await self._probe_connector(HTTPBIN_READ_TOOL)
+        if http_probe3 and http_probe3.startswith("status:"):
+            self.log(f"✓ PASS: HTTP probe returned {http_probe3}")
+            self.results["live_read"] = {"status": "PASS", "http_probe": http_probe3}
             return True
-        else:
-            self.log(f"✗ FAIL: HTTP probe returned {http_probe}", "ERROR")
-            self.results["live_read"] = {"status": "FAIL", "http_probe": http_probe}
-            return False
+        self.log(f"✗ Probe after creation: {http_probe3}", "ERROR")
+        self.results["live_read"] = {"status": "FAIL", "http_probe": http_probe3}
+        return False
 
     async def step2_setup_act(self) -> bool:
         """Step 2: Set up the webhook.act connector and approval-gated policy."""
