@@ -95,6 +95,7 @@ from app.tenant.change_requests import (
     TenantConfigChangeRequestSeparationError,
     TenantConfigChangeRequestStatus,
     TenantConfigChangeType,
+    TenantConfigChangeRequestValidationError,
 )
 from app.tenant.channel_self_service import (
     TenantChannelSelfServicePayload,
@@ -589,6 +590,7 @@ async def list_connector_configuration_history(
 async def test_connector_configuration(
     tenant_id: str,
     tool_name: str,
+    probe_http: bool = Query(False),
     expected_tenant_id: str = Depends(require_tenant_scope),
     _writer: AuthorityContext = Depends(require_tenant_connector_write),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
@@ -602,6 +604,7 @@ async def test_connector_configuration(
         result = await service.test_connector_connection(
             tenant_id=expected_tenant_id,
             tool_name=tool_name,
+            probe_http=probe_http,
         )
     except TenantConfigurationNotFoundError as exc:
         raise HTTPException(
@@ -1339,6 +1342,14 @@ def _change_request_http_error(exc: BaseException) -> HTTPException:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "tenant_config_approver_must_differ"},
         )
+    if isinstance(exc, TenantConfigChangeRequestValidationError):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "tenant_config_change_request_invalid",
+                "message": str(exc),
+            },
+        )
     if isinstance(exc, TenantConfigChangeRequestLifecycleError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1347,7 +1358,10 @@ def _change_request_http_error(exc: BaseException) -> HTTPException:
     if isinstance(exc, ValueError):
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "tenant_config_change_request_invalid"},
+            detail={
+                "code": "tenant_config_change_request_invalid",
+                "message": str(exc),
+            },
         )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

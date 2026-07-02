@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.core.ssrf import SSRFValidationError, validate_public_https_url
+from app.core.http import create_isolated_http_client
+from app.core.ssrf import (
+    PinnedIPAsyncHTTPTransport,
+    SSRFValidationError,
+    validate_public_https_url,
+)
 from app.runtime.resolution_autonomy_policy import RESOLUTION_AUTONOMY_POLICY_TYPE
 from app.runtime.resolution_taxonomy_policy import RESOLUTION_TAXONOMY_POLICY_TYPE
 from app.runtime.warranty_refund_policy import WARRANTY_REFUND_RULES_POLICY_TYPE
@@ -303,6 +308,7 @@ class TenantConfigurationService:
         *,
         tenant_id: str,
         tool_name: str,
+        probe_http: bool = False,
     ) -> ConnectorTestResult:
         configs = await self._runtime.list_connector_configurations(
             tenant_id=tenant_id,
@@ -334,12 +340,21 @@ class TenantConfigurationService:
             pinned_ip=validated.pinned_ip,
             ssl_context=self._connector_test_ssl_context,
         )
+
+        http_probe_result = "skipped"
+        if probe_http and tls_verified:
+            http_probe_result = await _http_get_probe(
+                url=validated.url,
+                pinned_ip=validated.pinned_ip,
+                ssl_context=self._connector_test_ssl_context,
+            )
+
         return ConnectorTestResult(
             reachable=tls_verified,
             config_valid=True,
             validated_host=validated.hostname,
             tls_verified=tls_verified,
-            http_probe="skipped",
+            http_probe=http_probe_result,
         )
 
     async def list_channels(
@@ -835,6 +850,33 @@ async def _verify_connector_tls(
     writer.close()
     await writer.wait_closed()
     return True
+
+
+async def _http_get_probe(
+    *,
+    url: str,
+    pinned_ip: str,
+    ssl_context: ssl.SSLContext | None,
+) -> str:
+    transport = PinnedIPAsyncHTTPTransport(
+        pinned_ip=pinned_ip,
+        ssl_context=ssl_context,
+    )
+    try:
+        async with create_isolated_http_client(
+            transport=transport,
+            timeout_seconds=_CONNECTOR_TEST_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = await client.request(
+                "GET",
+                url,
+                timeout=_CONNECTOR_TEST_TIMEOUT_SECONDS,
+                follow_redirects=False,
+            )
+        return f"status:{response.status_code}"
+    except Exception as exc:
+        return f"error:{type(exc).__name__}"
 
 
 def _approved_configuration_change(
