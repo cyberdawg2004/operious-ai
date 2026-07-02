@@ -219,3 +219,89 @@ async def test_config_missing_error_is_informative() -> None:
     assert result.error_message is not None
     # Config error message is allowed to include non-secret detail
     assert len(result.error_message) > 0
+
+
+# ---------------------------------------------------------------------------
+# Test (iv): ConnectorResponseError provider_error body is NOT echoed
+# Phase-1 audit gap: provider APIs can echo auth tokens in error bodies.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_provider_response_error_does_not_echo_provider_body() -> None:
+    """When the provider returns an error response whose body contains a secret,
+    the caller-visible error_message must NOT include that body — only the
+    HTTP status code is safe to surface.
+    """
+    from app.agents.tools.connectors.base import (
+        ConnectorProviderFields,
+        ConnectorResponseError,
+    )
+
+    _PROVIDER_SECRET = "Authorization: Bearer leaked_provider_token_xyz"
+
+    class _FailingParseConnectorTool(_StubConnectorTool):
+        """Always raises ConnectorResponseError with a body containing a secret."""
+
+        def parse_response(
+            self, response: ConnectorHTTPResponse, *, config: ConnectorConfigRecord
+        ) -> ConnectorProviderFields:
+            raise ConnectorResponseError(
+                status_code=401,
+                provider_fields=ConnectorProviderFields(
+                    provider_id=None,
+                    provider_status="error",
+                    provider_error=f"Unauthorized: {_PROVIDER_SECRET}",
+                ),
+            )
+
+    class _MockHTTPResponse:
+        """Stub response that satisfies ConnectorHTTPResponse protocol."""
+        status_code = 200
+        text = "{}"
+
+        def json(self) -> Any:
+            return {}
+
+    # We need the request to reach parse_response, so mock out the HTTP call
+    from unittest.mock import AsyncMock as _AsyncMock
+    import unittest.mock
+    tool = _FailingParseConnectorTool(
+        config_repository=_StubConfigRepository(),
+        credential_runtime=_AlwaysSucceedCredentialRuntime(),
+    )
+    ctx = _execution_context()
+    req = _request()
+
+    # Patch _validate_url_off_loop to skip real DNS + patch httpx transport
+    with unittest.mock.patch(
+        "app.agents.tools.connectors.base._validate_url_off_loop",
+        return_value=__import__("app.core.ssrf", fromlist=["ValidatedPublicHTTPSURL"]).ValidatedPublicHTTPSURL(
+            url="https://example.com/action",
+            hostname="example.com",
+            port=443,
+            pinned_ip="1.2.3.4",
+        ),
+    ), unittest.mock.patch(
+        "app.agents.tools.connectors.base.PinnedIPAsyncHTTPTransport",
+    ) as mock_transport_cls, unittest.mock.patch(
+        "app.agents.tools.connectors.base.create_isolated_http_client",
+    ) as mock_client_ctx:
+        mock_response = _MockHTTPResponse()
+        mock_client = _AsyncMock()
+        mock_client.__aenter__ = _AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = _AsyncMock(return_value=False)
+        mock_client.request = _AsyncMock(return_value=mock_response)
+        mock_client_ctx.return_value = mock_client
+        mock_transport_cls.return_value = _AsyncMock()
+
+        result = await tool.invoke(req, ctx)
+
+    assert result.error_code == "provider_error"
+    assert result.error_message is not None
+    # The provider's raw error body must NOT appear in the caller-visible message
+    assert _PROVIDER_SECRET not in (result.error_message or ""), (
+        f"Provider secret echoed into error_message: {result.error_message!r}"
+    )
+    assert "leaked_provider_token" not in (result.error_message or "")
+    # Only the HTTP status code should be present
+    assert "401" in (result.error_message or "")

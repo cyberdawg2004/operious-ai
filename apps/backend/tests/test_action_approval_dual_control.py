@@ -7,12 +7,17 @@ These are the four break-controls required by the fix specification:
   (ii)  different principal approves → succeeds (legit dual-control)
   (iii) proposed_by is read from first-class column, not spoofable via metadata
   (iv)  proposed_by=None (pre-migration rows) → still approvable (no regression)
+
+Phase-1 audit additions:
+  (v)  Guard calls through REAL ActionApprovalService.approve_in_transaction()
+  (vi) deny_in_transaction() also enforces separation
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -218,3 +223,72 @@ def test_build_pending_approval_proposed_by_defaults_to_none() -> None:
         governance_decision_id=None,
     )
     assert approval.proposed_by is None
+
+
+# ---------------------------------------------------------------------------
+# Phase-1 audit: test (v) — guard through REAL ActionApprovalService
+# ---------------------------------------------------------------------------
+# These tests call through ActionApprovalService.approve_in_transaction() and
+# deny_in_transaction() directly (with mocked I/O beyond the guard point) so
+# we exercise the PRODUCTION code path, not a copy of the guard.
+
+async def _make_service(approval: ActionApprovalRecord) -> ActionApprovalService:
+    """Build a real ActionApprovalService with an in-memory repo and mocked
+    session + dependencies.  The guard fires BEFORE any mocked I/O is called,
+    so we only need the repository to be functional."""
+    repo = InMemoryActionApprovalRepository()
+    await repo.create_pending_approval(approval, expected_tenant_id=_TENANT)
+
+    mock_session = AsyncMock()
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+
+    mock_orchestration = AsyncMock()
+    mock_orchestration.re_invoke_approved_action = AsyncMock()
+
+    return ActionApprovalService(
+        approval_repository=repo,
+        grant_repository=AsyncMock(),
+        governance_repository=AsyncMock(),
+        resolution_repository=AsyncMock(),
+        session_repository=AsyncMock(),
+        timeline_runtime=AsyncMock(),
+        session=mock_session,
+        orchestration_runtime=mock_orchestration,
+    )
+
+
+@pytest.mark.asyncio
+async def test_service_approve_in_transaction_rejects_self_approval() -> None:
+    """REAL service: approve_in_transaction raises ActionApprovalSeparationError
+    when approved_by == proposed_by.  Exercises the production code path.
+    """
+    approval = _make_approval(proposed_by=_AGENT_ACTOR, idempotency_seed="real-svc-self")
+    svc = await _make_service(approval)
+
+    with pytest.raises(ActionApprovalSeparationError, match="approver must differ"):
+        await svc.approve_in_transaction(
+            approval_id=approval.approval_id,
+            approved_by=_AGENT_ACTOR,  # same as proposed_by → must reject
+            note=None,
+            tenant_id=_TENANT,
+            expected_tenant_id=_TENANT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_service_deny_in_transaction_rejects_self_denial() -> None:
+    """REAL service: deny_in_transaction raises ActionApprovalSeparationError
+    when denied_by == proposed_by.  Confirms the guard covers both paths.
+    """
+    approval = _make_approval(proposed_by=_AGENT_ACTOR, idempotency_seed="real-svc-deny")
+    svc = await _make_service(approval)
+
+    with pytest.raises(ActionApprovalSeparationError, match="denier must differ"):
+        await svc.deny_in_transaction(
+            approval_id=approval.approval_id,
+            denied_by=_AGENT_ACTOR,  # same as proposed_by → must reject
+            reason="testing self-denial rejection",
+            tenant_id=_TENANT,
+            expected_tenant_id=_TENANT,
+        )

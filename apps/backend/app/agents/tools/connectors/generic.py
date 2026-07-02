@@ -208,7 +208,7 @@ class GenericConnectorTool(BaseTool):
         except ConnectorConfigError as exc:
             return connector_error_result(
                 code="connector_config_missing",
-                message=str(exc),
+                message=f"{type(exc).__name__}: connector config missing",
                 idempotency_key=provider_key,
             )
 
@@ -277,7 +277,7 @@ class GenericConnectorTool(BaseTool):
         except ConnectorResponseError as exc:
             return connector_provider_error_result(
                 provider_fields=exc.provider_fields,
-                message=str(exc),
+                message=f"http_status_{exc.status_code}",
                 idempotency_key=provider_key or "",
             )
         except Exception as exc:  # noqa: BLE001 - fail closed on parse errors.

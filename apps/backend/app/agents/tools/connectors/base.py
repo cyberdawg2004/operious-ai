@@ -143,7 +143,7 @@ class ConnectorTool(BaseTool):
         except ConnectorConfigError as exc:
             return _error_result(
                 code="connector_config_missing",
-                message=str(exc),
+                message=f"{type(exc).__name__}: connector config missing",
                 idempotency_key=provider_key,
             )
         channel_type = _channel_type(config.connector_type)
@@ -218,7 +218,7 @@ class ConnectorTool(BaseTool):
         except ConnectorResponseError as exc:
             return _provider_error_result(
                 provider_fields=exc.provider_fields,
-                message=str(exc),
+                message=f"http_status_{exc.status_code}",
                 idempotency_key=provider_key,
             )
         except Exception as exc:  # noqa: BLE001 - fail closed on parse errors.

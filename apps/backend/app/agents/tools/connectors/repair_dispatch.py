@@ -72,7 +72,7 @@ class GenericRestRepairDispatchConnector(ConnectorTool):
         except ConnectorConfigError as exc:
             return _error_result(
                 code="connector_config_missing",
-                message=str(exc),
+                message=f"{type(exc).__name__}: connector config missing",
                 idempotency_key=provider_key,
             )
 

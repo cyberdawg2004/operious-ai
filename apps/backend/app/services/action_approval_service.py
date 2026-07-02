@@ -430,6 +430,13 @@ class ActionApprovalService:
             approval_id=approval_id,
             expected_tenant_id=expected_tenant_id,
         )
+        # Dual-control: mirrors the identical guard in approve_in_transaction.
+        # A proposer cannot deny their own pending action; proposed_by=None
+        # (pre-migration rows) skips the check.
+        if approval.proposed_by is not None and denied_by == approval.proposed_by:
+            raise ActionApprovalSeparationError(
+                "action denier must differ from proposer"
+            )
         enriched = await self._with_resolution_metadata(
             approval,
             expected_tenant_id=expected_tenant_id,
