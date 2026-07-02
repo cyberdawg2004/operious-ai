@@ -38,7 +38,8 @@ _INSERT_APPROVAL_SQL = text(
         resolved_at,
         resolved_by,
         resolution_note,
-        metadata
+        metadata,
+        proposed_by
     )
     VALUES (
         CAST(:approval_id AS uuid),
@@ -54,7 +55,8 @@ _INSERT_APPROVAL_SQL = text(
         :resolved_at,
         :resolved_by,
         :resolution_note,
-        CAST(:metadata AS jsonb)
+        CAST(:metadata AS jsonb),
+        :proposed_by
     )
     ON CONFLICT (idempotency_key) DO NOTHING
     """
@@ -76,7 +78,8 @@ _SELECT_APPROVAL_SQL = text(
         resolved_at,
         resolved_by,
         resolution_note,
-        metadata
+        metadata,
+        proposed_by
     FROM public.action_approval_records
     WHERE approval_id = CAST(:approval_id AS uuid)
       AND tenant_id = :expected_tenant_id
@@ -99,7 +102,8 @@ _SELECT_BY_IDEMPOTENCY_SQL = text(
         resolved_at,
         resolved_by,
         resolution_note,
-        metadata
+        metadata,
+        proposed_by
     FROM public.action_approval_records
     WHERE idempotency_key = CAST(:idempotency_key AS uuid)
       AND tenant_id = :expected_tenant_id
@@ -122,7 +126,8 @@ _LIST_APPROVALS_SQL = text(
         resolved_at,
         resolved_by,
         resolution_note,
-        metadata
+        metadata,
+        proposed_by
     FROM public.action_approval_records
     WHERE tenant_id = :expected_tenant_id
     ORDER BY requested_at DESC, approval_id DESC
@@ -146,7 +151,8 @@ _LIST_APPROVALS_BY_STATUS_SQL = text(
         resolved_at,
         resolved_by,
         resolution_note,
-        metadata
+        metadata,
+        proposed_by
     FROM public.action_approval_records
     WHERE tenant_id = :expected_tenant_id
       AND status = :status
@@ -180,7 +186,8 @@ _RESOLVE_APPROVAL_SQL = text(
         resolved_at,
         resolved_by,
         resolution_note,
-        metadata
+        metadata,
+        proposed_by
     """
 )
 
@@ -211,6 +218,10 @@ class ActionApprovalRecord:
     resolved_by: str | None = None
     resolution_note: str | None = None
     metadata: MetadataMap = field(default_factory=_empty_json_object)
+    # First-class proposer identity for dual-control enforcement.
+    # Set to compute_agent_execution_actor() at creation time.
+    # approve_in_transaction() rejects approved_by == proposed_by.
+    proposed_by: str | None = None
 
 
 class ActionApprovalRepository(Protocol):
@@ -478,6 +489,7 @@ def build_pending_action_approval(
     payload_json: MetadataMap,
     governance_decision_id: str | None,
     metadata: MetadataMap | None = None,
+    proposed_by: str | None = None,
 ) -> ActionApprovalRecord:
     approval_id = uuid.uuid5(
         _ACTION_APPROVAL_NAMESPACE,
@@ -493,6 +505,7 @@ def build_pending_action_approval(
         payload_json=dict(payload_json),
         governance_decision_id=governance_decision_id,
         metadata=dict(metadata or {}),
+        proposed_by=proposed_by,
     )
 
 
@@ -512,6 +525,7 @@ def _record_params(record: ActionApprovalRecord) -> dict[str, object]:
         "resolved_by": record.resolved_by,
         "resolution_note": record.resolution_note,
         "metadata": json.dumps(dict(record.metadata), sort_keys=True),
+        "proposed_by": record.proposed_by,
     }
 
 
@@ -543,6 +557,9 @@ def _row_to_record(row: RowMapping) -> ActionApprovalRecord:
             else None
         ),
         metadata=_json_object(row["metadata"]),
+        proposed_by=(
+            str(row["proposed_by"]) if row["proposed_by"] is not None else None
+        ),
     )
 
 

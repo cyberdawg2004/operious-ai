@@ -107,6 +107,10 @@ class ActionApprovalRuntimeError(ActionApprovalError):
     """Raised when approval processing cannot be completed."""
 
 
+class ActionApprovalSeparationError(ActionApprovalError):
+    """Raised when the approver and proposer are the same principal."""
+
+
 ActionOrchestrationRuntimeFactory = Callable[
     [str],
     Awaitable[ActionOrchestrationRuntime],
@@ -288,6 +292,15 @@ class ActionApprovalService:
             approval_id=approval_id,
             expected_tenant_id=expected_tenant_id,
         )
+        # Dual-control: the principal approving must differ from the agent/actor
+        # that proposed the action. Mirrors the identical guard on the config-
+        # change path (tenant_config_change_request_service.py). proposed_by is
+        # None for records created before this column existed; skip the check in
+        # that case so old records remain approvable during migration rollout.
+        if approval.proposed_by is not None and approved_by == approval.proposed_by:
+            raise ActionApprovalSeparationError(
+                "action approver must differ from proposer"
+            )
         source_decision = await self._source_decision(
             approval,
             expected_tenant_id=expected_tenant_id,

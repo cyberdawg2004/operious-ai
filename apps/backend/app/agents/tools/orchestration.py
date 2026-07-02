@@ -347,6 +347,7 @@ class ActionOrchestrationRuntime:
                             "target_resource": target_resource,
                             AGENT_ACTION_ACTOR_KEY: actor,
                         },
+                        proposed_by=actor,
                     ),
                     expected_tenant_id=expected_tenant_id,
                 )
@@ -634,16 +635,6 @@ def _text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
-
-
-def _amount_to_cents(amount_text: str | None) -> int | None:
-    if amount_text is None:
-        return None
-    cleaned = amount_text.strip().lstrip("$").replace(",", "")
-    try:
-        return round(float(cleaned) * 100)
-    except ValueError:
-        return None
 
 
 def _required_proposal_reference(value: str | None, field_name: str) -> str:

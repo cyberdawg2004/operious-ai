@@ -2191,6 +2191,7 @@ async def _bind_action_approval(
                     "target_resource": target_resource,
                     "dispatch_id": work_item.dispatch_id,
                 },
+                proposed_by="agent:diagnostic-worker",
             ),
             expected_tenant_id=work_item.tenant_id,
         )
@@ -4084,8 +4085,12 @@ def _cognition_audit_encryptor() -> TenantCredentialEncryptor:
     key = get_settings().TENANT_CREDENTIAL_MASTER_KEY
     if key:
         return TenantCredentialEncryptor(platform_master_key=key)
-    if _active_pytest_case():
-        return TenantCredentialEncryptor(platform_master_key=b"0" * 32)
+    # No null-key fallback: a missing master key is always a hard failure.
+    # Tests that exercise this path must set TENANT_CREDENTIAL_MASTER_KEY
+    # via monkeypatch.setenv or the test environment (all existing tests
+    # that reach this path already do so). The old pytest-detection fallback
+    # was removed because PYTEST_CURRENT_TEST could fire in a contaminated
+    # prod environment and would silently encrypt with a known-zero key.
     raise RuntimeError("TENANT_CREDENTIAL_MASTER_KEY must be configured")
 
 

@@ -23,6 +23,7 @@ from app.services.action_approval_service import (
     ActionApprovalLifecycleError,
     ActionApprovalNotFoundError,
     ActionApprovalRuntimeError,
+    ActionApprovalSeparationError,
     ActionApprovalService,
 )
 from app.services.case_approval_service import CaseApprovalRuntimeError
@@ -109,6 +110,11 @@ async def approve_action_approval(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "action_approval_not_found"},
+        ) from exc
+    except ActionApprovalSeparationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "action_approval_separation_violation"},
         ) from exc
     except ActionApprovalLifecycleError as exc:
         raise HTTPException(
