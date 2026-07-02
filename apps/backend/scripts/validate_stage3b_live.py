@@ -168,13 +168,26 @@ class Stage3bValidator:
             if approve_response.status_code == 200:
                 self.log(f"✓ Change request {cr_id} approved and applied")
                 return True
-            else:
+            elif approve_response.status_code == 403:
                 self.log(
-                    f"✗ Manual approval required. Run: "
-                    f"POST /tenant/config/change-requests/{cr_id}/approve",
+                    f"✗ Dual-control enforced: proposer cannot approve their own change",
                     "WARN"
                 )
-                input("Press Enter after approving the change request...")
+                self.log(f"   Change request ID: {cr_id}", "WARN")
+                self.log(f"   Options:", "WARN")
+                self.log(f"     1. Have a second authorized user approve this change request", "WARN")
+                self.log(f"     2. Press Ctrl+C to exit, create connector another way, re-run script", "WARN")
+                self.log(f"     3. Press Enter to skip connector creation and continue validation", "WARN")
+                input("\nPress Enter to continue (will skip this connector)...")
+                self.log("⚠ Skipping connector creation - continuing with existing configs", "WARN")
+                return False  # Indicate failure, script will abort step 1
+            else:
+                self.log(
+                    f"✗ Approval failed ({approve_response.status_code}): {approve_response.text}",
+                    "ERROR"
+                )
+                self.log(f"   Change request ID: {cr_id}", "ERROR")
+                input("Press Enter after manually approving the change request...")
                 return True
 
         return True
