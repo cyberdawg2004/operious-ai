@@ -122,10 +122,12 @@ class Stage3bValidator:
         endpoint_host = endpoint_template.split("/")[2]  # Extract host from URL
 
         # REAL PAYLOAD SHAPE: change_type + payload (not "material" or "reason")
+        # connector_type must be a valid TenantChannelType enum value
+        # Use "oms" for outbound test connectors (httpbin, webhook.site)
         change_request = {
             "change_type": "connector",
             "payload": {
-                "connector_type": "generic",
+                "connector_type": "oms",  # Must be valid TenantChannelType (not "generic")
                 "tool_name": tool_name,
                 "http_method": http_method,
                 "endpoint_template": endpoint_template,
