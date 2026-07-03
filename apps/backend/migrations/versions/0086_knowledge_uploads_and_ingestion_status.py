@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0086_knowledge_uploads_and_ingestion_status"
 down_revision: str = "0085_outbound_send_outbox_reconciliation"
@@ -42,7 +43,7 @@ def upgrade() -> None:
         "tenant_knowledge_uploads",
         sa.Column(
             "upload_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             primary_key=True,
             server_default=sa.text("gen_random_uuid()"),
         ),
@@ -54,7 +55,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "document_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
+            postgresql.UUID(as_uuid=True),
             sa.ForeignKey(
                 "tenant_knowledge_documents.document_id", ondelete="SET NULL"
             ),
