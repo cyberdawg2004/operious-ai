@@ -690,6 +690,19 @@ def create_app(
     # per-tenant (innermost, registered first) and per-IP (registered after
     # trusted-ingress, so it sits OUTSIDE authority) layers.
     _rate_limiter = FixedWindowLimiter(cast(Any, redis_client))
+    if not settings.rate_limit_enabled_effective:
+        logger.warning(
+            "rate_limit_disabled",
+            extra={
+                "RATE_LIMIT_ENABLED": settings.RATE_LIMIT_ENABLED,
+                "environment": settings.ENVIRONMENT,
+                "detail": (
+                    "Per-tenant and per-IP rate limiting is DISABLED. "
+                    "Set RATE_LIMIT_ENABLED=true (or leave unset in a production "
+                    "environment) to restore the inbound request throttle."
+                ),
+            },
+        )
     logger.info("middleware_tenant_rate_limit_register_begin")
     app.add_middleware(
         TenantRateLimitMiddleware,
