@@ -7,9 +7,16 @@ import os
 from datetime import datetime
 from typing import Any
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field, field_validator
 
 _DEFAULT_MAX_BATCH_SIZE = 500
+
+# Per-field ceilings mirror TicketIngressRequest — same rationale.
+_MAX_BODY_BYTES = 100_000   # 100 KB per message body
+_MAX_ID_BYTES = 1_024       # external IDs
+_MAX_SUBJECT_BYTES = 2_048  # email subjects can be long but not unbounded
 
 
 def max_batch_size() -> int:
@@ -26,11 +33,11 @@ def max_batch_size() -> int:
 
 
 class BatchIngestItem(BaseModel):
-    channel_type: str
-    source_id: str
-    external_message_id: str
-    subject: str | None = None
-    body: str
+    channel_type: Annotated[str, Field(max_length=_MAX_ID_BYTES)]
+    source_id: Annotated[str, Field(max_length=_MAX_ID_BYTES)]
+    external_message_id: Annotated[str, Field(max_length=_MAX_ID_BYTES)]
+    subject: Annotated[str, Field(max_length=_MAX_SUBJECT_BYTES)] | None = None
+    body: Annotated[str, Field(max_length=_MAX_BODY_BYTES)]
     received_at: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
     tenant_id: str | None = None
