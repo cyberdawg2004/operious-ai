@@ -423,6 +423,50 @@ class ToolInvoker:
                         governance_envelope=None,
                         governance_decision_id=governance_decision_id,
                     )
+                # S-05 (C-2): verify the persisted ALLOW is BOUND to this
+                # exact request.  A seeded decision stored for a different
+                # tool / tenant / actor / payload must not be replayed here.
+                # Mirrors the identical check in the pre_approved path.
+                seeded_actor = compute_agent_execution_actor(context)
+                expected_seeded_binding = compute_agent_action_binding(
+                    tenant_id=tenant_id,
+                    tool_name=request.tool_name,
+                    actor=seeded_actor,
+                    payload=request.payload,
+                )
+                persisted_seeded_binding = persisted_replay.metadata.get(
+                    AGENT_ACTION_BINDING_KEY
+                )
+                if not isinstance(
+                    persisted_seeded_binding, str
+                ) or not hmac.compare_digest(
+                    persisted_seeded_binding, expected_seeded_binding
+                ):
+                    return self._denied_envelope(
+                        invocation_id=invocation_id,
+                        request=request,
+                        context=context,
+                        started_at=started_at,
+                        loop_start=loop_start,
+                        error=None,
+                        reason="seeded_decision_binding_mismatch",
+                        governance_envelope=None,
+                        governance_decision_id=governance_decision_id,
+                    )
+                # C-2: reject stale seeded decisions — same TTL as the
+                # pre_approved path.
+                if self._pre_approved_decision_expired(persisted_replay.decided_at):
+                    return self._denied_envelope(
+                        invocation_id=invocation_id,
+                        request=request,
+                        context=context,
+                        started_at=started_at,
+                        loop_start=loop_start,
+                        error=None,
+                        reason="seeded_decision_expired",
+                        governance_envelope=None,
+                        governance_decision_id=governance_decision_id,
+                    )
                 payload_hash = compute_agent_action_payload_hash(request.payload)
                 provider_idempotency_key = str(
                     derive_auto_allow_provider_idempotency_key(
