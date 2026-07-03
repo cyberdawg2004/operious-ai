@@ -1927,6 +1927,18 @@ def _webhook_signature_header_present(
     channel_type: TenantChannelType,
     headers: Mapping[str, str],
 ) -> bool:
+    """Return True only when the request carries a known signature header.
+
+    SECURITY INVARIANT: this function is the gate in process_channel_webhook
+    (line ~489) that rejects ANY webhook lacking a recognisable signature
+    header before any tenant DB work is performed. A new channel type MUST
+    be added to this function — returning False for unknown channel types is
+    intentional fail-closed behaviour (missing_signature rejection), not a
+    default pass.
+
+    When adding a new TenantChannelType: add a branch here AND add a
+    corresponding test in test_webhook_signature_invariant.py.
+    """
     if channel_type is TenantChannelType.EMAIL:
         return _any_header(
             headers,
@@ -1952,6 +1964,7 @@ def _webhook_signature_header_present(
         )
     if channel_type is TenantChannelType.LARK:
         return _header(headers, "x-lark-signature") is not None
+    # Unknown channel type → fail closed (missing_signature rejection upstream)
     return False
 
 
