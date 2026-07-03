@@ -72,6 +72,10 @@ from app.agents.tools.grants import (
     compute_agent_action_payload_hash,
     compute_agent_execution_actor,
 )
+from app.agents.tools.operation_metadata import (
+    COMMITMENT_KIND_METADATA_KEY as _COMMITMENT_KIND_KEY,
+    CommitmentKind as _CommitmentKind,
+)
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tracing import ToolInvocationTrace
 from app.agents.identity import derive_tool_invocation_id
@@ -638,6 +642,36 @@ class ToolInvoker:
 
         connector_invocations = self._connector_invocations
         reserved_connector_invocation: ConnectorInvocationRecord | None = None
+
+        # Finding 12 / C-2 edge: the connector invocation ledger is the
+        # one-shot double-fire guard for auto-allow (seeded) and fresh-eval
+        # governance paths.  A MONEY/GOODS action MUST NOT execute without
+        # the ledger — that would allow double-execution within the TTL
+        # window (replay or concurrent worker retry).  NONE/RECORD_UPDATE
+        # actions are informational and may proceed without the ledger.
+        if requires_action_governance and connector_invocations is None:
+            raw_kind = effective_request.metadata.get(_COMMITMENT_KIND_KEY)
+            if raw_kind in (
+                _CommitmentKind.MONEY.value,
+                _CommitmentKind.GOODS.value,
+            ):
+                return self._failed_envelope(
+                    invocation_id=invocation_id,
+                    request=effective_request,
+                    context=context,
+                    started_at=started_at,
+                    loop_start=loop_start,
+                    error=ToolConfigurationError(
+                        "connector_invocation_repository is required for "
+                        f"{raw_kind!r} actions; refusing to execute without "
+                        "the idempotency ledger"
+                    ),
+                    reason="money_goods_action_requires_ledger",
+                    governance_envelope=governance_envelope,
+                    governance_decision_id=governance_decision_id,
+                    provider_idempotency_key=provider_idempotency_key,
+                )
+
         if requires_action_governance and connector_invocations is not None:
             if context.tenant_id is None:
                 return self._failed_envelope(
