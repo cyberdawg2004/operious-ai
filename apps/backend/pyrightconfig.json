@@ -72,6 +72,8 @@
   "venvPath": ".",
   "venv": "venv",
 
+  "stubPath": "typings",
+
   "pythonVersion": "3.12",
   "pythonPlatform": "Linux",
 
@@ -80,6 +82,7 @@
   "useLibraryCodeForTypes": true,
   "reportMissingImports": "error",
   "reportMissingTypeStubs": "none",
+  "reportMissingModuleSource": "none",
   "reportPrivateImportUsage": "warning",
 
   "reportUnknownMemberType": "warning",
