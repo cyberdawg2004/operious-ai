@@ -192,6 +192,19 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "false (verified bearer only) in production."
         )
 
+    # ── CORS origins must be explicitly configured in production ─────────
+    # Empty CORS_ALLOW_ORIGINS triggers the hardcoded fallback list in
+    # main.py, which historically included http://localhost:3000.  Even
+    # after localhost is removed from the fallback, an unconfigured
+    # production deployment silently adopts whatever the hardcoded list
+    # contains.  Forcing explicit configuration prevents that drift.
+    if not (settings.CORS_ALLOW_ORIGINS or "").strip():
+        problems.append(
+            "CORS_ALLOW_ORIGINS is empty -> the CORS allowlist falls back to a "
+            "hardcoded list that may include unintended origins. "
+            "Set CORS_ALLOW_ORIGINS to the explicit production origin(s)."
+        )
+
     # ── Authentication must be enabled in production (S-C1) ─────────────
     # AUTH_ENABLED=false silently disables all bearer-token verification.
     # Every security control that depends on principal identity

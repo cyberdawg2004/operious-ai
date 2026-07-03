@@ -40,6 +40,8 @@ def _production(**overrides: object) -> Settings:
         # Auth must be enabled with a recognised provider in production.
         "AUTH_ENABLED": True,
         "AUTH_PROVIDER": "auth0",
+        # CORS origins must be explicitly configured — not the hardcoded fallback.
+        "CORS_ALLOW_ORIGINS": "https://app.operious.com",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -203,3 +205,20 @@ def test_auth_enabled_without_provider_blocks_production_boot() -> None:
 def test_auth_enabled_with_provider_passes_production_gate() -> None:
     """AUTH_ENABLED=true + non-empty AUTH_PROVIDER must not trip the auth gate."""
     validate_production_config(_production(AUTH_ENABLED=True, AUTH_PROVIDER="auth0"))
+
+
+# ── H-2: CORS production gate ─────────────────────────────────────────────────
+
+
+def test_empty_cors_origins_blocks_production_boot() -> None:
+    """CORS_ALLOW_ORIGINS empty → production gate must fail (H-2)."""
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(_production(CORS_ALLOW_ORIGINS=""))
+    assert any("CORS_ALLOW_ORIGINS" in p for p in exc.value.problems)
+
+
+def test_explicit_cors_origins_passes_production_gate() -> None:
+    """Explicit CORS_ALLOW_ORIGINS must not trip the CORS gate."""
+    validate_production_config(
+        _production(CORS_ALLOW_ORIGINS="https://app.operious.com")
+    )

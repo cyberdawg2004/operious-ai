@@ -108,7 +108,6 @@ ALLOWED_ORIGINS = [
     "https://app.operious.com",
     "https://www.operious.com",
     "https://operious.com",
-    "http://localhost:3000",
     "https://operious-ai-command-center.vercel.app",
 ]
 
