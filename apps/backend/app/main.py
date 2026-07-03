@@ -690,6 +690,27 @@ def create_app(
     # per-tenant (innermost, registered first) and per-IP (registered after
     # trusted-ingress, so it sits OUTSIDE authority) layers.
     _rate_limiter = FixedWindowLimiter(cast(Any, redis_client))
+    if not settings.AUTH_ENABLED:
+        logger.warning(
+            "auth_disabled",
+            extra={
+                "AUTH_ENABLED": settings.AUTH_ENABLED,
+                "environment": settings.ENVIRONMENT,
+                "detail": (
+                    "Authentication is DISABLED. Bearer-token verification is "
+                    "off; all endpoints are reachable without a credential. "
+                    "Set AUTH_ENABLED=true and AUTH_PROVIDER in production."
+                ),
+            },
+        )
+    else:
+        logger.info(
+            "auth_enabled",
+            extra={
+                "AUTH_PROVIDER": settings.AUTH_PROVIDER,
+                "environment": settings.ENVIRONMENT,
+            },
+        )
     if not settings.rate_limit_enabled_effective:
         logger.warning(
             "rate_limit_disabled",

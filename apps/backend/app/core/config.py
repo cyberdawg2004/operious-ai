@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     keys, feature flags, etc.). Everything must be typed and documented.
     """
 
-    AUTH_ENABLED: bool = False
+    AUTH_ENABLED: bool = True
     AUTH_PROVIDER: str | None = None
 
     # ─── Ingress trust posture (S-01) ────────────────────────────────

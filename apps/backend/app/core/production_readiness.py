@@ -192,6 +192,25 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "false (verified bearer only) in production."
         )
 
+    # ── Authentication must be enabled in production (S-C1) ─────────────
+    # AUTH_ENABLED=false silently disables all bearer-token verification.
+    # Every security control that depends on principal identity
+    # (tenant isolation, dual-control, capability gating) is predicated on
+    # auth being on. A missing env var must not produce an open API.
+    if not settings.AUTH_ENABLED:
+        problems.append(
+            "AUTH_ENABLED=false -> bearer-token verification is disabled; "
+            "every authenticated endpoint is reachable without a credential. "
+            "Set AUTH_ENABLED=true and a recognised AUTH_PROVIDER in production."
+        )
+    elif not (settings.AUTH_PROVIDER or "").strip():
+        problems.append(
+            "AUTH_ENABLED=true but AUTH_PROVIDER is empty -> no authentication "
+            "provider is configured; all Authorization-bearing requests will be "
+            "rejected with 401 verification_unavailable. "
+            "Set AUTH_PROVIDER to a recognised value (e.g. 'auth0')."
+        )
+
     return tuple(problems)
 
 

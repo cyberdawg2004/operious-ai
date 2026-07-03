@@ -37,6 +37,9 @@ def _production(**overrides: object) -> Settings:
         "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/operious-kms.json",
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
         "PUBLIC_BASE_URL": "https://api.operious.com",
+        # Auth must be enabled with a recognised provider in production.
+        "AUTH_ENABLED": True,
+        "AUTH_PROVIDER": "auth0",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -178,3 +181,25 @@ def test_data_protection_kms_gcp_requires_key_resource() -> None:
         or "OPERIOUS_KMS_KEY_RESOURCE" in problem
         for problem in exc.value.problems
     )
+
+
+# ── C-1: AUTH_ENABLED production gate ────────────────────────────────────────
+
+
+def test_auth_disabled_blocks_production_boot() -> None:
+    """AUTH_ENABLED=false must be a hard boot failure in production (C-1)."""
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(_production(AUTH_ENABLED=False))
+    assert any("AUTH_ENABLED" in p for p in exc.value.problems)
+
+
+def test_auth_enabled_without_provider_blocks_production_boot() -> None:
+    """AUTH_ENABLED=true with no provider must fail — bearer requests would be rejected."""
+    with pytest.raises(ProductionReadinessError) as exc:
+        validate_production_config(_production(AUTH_PROVIDER=None))
+    assert any("AUTH_PROVIDER" in p for p in exc.value.problems)
+
+
+def test_auth_enabled_with_provider_passes_production_gate() -> None:
+    """AUTH_ENABLED=true + non-empty AUTH_PROVIDER must not trip the auth gate."""
+    validate_production_config(_production(AUTH_ENABLED=True, AUTH_PROVIDER="auth0"))
