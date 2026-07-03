@@ -4127,10 +4127,6 @@ def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
 
 
-def _active_pytest_case() -> bool:
-    return "PYTEST_CURRENT_TEST" in os.environ
-
-
 def _timeline_idempotency_key(
     *,
     execution_id: str,
