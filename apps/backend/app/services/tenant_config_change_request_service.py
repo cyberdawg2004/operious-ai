@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from ipaddress import ip_address
+from enum import StrEnum
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
@@ -49,6 +50,7 @@ from app.tenant.change_requests import (
     TenantConfigChangeRequestSeparationError,
     TenantConfigChangeRequestStatus,
     TenantConfigChangeType,
+    TenantConfigChangeRequestValidationError,
     derive_tenant_config_change_request_id,
 )
 from app.tenant.chronology import canonical_sha256
@@ -1015,6 +1017,12 @@ async def _validate_payload(
     if change_type is TenantConfigChangeType.KNOWLEDGE:
         if operation == "update":
             required = ("document_id",)
+            _validate_uuid_field(payload, "document_id")
+            _validate_enum_field(
+                payload,
+                "review_status",
+                TenantKnowledgeReviewStatus,
+            )
         elif payload.get("document_type") == TenantKnowledgeDocumentType.TEMPLATE.value:
             required = (
                 "title",
@@ -1026,12 +1034,27 @@ async def _validate_payload(
             _validate_template_placeholders_payload(payload)
         else:
             required = ("title", "content", "document_type")
+        _validate_enum_field(
+            payload,
+            "document_type",
+            TenantKnowledgeDocumentType,
+            required=operation != "update",
+        )
+        _validate_enum_field(payload, "status", TenantKnowledgeDocumentStatus)
     elif change_type is TenantConfigChangeType.POLICY:
         required = (
             ("policy_type", "effective_from")
             if operation != "update"
             else ("policy_id",)
         )
+        _validate_enum_field(payload, "status", TenantGovernancePolicyStatus)
+        _validate_datetime_field(
+            payload,
+            "effective_from",
+            required=operation != "update",
+        )
+        if operation == "update":
+            _validate_uuid_field(payload, "policy_id")
         _validate_action_policy_payload(payload)
         await _validate_resolution_autonomy_policy_payload(
             payload,
@@ -1051,8 +1074,10 @@ async def _validate_payload(
             "circuit_window_minutes",
             "circuit_cooldown_minutes",
         )
+        _validate_enum_field(payload, "status", TenantExecutionGovernanceStatus)
     elif change_type is TenantConfigChangeType.TOPOLOGY:
         required = ("topology_name", "topology")
+        _validate_enum_field(payload, "status", TenantTopologyStatus)
     elif change_type is TenantConfigChangeType.CONNECTOR:
         if _operation(payload, default="configure") != "configure":
             raise TenantConfigChangeRequestLifecycleError(
@@ -1081,6 +1106,20 @@ async def _validate_payload(
             if operation in {"update", "verify"}
             else ("channel_type", "routing_address", "credentials", "webhook_secret")
         )
+        _validate_enum_field(
+            payload,
+            "status",
+            TenantChannelStatus,
+        )
+        if operation in {"update", "verify"}:
+            _validate_uuid_field(payload, "config_id")
+        else:
+            _validate_enum_field(
+                payload,
+                "channel_type",
+                TenantChannelType,
+                required=True,
+            )
     missing = [field for field in required if payload.get(field) is None]
     if missing:
         raise TenantConfigChangeRequestLifecycleError(
@@ -1131,8 +1170,8 @@ async def _validate_resolution_autonomy_policy_payload(
         ) from exc
 
     reply_auto_send = parameters_dict.get("reply_auto_send")
-    category_allowlist = (
-        reply_auto_send.get("category_allowlist")
+    category_allowlist: object = (
+        cast(Mapping[str, object], reply_auto_send).get("category_allowlist")
         if isinstance(reply_auto_send, Mapping)
         else None
     )
@@ -1436,6 +1475,59 @@ def _datetime(payload: Mapping[str, Any], key: str) -> datetime:
     if value is None:
         raise TenantConfigChangeRequestLifecycleError(f"{key} is required")
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _validate_enum_field(
+    payload: Mapping[str, Any],
+    key: str,
+    enum_type: type[StrEnum],
+    *,
+    required: bool = False,
+) -> None:
+    value = payload.get(key)
+    if value is None:
+        if required:
+            raise TenantConfigChangeRequestValidationError(f"{key} is required")
+        return
+    try:
+        enum_type(str(value))
+    except ValueError as exc:
+        allowed = ", ".join(repr(member.value) for member in enum_type)
+        raise TenantConfigChangeRequestValidationError(
+            f"{key} must be one of [{allowed}]; got {value!r}"
+        ) from exc
+
+
+def _validate_datetime_field(
+    payload: Mapping[str, Any],
+    key: str,
+    *,
+    required: bool = False,
+) -> None:
+    value = payload.get(key)
+    if value is None:
+        if required:
+            raise TenantConfigChangeRequestValidationError(f"{key} is required")
+        return
+    try:
+        if not isinstance(value, datetime):
+            datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise TenantConfigChangeRequestValidationError(
+            f"{key} must be an ISO 8601 datetime; got {value!r}"
+        ) from exc
+
+
+def _validate_uuid_field(payload: Mapping[str, Any], key: str) -> None:
+    value = payload.get(key)
+    if value is None:
+        return
+    try:
+        uuid.UUID(str(value))
+    except ValueError as exc:
+        raise TenantConfigChangeRequestValidationError(
+            f"{key} must be a valid UUID; got {value!r}"
+        ) from exc
 
 
 def _success_status_codes(payload: Mapping[str, Any]) -> tuple[int, ...]:

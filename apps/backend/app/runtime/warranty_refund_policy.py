@@ -41,6 +41,10 @@ def _empty_availability_check_map() -> dict[str, bool]:
     return {}
 
 
+def _empty_window_days_map() -> dict[str, int]:
+    return {}
+
+
 class WarrantyRefundPolicyParseError(ValueError):
     """Raised when a tenant's warranty_refund_rules policy JSON is malformed."""
 
@@ -53,7 +57,9 @@ class WarrantyRefundPolicy:
     authorized_resellers: frozenset[str]
     required_evidence_by_claim_type: Mapping[str, tuple[str, ...]]
     remedy_sequence_by_claim_type: Mapping[str, tuple[str, ...]]
-    window_days_by_claim_type: Mapping[str, int] = field(default_factory=dict)
+    window_days_by_claim_type: Mapping[str, int] = field(
+        default_factory=_empty_window_days_map
+    )
     remedy_requires_availability_check: Mapping[str, bool] = field(
         default_factory=_empty_availability_check_map
     )

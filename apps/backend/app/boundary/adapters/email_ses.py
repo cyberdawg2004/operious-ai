@@ -131,7 +131,7 @@ class S3SesRawEmailFetcher:
 
     def _get_object(self, bucket_name: str, object_key: str) -> bytes:
         response = self._client.get_object(Bucket=bucket_name, Key=object_key)
-        return cast(bytes, response["Body"].read())
+        return response["Body"].read()
 
 
 @dataclass(frozen=True, slots=True)
