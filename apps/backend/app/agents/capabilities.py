@@ -80,15 +80,20 @@ class CapabilitySet:
         return frozenset(n for n in names if n not in declared)
 
 
+_DEFAULT_MAX_TOOL_INVOCATIONS = 50
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionConstraints:
     """Operational constraints applied per execution.
 
     Attributes:
         max_tool_invocations: Hard cap on tool calls within this
-                              execution. ``0`` means unlimited (the
-                              substrate default — production
-                              deployments SHOULD set a positive cap).
+                              execution.  Defaults to
+                              ``_DEFAULT_MAX_TOOL_INVOCATIONS`` (50) so
+                              that an agent without explicit constraints
+                              cannot loop unboundedly.  Pass ``0`` only
+                              if you explicitly need no cap.
         allowed_tools:        Whitelist of tool names; empty means
                               "any tool the capabilities permit".
                               Tool calls outside this list produce a
@@ -102,7 +107,7 @@ class ExecutionConstraints:
         metadata:             Free-form operational metadata.
     """
 
-    max_tool_invocations: int = 0
+    max_tool_invocations: int = _DEFAULT_MAX_TOOL_INVOCATIONS
     allowed_tools: tuple[str, ...] = ()
     timeout_ms: int | None = None
     metadata: MetadataMap = field(default_factory=_empty_json_object)
@@ -122,4 +127,5 @@ __all__ = [
     "AgentCapability",
     "CapabilitySet",
     "ExecutionConstraints",
+    "_DEFAULT_MAX_TOOL_INVOCATIONS",
 ]

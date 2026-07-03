@@ -402,6 +402,33 @@ async def test_tenant_id_rides_typed_trace_field_not_metadata() -> None:
     )
 
 
+# ─── H-3: max_tool_invocations default cap ────────────────────────────────────
+
+
+def test_execution_constraints_default_has_finite_cap() -> None:
+    """ExecutionConstraints() must produce a positive max_tool_invocations (H-3).
+
+    Before this fix the default was 0 (unlimited), allowing adversarially
+    prompted agents to loop unboundedly.  The new default is
+    _DEFAULT_MAX_TOOL_INVOCATIONS (50).
+    """
+    from app.agents.capabilities import ExecutionConstraints, _DEFAULT_MAX_TOOL_INVOCATIONS
+
+    constraints = ExecutionConstraints()
+    assert constraints.max_tool_invocations > 0, (
+        "default ExecutionConstraints must have a finite cap, not 0 (unlimited)"
+    )
+    assert constraints.max_tool_invocations == _DEFAULT_MAX_TOOL_INVOCATIONS
+
+
+def test_explicit_zero_cap_is_still_supported() -> None:
+    """Callers that genuinely need no cap can still pass max_tool_invocations=0."""
+    from app.agents.capabilities import ExecutionConstraints
+
+    constraints = ExecutionConstraints(max_tool_invocations=0)
+    assert constraints.max_tool_invocations == 0
+
+
 @pytest.mark.asyncio
 async def test_tenant_id_none_when_not_supplied() -> None:
     rt = _runtime()
