@@ -345,8 +345,11 @@ class ActionApprovalService:
             },
         )
         if resolved is None:
-            raise ActionApprovalNotFoundError(
-                f"unknown action approval: {approval_id}"
+            # resolve_approval returns None when the row no longer has
+            # status='pending' — a concurrent approve/deny won the race.
+            raise ActionApprovalLifecycleError(
+                "action approval was already resolved by a concurrent request; "
+                "only one resolution is accepted"
             )
         await self._complete_bound_case_if_any(resolved)
         return resolved
@@ -454,8 +457,9 @@ class ActionApprovalService:
             },
         )
         if resolved is None:
-            raise ActionApprovalNotFoundError(
-                f"unknown action approval: {approval_id}"
+            raise ActionApprovalLifecycleError(
+                "action approval was already resolved by a concurrent request; "
+                "only one resolution is accepted"
             )
         await self._append_denied_event(
             approval=enriched,
@@ -489,7 +493,7 @@ class ActionApprovalService:
         approval_id: str,
         expected_tenant_id: str,
     ) -> ActionApprovalRecord:
-        record = await self._approvals.get_approval(
+        record = await self._approvals.get_approval_for_update(
             approval_id,
             expected_tenant_id=expected_tenant_id,
         )

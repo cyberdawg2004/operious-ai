@@ -27,6 +27,7 @@ from app.agents.tools.approvals import (
     build_pending_action_approval,
 )
 from app.services.action_approval_service import (
+    ActionApprovalLifecycleError,
     ActionApprovalSeparationError,
     ActionApprovalService,
 )
@@ -292,3 +293,92 @@ async def test_service_deny_in_transaction_rejects_self_denial() -> None:
             tenant_id=_TENANT,
             expected_tenant_id=_TENANT,
         )
+
+
+# ---------------------------------------------------------------------------
+# C-3: AND status='pending' guard prevents double-resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_returns_none_when_already_resolved() -> None:
+    """InMemory resolve_approval returns None if status != 'pending' (C-3).
+
+    The AND status='pending' guard in _RESOLVE_APPROVAL_SQL (Postgres) and
+    the status check in InMemoryActionApprovalRepository.resolve_approval
+    ensure that a concurrent second call cannot overwrite a resolved record.
+    """
+    repo = InMemoryActionApprovalRepository()
+    approval = _make_approval(proposed_by=_AGENT_ACTOR, idempotency_seed="c3-double")
+    await repo.create_pending_approval(approval, expected_tenant_id=_TENANT)
+
+    now = datetime.now(timezone.utc)
+
+    # First resolution succeeds.
+    resolved = await repo.resolve_approval(
+        approval.approval_id,
+        expected_tenant_id=_TENANT,
+        status="approved",
+        resolved_at=now,
+        resolved_by=_MANAGER_A,
+        resolution_note=None,
+        metadata={},
+    )
+    assert resolved is not None
+    assert resolved.status == "approved"
+
+    # Second resolution on an already-resolved record returns None (lost race).
+    second = await repo.resolve_approval(
+        approval.approval_id,
+        expected_tenant_id=_TENANT,
+        status="denied",
+        resolved_at=now,
+        resolved_by=_MANAGER_B,
+        resolution_note="concurrent",
+        metadata={},
+    )
+    assert second is None, "double-resolve must return None, not overwrite the first"
+
+    # The record retains the first resolution — it was not corrupted.
+    final = await repo.get_approval(approval.approval_id, expected_tenant_id=_TENANT)
+    assert final is not None
+    assert final.status == "approved"
+    assert final.resolved_by == _MANAGER_A
+
+
+@pytest.mark.asyncio
+async def test_resolve_non_pending_approval_returns_none() -> None:
+    """An already-denied record cannot be overwritten by a subsequent approve (C-3)."""
+    repo = InMemoryActionApprovalRepository()
+    approval = _make_approval(proposed_by=_AGENT_ACTOR, idempotency_seed="c3-deny-then-approve")
+    await repo.create_pending_approval(approval, expected_tenant_id=_TENANT)
+
+    now = datetime.now(timezone.utc)
+
+    # Deny first.
+    denied = await repo.resolve_approval(
+        approval.approval_id,
+        expected_tenant_id=_TENANT,
+        status="denied",
+        resolved_at=now,
+        resolved_by=_MANAGER_B,
+        resolution_note="denied",
+        metadata={},
+    )
+    assert denied is not None and denied.status == "denied"
+
+    # Subsequent approve returns None — the status guard blocks it.
+    late_approve = await repo.resolve_approval(
+        approval.approval_id,
+        expected_tenant_id=_TENANT,
+        status="approved",
+        resolved_at=now,
+        resolved_by=_MANAGER_A,
+        resolution_note=None,
+        metadata={},
+    )
+    assert late_approve is None
+
+    # Record still shows denied.
+    final = await repo.get_approval(approval.approval_id, expected_tenant_id=_TENANT)
+    assert final is not None and final.status == "denied"

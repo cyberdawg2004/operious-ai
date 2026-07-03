@@ -86,6 +86,31 @@ _SELECT_APPROVAL_SQL = text(
     """
 )
 
+_SELECT_APPROVAL_FOR_UPDATE_SQL = text(
+    """
+    SELECT
+        approval_id,
+        tenant_id,
+        session_id,
+        execution_id,
+        tool_name,
+        idempotency_key,
+        payload_json,
+        governance_decision_id,
+        status,
+        requested_at,
+        resolved_at,
+        resolved_by,
+        resolution_note,
+        metadata,
+        proposed_by
+    FROM public.action_approval_records
+    WHERE approval_id = CAST(:approval_id AS uuid)
+      AND tenant_id = :expected_tenant_id
+    FOR UPDATE
+    """
+)
+
 _SELECT_BY_IDEMPOTENCY_SQL = text(
     """
     SELECT
@@ -172,6 +197,7 @@ _RESOLVE_APPROVAL_SQL = text(
         metadata = CAST(:metadata AS jsonb)
     WHERE approval_id = CAST(:approval_id AS uuid)
       AND tenant_id = :expected_tenant_id
+      AND status = 'pending'
     RETURNING
         approval_id,
         tenant_id,
@@ -239,6 +265,22 @@ class ActionApprovalRepository(Protocol):
         expected_tenant_id: str,
     ) -> ActionApprovalRecord | None: ...
 
+    async def get_approval_for_update(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> ActionApprovalRecord | None:
+        """SELECT … FOR UPDATE — serialises concurrent resolve attempts.
+
+        Implementations that do not support row-level locking (e.g.
+        InMemoryActionApprovalRepository) fall back to a plain read;
+        the status guard in resolve_approval still prevents double-resolve.
+        """
+        return await self.get_approval(
+            approval_id, expected_tenant_id=expected_tenant_id
+        )
+
     async def get_by_idempotency_key(
         self,
         idempotency_key: str,
@@ -299,6 +341,17 @@ class InMemoryActionApprovalRepository:
             return None
         return record
 
+    async def get_approval_for_update(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> ActionApprovalRecord | None:
+        """In-memory implementation: no row locking, falls back to plain read."""
+        return await self.get_approval(
+            approval_id, expected_tenant_id=expected_tenant_id
+        )
+
     async def get_by_idempotency_key(
         self,
         idempotency_key: str,
@@ -341,6 +394,8 @@ class InMemoryActionApprovalRepository:
     ) -> ActionApprovalRecord | None:
         record = self._by_id.get(approval_id)
         if record is None or record.tenant_id != expected_tenant_id:
+            return None
+        if record.status != "pending":
             return None
         resolved = replace(
             record,
@@ -394,6 +449,25 @@ class PostgresActionApprovalRepository(TenantScopedRepository):
         row = (
             await self.session.execute(
                 _SELECT_APPROVAL_SQL,
+                {
+                    "approval_id": approval_id,
+                    "expected_tenant_id": expected_tenant_id,
+                },
+            )
+        ).mappings().one_or_none()
+        return None if row is None else _row_to_record(row)
+
+    async def get_approval_for_update(
+        self,
+        approval_id: str,
+        *,
+        expected_tenant_id: str,
+    ) -> ActionApprovalRecord | None:
+        """SELECT ... FOR UPDATE — serialises concurrent resolve attempts."""
+        await self._scope(expected_tenant_id)
+        row = (
+            await self.session.execute(
+                _SELECT_APPROVAL_FOR_UPDATE_SQL,
                 {
                     "approval_id": approval_id,
                     "expected_tenant_id": expected_tenant_id,
