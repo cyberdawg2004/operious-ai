@@ -64,13 +64,15 @@ async def build_tenant_action_tool_registry(
     work_order_repository: WorkOrderRepositoryProtocol | None = None,
     ssl_context: ssl.SSLContext | None = None,
     ssrf_validator: SSRFValidator | None = None,
-    allow_stub_actions: bool = True,
+    allow_stub_actions: bool = False,
 ) -> ToolRegistry:
     """Build one action registry for a tenant's configured connectors.
 
-    ``allow_stub_actions`` defaults to ``True`` for backward compatibility; the
-    production caller passes ``settings.allow_stub_actions_effective`` so an
-    unconfigured action fails closed in production instead of faking success.
+    ``allow_stub_actions`` defaults to ``False`` (fail-closed).  Non-production
+    callers that want stub behaviour must pass ``allow_stub_actions=True``
+    explicitly.  Production callers already pass
+    ``settings.allow_stub_actions_effective`` which returns ``False`` in
+    production, so this default change has no prod impact.
     """
 
     registry = ToolRegistry()

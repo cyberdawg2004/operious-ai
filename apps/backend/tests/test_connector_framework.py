@@ -218,14 +218,31 @@ async def test_connector_config_queryable_without_decrypting_credentials(
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_tenant_keeps_refund_stub() -> None:
+async def test_unconfigured_tenant_keeps_refund_stub_in_nonprod() -> None:
+    """allow_stub_actions=True (non-prod) → stub tool for unconfigured connector."""
     registry = await build_tenant_action_tool_registry(
         tenant_id=TENANT_ID,
         config_repository=InMemoryConnectorConfigRepository(),
         credential_runtime=_CredentialRuntime(),
+        allow_stub_actions=True,
     )
 
     assert isinstance(registry.get(TOOL_NAME), RefundRequestTool)
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_tenant_fails_closed_in_prod() -> None:
+    """allow_stub_actions=False (production default) → FailClosedActionTool."""
+    from app.agents.tools.actions.fail_closed import FailClosedActionTool
+
+    registry = await build_tenant_action_tool_registry(
+        tenant_id=TENANT_ID,
+        config_repository=InMemoryConnectorConfigRepository(),
+        credential_runtime=_CredentialRuntime(),
+        allow_stub_actions=False,
+    )
+
+    assert isinstance(registry.get(TOOL_NAME), FailClosedActionTool)
 
 
 async def _memory_config(
