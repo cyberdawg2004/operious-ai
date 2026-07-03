@@ -263,3 +263,53 @@ async def _save_action_policy(
         ),
         expected_tenant_id=_TENANT_ID,
     )
+
+
+# ── W: warranty_claim must be in money/goods gate ────────────────────────────
+
+
+def test_warranty_claim_commitment_kind_is_goods() -> None:
+    """warranty_claim must be classified CommitmentKind.GOODS (fix W).
+
+    Before this fix warranty_claim used CommitmentKind.RECORD_UPDATE, which
+    placed it outside the money_or_goods_commitment_kinds() set and allowed
+    automated execution without human approval — violating the
+    money/goods-always-human doctrine.  Warranty claims commit goods
+    (repair authorisation, replacement, parts shipment) and must be gated.
+    """
+    from app.agents.tools.operation_metadata import CommitmentKind, resolve_operation
+
+    operation = resolve_operation(
+        action_type="warranty_claim",
+        tool_name="warranty.claim",
+    )
+    assert operation is not None, "warranty_claim must be registered"
+    assert operation.commitment_kind == CommitmentKind.GOODS, (
+        f"warranty_claim must be CommitmentKind.GOODS for the money/goods gate "
+        f"to fire; got {operation.commitment_kind!r}"
+    )
+
+
+def test_warranty_claim_is_detected_by_money_or_goods_gate() -> None:
+    """An action with type 'warranty_claim' must trigger the money/goods gate (fix W).
+
+    money_or_goods_commitment_kinds() returns string evidence tags (not
+    CommitmentKind enums); an 'action_type:warranty_claim' tag means the
+    gate fires and routes to human approval.
+    """
+    from app.runtime.money_goods_commitment import (
+        has_money_or_goods_commitment,
+        money_or_goods_commitment_kinds,
+    )
+
+    kinds = money_or_goods_commitment_kinds(
+        recommended_actions=[{"type": "warranty_claim", "payload": {}}],
+        reply="Your warranty claim has been submitted.",
+    )
+    assert any("warranty_claim" in k for k in kinds), (
+        f"warranty_claim action type must be present in money_or_goods_commitment_kinds() "
+        f"so the human-approval gate fires; got kinds={kinds!r}"
+    )
+    assert has_money_or_goods_commitment(
+        recommended_actions=[{"type": "warranty_claim", "payload": {}}]
+    ), "has_money_or_goods_commitment must return True for warranty_claim action type"

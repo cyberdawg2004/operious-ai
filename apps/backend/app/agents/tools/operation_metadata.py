@@ -98,6 +98,11 @@ _COMMITMENT_KIND = "operation_commitment_kind"
 _APPROVAL_POLICY = "operation_approval_policy"
 _TARGET_RESOURCE_EXPR = "operation_target_resource_expr"
 
+OPERATION_ID_METADATA_KEY = _OPERATION_ID
+COMMITMENT_KIND_METADATA_KEY = _COMMITMENT_KIND
+APPROVAL_POLICY_METADATA_KEY = _APPROVAL_POLICY
+TARGET_RESOURCE_EXPR_METADATA_KEY = _TARGET_RESOURCE_EXPR
+
 
 def metadata_field_names() -> tuple[str, str, str, str]:
     return (
@@ -402,7 +407,13 @@ _REGISTERED_OPERATIONS: tuple[RegisteredOperation, ...] = (
         operation_id="operation.warranty_claim",
         tool_name="warranty.claim",
         action_types=frozenset({"warranty_claim"}),
-        commitment_kind=CommitmentKind.RECORD_UPDATE,
+        # Reclassified RECORD_UPDATE → GOODS (security fix W).
+        # A warranty claim authorises the vendor to deliver goods
+        # (repair, replacement, part shipment) to the customer, which
+        # is a goods commitment — not merely a record update.  This
+        # ensures the money/goods-always-human gate fires on warranty
+        # actions, consistent with replacement_order and repair_dispatch.
+        commitment_kind=CommitmentKind.GOODS,
         approval_policy=ApprovalPolicy.TENANT_POLICY,
         target_resource_expr="order:{order_id}:sku:{product_sku}",
         policy_key="warranty.claim",
@@ -494,10 +505,14 @@ _REGISTERED_BY_ACTION_TYPE = {
 
 __all__ = [
     "ApprovalPolicy",
+    "APPROVAL_POLICY_METADATA_KEY",
+    "COMMITMENT_KIND_METADATA_KEY",
     "CommitmentKind",
+    "OPERATION_ID_METADATA_KEY",
     "RegisteredOperation",
     "ResolvedOperation",
     "RuleKind",
+    "TARGET_RESOURCE_EXPR_METADATA_KEY",
     "known_action_tool_names",
     "metadata_field_names",
     "operation_metadata",
