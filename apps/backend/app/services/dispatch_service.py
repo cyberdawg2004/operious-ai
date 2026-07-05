@@ -68,6 +68,10 @@ from app.session.continuity import (
     CaseContinuityRuntime,
     ContinuityOutcome,
 )
+from app.session.cross_channel_merge import (
+    handle_confirmation_response,
+    is_awaiting_confirmation,
+)
 from app.session.identity_resolution import IdentityResolutionRuntime
 from app.session.contracts.requests import AppendEventRequest, OpenSessionRequest
 from app.session.contracts.results import AppendEventResult, OpenSessionResult
@@ -295,6 +299,17 @@ class DispatchService:
             if ingress.external_conversation_id
             else None,
         )
+
+        # MVP-7 Step 2: if the existing session for this handle is awaiting
+        # merge confirmation, handle the customer's YES/NO response before
+        # continuing normal dispatch. This runs on the next inbound message
+        # after the confirmation was sent.
+        if ingress.external_conversation_id:
+            await self._handle_merge_confirmation_if_pending(
+                tenant_id=tenant_id,
+                external_handle=session_external_handle,
+                inbound_text=_extract_ingress_text(ingress),
+            )
 
         if ingress.external_conversation_id:
             continuity = await self._continuity_runtime.evaluate(
@@ -615,6 +630,55 @@ class DispatchService:
             return self._coordination
         return self._coordination.with_topology_runtime(topology_runtime)
 
+    async def _handle_merge_confirmation_if_pending(
+        self,
+        *,
+        tenant_id: str,
+        external_handle: str,
+        inbound_text: str,
+    ) -> None:
+        """MVP-7 Step 2: check if the existing session for this handle is
+        awaiting a cross-channel merge confirmation, and if so parse the
+        customer's reply and act (merge or abandon).
+
+        NEVER raises — any failure leaves the session unchanged (fail-safe:
+        unmerged is always the safe state).
+        """
+        try:
+            from app.session.persistence.models import SessionQuery
+            page = await self._session_repository.list_sessions(
+                SessionQuery(
+                    external_handle=external_handle,
+                    tenant_id=tenant_id,
+                    limit=1,
+                ),
+                expected_tenant_id=tenant_id,
+            )
+            if not page.sessions:
+                return
+            current_session = page.sessions[0]
+            if not is_awaiting_confirmation(current_session):
+                return
+            decision, _updated = await handle_confirmation_response(
+                persistence=self._session_repository,
+                session=current_session,
+                customer_text=inbound_text,
+                tenant_id=tenant_id,
+            )
+            logger.info(
+                "merge_confirmation_handled tenant=%s session=%s decision=%s",
+                tenant_id,
+                current_session.session_id,
+                decision,
+            )
+        except Exception:
+            logger.warning(
+                "handle_merge_confirmation_if_pending_failed tenant=%s handle=%s",
+                tenant_id,
+                external_handle,
+                exc_info=True,
+            )
+
 
 class DispatchServiceError(RuntimeError):
     """Raised when dispatch cannot complete through existing runtimes."""
@@ -772,6 +836,29 @@ def _default_dispatch_proposals() -> tuple[DispatchArbitrationProposal, ...]:
             reason="ticket triage agent accepts diagnostic dispatch",
         ),
     )
+
+
+def _extract_ingress_text(ingress: BoundaryIngressRecord) -> str:
+    """Extract the plain customer text from a boundary ingress record.
+
+    Used to parse the customer's merge confirmation reply (YES/NO).
+    Falls back gracefully to empty string (which parse_confirmation_response
+    treats as ambiguous → NO, keeping sessions separate).
+    """
+    payload = ingress.canonical_payload
+    for key in ("comment", "text", "message", "description", "transcript", "raw_content"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    # WhatsApp text lives in nested canonical_payload
+    nested = payload.get("canonical_payload")
+    if isinstance(nested, dict):
+        nested_typed: dict[str, Any] = nested
+        for key in ("text", "message", "comment"):
+            inner = nested_typed.get(key)
+            if isinstance(inner, str) and inner.strip():
+                return inner.strip()
+    return ""
 
 
 def _correlation_id_text(ingress: BoundaryIngressRecord) -> str:

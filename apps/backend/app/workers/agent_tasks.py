@@ -219,6 +219,14 @@ from app.session.conversation import (
 )
 from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import as_session_id
+from app.session.cross_channel_merge import (
+    MERGE_KEY as _CROSS_CHANNEL_MERGE_KEY,
+    build_confirmation_message,
+    flag_merge_candidate,
+    get_raw_merge_state as _get_raw_merge_state,
+    is_merge_candidate,
+    record_confirmation_sent,
+)
 from app.session.identity_resolution import IdentityResolutionRuntime
 from app.session.lifecycle.classifier import is_terminal as is_terminal_session
 from app.session.persistence import (
@@ -1069,6 +1077,43 @@ async def _record_identity_correlations_after_extraction(
                 tenant_id=work_item.tenant_id,
                 customer_identity_id=identity_result.customer_identity_id,
             )
+        # MVP-7 Step 2: if a cross-channel Stage 2 match was found, flag
+        # this session as a merge candidate so the next inbound message
+        # can trigger the customer-confirmed merge flow.
+        if (
+            identity_result.match_stage == 2
+            and identity_result.matched_session_ids
+            and identity_result.customer_identity_id
+        ):
+            current_session = await session_repo.get_session(
+                as_session_id(work_item.session_id),
+                expected_tenant_id=work_item.tenant_id,
+            )
+            if current_session is not None:
+                prior_session_id = identity_result.matched_session_ids[0]
+                prior_session = await session_repo.get_session(
+                    as_session_id(prior_session_id),
+                    expected_tenant_id=work_item.tenant_id,
+                )
+                # Only flag as candidate if channels differ — same-channel
+                # continuity is handled by CaseContinuityRuntime already.
+                prior_channel = (
+                    prior_session.context_attributes.get("source_channel")
+                    if prior_session is not None
+                    else None
+                )
+                current_channel = work_item.source_channel
+                if current_channel != prior_channel:
+                    await flag_merge_candidate(
+                        persistence=session_repo,
+                        session=current_session,
+                        prior_session_id=prior_session_id,
+                        customer_identity_id=identity_result.customer_identity_id,
+                        prior_channel=prior_channel,
+                        prior_category=None,  # filled in by resolution proposal
+                        match_field=identity_result.match_field,
+                        tenant_id=work_item.tenant_id,
+                    )
     except Exception:
         logger.warning(
             "identity_correlation_wiring_failed tenant=%s session=%s",
@@ -1118,6 +1163,68 @@ async def _stamp_customer_identity_id(
         revision=existing.revision + 1,
     )
     await session_repo.save_session(updated)
+
+
+async def _maybe_send_merge_confirmation(
+    *,
+    session_repo: PostgresSessionPersistence,
+    work_item: _DiagnosticExecutionWorkItem,
+    diagnostic_category: str,
+) -> None:
+    """MVP-7 Step 2: if the session is a merge candidate, fill in
+    prior_category from the diagnostic result and advance to
+    CONFIRMATION_SENT.
+
+    The confirmation message text is stored in the merge state for the
+    next inbound message handler; no additional outbound is queued here
+    because the normal auto-send path will deliver it (the flag is set
+    before the outbox entry is created).
+
+    NEVER raises.
+    """
+    try:
+        current = await session_repo.get_session(
+            as_session_id(work_item.session_id),
+            expected_tenant_id=work_item.tenant_id,
+        )
+        if current is None or not is_merge_candidate(current):
+            return
+        confirmation_text = build_confirmation_message(
+            session=current,
+        )
+        if not confirmation_text:
+            return
+        # Advance merge state: fill in the diagnostic category so the
+        # confirmation message is specific (e.g. "warranty issue" vs
+        # generic "support request").
+        from dataclasses import replace as dc_replace
+        state = dict(_get_raw_merge_state(current))
+        if not state.get("prior_category") or state["prior_category"] == "support":
+            state["prior_category"] = diagnostic_category
+        attrs = dict(current.context_attributes)
+        attrs[_CROSS_CHANNEL_MERGE_KEY] = state
+        updated = dc_replace(
+            current,
+            context_attributes=attrs,
+            revision=current.revision + 1,
+        )
+        saved = await session_repo.save_session(updated)
+        # Re-read confirmation text with the updated category
+        confirmation_text = build_confirmation_message(session=saved)
+        if confirmation_text:
+            await record_confirmation_sent(
+                persistence=session_repo,
+                session=saved,
+                confirmation_text=confirmation_text,
+                tenant_id=work_item.tenant_id,
+            )
+    except Exception:
+        logger.warning(
+            "maybe_send_merge_confirmation_failed tenant=%s session=%s",
+            work_item.tenant_id,
+            work_item.session_id,
+            exc_info=True,
+        )
 
 
 def _log_diagnostic_claim_lost(
@@ -1888,6 +1995,14 @@ async def _append_resolution_proposal_after_diagnostic(
                     "send-eligible proposal ended without outbox row, approval case, "
                     "escalation, or terminal refusal"
                 )
+            # MVP-7 Step 2: if the session is a merge candidate, update
+            # prior_category with the diagnostic category now that we have it,
+            # then advance merge state to CONFIRMATION_SENT.
+            await _maybe_send_merge_confirmation(
+                session_repo=PostgresSessionPersistence(session),
+                work_item=work_item,
+                diagnostic_category=result.category,
+            )
             await _request_resolution_approval_cases_with_retry(
                 session=session,
                 proposal=proposal,
