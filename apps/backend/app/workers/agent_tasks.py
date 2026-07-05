@@ -86,6 +86,7 @@ from app.cognition.diagnostic_runtime import (
     diagnostic_retrieval_context_text,
     parse_diagnostic_output,
 )
+from app.cognition.extraction import ExtractionSchema, ExtractedOrderFields
 from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.cognition.identity import (
     derive_cognition_audit_id,
@@ -218,6 +219,7 @@ from app.session.conversation import (
 )
 from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import as_session_id
+from app.session.identity_resolution import IdentityResolutionRuntime
 from app.session.lifecycle.classifier import is_terminal as is_terminal_session
 from app.session.persistence import (
     PostgresSessionPersistence,
@@ -1020,6 +1022,104 @@ async def _diagnostic_usage_exists(
     return existing is not None
 
 
+async def _record_identity_correlations_after_extraction(
+    *,
+    session_repo: PostgresSessionPersistence,
+    work_item: _DiagnosticExecutionWorkItem,
+    extracted_fields: ExtractedOrderFields,
+    extraction_schema: ExtractionSchema | None,
+) -> None:
+    """MVP-7: record identity correlations and stamp customer_identity_id.
+
+    Called after diagnostic extraction succeeds. Writes one correlation
+    record per identity_field=true field that has a non-empty value, then
+    re-resolves identity to stamp customer_identity_id on the session row.
+    NEVER raises — any failure is logged and the pipeline continues.
+    """
+    if extraction_schema is None:
+        return
+    identity_field_names = extraction_schema.identity_fields()
+    if not identity_field_names:
+        return
+    extracted_dict = _extracted_fields_to_identity_dict(
+        extracted_fields, identity_field_names
+    )
+    if not extracted_dict:
+        return
+    try:
+        identity_runtime = IdentityResolutionRuntime(
+            session_persistence=session_repo,
+        )
+        await identity_runtime.record_identity_correlation(
+            tenant_id=work_item.tenant_id,
+            session_id=work_item.session_id,
+            extracted_fields=extracted_dict,
+            extraction_schema=extraction_schema,
+        )
+        identity_result = await identity_runtime.resolve(
+            tenant_id=work_item.tenant_id,
+            current_session_id=work_item.session_id,
+            extracted_fields=extracted_dict,
+            extraction_schema=extraction_schema,
+        )
+        if identity_result.customer_identity_id:
+            await _stamp_customer_identity_id(
+                session_repo=session_repo,
+                session_id=work_item.session_id,
+                tenant_id=work_item.tenant_id,
+                customer_identity_id=identity_result.customer_identity_id,
+            )
+    except Exception:
+        logger.warning(
+            "identity_correlation_wiring_failed tenant=%s session=%s",
+            work_item.tenant_id,
+            work_item.session_id,
+            exc_info=True,
+        )
+
+
+def _extracted_fields_to_identity_dict(
+    extracted: ExtractedOrderFields,
+    identity_field_names: tuple[str, ...],
+) -> dict[str, str]:
+    """Extract identity-bearing field values from the ExtractedOrderFields."""
+    result: dict[str, str] = {}
+    for name in identity_field_names:
+        field_obj = extracted.get_field(name)
+        if field_obj is None or field_obj.value is None:
+            continue
+        value = field_obj.value.strip()
+        if value:
+            result[name] = value
+    return result
+
+
+async def _stamp_customer_identity_id(
+    *,
+    session_repo: PostgresSessionPersistence,
+    session_id: str,
+    tenant_id: str,
+    customer_identity_id: str,
+) -> None:
+    """Stamp customer_identity_id on the session row via revision bump."""
+    from dataclasses import replace as dc_replace
+
+    existing = await session_repo.get_session(
+        as_session_id(session_id),
+        expected_tenant_id=tenant_id,
+    )
+    if existing is None:
+        return
+    if existing.customer_identity_id is not None:
+        return
+    updated = dc_replace(
+        existing,
+        customer_identity_id=uuid.UUID(customer_identity_id),
+        revision=existing.revision + 1,
+    )
+    await session_repo.save_session(updated)
+
+
 def _log_diagnostic_claim_lost(
     claim_lost: Mapping[str, object],
     *,
@@ -1172,6 +1272,16 @@ async def _persist_diagnostic_success(
                 )
                 result_payload = _diagnostic_result_from_reasoning(
                     cognition_result
+                )
+                # MVP-7: record identity correlations and stamp
+                # customer_identity_id after extraction completes.
+                await _record_identity_correlations_after_extraction(
+                    session_repo=session_repo,
+                    work_item=work_item,
+                    extracted_fields=result_payload.extracted_fields,
+                    extraction_schema=(
+                        draft.snapshot.resolved_taxonomy.extraction_schema
+                    ),
                 )
                 authority_tx = await session.begin_nested()
                 try:

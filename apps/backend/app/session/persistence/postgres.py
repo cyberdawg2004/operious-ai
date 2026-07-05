@@ -550,6 +550,7 @@ def _session_record_to_values(record: SessionRecord) -> dict[str, Any]:
         "context_attributes": dict(record.context_attributes),
         "context_notes": record.context_notes,
         "metadata_json": dict(record.metadata),
+        "customer_identity_id": record.customer_identity_id,
     }
 
 
@@ -602,6 +603,7 @@ def _update_session_row(
     row.context_attributes = dict(record.context_attributes)
     row.context_notes = record.context_notes
     row.metadata_json = dict(record.metadata)
+    row.customer_identity_id = record.customer_identity_id
 
 
 def _event_record_to_row(
@@ -671,6 +673,7 @@ def _session_row_to_record(row: SessionRow) -> SessionRecord:
         context_attributes=dict(_as_dict_of_any(row.context_attributes)),
         context_notes=row.context_notes,
         metadata=dict(_as_dict_of_any(row.metadata_json)),
+        customer_identity_id=row.customer_identity_id,
     )
 
 

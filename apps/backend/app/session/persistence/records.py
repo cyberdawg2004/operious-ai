@@ -49,6 +49,7 @@ class SessionRecord:
     )
     context_notes: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict[str, Any])
+    customer_identity_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
