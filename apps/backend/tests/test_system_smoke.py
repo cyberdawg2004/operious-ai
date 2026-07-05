@@ -11,8 +11,10 @@ test_full_chain             → PASSES now
 from __future__ import annotations
 
 import os
+import socket
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -52,6 +54,37 @@ def _isolate_smoke_env():
             os.environ[k] = v
 
 
+@pytest.fixture()
+def _require_reachable_postgres():
+    """Skip the test at runtime if TEST_DATABASE_URL's TCP port is closed.
+
+    The ``requires_postgres`` mark guards on URL presence at collection time,
+    but does not verify the port is open. Without this guard, smoke tests hang
+    for a full TCP timeout when the local Postgres is not running.
+    """
+    _load_dotenv_key(TEST_DATABASE_URL_ENV)
+    if not _postgres_reachable():
+        pytest.skip(
+            "TEST_DATABASE_URL is set but the Postgres TCP port is unreachable; "
+            "start the local Postgres to run this smoke test"
+        )
+
+
+def _postgres_reachable() -> bool:
+    """Return True only if the TCP port for TEST_DATABASE_URL is open."""
+    raw = os.environ.get(TEST_DATABASE_URL_ENV, "")
+    if not raw:
+        return False
+    try:
+        parsed = urlparse(raw)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 5432
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
 def _load_dotenv_key(key: str) -> None:
     """Load one simple KEY=VALUE entry from repo .env without logging it."""
     if os.environ.get(key):
@@ -77,7 +110,7 @@ def _create_app():
         "system-smoke-master-key-material-32-bytes",
     )
     os.environ["TENANT_CONFIG_ALLOW_SELF_APPROVAL"] = "true"
-    if database_url_skip_reason() is None:
+    if database_url_skip_reason() is None and _postgres_reachable():
         os.environ["DATABASE_URL"] = os.environ[TEST_DATABASE_URL_ENV]
     from app.core.config import get_settings
     from app.auth import VerifiedIdentity
@@ -159,7 +192,7 @@ async def test_health_endpoint_live():
 
 @pytest.mark.asyncio
 @requires_postgres
-async def test_ticket_ingress_chain():
+async def test_ticket_ingress_chain(_require_reachable_postgres: None):
     """
     FAILS with 404 until PR-W1 is complete.
     Success condition: 200 with ingress_id in response.
@@ -186,7 +219,7 @@ async def test_ticket_ingress_chain():
 
 @pytest.mark.asyncio
 @requires_postgres
-async def test_dispatch_governance_chain():
+async def test_dispatch_governance_chain(_require_reachable_postgres: None):
     """
     Live dispatch path returns a dispatch id and governance decision id.
     """
@@ -223,7 +256,7 @@ async def test_dispatch_governance_chain():
 
 @pytest.mark.asyncio
 @requires_postgres
-async def test_full_ticket_to_timeline_chain():
+async def test_full_ticket_to_timeline_chain(_require_reachable_postgres: None):
     """
     Full ticket path reaches dispatch, session timeline, and governance.
     """
