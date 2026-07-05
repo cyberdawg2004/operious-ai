@@ -51,7 +51,6 @@ import importlib
 from typing import Any
 
 import pytest
-from sqlalchemy import inspect as sa_inspect
 
 # ---------------------------------------------------------------------------
 # Ensure the app package is importable
