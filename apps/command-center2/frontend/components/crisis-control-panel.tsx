@@ -32,28 +32,28 @@ type TemplateConfig = {
 const templates: TemplateConfig[] = [
   {
     template: "block_sku",
-    label: "BLOCK_SKU",
+    label: "Block Product",
     decision: "DENY",
     icon: LockKeyhole,
     tone: "border-orange-500/35 bg-orange-500/10 text-orange-700 dark:text-orange-300",
   },
   {
     template: "halt_refunds",
-    label: "HALT_REFUNDS",
+    label: "Pause Refunds",
     decision: "REQUIRE_APPROVAL",
     icon: Ban,
     tone: "border-red-alert/35 bg-red-alert/10 text-red-alert",
   },
   {
     template: "escalate_all",
-    label: "ESCALATE_ALL",
+    label: "Escalate Everything",
     decision: "ESCALATE",
     icon: AlertTriangle,
     tone: "border-warning-amber/40 bg-warning-amber/10 text-warning-amber",
   },
   {
     template: "freeze_category",
-    label: "FREEZE_CATEGORY",
+    label: "Freeze Category",
     decision: "DENY",
     icon: Snowflake,
     tone: "border-blue-system/35 bg-blue-system/10 text-blue-system",
@@ -377,7 +377,7 @@ function ActiveDeployments({
                 <tr key={deployment.deployment_id}>
                   <td>
                     <span className="rounded border border-red-alert/25 bg-red-alert/10 px-2 py-1 text-[11px] text-red-alert">
-                      {deployment.template}
+                      {templateLabel(deployment.template)}
                     </span>
                   </td>
                   <td>{formatScope(deployment)}</td>
@@ -475,6 +475,16 @@ function previewText(template: CrisisTemplate, scope: Record<string, unknown>) {
     return "Will ESCALATE all diagnostic and action governance subjects";
   }
   return `Will DENY tickets classified as ${String(scope.category || "").trim() || "..."}`;
+}
+
+function templateLabel(value: string) {
+  const known: Record<string, string> = {
+    block_sku: "Block Product",
+    halt_refunds: "Pause Refunds",
+    escalate_all: "Escalate Everything",
+    freeze_category: "Freeze Category",
+  };
+  return known[value] ?? value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function formatScope(deployment: CrisisDeployment) {

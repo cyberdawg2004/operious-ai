@@ -420,10 +420,23 @@ const GENERIC_CREDENTIAL_FIELDS: ChannelCredentialField[] = [
   },
 ];
 
+function policyTypeLabel(value: string) {
+  const known: Record<string, string> = {
+    resolution_autonomy: "Resolution Authority",
+    action_tools: "Allowed Actions",
+    warranty_refund_rules: "Warranty & Refund Rules",
+    resolution_taxonomy: "Issue Categories",
+    extraction_schema: "Data Extraction Schema",
+  };
+  return known[value] ?? value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function GovernancePoliciesView({
   headerAddon = null,
+  footerAddon = null,
 }: {
   headerAddon?: React.ReactNode;
+  footerAddon?: React.ReactNode;
 }) {
   const [modal, setModal] = useState<PolicyModal>({ type: "none" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -480,7 +493,7 @@ export function GovernancePoliciesView({
     <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
       <ViewHeader
         eyebrow="GOVERNANCE · POLICIES"
-        title="Governance Policies"
+        title="AI Behavior Rules"
         actionLabel="Propose policy change"
         onAction={() => setModal({ type: "create" })}
       />
@@ -504,7 +517,7 @@ export function GovernancePoliciesView({
           {data.items.map((policy) => (
             <RecordCard
               key={policy.policy_id}
-              title={policy.policy_type}
+              title={policyTypeLabel(policy.policy_type)}
               meta={`v${policy.version} · ${policy.status}`}
               fields={[
                 ["Policy ID", policy.policy_id],
@@ -536,6 +549,7 @@ export function GovernancePoliciesView({
           />
         </Modal>
       )}
+      {footerAddon}
     </main>
   );
 }

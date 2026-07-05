@@ -24,10 +24,20 @@ import { cn } from "@/lib/utils";
 
 type ReleaseVerdict = "false_positive" | "fraud_confirmed";
 
-const STATE_BADGES: Record<SemanticCircuitState["state"], string> = {
+const STATE_BADGE_CLASSES: Record<string, string> = {
   CLOSED: "bg-green-100 text-green-800",
-  TRIPPED: "bg-red-100 text-red-800",
-  RESET: "bg-gray-100 text-gray-600",
+  OPEN: "bg-red-100 text-red-800",
+  TRIPPED: "bg-amber-100 text-amber-800",
+  HALF_OPEN: "bg-amber-100 text-amber-800",
+  RESET: "bg-amber-100 text-amber-800",
+};
+
+const STATE_BADGE_LABELS: Record<string, string> = {
+  CLOSED: "Normal",
+  OPEN: "Blocked",
+  TRIPPED: "Alert",
+  HALF_OPEN: "Alert",
+  RESET: "Recovering",
 };
 
 export function FraudMonitoringView() {
@@ -88,13 +98,15 @@ function FraudCircuitStates() {
     };
   }, [fetchStates]);
 
-  const allHealthy = (states ?? []).every((state) => state.state !== "TRIPPED");
+  const allHealthy = (states ?? []).every(
+    (state) => state.state === "CLOSED"
+  );
 
   return (
     <section>
       <SectionHeader
         eyebrow="LIVE CIRCUITS"
-        title="Circuit Breaker States"
+        title="AI Safety Controls"
         isRefreshing={isRefreshing}
         onRefresh={() => void fetchStates()}
       />
@@ -638,15 +650,20 @@ function TableHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
-function StateBadge({ state }: { state: SemanticCircuitState["state"] }) {
+function StateBadge({ state }: { state: string }) {
+  const label =
+    STATE_BADGE_LABELS[state] ??
+    state.charAt(0).toUpperCase() + state.slice(1).toLowerCase();
+  const classes =
+    STATE_BADGE_CLASSES[state] ?? "bg-gray-100 text-gray-600";
   return (
     <span
       className={cn(
         "inline-flex rounded px-2 py-1 font-technical text-[10px] font-semibold uppercase tracking-[0.12em]",
-        STATE_BADGES[state]
+        classes
       )}
     >
-      {state}
+      {label}
     </span>
   );
 }

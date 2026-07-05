@@ -7,7 +7,6 @@ import {
   ChevronUp,
   RefreshCw,
   RotateCcw,
-  Search,
   XCircle,
 } from "lucide-react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
@@ -23,24 +22,37 @@ import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
 
-const QUEUE_LABELS: Record<string, string> = {
-  "diagnostic.high": "Diagnostic (High Priority)",
-  "diagnostic.normal": "Diagnostic (Normal)",
-  "diagnostic.retry": "Diagnostic (Retry)",
-  escalation: "Escalation",
-  supervisor: "Supervisor",
-  qa: "Quality Assurance",
-  sop_intelligence: "SOP Intelligence",
-  knowledge_indexing: "Knowledge Indexing",
-  webhook_maintenance: "Webhook Maintenance",
-  dead_letter: "Dead Letter",
-  "ingress.email": "Email Ingress",
-  "ingress.whatsapp": "WhatsApp Ingress",
-  "ingress.shopify": "Shopify Ingress",
-  "ingress.voice": "Voice Ingress",
+const QUEUE_LABEL_MAP: Record<string, string> = {
+  "diagnostic.high": "AI Processing",
+  "diagnostic.normal": "AI Processing",
+  "diagnostic.retry": "AI Processing",
+  escalation: "Escalations",
+  supervisor: "Quality Review",
+  qa: "Quality Review",
+  sop_intelligence: "AI Processing",
+  knowledge_indexing: "Knowledge",
+  "outbound.send": "Outbound Messages",
+  "ingress.email": "Customer Inbox",
+  "ingress.whatsapp": "Customer Inbox",
+  "ingress.shopify": "Customer Inbox",
+  "ingress.voice": "Customer Inbox",
+  dead_letter: "Failed (unrecoverable)",
+  webhook_maintenance: "System",
+  whatsapp_media_fetch: "System",
 };
 
-const QUEUE_NAMES = Object.keys(QUEUE_LABELS);
+// One dropdown option per unique friendly label; first queue name in each group is the filter value
+const QUEUE_OPTIONS = ((): Array<{ value: string; label: string }> => {
+  const seen = new Set<string>();
+  const result: Array<{ value: string; label: string }> = [];
+  for (const [queueName, label] of Object.entries(QUEUE_LABEL_MAP)) {
+    if (!seen.has(label)) {
+      seen.add(label);
+      result.push({ value: queueName, label });
+    }
+  }
+  return result;
+})();
 
 export function DlqInspectorView() {
   const [data, setData] = useState<DeadLetterListResponse | null>(null);
@@ -48,22 +60,12 @@ export function DlqInspectorView() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [queueFilter, setQueueFilter] = useState("");
-  const [errorClassInput, setErrorClassInput] = useState("");
-  const [errorClassFilter, setErrorClassFilter] = useState("");
   const [offset, setOffset] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmationId, setConfirmationId] = useState<string | null>(null);
   const [replayingId, setReplayingId] = useState<string | null>(null);
   const [replayErrors, setReplayErrors] = useState<Record<string, string>>({});
   const hasLoadedRef = useRef(false);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setOffset(0);
-      setErrorClassFilter(errorClassInput.trim());
-    }, 500);
-    return () => window.clearTimeout(timeout);
-  }, [errorClassInput]);
 
   const fetchDeadLetters = useCallback(async () => {
     if (hasLoadedRef.current) {
@@ -76,7 +78,7 @@ export function DlqInspectorView() {
     try {
       const response = await listDeadLetters({
         queue: queueFilter || null,
-        error_class: errorClassFilter || null,
+        error_class: null,
         limit: PAGE_SIZE,
         offset,
       });
@@ -88,7 +90,7 @@ export function DlqInspectorView() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [errorClassFilter, offset, queueFilter]);
+  }, [offset, queueFilter]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -183,31 +185,12 @@ export function DlqInspectorView() {
             className="h-11 rounded border border-border-subtle bg-surface-raised px-3 text-[13px] text-ink-primary outline-none transition-colors focus:border-border-defined sm:h-10"
           >
             <option value="">All queues</option>
-            {QUEUE_NAMES.map((queueName) => (
-              <option key={queueName} value={queueName}>
-                {QUEUE_LABELS[queueName]}
+            {QUEUE_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
-        </label>
-
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary">
-            Error Class
-          </span>
-          <div className="relative">
-            <Search
-              size={14}
-              strokeWidth={1.5}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-tertiary"
-            />
-            <input
-              value={errorClassInput}
-              onChange={(event) => setErrorClassInput(event.target.value)}
-              placeholder="Filter by error class..."
-              className="h-11 w-full rounded border border-border-subtle bg-surface-raised pl-9 pr-3 text-[13px] text-ink-primary placeholder:text-ink-tertiary outline-none transition-colors focus:border-border-defined sm:h-10"
-            />
-          </div>
         </label>
       </div>
 
@@ -241,10 +224,9 @@ export function DlqInspectorView() {
 
           <div className="overflow-x-auto">
             <div className="min-w-[1060px]">
-              <div className="grid h-11 grid-cols-[minmax(220px,1fr)_190px_220px_110px_130px_130px_120px] items-center border-b border-border-subtle bg-surface-raised px-3 sm:h-9">
+              <div className="grid h-11 grid-cols-[minmax(220px,1fr)_190px_110px_130px_130px_140px] items-center border-b border-border-subtle bg-surface-raised px-3 sm:h-9">
                 <TableHeader>Task Name</TableHeader>
                 <TableHeader>Queue</TableHeader>
-                <TableHeader>Error Class</TableHeader>
                 <TableHeader>Attempts</TableHeader>
                 <TableHeader>Age</TableHeader>
                 <TableHeader>Status</TableHeader>
@@ -338,7 +320,7 @@ function DeadLetterRow({
             onToggle();
           }
         }}
-        className="grid min-h-16 cursor-pointer grid-cols-[minmax(220px,1fr)_190px_220px_110px_130px_130px_120px] items-center px-3 transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
+        className="grid min-h-16 cursor-pointer grid-cols-[minmax(220px,1fr)_190px_110px_130px_130px_140px] items-center px-3 transition-colors duration-160 hover:bg-[var(--surface-sunken)]"
       >
         <div className="min-w-0 px-2">
           <span className="block truncate text-[13px] font-medium text-ink-primary">
@@ -349,7 +331,6 @@ function DeadLetterRow({
           </span>
         </div>
         <DataCell value={formatQueueName(item.queue)} muted={item.queue === null} />
-        <DataCell value={item.error_class} />
         <DataCell value={String(item.attempt_count)} />
         <DataCell value={formatCreatedAge(item.created_at)} />
         <div className="px-2">
@@ -364,10 +345,10 @@ function DeadLetterRow({
                 event.stopPropagation();
                 onRequestReplay();
               }}
-              className="inline-flex h-9 items-center gap-2 rounded border border-gold-primary/40 px-3 font-technical text-[10px] uppercase tracking-[0.12em] text-gold-primary transition-colors hover:bg-gold-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-9 items-center gap-1.5 rounded border border-gold-primary/60 bg-gold-primary/10 px-4 text-[12px] font-semibold text-gold-primary transition-colors hover:bg-gold-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <RotateCcw size={12} strokeWidth={1.5} />
-              {isReplaying ? "Replaying" : "Replay"}
+              <RotateCcw size={13} strokeWidth={1.5} />
+              {isReplaying ? "Retrying…" : "Retry"}
             </button>
           )}
           <ToggleIcon size={14} strokeWidth={1.5} className="text-ink-tertiary" />
@@ -376,46 +357,71 @@ function DeadLetterRow({
 
       {isExpanded && (
         <div className="border-t border-border-subtle bg-surface-sunken/60 px-5 py-4">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="flex flex-col gap-4">
             <section>
               <div className="mb-1 font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary">
-                Error Message
+                What failed
               </div>
               <p className="break-words text-[13px] leading-relaxed text-ink-secondary">
-                {item.error_message || "No error message recorded."}
+                {item.error_message || "No error details recorded."}
               </p>
             </section>
+
             <section>
               <div className="mb-1 font-technical text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-tertiary">
-                Task Payload
+                When
               </div>
-              <TechnicalDetails label="Show task payload" openLabel="Hide task payload">
-                <pre className="max-h-[260px] overflow-auto rounded border border-border-subtle bg-surface px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-secondary">
-                  {JSON.stringify(item.task_payload, null, 2)}
-                </pre>
-              </TechnicalDetails>
+              <p className="text-[13px] text-ink-secondary">
+                {new Date(item.created_at).toLocaleString(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+                {" · "}
+                {formatCreatedAge(item.created_at)} ago
+              </p>
             </section>
+
+            <TechnicalDetails label="Show raw payload" openLabel="Hide raw payload">
+              <pre className="max-h-[260px] overflow-auto rounded border border-border-subtle bg-surface px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-secondary">
+                {JSON.stringify(item.task_payload, null, 2)}
+              </pre>
+            </TechnicalDetails>
           </div>
+
+          {!item.replayed && !confirmationOpen && (
+            <div className="mt-5">
+              <button
+                type="button"
+                disabled={isReplaying}
+                onClick={onRequestReplay}
+                className="inline-flex h-10 items-center gap-2 rounded border border-gold-primary/60 bg-gold-primary/10 px-5 text-[13px] font-semibold text-gold-primary transition-colors hover:bg-gold-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw size={14} strokeWidth={1.5} />
+                {isReplaying ? "Retrying…" : "Retry this operation"}
+              </button>
+            </div>
+          )}
 
           {confirmationOpen && !item.replayed && (
             <div className="mt-4 rounded border border-warning-amber/30 bg-warning-amber/10 px-3 py-3">
               <p className="text-[13px] text-warning-amber">
-                Replay this task? It will be republished to its queue.
+                Retry this operation? It will be re-queued for processing.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
                   disabled={isReplaying}
                   onClick={onConfirmReplay}
-                  className="h-10 rounded border border-gold-primary/40 px-3 text-[12px] font-medium text-gold-primary transition-colors hover:bg-gold-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-10 items-center gap-2 rounded border border-gold-primary/60 bg-gold-primary/10 px-4 text-[12px] font-semibold text-gold-primary transition-colors hover:bg-gold-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Confirm
+                  <RotateCcw size={13} strokeWidth={1.5} />
+                  {isReplaying ? "Retrying…" : "Confirm retry"}
                 </button>
                 <button
                   type="button"
                   disabled={isReplaying}
                   onClick={onCancelReplay}
-                  className="h-10 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 rounded border border-border-subtle px-4 text-[12px] text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -488,7 +494,9 @@ function TableHeader({ children }: { children: React.ReactNode }) {
 
 function formatQueueName(queue: string | null): string {
   if (queue === null) return "Unknown";
-  return QUEUE_LABELS[queue] ?? queue;
+  if (QUEUE_LABEL_MAP[queue]) return QUEUE_LABEL_MAP[queue];
+  // Fallback: capitalize and replace dots/underscores with spaces
+  return queue.replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function formatCreatedAge(value: string): string {

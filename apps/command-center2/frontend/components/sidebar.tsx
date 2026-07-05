@@ -9,32 +9,28 @@ import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
 import { useTheme } from "./theme-provider";
 import {
-  Activity,
   AlertTriangle,
+  BarChart3,
+  Bell,
+  BookOpen,
   Building2,
+  CheckSquare,
   ChevronDown,
   ChevronRight,
-  ClipboardCheck,
   Inbox,
   LayoutDashboard,
-  LayoutList,
-  MessageSquare,
-  Network,
-  Brain,
-  BookOpen,
-  Gavel,
-  GitBranch,
-  Radio,
-  Plug,
-  Users,
-  FileSearch,
-  Settings,
-  ShieldAlert,
-  LifeBuoy,
   LogOut,
-  Sun,
+  MessageSquare,
   Moon,
+  Plug,
+  Radio,
+  Settings,
+  ShieldCheck,
+  Sliders,
+  Sparkles,
+  Sun,
   X,
+  XCircle,
 } from "lucide-react";
 
 interface NavItem {
@@ -42,53 +38,39 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ElementType;
-  group: "operations" | "intelligence" | "platform" | "system";
-  /** When set, the item is surfaced only to principals holding this capability. */
-  requiresCapability?: string;
 }
 
-const navItems: NavItem[] = [
-  { id: "overview", href: dashboardRoutes.overview, label: "Command Overview", icon: LayoutDashboard, group: "operations" },
-  { id: "attention", href: dashboardRoutes.attention, label: "Needs Your Attention", icon: Inbox, group: "operations" },
-  { id: "operations", href: dashboardRoutes.operations, label: "Operations Queue", icon: LayoutList, group: "operations" },
-  { id: "conversations", href: dashboardRoutes.conversations, label: "Conversations", icon: MessageSquare, group: "operations" },
-  { id: "queue-status", href: dashboardRoutes["queue-status"], label: "Queue Status", icon: Activity, group: "operations" },
-  { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "Failed Operations", icon: AlertTriangle, group: "operations" },
-  { id: "fraud", href: dashboardRoutes.fraud, label: "Fraud Monitoring", icon: ShieldAlert, group: "operations" },
-  { id: "trace", href: dashboardRoutes.trace, label: "Decision History", icon: Network, group: "operations" },
-  { id: "supervisor", href: dashboardRoutes.supervisor, label: "Quality Reviews", icon: ShieldAlert, group: "operations" },
-  { id: "escalations", href: dashboardRoutes.escalations, label: "Escalations", icon: LifeBuoy, group: "operations", requiresCapability: "tenant.operations.read" },
-  { id: "case-approvals", href: dashboardRoutes["case-approvals"], label: "Message Approvals", icon: ClipboardCheck, group: "operations", requiresCapability: "tenant.approvals.read" },
-  { id: "approvals", href: dashboardRoutes.approvals, label: "Action Sign-offs", icon: Inbox, group: "intelligence" },
-  { id: "cognition", href: dashboardRoutes.cognition, label: "AI Recommendations", icon: Brain, group: "intelligence" },
-  { id: "knowledge", href: dashboardRoutes.knowledge, label: "Knowledge Base", icon: BookOpen, group: "intelligence" },
-  { id: "governance", href: dashboardRoutes.governance, label: "Governance", icon: Gavel, group: "platform" },
-  { id: "crisis", href: dashboardRoutes.crisis, label: "Crisis History", icon: ShieldAlert, group: "platform" },
-  { id: "topology", href: dashboardRoutes.topology, label: "Workforce Map", icon: GitBranch, group: "platform" },
-  { id: "channels", href: dashboardRoutes.channels, label: "Channels", icon: Radio, group: "platform" },
-  { id: "connectors", href: dashboardRoutes.connectors, label: "Connector Config", icon: Plug, group: "platform" },
-  { id: "action-policy", href: dashboardRoutes["action-policy"], label: "Action Policy", icon: Gavel, group: "platform" },
-  { id: "config-approvals", href: dashboardRoutes["config-approvals"], label: "Configuration Approvals", icon: Inbox, group: "platform" },
-  { id: "onboarding", href: dashboardRoutes.onboarding, label: "Configure Tenant", icon: Building2, group: "platform" },
-  { id: "team", href: dashboardRoutes.team, label: "Team & Roles", icon: Users, group: "system" },
-  { id: "audit", href: dashboardRoutes.audit, label: "Audit & Exports", icon: FileSearch, group: "system" },
-  { id: "settings", href: dashboardRoutes.settings, label: "Settings", icon: Settings, group: "system" },
+const workItems: NavItem[] = [
+  { id: "overview", href: dashboardRoutes.overview, label: "Overview", icon: LayoutDashboard },
+  { id: "attention", href: dashboardRoutes.attention, label: "Needs Your Attention", icon: Bell },
+  { id: "operations", href: dashboardRoutes.operations, label: "Operations Queue", icon: Inbox },
+  { id: "conversations", href: dashboardRoutes.conversations, label: "Conversations", icon: MessageSquare },
+  { id: "supervisor", href: dashboardRoutes.supervisor, label: "Quality Reviews", icon: ShieldCheck },
+  { id: "cognition", href: dashboardRoutes.cognition, label: "AI Recommendations", icon: Sparkles },
 ];
 
-/**
- * Daily-work surfaces for support managers — kept small and always visible
- * so the primary view never feels cluttered with admin/config screens.
- */
-const PRIMARY_ITEM_IDS = ["operations", "attention", "knowledge", "cognition"];
+const intelligenceItems: NavItem[] = [
+  { id: "knowledge", href: dashboardRoutes.knowledge, label: "Knowledge Base", icon: BookOpen },
+  { id: "action-history", href: "/dashboard/action-history", label: "Action History", icon: BarChart3 },
+  { id: "fraud", href: dashboardRoutes.fraud, label: "Fraud Monitoring", icon: AlertTriangle },
+  { id: "dlq-inspector", href: dashboardRoutes["dlq-inspector"], label: "Failed Operations", icon: XCircle },
+  { id: "config-approvals", href: dashboardRoutes["config-approvals"], label: "Change Approvals", icon: CheckSquare },
+];
 
-const adminGroupLabels: Record<NavItem["group"], string> = {
-  operations: "Monitoring",
-  intelligence: "Intelligence",
-  platform: "Platform",
-  system: "System",
+const setupItems: NavItem[] = [
+  { id: "governance", href: dashboardRoutes.governance, label: "AI Behavior Rules", icon: Sliders },
+  { id: "action-policy", href: dashboardRoutes["action-policy"], label: "Action Policy", icon: ShieldCheck },
+  { id: "channels", href: dashboardRoutes.channels, label: "Channels", icon: Radio },
+  { id: "connectors", href: dashboardRoutes.connectors, label: "Connected Systems", icon: Plug },
+  { id: "onboarding", href: dashboardRoutes.onboarding, label: "Configure Tenant", icon: Settings },
+];
+
+const readLocalBool = (key: string): boolean | null => {
+  if (typeof window === "undefined") return null;
+  const v = window.localStorage.getItem(key);
+  if (v === null) return null;
+  return v === "true";
 };
-
-const adminGroupOrder: NavItem["group"][] = ["operations", "intelligence", "platform", "system"];
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -117,12 +99,12 @@ export function Sidebar({
   approvalCount = null,
   crisisActive = false,
   fraudActive = false,
-  capabilities = null,
 }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const { user, isLoading } = useUser();
+
   const resolvedUserName =
     !isLoading && user
       ? user.name || user.email || user.nickname || "Authenticated operator"
@@ -135,22 +117,48 @@ export function Sidebar({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
   const clearLocalAuthorityCache = () => {
     window.localStorage.removeItem("operious_tenant_id");
     window.localStorage.removeItem("operious_principal_id");
     window.localStorage.removeItem("operious_operator_label");
   };
 
-  const visibleItems = navItems.filter(
-    (item) =>
-      !item.requiresCapability || (capabilities ?? []).includes(item.requiresCapability)
-  );
-  const primaryItems = PRIMARY_ITEM_IDS
-    .map((id) => visibleItems.find((item) => item.id === id))
-    .filter((item): item is NavItem => Boolean(item));
-  const adminItems = visibleItems.filter((item) => !PRIMARY_ITEM_IDS.includes(item.id));
-  const activeIsAdmin = adminItems.some((item) => item.href === pathname);
-  const [adminOpen, setAdminOpen] = useState(activeIsAdmin);
+  const [intelligenceOpen, setIntelligenceOpen] = useState<boolean>(() => {
+    const stored = readLocalBool("Intelligence");
+    if (stored !== null) return stored;
+    // Auto-open if the current route lives in this group
+    return intelligenceItems.some((item) => item.href === (typeof window !== "undefined" ? window.location.pathname : ""));
+  });
+
+  const [setupOpen, setSetupOpen] = useState<boolean>(() => {
+    const stored = readLocalBool("Setup");
+    if (stored !== null) return stored;
+    return setupItems.some((item) => item.href === (typeof window !== "undefined" ? window.location.pathname : ""));
+  });
+
+  const toggleIntelligence = () => {
+    const next = !intelligenceOpen;
+    setIntelligenceOpen(next);
+    window.localStorage.setItem("Intelligence", String(next));
+  };
+
+  const toggleSetup = () => {
+    const next = !setupOpen;
+    setSetupOpen(next);
+    window.localStorage.setItem("Setup", String(next));
+  };
+
+  const navLinkProps = {
+    pathname,
+    collapsed,
+    hoveredItem,
+    setHoveredItem,
+    onMobileClose,
+    approvalCount,
+    crisisActive,
+    fraudActive,
+  };
 
   return (
     <aside
@@ -217,83 +225,75 @@ export function Sidebar({
 
       {/* Navigation */}
       <nav className={cn("flex-1 overflow-y-auto px-3 py-3", collapsed && "lg:px-2")}>
-        {/* Primary — daily manager work */}
+
+        {/* Work group — always expanded */}
         <div>
           {!collapsed && (
             <h4 className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-quaternary">
-              Daily Work
+              Work
             </h4>
           )}
           <ul className="space-y-1">
-            {primaryItems.map((item) => (
-              <NavLink
-                key={item.id}
-                item={item}
-                pathname={pathname}
-                collapsed={collapsed}
-                hoveredItem={hoveredItem}
-                setHoveredItem={setHoveredItem}
-                onMobileClose={onMobileClose}
-                approvalCount={approvalCount}
-                crisisActive={crisisActive}
-                fraudActive={fraudActive}
-                size="lg"
-              />
+            {workItems.map((item) => (
+              <NavLink key={item.id} item={item} size="lg" {...navLinkProps} />
             ))}
           </ul>
         </div>
 
-        {/* Admin — secondary, collapsible */}
+        {/* Intelligence group — collapsible */}
         <div className="mt-5">
           <button
             type="button"
-            onClick={() => setAdminOpen((open) => !open)}
+            onClick={toggleIntelligence}
             className={cn(
               "mb-1.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-quaternary transition-colors hover:text-ink-tertiary",
               collapsed && "lg:justify-center"
             )}
-            aria-expanded={adminOpen}
+            aria-expanded={intelligenceOpen}
           >
             <ChevronRight
               size={12}
               strokeWidth={2}
-              className={cn("transition-transform duration-150", adminOpen && "rotate-90")}
+              className={cn("transition-transform duration-150", intelligenceOpen && "rotate-90")}
             />
-            {!collapsed && <span>Admin &amp; Configuration</span>}
+            {!collapsed && <span>Intelligence</span>}
           </button>
-
-          {adminOpen &&
-            adminGroupOrder.map((groupKey) => {
-              const groupItems = adminItems.filter((item) => item.group === groupKey);
-              if (groupItems.length === 0) return null;
-              return (
-                <div key={groupKey} className="mb-3">
-                  {!collapsed && (
-                    <h5 className="mb-1 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-quaternary">
-                      {adminGroupLabels[groupKey]}
-                    </h5>
-                  )}
-                  <ul className="space-y-0.5">
-                    {groupItems.map((item) => (
-                      <NavLink
-                        key={item.id}
-                        item={item}
-                        pathname={pathname}
-                        collapsed={collapsed}
-                        hoveredItem={hoveredItem}
-                        setHoveredItem={setHoveredItem}
-                        onMobileClose={onMobileClose}
-                        approvalCount={approvalCount}
-                        crisisActive={crisisActive}
-                        fraudActive={fraudActive}
-                        size="sm"
-                      />
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
+          {intelligenceOpen && (
+            <ul className="space-y-0.5">
+              {intelligenceItems.map((item) => (
+                <NavLink key={item.id} item={item} size="sm" {...navLinkProps} />
+              ))}
+            </ul>
+          )}
         </div>
+
+        {/* Setup group — collapsible */}
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={toggleSetup}
+            className={cn(
+              "mb-1.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-quaternary transition-colors hover:text-ink-tertiary",
+              collapsed && "lg:justify-center"
+            )}
+            aria-expanded={setupOpen}
+          >
+            <ChevronRight
+              size={12}
+              strokeWidth={2}
+              className={cn("transition-transform duration-150", setupOpen && "rotate-90")}
+            />
+            {!collapsed && <span>Setup</span>}
+          </button>
+          {setupOpen && (
+            <ul className="space-y-0.5">
+              {setupItems.map((item) => (
+                <NavLink key={item.id} item={item} size="sm" {...navLinkProps} />
+              ))}
+            </ul>
+          )}
+        </div>
+
       </nav>
 
       {/* Footer — profile + theme */}
@@ -434,7 +434,7 @@ function NavLink({
             {approvalCount > 99 ? "99+" : approvalCount}
           </span>
         )}
-        {(item.id === "governance" || item.id === "crisis") && crisisActive && (
+        {item.id === "governance" && crisisActive && (
           <span
             className={cn(
               "ml-auto h-2 w-2 rounded-full bg-red-alert",
