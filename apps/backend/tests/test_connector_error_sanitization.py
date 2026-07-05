@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-import ssl
 from typing import Any
 
 import pytest
@@ -28,9 +27,7 @@ from app.agents.tools.connectors.base import (
     ConnectorProviderFields,
     ConnectorTool,
 )
-from app.agents.tools.connectors.config import ConnectorConfigRepository
 from app.agents.tools.grants import AGENT_ACTION_PROVIDER_IDEMPOTENCY_KEY
-from app.agents.tools.connectors.base import TenantCredentialRuntime
 from app.tenant.enums import TenantChannelType
 
 _TENANT = "tenant-cred-test"

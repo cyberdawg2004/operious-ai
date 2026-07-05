@@ -85,6 +85,11 @@ export type ConfigChangeRequestBody = {
   payload: Record<string, unknown>;
 };
 
+function normalizeStatusValue(status?: string): string | undefined {
+  const normalized = status?.trim().toLowerCase();
+  return normalized ? normalized : undefined;
+}
+
 /**
  * Build a `connector` change request body. Credentials are NEVER included —
  * any forbidden credential key present on the input is stripped defensively,
@@ -105,7 +110,7 @@ export function buildConnectorChangePayload(
     idempotency_header_name: input.idempotency_header_name,
     response_parse: input.response_parse,
     success_status_codes: input.success_status_codes,
-    status: input.status ?? "active",
+    status: normalizeStatusValue(input.status) ?? "active",
   };
   return { change_type: "connector", payload: stripCredentialKeys(payload) };
 }
@@ -256,7 +261,7 @@ export function buildGovernancePolicyChangePayload(
     payload.policy_id = input.policyId;
   }
   if (input.status) {
-    payload.status = input.status;
+    payload.status = normalizeStatusValue(input.status);
   }
   if (input.effectiveFrom) {
     payload.effective_from = input.effectiveFrom;
@@ -301,7 +306,7 @@ export function buildChannelCredentialChangePayload(
     payload.routing_address = input.routingAddress.trim();
   }
   if (input.status) {
-    payload.status = input.status;
+    payload.status = normalizeStatusValue(input.status);
   }
   return { change_type: "channel", payload };
 }
@@ -335,7 +340,7 @@ export function buildChannelChangePayload(
     routing_address: input.routingAddress,
     credentials: dropBlankValues(input.credentials),
     webhook_secret: input.webhookSecret,
-    status: input.status ?? "pending_validation",
+    status: normalizeStatusValue(input.status) ?? "pending_validation",
   };
   return { change_type: "channel", payload };
 }
@@ -375,7 +380,7 @@ export function buildWhatsAppSelfServiceChannelChangePayload(
       graph_api_version: input.graph_api_version ?? "v25.0",
     },
     webhook_secret: "pending-provider-validation",
-    status: input.status ?? "pending_validation",
+    status: normalizeStatusValue(input.status) ?? "pending_validation",
     self_service_config: compactValues({
       setup: "manual_token",
       waba_id: input.waba_id,
@@ -437,7 +442,7 @@ export function buildSesSelfServiceChannelChangePayload(
       topic_arn: input.topic_arn,
     }),
     webhook_secret: input.topic_arn ?? "pending-provider-validation",
-    status: input.status ?? "pending_validation",
+    status: normalizeStatusValue(input.status) ?? "pending_validation",
     self_service_config: compactValues({
       mode: input.mode,
       region: input.region,

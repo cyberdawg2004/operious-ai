@@ -76,12 +76,14 @@ class ConnectorInventoryAvailabilityChecker:
             tool_name=InventoryCheckConnector.name,
             target_resource=target_resource,
         )
+        sku_field = extracted_fields.get_field("product_sku")
+        order_field = extracted_fields.get_field("order_id")
         request = ToolInvocationRequest(
             tool_name=InventoryCheckConnector.name,
             payload={
                 "remedy": remedy,
-                "product_sku": extracted_fields.product_sku.value,
-                "order_id": extracted_fields.order_id.value,
+                "product_sku": sku_field.value if sku_field is not None else None,
+                "order_id": order_field.value if order_field is not None else None,
             },
             metadata={AGENT_ACTION_PROVIDER_IDEMPOTENCY_KEY: str(idempotency_key)},
         )
@@ -96,8 +98,12 @@ class ConnectorInventoryAvailabilityChecker:
 
 
 def _target_resource(remedy: str, extracted_fields: ExtractedOrderFields) -> str:
-    sku = extracted_fields.product_sku.value
-    order_id = extracted_fields.order_id.value
+    # Use get_field() so tenant-custom field names (e.g. "product_id" for a
+    # non-commerce tenant) are handled identically to legacy "product_sku".
+    sku_field = extracted_fields.get_field("product_sku")
+    order_field = extracted_fields.get_field("order_id")
+    sku = sku_field.value if sku_field is not None else None
+    order_id = order_field.value if order_field is not None else None
     if sku is not None:
         return f"inventory:{remedy}:sku:{sku}"
     if order_id is not None:

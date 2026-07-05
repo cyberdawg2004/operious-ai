@@ -141,6 +141,14 @@ class OperationalAct(StrEnum):
     DEFECT_REPORT_GENERATED = "supervisor:defect_report_generated"
     SUPERVISOR_INSPECT = "supervisor:inspect"
 
+    # ─── intelligence layer agents (P1b/P2) ────────────────────────
+    FRAUD_SIGNAL = "agents:fraud_signal"
+    SOP_CONTRADICTION_FLAG = "agents:sop_contradiction_flag"
+    SME_REVIEW_REQUEST = "agents:sme_review_request"
+    KB_TRAINER_PROPOSE = "agents:kb_trainer_propose"
+    SUPERVISOR_PATTERN_DETECT = "agents:supervisor_pattern_detect"
+    FOLLOW_UP_TRIGGER = "agents:follow_up_trigger"
+
 
 CAPABILITY_GOVERNED_ACTS: frozenset[OperationalAct] = frozenset(
     {

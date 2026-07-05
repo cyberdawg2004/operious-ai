@@ -32,8 +32,8 @@ class ProductionReadinessError(RuntimeError):
         super().__init__(
             "Refusing to boot: production configuration is not ready:\n  - "
             f"{joined}\n"
-            "Set the real provider/secret, or explicitly acknowledge a stub "
-            "with the corresponding ALLOW_STUB_* flag."
+            "Set the real provider, durable substrate, and required secret. "
+            "ALLOW_STUB_* flags are non-production escape hatches only."
         )
 
 

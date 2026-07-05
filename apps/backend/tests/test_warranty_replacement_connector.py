@@ -52,8 +52,6 @@ from app.agents.tools.action_governance import (
     build_action_tool_governance_runtime,
 )
 from app.agents.tools.actions import (
-    FailClosedActionTool,
-    WarrantyClaimTool,
     build_tenant_action_tool_registry,
 )
 from app.agents.tools.approvals import PostgresActionApprovalRepository
@@ -1237,56 +1235,73 @@ async def test_postgres_unreachable_connector_fails_closed_and_replays_failure(
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_warranty_registers_fail_closed_in_prod() -> None:
-    """No active ConnectorConfigRecord → FailClosedActionTool in prod path."""
+async def test_unconfigured_warranty_absent_from_registry_in_prod() -> None:
+    """No active ConnectorConfigRecord → tool absent from registry (domain-agnostic design).
+
+    The old contract was: unconfigured → FailClosedActionTool with hardcoded name.
+    New contract: unconfigured → absent from registry entirely. No hardcoded tool names.
+    """
+    from app.agents.exceptions import ToolNotFoundError
+
     registry = await build_tenant_action_tool_registry(
         tenant_id=_TENANT_ID,
         config_repository=InMemoryConnectorConfigRepository(),
         credential_runtime=_CredentialRuntime(),
         allow_stub_actions=False,
     )
-
-    tool = registry.get(_WARRANTY_TOOL)
-    assert isinstance(tool, FailClosedActionTool), (
-        f"expected FailClosedActionTool, got {type(tool).__name__}"
-    )
+    assert registry.names() == (), "unconfigured tenant must have empty registry"
+    try:
+        registry.get(_WARRANTY_TOOL)
+        pytest.fail(f"{_WARRANTY_TOOL!r} should not exist in unconfigured registry")
+    except ToolNotFoundError:
+        pass  # expected
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_replacement_registers_fail_closed_in_prod() -> None:
-    """No active ConnectorConfigRecord → FailClosedActionTool in prod path."""
+async def test_unconfigured_replacement_absent_from_registry_in_prod() -> None:
+    """No active ConnectorConfigRecord → tool absent from registry."""
+    from app.agents.exceptions import ToolNotFoundError
+
     registry = await build_tenant_action_tool_registry(
         tenant_id=_TENANT_ID,
         config_repository=InMemoryConnectorConfigRepository(),
         credential_runtime=_CredentialRuntime(),
         allow_stub_actions=False,
     )
-
-    tool = registry.get(_REPLACEMENT_TOOL)
-    assert isinstance(tool, FailClosedActionTool), (
-        f"expected FailClosedActionTool, got {type(tool).__name__}"
-    )
+    try:
+        registry.get(_REPLACEMENT_TOOL)
+        pytest.fail(f"{_REPLACEMENT_TOOL!r} should not exist in unconfigured registry")
+    except ToolNotFoundError:
+        pass  # expected
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_warranty_registers_stub_in_nonprod() -> None:
-    """No active config + allow_stub_actions=True → WarrantyClaimTool stub."""
+async def test_unconfigured_warranty_absent_in_nonprod() -> None:
+    """No active config + allow_stub_actions=True → still absent from registry.
+
+    The domain-agnostic design has no hardcoded stub tools. allow_stub_actions
+    has no effect — stubs were removed with the hardcoded tool registry.
+    """
+    from app.agents.exceptions import ToolNotFoundError
+
     registry = await build_tenant_action_tool_registry(
         tenant_id=_TENANT_ID,
         config_repository=InMemoryConnectorConfigRepository(),
         credential_runtime=_CredentialRuntime(),
         allow_stub_actions=True,
     )
-
-    tool = registry.get(_WARRANTY_TOOL)
-    assert isinstance(tool, WarrantyClaimTool), (
-        f"expected WarrantyClaimTool stub, got {type(tool).__name__}"
-    )
+    try:
+        registry.get(_WARRANTY_TOOL)
+        pytest.fail(f"{_WARRANTY_TOOL!r} should not exist in unconfigured registry")
+    except ToolNotFoundError:
+        pass  # expected
 
 
 @pytest.mark.asyncio
-async def test_configured_warranty_registers_real_connector() -> None:
-    """Active ConnectorConfigRecord → real GenericRestWarrantyClaimConnector."""
+async def test_configured_warranty_registers_generic_connector() -> None:
+    """Active ConnectorConfigRecord → GenericConnectorTool registered under tool_name."""
+    from app.agents.tools.connectors import GenericConnectorTool
+
     config_repo = await _memory_warranty_config(
         endpoint_template="https://warranty.sandbox.example/claims",
         endpoint_host="warranty.sandbox.example",
@@ -1299,13 +1314,16 @@ async def test_configured_warranty_registers_real_connector() -> None:
     )
 
     tool = registry.get(_WARRANTY_TOOL)
-    assert isinstance(tool, GenericRestWarrantyClaimConnector), (
-        f"expected GenericRestWarrantyClaimConnector, got {type(tool).__name__}"
+    assert isinstance(tool, GenericConnectorTool), (
+        f"expected GenericConnectorTool, got {type(tool).__name__}"
     )
 
 
 @pytest.mark.asyncio
-async def test_configured_replacement_registers_real_connector() -> None:
+async def test_configured_replacement_registers_generic_connector() -> None:
+    """Active ConnectorConfigRecord → GenericConnectorTool registered under tool_name."""
+    from app.agents.tools.connectors import GenericConnectorTool
+
     repo = InMemoryConnectorConfigRepository()
     await repo.save_config(
         _replacement_config(),
@@ -1319,8 +1337,8 @@ async def test_configured_replacement_registers_real_connector() -> None:
     )
 
     tool = registry.get(_REPLACEMENT_TOOL)
-    assert isinstance(tool, ReplacementOrderConnector), (
-        f"expected ReplacementOrderConnector, got {type(tool).__name__}"
+    assert isinstance(tool, GenericConnectorTool), (
+        f"expected GenericConnectorTool, got {type(tool).__name__}"
     )
 
 

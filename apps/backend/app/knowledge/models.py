@@ -98,6 +98,28 @@ class KnowledgeRetrievalResult:
     vector_index_name: str
 
 
+class ContradictionCheckStatus(StrEnum):
+    """Tri-state outcome of the MVP-4 SOP contradiction check.
+
+    These three states are INTENTIONALLY distinguishable — "unchecked" must
+    never be indistinguishable from "clean".
+
+    CHECKED_CLEAN: agent ran, no contradiction found → document admitted.
+    CHECKED_CONTRADICTION: agent ran, contradiction found → document quarantined.
+    UNCHECKED_AGENT_UNAVAILABLE: agent could not run (error/timeout/no policy)
+        → document quarantined for human review. "The check did not run" is
+        treated as a known-unknown, NOT as a clean result. Human must verify
+        before the document is admitted to the active KB.
+    NOT_APPLICABLE: document type is not subject to contradiction checking
+        (FAQ, TEMPLATE, PRODUCT_GUIDE, etc.), or no agent is wired.
+    """
+
+    CHECKED_CLEAN = "checked_clean"
+    CHECKED_CONTRADICTION = "checked_contradiction"
+    UNCHECKED_AGENT_UNAVAILABLE = "unchecked_agent_unavailable"
+    NOT_APPLICABLE = "not_applicable"
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeIngestionResult:
     tenant_id: str
@@ -107,9 +129,18 @@ class KnowledgeIngestionResult:
     vector_count: int
     vector_index_name: str
     indexed_at: datetime
+    # MVP-4: tri-state contradiction check outcome.
+    # NOT_APPLICABLE when no agent is wired or document type is exempt.
+    # UNCHECKED_AGENT_UNAVAILABLE when agent failed — document is quarantined,
+    # chunk_count=0, vector_count=0. Requires human review before admission.
+    contradiction_check_status: ContradictionCheckStatus = (
+        ContradictionCheckStatus.NOT_APPLICABLE
+    )
+    contradiction_metadata: dict[str, object] | None = None
 
 
 __all__ = [
+    "ContradictionCheckStatus",
     "KnowledgeBudgetDecision",
     "KnowledgeBudgetDecisionReason",
     "KnowledgeCitation",

@@ -148,7 +148,7 @@ def _concrete_agent_modules() -> set[str]:
             if (
                 isinstance(node, ast.ClassDef)
                 and node.name.endswith("Agent")
-                and node.name != "BaseAgent"
+                and node.name not in ("BaseAgent", "BaseGovernedLLMAgent")
             ):
                 modules.add(_module_name(path))
     return modules

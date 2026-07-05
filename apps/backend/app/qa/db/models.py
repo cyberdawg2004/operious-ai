@@ -54,6 +54,10 @@ class QAScoreRow(Base):
     policy_compliance: Mapped[float] = mapped_column(Float, nullable=False)
     timeline_integrity: Mapped[float] = mapped_column(Float, nullable=False)
     resolution_quality: Mapped[float] = mapped_column(Float, nullable=False)
+    # MVP-6: semantic grounding score from SemanticQAAgent. 0.0 = not yet scored.
+    semantic_grounding: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default=text("0.0")
+    )
     overall_score: Mapped[float] = mapped_column(Float, nullable=False)
     supervisor_decision_kind: Mapped[str] = mapped_column(
         String(_ENUM_WIDTH), nullable=False, index=True
@@ -96,6 +100,10 @@ class QAScoreRow(Base):
         CheckConstraint(
             "resolution_quality >= 0 AND resolution_quality <= 1",
             name="resolution_quality_bounds",
+        ),
+        CheckConstraint(
+            "semantic_grounding >= 0 AND semantic_grounding <= 1",
+            name="semantic_grounding_bounds",
         ),
         CheckConstraint(
             "overall_score >= 0 AND overall_score <= 1",

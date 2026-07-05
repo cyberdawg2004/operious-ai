@@ -62,13 +62,17 @@ class TemplatePlaceholderError(ValueError):
     filled at send time."""
 
 
-def fillable_template_placeholders() -> frozenset[str]:
+def fillable_template_placeholders(
+    extra_field_names: frozenset[str] | None = None,
+) -> frozenset[str]:
     """The complete set of names a template's ``{placeholder}`` can ever
-    resolve to: the extracted order fields (app.cognition.extraction)
-    plus the two names always derived regardless of extraction. Anything
-    outside this set can never be filled at send time — see
-    ``validate_template_placeholders``, the authoring-time guard that
-    rejects such a template before it can ever be approved.
+    resolve to: the extracted fields plus the two names always derived
+    regardless of extraction.
+
+    ``extra_field_names`` accepts a tenant's extraction schema field names
+    so non-e-commerce tenants can reference their own fields in templates.
+    When None, the legacy e-commerce field set is used so existing behaviour
+    is unchanged.
 
     Imported lazily, not at module level: app.cognition.extraction's
     parent package eagerly imports app.runtime.resolution_runtime, which
@@ -76,6 +80,9 @@ def fillable_template_placeholders() -> frozenset[str]:
     import.
     """
     global _fillable_cache
+    if extra_field_names is not None:
+        # Tenant-specific — never cache; build fresh and include extras.
+        return extra_field_names | _ALWAYS_DERIVED_PLACEHOLDERS
     if _fillable_cache is None:
         from app.cognition.extraction import EXTRACTED_ORDER_FIELD_NAMES
 
@@ -95,17 +102,18 @@ def extract_placeholders(content: str) -> frozenset[str]:
     return frozenset(_PLACEHOLDER_PATTERN.findall(content))
 
 
-def validate_template_placeholders(content: str) -> None:
+def validate_template_placeholders(
+    content: str,
+    extra_field_names: frozenset[str] | None = None,
+) -> None:
     """Authoring-time guard: reject a template that references a
     placeholder outside ``fillable_template_placeholders()``.
 
-    Without this, an unknown placeholder name was never caught anywhere
-    (extract_placeholders had zero callers) and would silently render as
-    a literal ``[missing: name]`` string in a customer-facing reply —
-    this is what closes that gap at the point a template can still be
-    rejected instead of approved.
+    ``extra_field_names`` is forwarded to ``fillable_template_placeholders``
+    to support tenants whose extraction_schema declares fields beyond the
+    legacy e-commerce set.
     """
-    fillable = fillable_template_placeholders()
+    fillable = fillable_template_placeholders(extra_field_names)
     unknown = extract_placeholders(content) - fillable
     if unknown:
         raise TemplatePlaceholderError(

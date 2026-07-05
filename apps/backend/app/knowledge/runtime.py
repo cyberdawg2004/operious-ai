@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.core.config import get_settings
 from app.knowledge.chunking import DeterministicKnowledgeChunker
@@ -20,6 +21,7 @@ from app.knowledge.exceptions import (
 )
 from app.knowledge.identity import derive_chunk_id, derive_vector_id
 from app.knowledge.models import (
+    ContradictionCheckStatus,
     KnowledgeBudgetDecision,
     KnowledgeBudgetDecisionReason,
     KnowledgeCitation,
@@ -41,10 +43,17 @@ from app.knowledge.persistence import (
 )
 from app.tenant.enums import (
     TenantKnowledgeDocumentStatus,
+    TenantKnowledgeDocumentType,
     TenantKnowledgeReviewStatus,
 )
 from app.tenant.identity import TenantKnowledgeDocumentId
 from app.tenant.persistence import TenantConfigurationRepository
+from app.tenant.persistence.models import TenantKnowledgeDocumentQuery
+
+if TYPE_CHECKING:
+    from app.agents.governed.sop_contradiction import SOPContradictionAgent
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeRuntime:
     """Runtime authority for tenant-owned knowledge ingestion."""
@@ -57,6 +66,7 @@ class KnowledgeRuntime:
         embedding_provider: KnowledgeEmbeddingProvider | None = None,
         chunker: DeterministicKnowledgeChunker | None = None,
         injection_scanner: KnowledgeInjectionScanner | None = None,
+        sop_contradiction_agent: SOPContradictionAgent | None = None,
         vector_index_name: str = "tenant_knowledge_default",
         default_context_token_budget: int = 4000,
     ) -> None:
@@ -73,6 +83,7 @@ class KnowledgeRuntime:
         self._injection_scanner = (
             injection_scanner or PatternKnowledgeInjectionScanner()
         )
+        self._sop_contradiction_agent = sop_contradiction_agent
         self._vector_index_name = vector_index_name
         self._default_context_token_budget = default_context_token_budget
 
@@ -97,6 +108,57 @@ class KnowledgeRuntime:
             content=document.content,
             current_review_status=document.review_status,
         )
+
+        # MVP-4: run contradiction check on SOP/POLICY docs when agent is wired.
+        # Only runs if injection scan did not hard-reject the document.
+        check_status = ContradictionCheckStatus.NOT_APPLICABLE
+        contradiction_meta: dict[str, Any] | None = None
+        if (
+            self._sop_contradiction_agent is not None
+            and review_status is not TenantKnowledgeReviewStatus.REJECTED
+            and document.document_type in (
+                TenantKnowledgeDocumentType.SOP,
+                TenantKnowledgeDocumentType.POLICY,
+            )
+        ):
+            check_status, contradiction_meta = await _run_contradiction_check(
+                agent=self._sop_contradiction_agent,
+                document=document,
+                repository=self._tenant_configuration_repository,
+                tenant_id=tenant_id,
+            )
+
+        # CHECKED_CONTRADICTION and UNCHECKED_AGENT_UNAVAILABLE both quarantine
+        # and skip indexing, for different reasons:
+        # - CHECKED_CONTRADICTION: the check ran and found a real conflict.
+        # - UNCHECKED_AGENT_UNAVAILABLE: the check COULD NOT RUN. "Unchecked"
+        #   is not "clean" — the document is held for human review until the
+        #   contradiction check can be performed. Fail-to-review, not fail-open.
+        if check_status in (
+            ContradictionCheckStatus.CHECKED_CONTRADICTION,
+            ContradictionCheckStatus.UNCHECKED_AGENT_UNAVAILABLE,
+        ):
+            now = _utcnow()
+            await self._tenant_configuration_repository.save_knowledge_document(
+                replace(
+                    document,
+                    status=TenantKnowledgeDocumentStatus.ACTIVE,
+                    review_status=TenantKnowledgeReviewStatus.QUARANTINED,
+                ),
+                expected_tenant_id=tenant_id,
+            )
+            return KnowledgeIngestionResult(
+                tenant_id=tenant_id,
+                document_id=document.document_id,
+                document_version=document.version,
+                chunk_count=0,
+                vector_count=0,
+                vector_index_name=self._vector_index_name,
+                indexed_at=now,
+                contradiction_check_status=check_status,
+                contradiction_metadata=contradiction_meta,
+            )
+
         chunks = self._chunker.chunk(document.content)
         if not chunks:
             raise KnowledgeDocumentNotIndexableError(
@@ -192,6 +254,8 @@ class KnowledgeRuntime:
             vector_count=len(vector_records),
             vector_index_name=self._vector_index_name,
             indexed_at=now,
+            contradiction_check_status=check_status,
+            contradiction_metadata=None,
         )
 
     async def retrieve(
@@ -403,6 +467,93 @@ def _entry_metadata(entry: KnowledgeVectorEntry) -> dict[str, Any]:
     if entry.document_review_status:
         metadata["document_review_status"] = entry.document_review_status
     return metadata
+
+
+async def _run_contradiction_check(
+    *,
+    agent: SOPContradictionAgent,
+    document: Any,
+    repository: TenantConfigurationRepository,
+    tenant_id: str,
+) -> tuple[ContradictionCheckStatus, dict[str, Any] | None]:
+    """Run SOP contradiction agent against the active corpus.
+
+    Returns (check_status, contradiction_metadata).
+
+    CHECKED_CLEAN: agent ran, no contradiction → (CHECKED_CLEAN, None).
+    CHECKED_CONTRADICTION: agent found contradictions → (CHECKED_CONTRADICTION, meta).
+    UNCHECKED_AGENT_UNAVAILABLE: agent could not run (timeout, LLM error, no
+        active policy, unhandled exception) → (UNCHECKED_AGENT_UNAVAILABLE, None).
+
+    DOCTRINE: agent-unavailable NEVER returns CHECKED_CLEAN. The caller must
+    treat UNCHECKED_AGENT_UNAVAILABLE as a known-unknown and quarantine the
+    document for human review, not admit it as if the check passed.
+    """
+    from app.agents.governed.base import AgentInput
+    from app.agents.governed.proposal import AgentProposalStatus
+    from app.agents.governed.sop_contradiction import (
+        contradiction_report_to_quarantine_metadata,
+    )
+
+    try:
+        # Load active SOP/POLICY corpus (approved only, excluding self).
+        corpus_page = await repository.list_knowledge_documents(
+            TenantKnowledgeDocumentQuery(
+                review_status=TenantKnowledgeReviewStatus.APPROVED,
+                limit=20,
+            ),
+            expected_tenant_id=tenant_id,
+        )
+        corpus_docs = [
+            {
+                "doc_id": str(doc.document_id),
+                "title": doc.title,
+                "content": doc.content,
+            }
+            for doc in corpus_page.items
+            if str(doc.document_id) != str(document.document_id)
+            and doc.document_type in (
+                TenantKnowledgeDocumentType.SOP,
+                TenantKnowledgeDocumentType.POLICY,
+            )
+        ]
+
+        agent_input = AgentInput(
+            tenant_id=tenant_id,
+            session_id=f"ingest:{document.document_id}",
+            execution_id=f"ingest:{document.document_id}:v{document.version}",
+            content={
+                "new_document_id": str(document.document_id),
+                "new_document_title": document.title,
+                "new_document_type": document.document_type.value,
+                "new_document_content": document.content,
+                "corpus_documents": corpus_docs,
+            },
+        )
+        proposal = await agent.run(agent_input)
+
+        if proposal.status != AgentProposalStatus.COMPLETED or proposal.output is None:
+            logger.warning(
+                "sop_contradiction_agent_unavailable tenant=%s doc=%s status=%s "
+                "— document quarantined for human review (unchecked != clean)",
+                tenant_id, document.document_id, proposal.status,
+            )
+            return (ContradictionCheckStatus.UNCHECKED_AGENT_UNAVAILABLE, None)
+
+        report = dict(proposal.output)
+        meta = contradiction_report_to_quarantine_metadata(report)
+        if meta is not None:
+            return (ContradictionCheckStatus.CHECKED_CONTRADICTION, meta)
+        return (ContradictionCheckStatus.CHECKED_CLEAN, None)
+
+    except Exception:
+        logger.warning(
+            "sop_contradiction_check_failed tenant=%s doc=%s "
+            "— document quarantined for human review (unchecked != clean)",
+            tenant_id, document.document_id,
+            exc_info=True,
+        )
+        return (ContradictionCheckStatus.UNCHECKED_AGENT_UNAVAILABLE, None)
 
 
 def _review_document_for_indexing(

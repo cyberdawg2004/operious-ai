@@ -95,19 +95,23 @@ def determine_eligibility(
             verdict=EligibilityVerdict.CANNOT_DETERMINE, claim_type=claim_type
         )
 
+    date_field = policy.date_field_name()
+    seller_field = policy.seller_field_name()
+
     missing: list[str] = []
     for field_name in required:
-        field = getattr(extracted_fields, field_name)
-        if field.value is None or field.confidence == "low":
+        ef = extracted_fields.get_field(field_name)
+        absent = ef is None or ef.value is None or ef.confidence == "low"
+        if absent:
             missing.append(field_name)
 
-    parsed_purchase_date: date | None = None
-    if "purchase_date" in required and "purchase_date" not in missing:
-        purchase_date_value = extracted_fields.purchase_date.value
-        assert purchase_date_value is not None  # not in missing => has a value
-        parsed_purchase_date = _parse_date(purchase_date_value)
-        if parsed_purchase_date is None:
-            missing.append("purchase_date")
+    parsed_date: date | None = None
+    if date_field in required and date_field not in missing:
+        date_ef = extracted_fields.get_field(date_field)
+        assert date_ef is not None and date_ef.value is not None  # not in missing
+        parsed_date = _parse_date(date_ef.value)
+        if parsed_date is None:
+            missing.append(date_field)
 
     if missing:
         return EligibilityDetermination(
@@ -119,20 +123,23 @@ def determine_eligibility(
     grounding: list[EligibilityCheck] = []
     eligible = True
 
-    if "purchase_date" in required:
-        assert parsed_purchase_date is not None
+    if date_field in required:
+        assert parsed_date is not None
         check = _warranty_window_check(
             extracted_fields,
-            parsed_purchase_date=parsed_purchase_date,
+            date_field_name=date_field,
+            parsed_date=parsed_date,
             warranty_window_days=policy.window_days_for(claim_type),
             now=now,
         )
         grounding.append(check)
         eligible = eligible and check.passed
 
-    if "seller" in required:
+    if seller_field in required:
         check = _authorized_reseller_check(
-            extracted_fields, authorized_resellers=policy.authorized_resellers
+            extracted_fields,
+            seller_field_name=seller_field,
+            authorized_resellers=policy.authorized_resellers,
         )
         grounding.append(check)
         eligible = eligible and check.passed
@@ -157,40 +164,42 @@ def determine_eligibility(
 def _warranty_window_check(
     extracted_fields: ExtractedOrderFields,
     *,
-    parsed_purchase_date: date,
+    date_field_name: str,
+    parsed_date: date,
     warranty_window_days: int,
     now: datetime,
 ) -> EligibilityCheck:
-    age_days = (now.date() - parsed_purchase_date).days
+    age_days = (now.date() - parsed_date).days
     passed = 0 <= age_days <= warranty_window_days
-    field = extracted_fields.purchase_date
+    ef = extracted_fields.get_field(date_field_name)
     return EligibilityCheck(
         name="within_warranty_window",
         passed=passed,
         rule=f"warranty_window_days={warranty_window_days}",
-        evidence_field="purchase_date",
-        evidence_value=field.value or "",
-        evidence_confidence=field.confidence or "",
-        evidence_source=field.source,
+        evidence_field=date_field_name,
+        evidence_value=(ef.value if ef is not None else "") or "",
+        evidence_confidence=(ef.confidence if ef is not None else "") or "",
+        evidence_source=ef.source if ef is not None else "none",
     )
 
 
 def _authorized_reseller_check(
     extracted_fields: ExtractedOrderFields,
     *,
+    seller_field_name: str,
     authorized_resellers: frozenset[str],
 ) -> EligibilityCheck:
-    field = extracted_fields.seller
-    seller_value = field.value or ""
+    ef = extracted_fields.get_field(seller_field_name)
+    seller_value = (ef.value if ef is not None else "") or ""
     passed = seller_value.strip().lower() in authorized_resellers
     return EligibilityCheck(
         name="authorized_reseller",
         passed=passed,
         rule=f"authorized_resellers={sorted(authorized_resellers)!r}",
-        evidence_field="seller",
+        evidence_field=seller_field_name,
         evidence_value=seller_value,
-        evidence_confidence=field.confidence or "",
-        evidence_source=field.source,
+        evidence_confidence=(ef.confidence if ef is not None else "") or "",
+        evidence_source=ef.source if ef is not None else "none",
     )
 
 

@@ -1263,6 +1263,15 @@ export function listGovernancePolicies() {
   });
 }
 
+export function listGovernancePoliciesByType(
+  policyType: string,
+  status: "active" | "draft" | "archived" = "active"
+) {
+  return apiRequest<ApiPage<TenantGovernancePolicy>>("/tenant/policies", {
+    query: { policy_type: policyType, status, limit: 1, offset: 0 },
+  });
+}
+
 export function createGovernancePolicy(request: TenantGovernancePolicyCreateRequest) {
   return apiRequest<TenantGovernancePolicy>("/tenant/policies", {
     method: "POST",

@@ -250,6 +250,17 @@ test('governance policy change payload includes policy_id only on update', () =>
   strictEqual(updated.payload.policy_type, 'resolution_autonomy');
 });
 
+test('governance policy payload normalizes status values to lowercase wire enums', () => {
+  const created = payloads.buildGovernancePolicyChangePayload({
+    policyType: 'warranty_refund_rules',
+    parameters: { warranty_window_days: 730 },
+    status: 'ACTIVE',
+    effectiveFrom: '2026-06-04T00:00:00.000Z',
+  });
+
+  strictEqual(created.payload.status, 'active');
+});
+
 // ─── Constraint C: client-side change_type filter ─────────────────────────
 
 test('client-side filter keeps connector, every policy type, and knowledge upload changes', () => {

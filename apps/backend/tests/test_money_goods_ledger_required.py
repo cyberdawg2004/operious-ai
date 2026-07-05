@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from dataclasses import dataclass, field
 from typing import ClassVar, FrozenSet, Sequence
 
 import pytest
@@ -51,7 +50,6 @@ from app.governance.policies.chain import PolicyChain
 from app.governance.subjects.base import SubjectKind
 from app.agents.tools.connector_invocations import (
     ConnectorInvocationRecord,
-    ConnectorInvocationRepository,
     ConnectorInvocationReservation,
 )
 

@@ -21,6 +21,7 @@ class CommitmentKind(StrEnum):
     RECORD_UPDATE = "record_update"
     MONEY = "money"
     GOODS = "goods"
+    SERVICE_COMMITMENT = "service_commitment"
 
 
 class ApprovalPolicy(StrEnum):
@@ -366,6 +367,115 @@ def _dispatch_target(
     return tool_name or action_type or "operation"
 
 
+def _repair_booking_payload(
+    action: Mapping[str, Any],
+    proposal: Any,
+    action_type: str,
+) -> JsonObject:
+    del action_type
+    return {
+        "order_id": _text(action.get("order_id")),
+        "product_sku": _text(action.get("product_sku")),
+        "preferred_date": _text(action.get("preferred_date")),
+        "customer_address_hash": _text(action.get("customer_address_hash"))
+            or "address_unavailable",
+        "device_description": _text(action.get("device_description"))
+            or _proposal_text(proposal)
+            or "repair_booking",
+    }
+
+
+def _booking_target(
+    action: Mapping[str, Any],
+    payload: Mapping[str, JsonValue],
+    tool_name: str | None,
+    action_type: str | None,
+) -> str:
+    explicit = _text(action.get("target_resource_id"))
+    if explicit is not None:
+        return explicit
+    order_id = _text(payload.get("order_id"))
+    product_sku = _text(payload.get("product_sku"))
+    if order_id is not None and product_sku is not None:
+        return f"booking:{order_id}:{product_sku}"
+    return tool_name or action_type or "operation"
+
+
+# Keys in a recommended_action dict that carry orchestration directives or nested
+# objects — NOT tenant-extracted data fields.  Everything outside this set is a
+# scalar data value (order_id, product_sku, account_number, transaction_id, …)
+# that was merged in by _merge_extracted_fields and should be forwarded as payload
+# or governance metadata without hardcoding any specific field name.
+ACTION_STRUCTURAL_KEYS: frozenset[str] = frozenset({
+    "type",
+    "tool_name",
+    "label",
+    "requires_execution",
+    "payload_template",
+    "target_resource_id",
+    "payload",
+    "warranty_refund_eligibility",
+    "resolution_verdict",
+})
+
+
+def generic_payload_builder(
+    action: Mapping[str, Any],
+    proposal: Any,
+    action_type: str,
+) -> JsonObject:
+    """Generic fallback payload builder for non-registered (non-commerce) operations.
+
+    Forwards all non-structural scalar values from the action dict as the
+    payload body.  These values were placed there by _merge_extracted_fields
+    using the tenant's configured extraction schema field names — so a bank
+    action with account_number/dispute_amount produces a payload with those
+    keys, and a telecom action with service_id/phone produces its own keys,
+    without any hardcoded commerce assumptions.
+
+    Fail-closed: if the action has no data fields (payload would be empty),
+    the action_type is included as a context marker so the connector receives
+    at minimum the operation intent.
+    """
+    del action_type
+    result: JsonObject = {}
+    for key, raw_value in action.items():
+        if key in ACTION_STRUCTURAL_KEYS:
+            continue
+        value = _text(raw_value) or (
+            raw_value if isinstance(raw_value, int | float | bool) else None
+        )
+        if value is not None:
+            result[key] = value
+    # Supplement with proposal-level fields that are always meaningful context
+    issue_cat = _text(getattr(proposal, "resolution_category", None))
+    if issue_cat is not None and "issue_category" not in result:
+        result["issue_category"] = issue_cat
+    return result
+
+
+def generic_target_resource_builder(
+    action: Mapping[str, Any],
+    payload: Mapping[str, JsonValue],
+    tool_name: str | None,
+    action_type: str | None,
+) -> str:
+    """Generic target resource builder for non-commerce operations.
+
+    Checks explicit target_resource_id first, then uses the first non-empty
+    string value in the payload as the resource identifier, falling back to
+    the tool/action name.  This lets bank/telecom operations produce a
+    meaningful audit target without hardcoding field names.
+    """
+    explicit = _text(action.get("target_resource_id"))
+    if explicit is not None:
+        return explicit
+    for value in payload.values():
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return tool_name or action_type or "operation"
+
+
 def _proposal_text(proposal: Any) -> str | None:
     reply = _text(getattr(proposal, "proposed_customer_reply", None))
     if reply is None:
@@ -493,6 +603,24 @@ _REGISTERED_OPERATIONS: tuple[RegisteredOperation, ...] = (
         required_policy_rule=False,
         target_resource_builder=_dispatch_target,
     ),
+    # MVP-9: repair booking — schedules a physical repair appointment with
+    # the tenant's configured service team. CommitmentKind.GOODS because
+    # it dispatches a service technician (goods/services delivery).
+    # ALWAYS_REQUIRE_APPROVAL: a booking is a real-world commitment that
+    # must always be approved by a human before being sent.
+    RegisteredOperation(
+        operation_id="operation.repair_booking",
+        tool_name="repair.booking",
+        action_types=frozenset({"repair_booking"}),
+        commitment_kind=CommitmentKind.GOODS,
+        approval_policy=ApprovalPolicy.ALWAYS_REQUIRE_APPROVAL,
+        target_resource_expr="booking:{order_id}:{product_sku}",
+        policy_key="repair.booking",
+        rule_kind=RuleKind.ALWAYS,
+        required_policy_rule=False,
+        payload_builder=_repair_booking_payload,
+        target_resource_builder=_booking_target,
+    ),
 )
 
 _REGISTERED_BY_TOOL = {operation.tool_name: operation for operation in _REGISTERED_OPERATIONS}
@@ -504,6 +632,7 @@ _REGISTERED_BY_ACTION_TYPE = {
 
 
 __all__ = [
+    "ACTION_STRUCTURAL_KEYS",
     "ApprovalPolicy",
     "APPROVAL_POLICY_METADATA_KEY",
     "COMMITMENT_KIND_METADATA_KEY",
@@ -513,6 +642,8 @@ __all__ = [
     "ResolvedOperation",
     "RuleKind",
     "TARGET_RESOURCE_EXPR_METADATA_KEY",
+    "generic_payload_builder",
+    "generic_target_resource_builder",
     "known_action_tool_names",
     "metadata_field_names",
     "operation_metadata",

@@ -21,7 +21,6 @@ from app.dependencies.authority import (
     require_tenant_scope,
 )
 from app.dependencies.database import get_db_session
-from app.api.v1.schemas.action_approvals import ActionApprovalListResponse
 from app.dependencies.services import get_action_approval_service
 from app.identity import AuthorityContext
 from app.main import create_app

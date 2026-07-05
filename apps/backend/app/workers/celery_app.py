@@ -43,6 +43,7 @@ from app.queues import (
     QUEUE_SOP_INTELLIGENCE,
     QUEUE_SME_APPROVAL,
     QUEUE_SUPERVISOR,
+    QUEUE_TRAINER,
     QUEUE_WEBHOOK_MAINTENANCE,
     QUEUE_WHATSAPP_MEDIA_FETCH,
 )
@@ -96,9 +97,11 @@ celery_app = Celery(
         "app.workers.qa_tasks",
         "app.workers.s10_probe_tasks",
         "app.workers.sop_intelligence_tasks",
+        "app.workers.trainer_tasks",
         "app.workers.supervisor_tasks",
         "app.workers.webhook_nonce_tasks",
         "app.workers.whatsapp_media_fetch_tasks",
+        "app.workers.work_order_followup_tasks",
     ],
 )
 
@@ -122,6 +125,7 @@ celery_conf.update(
         "review_case_approval": {"queue": QUEUE_SME_APPROVAL},
         "scan_training_recommendation_gaps": {"queue": QUEUE_SOP_INTELLIGENCE},
         "detect_sop_failure_patterns": {"queue": QUEUE_SOP_INTELLIGENCE},
+        "aggregate_qa_signals": {"queue": QUEUE_TRAINER},
         "reindex_knowledge_document": {"queue": QUEUE_KNOWLEDGE_INDEXING},
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "dispatch_ingress": {"queue": QUEUE_INGRESS_EMAIL},
@@ -165,6 +169,7 @@ celery_conf.update(
         },
         "s10_dead_letter_probe": {"queue": QUEUE_DEAD_LETTER},
         "process_post_call_transcript": {"queue": QUEUE_INGRESS_VOICE},
+        "poll_stale_work_orders": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
     },
     task_acks_late=True,
     task_ignore_result=True,
@@ -291,6 +296,15 @@ celery_conf.update(
         "purge-expired-protected-data-daily": {
             "task": "purge_expired_protected_data",
             "schedule": 86400.0,
+            "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        # MVP-9: poll AWAITING_FULFILLMENT work orders past their SLA window
+        # and send a customer follow-up via the outbound auto-send path.
+        # Runs hourly — matching the default 24h SLA floor, this fires at most
+        # once per SLA period per work order (idempotency via metadata stamp).
+        "poll-stale-work-orders-hourly": {
+            "task": "poll_stale_work_orders",
+            "schedule": 3600.0,
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         },
     },

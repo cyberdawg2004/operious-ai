@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   createChannelConfiguration,
   createSesSelfServiceChannel,
@@ -13,6 +13,7 @@ import {
   listChannelConfigurations,
   listDeadLetterExecutions,
   listGovernancePolicies,
+  listGovernancePoliciesByType,
   listOperationalAlerts,
   listTopologyConfigurations,
   proposeConfigChangeRequest,
@@ -971,13 +972,17 @@ function PolicyForm({
   isSubmitting: boolean;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }) {
+  const policyType = policy?.policy_type ?? "";
+  const isResolutionTaxonomy = policyType === "resolution_taxonomy";
+  const isWarrantyRefund = policyType === "warranty_refund_rules";
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <h2 className="font-display text-[24px] font-semibold text-ink-primary">
         {policy ? "Propose Policy Update" : "Propose New Policy"}
       </h2>
       {error && <FormError message={error} />}
-      <TextInput name="policy_type" label="Policy type" defaultValue={policy?.policy_type ?? ""} disabled={Boolean(policy)} required />
+      <TextInput name="policy_type" label="Policy type" defaultValue={policyType} disabled={Boolean(policy)} required />
       <SelectInput
         name="status"
         label="Status"
@@ -991,11 +996,17 @@ function PolicyForm({
         defaultValue={toDateTimeLocal(policy?.effective_from)}
         required
       />
-      <JsonInput
-        name="parameters"
-        label="Parameters"
-        defaultValue={JSON.stringify(policy?.parameters ?? {}, null, 2)}
-      />
+      {isResolutionTaxonomy ? (
+        <ExtractionSchemaEditor policy={policy} />
+      ) : isWarrantyRefund ? (
+        <WarrantyRefundEditor policy={policy} />
+      ) : (
+        <JsonInput
+          name="parameters"
+          label="Parameters"
+          defaultValue={JSON.stringify(policy?.parameters ?? {}, null, 2)}
+        />
+      )}
       <SubmitButton isSubmitting={isSubmitting} label={policy ? "Propose update" : "Propose policy"} />
     </form>
   );
@@ -1439,4 +1450,442 @@ function formatLabel(value: string): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// MVP-1 Extraction Schema Builder
+// ---------------------------------------------------------------------------
+
+type ExtractionFieldType = "string" | "date" | "integer" | "decimal" | "enum";
+
+const FIELD_TYPES: ExtractionFieldType[] = ["string", "date", "integer", "decimal", "enum"];
+
+const ECOMMERCE_DEFAULT_FIELDS: ExtractionFieldRow[] = [
+  { id: "f1", name: "order_id",      type: "string",  displayName: "Order ID",       description: "The customer's order number",                              requiredForAuto: true,  identityField: false, enumValues: [] },
+  { id: "f2", name: "product_sku",   type: "string",  displayName: "Product SKU",    description: "The product model or SKU",                                 requiredForAuto: false, identityField: false, enumValues: [] },
+  { id: "f3", name: "purchase_date", type: "date",    displayName: "Purchase Date",  description: "The date the product was purchased (YYYY-MM-DD)",           requiredForAuto: true,  identityField: false, enumValues: [] },
+  { id: "f4", name: "seller",        type: "string",  displayName: "Seller",         description: "The store or seller the customer purchased from",           requiredForAuto: false, identityField: false, enumValues: [] },
+  { id: "f5", name: "amount",        type: "decimal", displayName: "Amount",         description: "The purchase amount",                                      requiredForAuto: false, identityField: false, enumValues: [] },
+  { id: "f6", name: "currency",      type: "string",  displayName: "Currency",       description: "The purchase currency code (e.g. USD)",                    requiredForAuto: false, identityField: false, enumValues: [] },
+];
+
+interface ExtractionFieldRow {
+  id: string;
+  name: string;
+  type: ExtractionFieldType;
+  displayName: string;
+  description: string;
+  requiredForAuto: boolean;
+  identityField: boolean;
+  enumValues: string[];
+}
+
+function newFieldId(): string {
+  return `field-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function parseExistingSchema(policy?: TenantGovernancePolicy): ExtractionFieldRow[] | null {
+  const schema = policy?.parameters?.extraction_schema;
+  if (!schema || typeof schema !== "object") return null;
+  const entries = Object.entries(schema as Record<string, Record<string, unknown>>);
+  if (entries.length === 0) return null;
+  return entries.map(([name, spec]) => ({
+    id: newFieldId(),
+    name,
+    type: (spec.type as ExtractionFieldType) ?? "string",
+    displayName: typeof spec.display_name === "string" ? spec.display_name : "",
+    description: typeof spec.description === "string" ? spec.description : "",
+    requiredForAuto: spec.required_for_auto === true,
+    identityField: spec.identity_field === true,
+    enumValues: Array.isArray(spec.values) ? (spec.values as string[]) : [],
+  }));
+}
+
+function serializeExtractionSchema(rows: ExtractionFieldRow[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const row of rows) {
+    if (!row.name.trim()) continue;
+    const spec: Record<string, unknown> = { type: row.type };
+    if (row.displayName.trim()) spec.display_name = row.displayName.trim();
+    if (row.description.trim()) spec.description = row.description.trim();
+    if (row.requiredForAuto) spec.required_for_auto = true;
+    if (row.identityField) spec.identity_field = true;
+    if (row.type === "enum" && row.enumValues.length > 0)
+      spec.values = row.enumValues.filter((v) => v.trim());
+    result[row.name.trim()] = spec;
+  }
+  return result;
+}
+
+function validateFieldName(name: string): string | null {
+  if (!name.trim()) return "Field name is required";
+  if (!/^[a-z][a-z0-9_]*$/.test(name.trim()))
+    return "Must be lowercase snake_case (letters, digits, underscores, starting with a letter)";
+  return null;
+}
+
+function ExtractionSchemaEditor({ policy }: { policy?: TenantGovernancePolicy }) {
+  const existingSchema = parseExistingSchema(policy);
+  const [rows, setRows] = useState<ExtractionFieldRow[]>(
+    existingSchema ?? []
+  );
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showEmpty, setShowEmpty] = useState(!existingSchema);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const otherParams = policy?.parameters
+    ? Object.fromEntries(
+        Object.entries(policy.parameters).filter(([k]) => k !== "extraction_schema")
+      )
+    : {};
+
+  const serialized = JSON.stringify({
+    ...otherParams,
+    ...(rows.length > 0 ? { extraction_schema: serializeExtractionSchema(rows) } : {}),
+  }, null, 2);
+
+  const addField = () => {
+    const newRow: ExtractionFieldRow = {
+      id: newFieldId(),
+      name: "",
+      type: "string",
+      displayName: "",
+      description: "",
+      requiredForAuto: false,
+      identityField: false,
+      enumValues: [],
+    };
+    setRows((prev) => [...prev, newRow]);
+    setExpandedId(newRow.id);
+    setShowEmpty(false);
+  };
+
+  const updateRow = (id: string, updates: Partial<ExtractionFieldRow>) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, ...updates } : r))
+    );
+    if (updates.name !== undefined) {
+      const err = validateFieldName(updates.name);
+      setFieldErrors((prev) => ({ ...prev, [id]: err ?? "" }));
+    }
+  };
+
+  const removeRow = (id: string) => {
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    if (expandedId === id) setExpandedId(null);
+  };
+
+  if (showEmpty && rows.length === 0) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-lg border border-border-subtle bg-surface p-5 text-center">
+          <p className="font-display text-[14px] font-semibold text-ink-primary">No extraction schema configured</p>
+          <p className="mt-1 text-[12px] text-ink-secondary">
+            The AI currently uses default fields (order_id, product_sku, purchase_date, seller, amount, currency).
+            Define a custom schema to extract different fields for your vertical.
+          </p>
+          <div className="mt-4 flex justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => { setRows(ECOMMERCE_DEFAULT_FIELDS.map((f) => ({ ...f, id: newFieldId() }))); setShowEmpty(false); }}
+              className="rounded border border-border-defined px-3 py-1.5 text-[12px] text-ink-secondary hover:text-ink-primary"
+            >
+              Use e-commerce defaults
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowEmpty(false); addField(); }}
+              className="rounded bg-gold-primary px-3 py-1.5 text-[12px] font-semibold text-black hover:bg-gold-primary/90"
+            >
+              Start from scratch
+            </button>
+          </div>
+        </div>
+        <input type="hidden" name="parameters" value={JSON.stringify(otherParams, null, 2)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="font-technical text-[10px] uppercase tracking-[0.14em] text-ink-tertiary">
+          Extraction Schema
+        </label>
+        <button
+          type="button"
+          onClick={addField}
+          className="rounded border border-border-subtle px-2 py-1 text-[11px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+        >
+          + Add Field
+        </button>
+      </div>
+      <p className="text-[11px] text-ink-tertiary">
+        Fields extracted from customer tickets by the AI. Field order determines extraction prompt order.
+      </p>
+      {rows.length > 0 && (
+        <div className="overflow-hidden rounded-md border border-border-subtle">
+          {rows.map((row) => (
+            <div key={row.id} className="border-b border-border-subtle last:border-b-0">
+              <div className="flex items-center gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <span className="font-mono text-[12px] text-ink-primary">
+                    {row.name || <span className="text-ink-tertiary italic">unnamed</span>}
+                  </span>
+                  <span className="ml-2 text-[11px] text-ink-tertiary">{row.type}</span>
+                  {row.requiredForAuto && (
+                    <span className="ml-2 rounded bg-gold-primary/15 px-1 text-[10px] font-semibold text-gold-primary">required</span>
+                  )}
+                  {row.identityField && (
+                    <span className="ml-1 rounded bg-blue-500/15 px-1 text-[10px] font-semibold text-blue-500">identity</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
+                  className="text-[11px] text-ink-tertiary hover:text-ink-primary"
+                >
+                  {expandedId === row.id ? "Collapse" : "Edit"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="text-[11px] text-red-alert hover:text-red-alert/80"
+                >
+                  ✕
+                </button>
+              </div>
+              {expandedId === row.id && (
+                <div className="border-t border-border-subtle bg-surface-raised px-3 py-3 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">Field Name *</label>
+                      <input
+                        type="text"
+                        value={row.name}
+                        onChange={(e) => updateRow(row.id, { name: e.target.value })}
+                        placeholder="e.g. account_number"
+                        className="w-full rounded border border-border-subtle bg-surface px-2 py-1.5 font-mono text-[12px] text-ink-primary outline-none focus:border-gold-primary"
+                      />
+                      {fieldErrors[row.id] && (
+                        <p className="text-[10px] text-red-alert">{fieldErrors[row.id]}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">Type *</label>
+                      <select
+                        value={row.type}
+                        onChange={(e) => updateRow(row.id, { type: e.target.value as ExtractionFieldType, enumValues: [] })}
+                        className="w-full rounded border border-border-subtle bg-surface px-2 py-1.5 text-[12px] text-ink-primary outline-none focus:border-gold-primary"
+                      >
+                        {FIELD_TYPES.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">Display Name</label>
+                    <input
+                      type="text"
+                      value={row.displayName}
+                      onChange={(e) => updateRow(row.id, { displayName: e.target.value })}
+                      placeholder="e.g. Account Number"
+                      className="w-full rounded border border-border-subtle bg-surface px-2 py-1.5 text-[12px] text-ink-primary outline-none focus:border-gold-primary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">AI Description</label>
+                    <input
+                      type="text"
+                      value={row.description}
+                      onChange={(e) => updateRow(row.id, { description: e.target.value })}
+                      placeholder={row.type === "date" ? 'e.g. "Date of the transaction in YYYY-MM-DD format"' : 'e.g. "The customer\'s account number"'}
+                      className="w-full rounded border border-border-subtle bg-surface px-2 py-1.5 text-[12px] text-ink-primary outline-none focus:border-gold-primary"
+                    />
+                    <p className="text-[10px] text-ink-tertiary">Sent directly to the AI. Specific descriptions improve extraction accuracy.</p>
+                  </div>
+                  {row.type === "enum" && (
+                    <div className="space-y-1">
+                      <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">Allowed Values *</label>
+                      <div className="flex flex-wrap gap-1">
+                        {row.enumValues.map((v, i) => (
+                          <span key={i} className="flex items-center gap-1 rounded border border-border-subtle bg-surface px-2 py-0.5 text-[11px] text-ink-primary">
+                            {v}
+                            <button
+                              type="button"
+                              onClick={() => updateRow(row.id, { enumValues: row.enumValues.filter((_, j) => j !== i) })}
+                              className="text-ink-tertiary hover:text-red-alert"
+                            >×</button>
+                          </span>
+                        ))}
+                        <EnumValueAdder onAdd={(v) => updateRow(row.id, { enumValues: [...row.enumValues, v] })} />
+                      </div>
+                      {row.enumValues.length === 0 && (
+                        <p className="text-[10px] text-red-alert">At least one value required for enum type</p>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={row.requiredForAuto}
+                        onChange={(e) => updateRow(row.id, { requiredForAuto: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span className="text-[12px] text-ink-primary">Required for auto-approval</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={row.identityField}
+                        onChange={(e) => updateRow(row.id, { identityField: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span className="text-[12px] text-ink-primary">Identity field</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {rows.length === 0 && (
+        <p className="text-[12px] text-ink-tertiary italic">No fields defined. Click &ldquo;+ Add Field&rdquo; to begin.</p>
+      )}
+      <input type="hidden" name="parameters" value={serialized} />
+    </div>
+  );
+}
+
+function EnumValueAdder({ onAdd }: { onAdd: (value: string) => void }) {
+  const [value, setValue] = useState("");
+  return (
+    <div className="flex gap-1">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (value.trim()) { onAdd(value.trim()); setValue(""); }
+          }
+        }}
+        placeholder="Add value…"
+        className="w-24 rounded border border-border-subtle bg-surface px-2 py-0.5 text-[11px] text-ink-primary outline-none focus:border-gold-primary"
+      />
+      <button
+        type="button"
+        onClick={() => { if (value.trim()) { onAdd(value.trim()); setValue(""); } }}
+        className="rounded border border-border-subtle px-1.5 text-[11px] text-ink-secondary hover:text-ink-primary"
+      >+</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MVP-1 Warranty Refund Rules Editor (eligibility field role mapping)
+// ---------------------------------------------------------------------------
+
+function WarrantyRefundEditor({ policy }: { policy?: TenantGovernancePolicy }) {
+  const existing = (policy?.parameters ?? {}) as Record<string, unknown>;
+  const existingMappings = (existing.eligibility_field_mappings ?? {}) as Record<string, string>;
+
+  const [dateField, setDateField] = useState(existingMappings.purchase_timestamp ?? "purchase_date");
+  const [sellerField, setSellerField] = useState(existingMappings.authorized_seller ?? "seller");
+  const [schemaFieldNames, setSchemaFieldNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    listGovernancePoliciesByType("resolution_taxonomy", "active")
+      .then((page) => {
+        const schema = page.items[0]?.parameters?.extraction_schema;
+        if (schema && typeof schema === "object") {
+          setSchemaFieldNames(Object.keys(schema as Record<string, unknown>));
+        }
+      })
+      .catch(() => {/* schema field names unavailable — fall back to text input */});
+  }, []);
+
+  const legacyDefaults = ["purchase_date", "seller", "order_id", "product_sku", "amount", "currency"];
+  const fieldOptions = schemaFieldNames.length > 0 ? schemaFieldNames : legacyDefaults;
+
+  const buildParameters = () => {
+    const base = Object.fromEntries(
+      Object.entries(existing).filter(([k]) => k !== "eligibility_field_mappings")
+    );
+    const mappings: Record<string, string> = {};
+    if (dateField && dateField !== "purchase_date") mappings.purchase_timestamp = dateField;
+    if (sellerField && sellerField !== "seller") mappings.authorized_seller = sellerField;
+    return {
+      ...base,
+      ...(Object.keys(mappings).length > 0 ? { eligibility_field_mappings: mappings } : {}),
+    };
+  };
+
+  const serialized = JSON.stringify(buildParameters(), null, 2);
+  const usingDefaults = dateField === "purchase_date" && sellerField === "seller";
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="font-technical text-[10px] uppercase tracking-[0.14em] text-ink-tertiary">
+          Eligibility Field Roles
+        </label>
+        <p className="mt-0.5 text-[11px] text-ink-tertiary">
+          Map your schema fields to the roles the eligibility engine uses. Leave as default if your fields are named{" "}
+          <code className="font-mono text-[11px]">purchase_date</code> and{" "}
+          <code className="font-mono text-[11px]">seller</code>.
+        </p>
+      </div>
+      <div className="rounded-md border border-border-subtle divide-y divide-border-subtle">
+        <div className="px-3 py-3 space-y-1">
+          <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+            Date Role — warranty window check
+          </label>
+          <p className="text-[11px] text-ink-tertiary">Which field is the relevant date for warranty/return eligibility?</p>
+          <select
+            value={dateField}
+            onChange={(e) => setDateField(e.target.value)}
+            className="w-full rounded border border-border-subtle bg-surface px-2 py-1.5 text-[12px] text-ink-primary outline-none focus:border-gold-primary"
+          >
+            {fieldOptions.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <p className="text-[10px] text-ink-tertiary">Default: <code className="font-mono">purchase_date</code></p>
+        </div>
+        <div className="px-3 py-3 space-y-1">
+          <label className="block font-technical text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
+            Counterparty Role — authorized reseller check
+          </label>
+          <p className="text-[11px] text-ink-tertiary">Which field identifies the seller, merchant, or provider?</p>
+          <select
+            value={sellerField}
+            onChange={(e) => setSellerField(e.target.value)}
+            className="w-full rounded border border-border-subtle bg-surface px-2 py-1.5 text-[12px] text-ink-primary outline-none focus:border-gold-primary"
+          >
+            {fieldOptions.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <p className="text-[10px] text-ink-tertiary">Default: <code className="font-mono">seller</code></p>
+        </div>
+      </div>
+      {usingDefaults && (
+        <p className="text-[11px] text-ink-secondary">
+          ✓ Using default field names — no mapping will be stored.
+        </p>
+      )}
+      <details className="group">
+        <summary className="cursor-pointer text-[11px] text-ink-tertiary hover:text-ink-secondary">
+          Advanced: edit raw parameters JSON
+        </summary>
+        <JsonInput
+          name="_parameters_raw_override"
+          label=""
+          defaultValue={serialized}
+        />
+      </details>
+      <input type="hidden" name="parameters" value={serialized} />
+    </div>
+  );
 }

@@ -543,6 +543,7 @@ def _record_to_row(record: ResolutionProposalRecord) -> ResolutionProposalRow:
         status=record.status.value,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        metadata_json=dict(record.metadata),
     )
 
 
@@ -575,6 +576,7 @@ def _row_to_record(row: ResolutionProposalRow) -> ResolutionProposalRecord:
         status=ResolutionProposalStatus(row.status),
         created_at=row.created_at,
         updated_at=row.updated_at,
+        metadata=_as_dict(row.metadata_json),
     )
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.qa.exceptions import QAPersistenceError
 from app.qa.persistence.models import QAScorePage, QAScoreQuery
 from app.qa.persistence.records import QAScoreRecord
@@ -103,6 +105,21 @@ def _matches(
         and record.supervisor_decision_kind != query.supervisor_decision_kind
     ):
         return False
+    # MVP-5: date range filtering for the QA signal aggregator.
+    if query.scored_after is not None:
+        try:
+            scored_at = datetime.fromisoformat(record.scored_at)
+            if scored_at < query.scored_after:
+                return False
+        except (ValueError, TypeError):
+            return False
+    if query.scored_before is not None:
+        try:
+            scored_at = datetime.fromisoformat(record.scored_at)
+            if scored_at > query.scored_before:
+                return False
+        except (ValueError, TypeError):
+            return False
     return True
 
 

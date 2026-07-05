@@ -21,6 +21,7 @@ from app.boundary.translation import (
 )
 from app.cognition.extraction import (
     EXTRACTED_ORDER_FIELD_NAMES,
+    ExtractionSchema,
     ExtractedField,
     ExtractedOrderFields,
 )
@@ -365,6 +366,7 @@ class ResolutionRuntime:
         tenant_configuration_repository: TenantConfigurationRepository | None = None,
         auto_approve_threshold: float = _DEFAULT_AUTO_APPROVE_THRESHOLD,
         inventory_availability_checker: InventoryAvailabilityChecker | None = None,
+        fraud_detection_agent: Any | None = None,
     ) -> None:
         if auto_approve_threshold < 0 or auto_approve_threshold > 1:
             raise ValueError("auto_approve_threshold must be between 0 and 1")
@@ -377,6 +379,8 @@ class ResolutionRuntime:
             conversation_generator or GroundedConversationGenerationRuntime()
         )
         self._inventory_availability_checker = inventory_availability_checker
+        # MVP-3/SME: FraudDetectionAgent injected optionally; None = no fraud check.
+        self._fraud_detection_agent = fraud_detection_agent
 
     async def create_proposal(
         self,
@@ -422,6 +426,7 @@ class ResolutionRuntime:
         recommended_actions = _attach_resolution_verdicts(
             recommended_actions,
             extracted_fields=request.extracted_fields,
+            extraction_schema=taxonomy.extraction_schema,
         )
         verdict_reply = await _apply_resolution_verdict_override(
             recommended_actions=recommended_actions,
@@ -472,6 +477,21 @@ class ResolutionRuntime:
             repository=self._tenant_configuration_repository,
             tenant_id=request.tenant_id,
         )
+
+        # MVP-3: run FraudDetectionAgent if injected. Fail-open: any error
+        # or agent unavailability leaves fraud_extra_reasons empty and the
+        # existing keyword gate (_FRAUD_KEYWORDS) remains the safety floor.
+        fraud_extra_reasons: tuple[str, ...] = ()
+        if self._fraud_detection_agent is not None:
+            fraud_extra_reasons = await _run_fraud_gate(
+                agent=self._fraud_detection_agent,
+                tenant_id=request.tenant_id,
+                session_id=request.session_id or "",
+                execution_id=request.execution_id or "",
+                original_content=request.original_content,
+                extracted_fields=request.extracted_fields,
+            )
+
         gate = _evaluate_gate(
             category=category,
             original_content=request.original_content,
@@ -482,6 +502,7 @@ class ResolutionRuntime:
             recommended_actions=recommended_actions,
             extracted_fields=request.extracted_fields,
             skip_unsupported_commitment_check=reply_is_approved_verdict_override,
+            extra_reasons=fraud_extra_reasons,
         )
         proposal_id = derive_resolution_proposal_id(
             tenant_id=request.tenant_id,
@@ -549,6 +570,9 @@ class ResolutionRuntime:
             created_at=now,
             updated_at=now,
             governance_decision_id=gate.governance_decision_id,
+            metadata={
+                "gate_reasons": list(gate.reasons),
+            } if gate.reasons else {},
         )
         return await self._persistence.create_resolution_proposal(
             record,
@@ -1052,7 +1076,11 @@ def _recommended_actions(
     result: list[Mapping[str, Any]] = []
     for action in actions:
         merged = (
-            _merge_extracted_fields(action, resolved_fields)
+            _merge_extracted_fields(
+                action,
+                resolved_fields,
+                extraction_schema=taxonomy.extraction_schema,
+            )
             if extracted_fields is not None
             else dict(action)
         )
@@ -1164,6 +1192,7 @@ def _attach_resolution_verdicts(
     actions: tuple[Mapping[str, Any], ...],
     *,
     extracted_fields: ExtractedOrderFields | None,
+    extraction_schema: ExtractionSchema | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     """Map each action's warranty/refund eligibility verdict (if any) onto
     the generic ResolutionVerdictSummary contract
@@ -1191,6 +1220,7 @@ def _attach_resolution_verdicts(
         summary = _warranty_refund_eligibility_to_resolution_verdict(
             cast(Mapping[str, Any], eligibility),
             extracted_fields=extracted_fields,
+            extraction_schema=extraction_schema,
         )
         if summary is None:
             result.append(action)
@@ -1205,6 +1235,7 @@ def _warranty_refund_eligibility_to_resolution_verdict(
     eligibility: Mapping[str, Any],
     *,
     extracted_fields: ExtractedOrderFields | None,
+    extraction_schema: ExtractionSchema | None = None,
 ) -> ResolutionVerdictSummary | None:
     """The warranty-specific mapping: EligibilityDetermination (as the
     dict _eligibility_determination_to_dict produces, post-W3 remedy
@@ -1229,6 +1260,7 @@ def _warranty_refund_eligibility_to_resolution_verdict(
                 claim_type=claim_type,
                 missing_fields=[],
                 extracted_fields=extracted_fields,
+                extraction_schema=extraction_schema,
             ),
         )
 
@@ -1243,6 +1275,7 @@ def _warranty_refund_eligibility_to_resolution_verdict(
                 claim_type=claim_type,
                 missing_fields=[],
                 extracted_fields=extracted_fields,
+                extraction_schema=extraction_schema,
             ),
         )
 
@@ -1267,6 +1300,7 @@ def _warranty_refund_eligibility_to_resolution_verdict(
                 claim_type=claim_type,
                 missing_fields=missing_fields,
                 extracted_fields=extracted_fields,
+                extraction_schema=extraction_schema,
             ),
         )
 
@@ -1356,16 +1390,24 @@ def _probe_substitution_values(
     claim_type: str | None,
     missing_fields: list[str],
     extracted_fields: ExtractedOrderFields | None,
+    extraction_schema: ExtractionSchema | None = None,
 ) -> dict[str, str | None]:
     values: dict[str, str | None] = {
-        "missing_fields": _render_missing_fields(missing_fields),
+        "missing_fields": _render_missing_fields(
+            missing_fields, extraction_schema=extraction_schema
+        ),
     }
     if claim_type is not None:
         values["claim_type"] = _humanize_field(claim_type)
     if extracted_fields is not None:
-        for name in EXTRACTED_ORDER_FIELD_NAMES:
-            field: ExtractedField = getattr(extracted_fields, name)
-            values[name] = field.value
+        field_names = (
+            extraction_schema.field_names()
+            if extraction_schema is not None
+            else EXTRACTED_ORDER_FIELD_NAMES
+        )
+        for name in field_names:
+            ef = extracted_fields.get_field(name)
+            values[name] = ef.value if ef is not None else None
     return values
 
 
@@ -1376,13 +1418,8 @@ def _humanize_field(name: str) -> str:
     return name.replace("_", " ")
 
 
-# Customer-facing labels for the generic extraction field vocabulary
-# (EXTRACTED_ORDER_FIELD_NAMES) -- this set is domain-agnostic e-commerce
-# transaction vocabulary, not tied to any tenant's product line, so the
-# labels stay generic too (no tenant- or product-specific wording). A
-# field outside this map (or a future addition to EXTRACTED_ORDER_FIELD_
-# NAMES that hasn't been given a label yet) falls back to _humanize_field
-# rather than raising -- a slightly-less-polished label beats an error.
+# Customer-facing labels for the legacy e-commerce extraction field names.
+# A field outside this map falls back to _humanize_field rather than raising.
 _MISSING_FIELD_FRIENDLY_LABELS: Mapping[str, str] = {
     "order_id": "your order number",
     "product_sku": "the product model or SKU",
@@ -1393,11 +1430,21 @@ _MISSING_FIELD_FRIENDLY_LABELS: Mapping[str, str] = {
 }
 
 
-def _friendly_missing_field_label(name: str) -> str:
+def _friendly_missing_field_label(
+    name: str,
+    extraction_schema: ExtractionSchema | None = None,
+) -> str:
+    if extraction_schema is not None:
+        spec = extraction_schema.get(name)
+        if spec is not None:
+            return spec.effective_display_name()
     return _MISSING_FIELD_FRIENDLY_LABELS.get(name, _humanize_field(name))
 
 
-def _render_missing_fields(missing_fields: list[str]) -> str:
+def _render_missing_fields(
+    missing_fields: list[str],
+    extraction_schema: ExtractionSchema | None = None,
+) -> str:
     """Render the set of missing fields for a template's {missing_fields}.
 
     A single missing field reads as a plain phrase ("your order
@@ -1408,7 +1455,9 @@ def _render_missing_fields(missing_fields: list[str]) -> str:
     convention used elsewhere for multiple distinct items, rather than
     a comma-joined blob that gets harder to parse as the count grows.
     """
-    labels = [_friendly_missing_field_label(field) for field in missing_fields]
+    labels = [
+        _friendly_missing_field_label(f, extraction_schema) for f in missing_fields
+    ]
     if len(labels) <= 1:
         return labels[0] if labels else ""
     return "\n" + "\n".join(
@@ -1443,35 +1492,27 @@ def _eligibility_determination_to_dict(
 def _merge_extracted_fields(
     action: Mapping[str, Any],
     extracted_fields: ExtractedOrderFields,
+    extraction_schema: ExtractionSchema | None = None,
 ) -> Mapping[str, Any]:
-    """Merge real extracted values into the action's template dict — this
-    is the precise fix for the unknown_order/unknown_sku bug: actions built
-    from category+taxonomy alone never carried real ticket data, so
-    downstream fallback chains (orchestration.py) always hit their
-    fabricated-placeholder branch. An explicit tenant-configured value on
-    the template (rare; templates are empty by default) still wins over
-    extraction. A None extracted value never overwrites anything — it
-    simply leaves the key unset, which downstream code reads as "missing"
-    honestly rather than as a string that looks like data.
+    """Merge real extracted values into the action's template dict.
+
+    When a tenant-configured extraction_schema is present its field names
+    are iterated; otherwise falls back to the legacy e-commerce list.
+    An explicit tenant-configured value on the template still wins over
+    extraction.  A None extracted value never overwrites anything.
     """
     merged = dict(action)
-    for name in EXTRACTED_ORDER_FIELD_NAMES:
-        field: ExtractedField = getattr(extracted_fields, name)
-        if field.value is not None and merged.get(name) is None:
-            merged[name] = field.value
+    field_names = (
+        extraction_schema.field_names()
+        if extraction_schema is not None
+        else EXTRACTED_ORDER_FIELD_NAMES
+    )
+    for name in field_names:
+        ef = extracted_fields.get_field(name)
+        if ef is not None and ef.value is not None and merged.get(name) is None:
+            merged[name] = ef.value
     return merged
 
-
-# Required for THIS action type to be eligible for auto-approval. Keyed by
-# the taxonomy action "type" (matches app.agents.tools.orchestration's
-# _ACTION_TOOL_BY_TYPE keys) rather than tool_name, since tool_name can be
-# tenant-customized while "type" is the stable taxonomy identifier.
-_REQUIRED_EXTRACTION_FIELDS_BY_ACTION_TYPE: Mapping[str, tuple[str, ...]] = {
-    "refund_request": ("order_id", "amount"),
-    "warranty_claim": ("purchase_date",),
-    "replacement_order": ("order_id",),
-    "warehouse_repair": (),
-}
 
 # confidence levels that are NOT good enough to act on, even though a
 # value is present — "low" means the model itself flagged uncertainty
@@ -1480,26 +1521,53 @@ _REQUIRED_EXTRACTION_FIELDS_BY_ACTION_TYPE: Mapping[str, tuple[str, ...]] = {
 _INSUFFICIENT_CONFIDENCE = frozenset({"low"})
 
 
+def _required_fields_for_action(
+    action: Mapping[str, Any],
+    extraction_schema: ExtractionSchema | None,
+) -> tuple[str, ...]:
+    """Return the extraction field names that must be present and
+    high-confidence before this action can auto-approve.
+
+    Priority order (most specific wins):
+      1. ExtractionSchema.required_for_auto() — tenant explicitly declared
+         which fields are required across all action types.
+      2. action["payload_template"] keys — the fields the tenant wired into
+         the action's connector payload are the fields the connector needs;
+         if they are missing, the connector call would produce bad data.
+      3. Empty tuple — no extraction gating (action has no payload template
+         and no schema; typically a collect_context / informational action).
+
+    No hardcoded vertical-specific lists. Any business domain works.
+    """
+    if extraction_schema is not None:
+        return extraction_schema.required_for_auto()
+    payload_template = action.get("payload_template")
+    if isinstance(payload_template, Mapping):
+        return tuple(str(k) for k in payload_template)
+    return ()
+
+
 def _extraction_completeness_reasons(
     *,
     recommended_actions: tuple[Mapping[str, Any], ...],
     extracted_fields: ExtractedOrderFields | None,
+    extraction_schema: ExtractionSchema | None = None,
 ) -> tuple[str, ...]:
     """Fail-closed extraction gating: an action whose required field is
-    missing or low-confidence must route to human approval through the
-    SAME reasons-list mechanism a monetary-threshold breach or fraud
-    keyword already uses — not a parallel check. A wrong order_id or
-    purchase_date feeds a wrong eligibility decision, so "extraction
-    didn't find it" is never silently treated as "proceed anyway".
+    missing or low-confidence must route to human approval.
+
+    Required fields come from the tenant's extraction_schema
+    (required_for_auto) when present, or from the action's own
+    payload_template keys when not — both are tenant-declared, not
+    hardcoded. No e-commerce-specific field names live in this function.
     """
     reasons: list[str] = []
     for action in recommended_actions:
         action_type = action.get("type")
         if not isinstance(action_type, str) or not action_type.strip():
             continue
-        required = _REQUIRED_EXTRACTION_FIELDS_BY_ACTION_TYPE.get(
-            action_type.strip(), ()
-        )
+        action_type_str = action_type.strip()
+        required = _required_fields_for_action(action, extraction_schema)
         for field_name in required:
             field = _extracted_field_or_none(extracted_fields, field_name)
             is_insufficient = (
@@ -1509,7 +1577,7 @@ def _extraction_completeness_reasons(
             )
             if is_insufficient:
                 reasons.append(
-                    f"missing_required_extraction_field:{action_type}:{field_name}"
+                    f"missing_required_extraction_field:{action_type_str}:{field_name}"
                 )
     return tuple(reasons)
 
@@ -1544,8 +1612,9 @@ def _extracted_field_or_none(
 ) -> ExtractedField | None:
     if extracted_fields is None:
         return None
-    value = getattr(extracted_fields, field_name, None)
-    return value if isinstance(value, ExtractedField) else None
+    # Use get_field() which handles both declared e-commerce fields and
+    # tenant-custom extra fields stored in model_extra.
+    return extracted_fields.get_field(field_name)
 
 
 def _evaluate_gate(
@@ -1559,8 +1628,9 @@ def _evaluate_gate(
     recommended_actions: tuple[Mapping[str, Any], ...] = (),
     extracted_fields: ExtractedOrderFields | None = None,
     skip_unsupported_commitment_check: bool = False,
+    extra_reasons: tuple[str, ...] = (),
 ) -> _GateDecision:
-    reasons: list[str] = []
+    reasons: list[str] = list(extra_reasons)
     text = f"{original_content} {reply}".lower()
     commitment_kinds = money_or_goods_commitment_kinds(
         recommended_actions=recommended_actions,
@@ -1596,6 +1666,7 @@ def _evaluate_gate(
         _extraction_completeness_reasons(
             recommended_actions=recommended_actions,
             extracted_fields=extracted_fields,
+            extraction_schema=taxonomy.extraction_schema,
         )
     )
     reasons.extend(
@@ -1614,7 +1685,12 @@ def _evaluate_gate(
         )
     if any(
         reason in reasons
-        for reason in ("safety_risk", "legal_or_chargeback_risk", "fraud_risk")
+        for reason in (
+            "safety_risk",
+            "legal_or_chargeback_risk",
+            "fraud_risk",
+            "fraud_risk_high",
+        )
     ):
         return _GateDecision(
             supervisor_verdict=ResolutionSupervisorVerdict.NEEDS_HUMAN_REVIEW,
@@ -1686,12 +1762,15 @@ def _has_conflicting_evidence(
     return any(status not in {"", "active"} for status in statuses)
 
 
-def _monetary_commitment_exceeds_threshold(
+def monetary_commitment_exceeds_threshold(
     text: str,
     threshold_cents: int,
     taxonomy: ResolutionTaxonomyPolicy,
 ) -> bool:
     money_pattern = _money_pattern_for(taxonomy)
+    if money_pattern is None:
+        # Tenant has not configured any currency vocabulary — no detection.
+        return False
     for match in money_pattern.finditer(text):
         amount_text = match.group("prefix") or match.group("suffix")
         if amount_text is None:
@@ -1702,20 +1781,34 @@ def _monetary_commitment_exceeds_threshold(
     return False
 
 
-def _money_pattern_for(taxonomy: ResolutionTaxonomyPolicy) -> re.Pattern[str]:
-    symbols = sorted(
-        taxonomy.monetary_currency_symbols | {"$"}, key=len, reverse=True
-    )
-    codes = sorted(
-        taxonomy.monetary_currency_codes | {"usd", "dollars"}, key=len, reverse=True
-    )
-    symbol_pattern = "|".join(re.escape(symbol) for symbol in symbols)
-    code_pattern = "|".join(re.escape(code) for code in codes)
-    return re.compile(
-        rf"(?:(?:{symbol_pattern})\s*(?P<prefix>\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?)|"
-        rf"(?P<suffix>\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?)\s*(?:{code_pattern}))",
-        flags=re.IGNORECASE,
-    )
+_monetary_commitment_exceeds_threshold = monetary_commitment_exceeds_threshold
+
+
+def _money_pattern_for(taxonomy: ResolutionTaxonomyPolicy) -> re.Pattern[str] | None:
+    """Build a currency-amount regex from the tenant's configured symbols and
+    codes. Returns None when the tenant has not configured any currency
+    vocabulary — no hardcoded defaults, no USD/dollar assumptions.
+
+    Callers must check for None and skip currency detection when the tenant
+    has not opted in. This keeps banking, healthcare, and telecom tenants
+    free of false-positive monetary-commitment matches.
+    """
+    symbols = sorted(taxonomy.monetary_currency_symbols, key=len, reverse=True)
+    codes = sorted(taxonomy.monetary_currency_codes, key=len, reverse=True)
+    if not symbols and not codes:
+        return None
+    parts: list[str] = []
+    if symbols:
+        symbol_pattern = "|".join(re.escape(s) for s in symbols)
+        parts.append(
+            rf"(?:(?:{symbol_pattern})\s*(?P<prefix>\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?))"
+        )
+    if codes:
+        code_pattern = "|".join(re.escape(c) for c in codes)
+        parts.append(
+            rf"(?:(?P<suffix>\d+(?:,\d{{3}})*(?:\.\d{{1,2}})?)\s*(?:{code_pattern}))"
+        )
+    return re.compile("|".join(parts), flags=re.IGNORECASE)
 
 
 def _unsupported_commitment_patterns(
@@ -1761,6 +1854,68 @@ def _float_value(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
     return 0.0
+
+
+async def _run_fraud_gate(
+    *,
+    agent: Any,
+    tenant_id: str,
+    session_id: str,
+    execution_id: str,
+    original_content: str,
+    extracted_fields: Any | None,
+) -> tuple[str, ...]:
+    """Run FraudDetectionAgent and return gate reasons. Fail-open on any error."""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    try:
+        from app.agents.governed.base import AgentInput
+        from app.agents.governed.proposal import AgentProposalStatus
+        from app.agents.governed.fraud_detection import (
+            resolve_fraud_thresholds,
+            fraud_signal_to_gate_reasons,
+        )
+
+        extracted_dict: dict[str, Any] = {}
+        if extracted_fields is not None:
+            for fname in getattr(
+                getattr(extracted_fields, "model_fields", None) or {}, "__iter__", lambda: []
+            )():
+                ef = extracted_fields.get_field(fname)
+                if ef and ef.value:
+                    extracted_dict[fname] = ef.value
+
+        agent_input = AgentInput(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            execution_id=execution_id,
+            content={
+                "ticket_text": original_content,
+                "extracted_fields": extracted_dict,
+                "customer_history": {},
+            },
+        )
+        proposal = await agent.run(agent_input)
+        if proposal.status == AgentProposalStatus.COMPLETED and proposal.output:
+            thresholds = resolve_fraud_thresholds(None)
+            reasons = fraud_signal_to_gate_reasons(
+                proposal.output, thresholds[0], thresholds[1]
+            )
+            if reasons:
+                _log.info(
+                    "fraud_gate_triggered tenant=%s reasons=%s score=%.2f",
+                    tenant_id,
+                    reasons,
+                    proposal.output.get("risk_score", 0.0),
+                )
+            return reasons
+    except Exception:
+        _log.warning(
+            "fraud_gate_failed tenant=%s — proceeding without fraud check",
+            tenant_id,
+            exc_info=True,
+        )
+    return ()
 
 
 __all__ = [

@@ -59,7 +59,6 @@ from app.agents.tools.orchestration import (
 )
 from app.agents.value_objects import CausalityMetadata
 from app.cognition import (
-    AnthropicMessagesClient,
     CognitionSemanticRejectionDirection,
     CognitionSemanticRejectionRecord,
     DeterministicDiagnosticLLMClient,
@@ -246,6 +245,7 @@ from app.queues import (
     QUEUE_SUPERVISOR,
 )
 from app.workers.supervisor_tasks import evaluate_session_supervisor
+from app.agents.governed.fraud_detection import FraudDetectionAgent
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -1705,6 +1705,10 @@ async def _append_resolution_proposal_after_diagnostic(
                     llm_client=_diagnostic_llm_client()
                 ),
                 tenant_configuration_repository=tenant_configuration_repository,
+                fraud_detection_agent=FraudDetectionAgent(
+                    llm_client=_diagnostic_llm_client(),
+                    tenant_configuration_repository=tenant_configuration_repository,
+                ),
             ).create_proposal(
                 ResolutionProposalRequest(
                     tenant_id=work_item.tenant_id,
@@ -2215,6 +2219,11 @@ def _approval_categories_for_resolution(
     if proposal.status is not ResolutionProposalStatus.PENDING_HUMAN_APPROVAL:
         return ()
     categories: list[CaseApprovalEntryCategory] = []
+    # MVP-3/SME: fraud_risk_high from FraudDetectionAgent routes to dedicated
+    # SME fraud queue. Read from gate_reasons in proposal metadata.
+    from app.resolution.persistence.records import resolution_proposal_gate_reasons
+    if "fraud_risk_high" in resolution_proposal_gate_reasons(proposal):
+        categories.append(CaseApprovalEntryCategory.FRAUD_RISK_HIGH)
     if _first_warranty_refund_eligible_action(proposal) is not None:
         # A determinable (eligible/ineligible) W1 verdict takes priority as
         # the case's entry_category, so the reviewer lands on the
@@ -4069,16 +4078,12 @@ def _diagnostic_cognition_runtime(
 
 
 def _diagnostic_llm_client() -> DiagnosticLLMClient:
+    from app.cognition.llm_factory import build_llm_client
+
     settings = get_settings()
-    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+    if _running_under_pytest() or not _llm_configured(settings):
         return DeterministicDiagnosticLLMClient()
-    return AnthropicMessagesClient(
-        api_key=settings.ANTHROPIC_API_KEY,
-        model=settings.ANTHROPIC_DEFAULT_MODEL,
-        base_url=settings.ANTHROPIC_BASE_URL,
-        anthropic_version=settings.ANTHROPIC_VERSION,
-        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
-    )
+    return build_llm_client(settings)
 
 
 def _cognition_audit_encryptor() -> TenantCredentialEncryptor:
@@ -4125,6 +4130,13 @@ def _metadata_text(value: object) -> str | None:
 
 def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+
+def _llm_configured(settings: Settings) -> bool:
+    provider = settings.LLM_PROVIDER.strip().casefold()
+    if provider == "bedrock":
+        return bool(settings.LLM_AWS_REGION.strip())
+    return bool(settings.ANTHROPIC_API_KEY.strip())
 
 
 def _timeline_idempotency_key(

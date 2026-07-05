@@ -12,7 +12,13 @@ def _empty_metadata() -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class QAScoreRecord:
-    """Durable QA score produced from one supervisor inspection."""
+    """Durable QA score produced from one supervisor inspection.
+
+    semantic_grounding (MVP-6): LLM-scored dimension measuring whether
+    the cited KB text actually supports the claims in the reply. Defaults
+    to 0.0 (absent / not yet scored). Populated by SemanticQAAgent post-
+    resolution and stored in the semantic_grounding column (migration 0095).
+    """
 
     score_id: str
     inspection_id: str
@@ -30,6 +36,8 @@ class QAScoreRecord:
     escalation_count: int
     scored_at: str
     metadata: Mapping[str, Any] = field(default_factory=_empty_metadata)
+    # MVP-6: 0.0 = not yet scored or citations absent.
+    semantic_grounding: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +57,7 @@ class QAScoreRecord:
             "escalation_count": self.escalation_count,
             "scored_at": self.scored_at,
             "metadata": dict(self.metadata),
+            "semantic_grounding": self.semantic_grounding,
         }
 
     @classmethod
@@ -74,6 +83,7 @@ class QAScoreRecord:
             escalation_count=int(data["escalation_count"]),
             scored_at=str(data["scored_at"]),
             metadata=dict(data.get("metadata") or {}),
+            semantic_grounding=float(data.get("semantic_grounding") or 0.0),
         )
 
 

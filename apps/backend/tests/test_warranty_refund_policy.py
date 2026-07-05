@@ -198,7 +198,14 @@ def _window_days_override_without_purchase_date(p: dict[str, object]) -> None:
         _empty_authorized_resellers,
         _drop_required_evidence,
         _empty_required_evidence,
-        _unknown_evidence_field,
+        # NOTE: _unknown_evidence_field is intentionally excluded here (MVP-1).
+        # Under MVP-1, warranty_refund_rules accepts ANY field name in
+        # required_evidence_by_claim_type because non-commerce tenants (bank,
+        # telecom, insurance) define their own field vocabularies via
+        # extraction_schema. The cross-check against EXTRACTED_ORDER_FIELD_NAMES
+        # was an e-commerce-only sanity guard that blocks other verticals.
+        # See: test_warranty_refund_policy_accepts_non_ecommerce_fields in
+        # test_mvp1_extraction_schema_agnosticism.py for the new contract.
         _negative_window_days_override,
         _string_window_days_override,
         _window_days_override_for_unknown_claim_type,
@@ -212,6 +219,21 @@ def test_rejects_malformed_parameters(
     mutate(parameters)
     with pytest.raises(WarrantyRefundPolicyParseError):
         validate_warranty_refund_policy_parameters(parameters)
+
+
+def test_unknown_evidence_field_now_accepted_for_non_commerce_tenants() -> None:
+    """MVP-1: any field name is valid in required_evidence_by_claim_type.
+
+    Previously the parser cross-checked against EXTRACTED_ORDER_FIELD_NAMES and
+    rejected fields outside that e-commerce set. That check was removed so bank/
+    telecom/insurance tenants can configure their own field vocabularies.
+    See test_mvp1_extraction_schema_agnosticism.py for the full domain-agnostic
+    contract.
+    """
+    parameters = _valid_parameters()
+    _unknown_evidence_field(parameters)
+    # Must not raise — any field name is accepted
+    validate_warranty_refund_policy_parameters(parameters)
 
 
 def test_remedy_sequence_for_unknown_claim_type_rejected() -> None:

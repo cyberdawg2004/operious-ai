@@ -104,8 +104,8 @@ def test_parse_valid_parameters_returns_policy() -> None:
             ),
         ),
         monetary_remedy_keywords=frozenset(),
-        monetary_currency_symbols=frozenset({"$"}),
-        monetary_currency_codes=frozenset({"usd", "dollars"}),
+        monetary_currency_symbols=frozenset(),
+        monetary_currency_codes=frozenset(),
         unsupported_commitment_patterns=frozenset(),
     )
     assert policy.category_ids() == frozenset({"charging_issue"})
@@ -188,7 +188,19 @@ def test_parse_reserved_unclassified_category_id_raises() -> None:
         parse_resolution_taxonomy_policy(record)
 
 
-def test_parse_recommended_action_requiring_execution_with_unknown_tool_raises() -> None:
+def test_parse_recommended_action_requiring_execution_accepts_any_tool_name() -> None:
+    """MVP-2: resolution_taxonomy accepts any non-empty tool_name.
+
+    Prior behavior (before MVP-2): tool_name was validated against
+    KNOWN_ACTION_TOOL_NAMES and rejected if not in the compiled set.
+
+    New behavior: any non-empty tool_name is accepted at policy-parse time.
+    The governance gate at runtime (TenantActionPolicy.evaluate) is the
+    authoritative validator — it checks the tool against the tenant's
+    active action_tools policy. This allows non-commerce tenants (bank,
+    telecom, insurance) to declare their own tool names in the taxonomy
+    without modifying Python source.
+    """
     record = _record(
         parameters={
             "categories": [
@@ -201,7 +213,7 @@ def test_parse_recommended_action_requiring_execution_with_unknown_tool_raises()
                             "type": "dispatch_replacement",
                             "label": "Dispatch a replacement unit",
                             "requires_execution": True,
-                            "tool_name": "not_a_known_tool",
+                            "tool_name": "account.credit",  # non-commerce tool
                             "payload_template": {},
                             "target_resource_id": "device-123",
                         }
@@ -210,9 +222,11 @@ def test_parse_recommended_action_requiring_execution_with_unknown_tool_raises()
             ]
         }
     )
-
-    with pytest.raises(ResolutionTaxonomyPolicyParseError):
-        parse_resolution_taxonomy_policy(record)
+    # Must NOT raise — any non-empty tool_name is now accepted
+    policy = parse_resolution_taxonomy_policy(record)
+    actions = policy.actions_for("warranty_replacement_inquiry")
+    assert len(actions) == 1
+    assert actions[0]["tool_name"] == "account.credit"
 
 
 def test_parse_recommended_action_requiring_execution_with_known_tool() -> None:
@@ -360,10 +374,11 @@ def test_money_pattern_for_empty_taxonomy_matches_dollar_amounts_only() -> None:
         unsupported_commitment_patterns=frozenset(),
     )
 
+    # Empty taxonomy: no currency configured → pattern is None (no detection)
     pattern = _money_pattern_for(taxonomy)
-
-    assert pattern.search("We can offer $50 as a goodwill credit.")
-    assert not pattern.search("We can offer 50 EUR as a goodwill credit.")
+    assert pattern is None, (
+        "empty taxonomy must return None — no currency detection without tenant config"
+    )
 
 
 def test_money_pattern_for_taxonomy_includes_tenant_currency_symbols_and_codes() -> None:
@@ -376,11 +391,14 @@ def test_money_pattern_for_taxonomy_includes_tenant_currency_symbols_and_codes()
     )
 
     pattern = _money_pattern_for(taxonomy)
+    assert pattern is not None
 
     assert pattern.search("We can offer €50 as a goodwill credit.")
     assert pattern.search("We can offer 50 eur as a goodwill credit.")
-    # baseline USD support remains available regardless of tenant config
-    assert pattern.search("We can offer $50 as a goodwill credit.")
+    # USD not configured → should NOT match (no hardcoded USD default)
+    assert not pattern.search("We can offer $50 as a goodwill credit."), (
+        "USD must not match when tenant only configured EUR — no hardcoded USD fallback"
+    )
 
 
 def test_unsupported_commitment_patterns_includes_baseline_and_tenant_patterns() -> None:

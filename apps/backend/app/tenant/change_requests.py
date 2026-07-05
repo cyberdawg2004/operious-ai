@@ -54,6 +54,12 @@ class TenantConfigChangeRequestLifecycleError(TenantConfigChangeRequestError):
     """Raised when a status transition is not legal."""
 
 
+class TenantConfigChangeRequestValidationError(
+    TenantConfigChangeRequestLifecycleError
+):
+    """Raised when a proposed payload fails validation."""
+
+
 class TenantConfigChangeRequestSeparationError(TenantConfigChangeRequestError):
     """Raised when one principal attempts propose and approve duties."""
 
@@ -363,5 +369,6 @@ __all__ = [
     "TenantConfigChangeRequestSeparationError",
     "TenantConfigChangeRequestStatus",
     "TenantConfigChangeType",
+    "TenantConfigChangeRequestValidationError",
     "derive_tenant_config_change_request_id",
 ]

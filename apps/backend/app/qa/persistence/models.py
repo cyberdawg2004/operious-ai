@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.qa.persistence.records import QAScoreRecord
 
@@ -14,6 +15,9 @@ class QAScoreQuery:
     execution_id: str | None = None
     tenant_id: str | None = None
     supervisor_decision_kind: str | None = None
+    # MVP-5: date range for the QA signal aggregator's rolling window.
+    scored_after: datetime | None = None
+    scored_before: datetime | None = None
     limit: int = 100
     offset: int = 0
 

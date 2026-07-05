@@ -7,7 +7,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
-from app.agents.tools.action_governance import KNOWN_ACTION_TOOL_NAMES
+from app.cognition.extraction import (
+    ExtractionSchema,
+    ExtractionSchemaParseError,
+    parse_extraction_schema,
+)
 from app.tenant.persistence import (
     TenantConfigurationRepository,
     TenantGovernancePolicyRecord,
@@ -31,10 +35,12 @@ _COLLECT_CONTEXT_FALLBACK_ACTION: Mapping[str, Any] = {
     "requires_execution": False,
 }
 
-#: Defaults applied when `monetary_commitment` is absent from an otherwise
-#: valid policy record — the existing USD-only money pattern.
-_DEFAULT_CURRENCY_SYMBOLS = frozenset({"$"})
-_DEFAULT_CURRENCY_CODES = frozenset({"usd", "dollars"})
+# No default currency symbols or codes. Currency detection only applies when
+# the tenant explicitly configures monetary_commitment in their
+# resolution_taxonomy policy. An unconfigured tenant gets no currency
+# matching — they must opt in. This keeps the system domain-agnostic:
+# a healthcare or telecom tenant is never accidentally tagged with USD
+# patterns they did not declare.
 
 
 class ResolutionTaxonomyPolicyParseError(ValueError):
@@ -60,6 +66,11 @@ class ResolutionTaxonomyPolicy:
     monetary_currency_symbols: frozenset[str]
     monetary_currency_codes: frozenset[str]
     unsupported_commitment_patterns: frozenset[str]
+    # Tenant-configured field extraction schema.  None means "use the legacy
+    # e-commerce field set" (EXTRACTED_ORDER_FIELD_NAMES) — this preserves
+    # exact backward compatibility for existing tenants that have not yet
+    # declared an extraction_schema in their resolution_taxonomy policy.
+    extraction_schema: ExtractionSchema | None = None
 
     def category_ids(self) -> frozenset[str]:
         return frozenset(category.id for category in self.categories)
@@ -78,6 +89,7 @@ def _empty_taxonomy() -> ResolutionTaxonomyPolicy:
         monetary_currency_symbols=frozenset(),
         monetary_currency_codes=frozenset(),
         unsupported_commitment_patterns=frozenset(),
+        extraction_schema=None,
     )
 
 
@@ -141,13 +153,36 @@ def _parse_resolution_taxonomy_parameters(
     unsupported_commitment_patterns = _parse_unsupported_commitment_patterns(
         parameters.get("unsupported_commitment_patterns")
     )
+    extraction_schema = _parse_taxonomy_extraction_schema(
+        parameters.get("extraction_schema")
+    )
     return ResolutionTaxonomyPolicy(
         categories=categories,
         monetary_remedy_keywords=monetary_remedy_keywords,
         monetary_currency_symbols=currency_symbols,
         monetary_currency_codes=currency_codes,
         unsupported_commitment_patterns=unsupported_commitment_patterns,
+        extraction_schema=extraction_schema,
     )
+
+
+def _parse_taxonomy_extraction_schema(
+    value: object,
+) -> ExtractionSchema | None:
+    """Parse the optional extraction_schema key from a resolution_taxonomy policy.
+
+    Returns None when absent — the caller uses the legacy fixed field set.
+    Raises ResolutionTaxonomyPolicyParseError when the value is present but
+    structurally invalid, so the whole policy parse fails closed.
+    """
+    if value is None:
+        return None
+    try:
+        return parse_extraction_schema(value)
+    except ExtractionSchemaParseError as exc:
+        raise ResolutionTaxonomyPolicyParseError(
+            f"extraction_schema is invalid: {exc}"
+        ) from exc
 
 
 def _parse_categories(value: object) -> tuple[ResolutionTaxonomyCategory, ...]:
@@ -230,10 +265,11 @@ def _parse_recommended_action(value: object, field: str) -> Mapping[str, Any]:
         tool_name = _require_non_empty_string(
             entry.get("tool_name"), f"{field}.tool_name"
         )
-        if tool_name not in KNOWN_ACTION_TOOL_NAMES:
-            raise ResolutionTaxonomyPolicyParseError(
-                f"{field}.tool_name is not a known action tool: {tool_name!r}"
-            )
+        # Accept any non-empty tool_name — commerce tools (refund.request etc.)
+        # are checked at runtime by the governance gate.  Non-commerce tenants
+        # register their own tool names (e.g. "account.credit", "service.ticket")
+        # via their action_tools policy; rejecting unknown names here would
+        # prevent new verticals from configuring their taxonomy entirely.
         payload_template = entry.get("payload_template")
         if not isinstance(payload_template, Mapping):
             raise ResolutionTaxonomyPolicyParseError(
@@ -260,7 +296,7 @@ def _parse_monetary_commitment(
     value: object,
 ) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     if value is None:
-        return frozenset(), _DEFAULT_CURRENCY_SYMBOLS, _DEFAULT_CURRENCY_CODES
+        return frozenset(), frozenset(), frozenset()
 
     entry = _require_mapping(value, "monetary_commitment")
     remedy_keywords = _require_string_set(
@@ -280,8 +316,8 @@ def _parse_monetary_commitment(
     )
     return (
         remedy_keywords,
-        currency_symbols | _DEFAULT_CURRENCY_SYMBOLS,
-        currency_codes | _DEFAULT_CURRENCY_CODES,
+        currency_symbols,
+        currency_codes,
     )
 
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from app.cognition import AnthropicMessagesClient
+from app.cognition.llm import DiagnosticLLMClient
+from app.cognition.llm_factory import build_llm_client
 from app.core.config import Settings, get_settings
 from app.runtime.conversation_generation import GroundedConversationGenerationRuntime
 from app.sme.generated_reviewer import GeneratedSmeReviewer
@@ -16,12 +17,11 @@ def build_sme_review_runtime(
     """Build the shared SME runtime used by API and worker entrypoints.
 
     Production never falls back to local deterministic/model-free authoring.
-    If no Anthropic key is configured, review attempts fail closed and the
-    approval case remains pending for escalation/remediation. Non-production
-    keeps the local grounded fallback so hermetic tests and local development
-    do not require provider credentials.
+    If no LLM is configured (neither Anthropic key nor Bedrock), review
+    attempts fail closed and the approval case remains pending for
+    escalation/remediation. Non-production keeps the local grounded fallback
+    so hermetic tests and local development do not require credentials.
     """
-
     resolved_settings = settings or get_settings()
     llm_client = _sme_generation_llm_client(resolved_settings)
     if llm_client is None and resolved_settings.is_production:
@@ -41,17 +41,19 @@ def build_sme_review_runtime(
 
 def _sme_generation_llm_client(
     settings: Settings,
-) -> AnthropicMessagesClient | None:
-    api_key = settings.ANTHROPIC_API_KEY.strip()
-    if not api_key:
+) -> DiagnosticLLMClient | None:
+    if not _llm_configured(settings):
         return None
-    return AnthropicMessagesClient(
-        api_key=api_key,
-        model=settings.ANTHROPIC_DEFAULT_MODEL,
-        base_url=settings.ANTHROPIC_BASE_URL,
-        anthropic_version=settings.ANTHROPIC_VERSION,
-        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
-    )
+    # SME review is reasoning-heavy: prefer the Sonnet-tier model on Bedrock.
+    return build_llm_client(settings, prefer_reasoning_model=True)
+
+
+def _llm_configured(settings: Settings) -> bool:
+    """Return True if any real LLM provider is configured."""
+    provider = settings.LLM_PROVIDER.strip().casefold()
+    if provider == "bedrock":
+        return bool(settings.LLM_AWS_REGION.strip())
+    return bool(settings.ANTHROPIC_API_KEY.strip())
 
 
 __all__ = ["build_sme_review_runtime"]

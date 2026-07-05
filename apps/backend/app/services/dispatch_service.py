@@ -68,6 +68,7 @@ from app.session.continuity import (
     CaseContinuityRuntime,
     ContinuityOutcome,
 )
+from app.session.identity_resolution import IdentityResolutionRuntime
 from app.session.contracts.requests import AppendEventRequest, OpenSessionRequest
 from app.session.contracts.results import AppendEventResult, OpenSessionResult
 from app.session.enums import (
@@ -130,6 +131,7 @@ class DispatchService:
         whatsapp_media_fetch_repository: (
             WhatsAppMediaFetchRepositoryProtocol | None
         ) = None,
+        identity_resolution_runtime: IdentityResolutionRuntime | None = None,
     ) -> None:
         self._coordination = coordination_runtime
         self._boundary_ingress = boundary_ingress_repository
@@ -146,6 +148,10 @@ class DispatchService:
         self._approval_queue_ingress = approval_queue_ingress
         self._case_approval_reviewer = case_approval_reviewer
         self._whatsapp_media_fetch_repository = whatsapp_media_fetch_repository
+        self._identity_resolution_runtime = (
+            identity_resolution_runtime
+            or IdentityResolutionRuntime(session_persistence=session_repository)
+        )
 
     async def dispatch(
         self,
@@ -278,6 +284,18 @@ class DispatchService:
             if ingress.external_conversation_id
             else str(ingress.ingress_id)
         )
+        # MVP-7: run cross-channel identity resolution before continuity so
+        # that a returning customer on a different channel gets their prior
+        # session context. Resolution never raises — worst case returns
+        # match_stage=0 and the flow continues unchanged.
+        identity_result = await self._identity_resolution_runtime.resolve(
+            tenant_id=tenant_id,
+            current_session_id=str(ingress.ingress_id),
+            external_handle=session_external_handle
+            if ingress.external_conversation_id
+            else None,
+        )
+
         if ingress.external_conversation_id:
             continuity = await self._continuity_runtime.evaluate(
                 tenant_id=tenant_id,
@@ -288,6 +306,20 @@ class DispatchService:
             continuity = CaseContinuityResult(
                 outcome=ContinuityOutcome.NEW_CASE,
             )
+
+        # If cross-channel identity matched a prior session on a different
+        # handle, prefer that context over a new-case result from continuity.
+        if (
+            identity_result.has_context()
+            and continuity.outcome is ContinuityOutcome.NEW_CASE
+            and identity_result.matched_session_ids
+        ):
+            continuity = CaseContinuityResult(
+                outcome=ContinuityOutcome.REOPENED_CASE,
+                existing_session_id=identity_result.matched_session_ids[0],
+                prior_session_id=identity_result.matched_session_ids[0],
+            )
+
         session_id = _dispatch_session_id(
             tenant_id=tenant_id,
             external_handle=session_external_handle,

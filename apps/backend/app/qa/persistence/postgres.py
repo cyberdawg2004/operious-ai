@@ -115,6 +115,11 @@ def _apply_filters(
             QAScoreRow.supervisor_decision_kind
             == query.supervisor_decision_kind
         )
+    # MVP-5: date range filtering for the QA signal aggregator.
+    if query.scored_after is not None:
+        stmt = stmt.where(QAScoreRow.scored_at >= query.scored_after)
+    if query.scored_before is not None:
+        stmt = stmt.where(QAScoreRow.scored_at <= query.scored_before)
     return stmt
 
 
@@ -129,6 +134,7 @@ def _record_to_row(record: QAScoreRecord) -> QAScoreRow:
         policy_compliance=record.policy_compliance,
         timeline_integrity=record.timeline_integrity,
         resolution_quality=record.resolution_quality,
+        semantic_grounding=record.semantic_grounding,
         overall_score=record.overall_score,
         supervisor_decision_kind=record.supervisor_decision_kind,
         finding_count=record.finding_count,
@@ -150,6 +156,7 @@ def _row_to_record(row: QAScoreRow) -> QAScoreRecord:
         policy_compliance=row.policy_compliance,
         timeline_integrity=row.timeline_integrity,
         resolution_quality=row.resolution_quality,
+        semantic_grounding=float(row.semantic_grounding or 0.0),
         overall_score=row.overall_score,
         supervisor_decision_kind=row.supervisor_decision_kind,
         finding_count=row.finding_count,

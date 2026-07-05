@@ -105,6 +105,16 @@ class ResolutionProposalRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Metadata JSONB for gate reasons and other structured proposal context.
+    # Added in migration 0096_mvp_sme_resolution_proposal_metadata.
+    # gate_reasons: list of strings from _evaluate_gate() (e.g. "fraud_risk_high").
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
 
     __table_args__ = (
         CheckConstraint("length(tenant_id) > 0", name="tenant_id_nonempty"),

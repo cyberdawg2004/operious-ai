@@ -16,9 +16,7 @@ null-key. With the key set → encryptor works normally.
 
 from __future__ import annotations
 
-import importlib
 import os
-from unittest.mock import patch
 
 import pytest
 

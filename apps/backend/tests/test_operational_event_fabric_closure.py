@@ -162,6 +162,7 @@ def test_transport_and_request_boundaries_do_not_import_projection_bridges() -> 
 def test_operational_event_runtime_is_only_used_by_event_or_projection_layers() -> None:
     allowed_prefixes = (
         "events/",
+        "agents/governed/base.py",
         "runtime/arbitration_event_projection.py",
         "runtime/boundary_event_projection.py",
         "runtime/coordination_event_projection.py",

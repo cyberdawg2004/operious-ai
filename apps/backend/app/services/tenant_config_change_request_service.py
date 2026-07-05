@@ -34,6 +34,7 @@ from app.runtime.resolution_taxonomy_policy import (
 from app.runtime.warranty_refund_policy import (
     WARRANTY_REFUND_RULES_POLICY_TYPE,
     WarrantyRefundPolicyParseError,
+    parse_warranty_refund_policy,
     validate_warranty_refund_policy_parameters,
 )
 from app.events import EventCausality, EventChronology, EventId, OperationalEvent
@@ -1063,6 +1064,16 @@ async def _validate_payload(
         )
         _validate_resolution_taxonomy_policy_payload(payload)
         _validate_warranty_refund_policy_payload(payload)
+        await _validate_warranty_refund_role_field_references(
+            payload,
+            tenant_configuration=tenant_configuration,
+            tenant_id=tenant_id,
+        )
+        await _validate_taxonomy_schema_role_consistency(
+            payload,
+            tenant_configuration=tenant_configuration,
+            tenant_id=tenant_id,
+        )
     elif change_type is TenantConfigChangeType.EXECUTION_GOVERNANCE:
         required = (
             "execution_quota",
@@ -1242,6 +1253,125 @@ def _validate_warranty_refund_policy_payload(payload: Mapping[str, Any]) -> None
         raise TenantConfigChangeRequestLifecycleError(
             f"invalid warranty_refund_rules policy parameters: {exc}"
         ) from exc
+
+
+async def _validate_warranty_refund_role_field_references(
+    payload: Mapping[str, Any],
+    *,
+    tenant_configuration: "TenantConfigurationService",
+    tenant_id: str,
+) -> None:
+    """Cross-policy guard (money-path integrity): reject a warranty_refund_rules
+    change whose eligibility_field_mappings reference a field name not declared
+    in the current active resolution_taxonomy extraction_schema.
+
+    A dangling role→field reference causes every eligibility evaluation to
+    produce CANNOT_DETERMINE silently, routing all eligible tickets to human
+    review with no actionable error.  Better to reject at propose time.
+
+    Skip the check when:
+    - No custom eligibility_field_mappings are present (defaults are always valid).
+    - No active resolution_taxonomy policy exists (cannot validate against nothing).
+    - The active taxonomy has no extraction_schema (legacy e-commerce defaults
+      are always valid; the two default role values purchase_date/seller exist
+      in the legacy field set by construction).
+    """
+    if payload.get("policy_type") != WARRANTY_REFUND_RULES_POLICY_TYPE:
+        return
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, Mapping):
+        return
+    eligibility_mappings = parameters.get("eligibility_field_mappings")
+    if not isinstance(eligibility_mappings, Mapping) or not eligibility_mappings:
+        return
+
+    taxonomy_record = await tenant_configuration.resolve_active_governance_policy(
+        tenant_id=tenant_id,
+        policy_type=RESOLUTION_TAXONOMY_POLICY_TYPE,
+    )
+    if taxonomy_record is None:
+        return
+    try:
+        taxonomy = parse_resolution_taxonomy_policy(taxonomy_record)
+    except ResolutionTaxonomyPolicyParseError:
+        return
+    if taxonomy.extraction_schema is None:
+        return
+
+    declared = taxonomy.extraction_schema.field_names()
+    for role_key, mapped_field in eligibility_mappings.items():
+        if not isinstance(mapped_field, str) or not mapped_field.strip():
+            continue
+        field = mapped_field.strip()
+        if field not in declared:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"eligibility_field_mappings.{role_key} references field "
+                f"{field!r} which is not declared in the active "
+                f"resolution_taxonomy extraction_schema "
+                f"(declared: {', '.join(sorted(declared))}). "
+                f"Add {field!r} to the extraction schema first, or map "
+                f"the role to an existing field."
+            )
+
+
+async def _validate_taxonomy_schema_role_consistency(
+    payload: Mapping[str, Any],
+    *,
+    tenant_configuration: "TenantConfigurationService",
+    tenant_id: str,
+) -> None:
+    """Cross-policy guard (money-path integrity): reject a resolution_taxonomy
+    change that would leave the active warranty_refund_rules
+    eligibility_field_mappings with a dangling field reference.
+
+    A tenant removing field 'transaction_date' from their extraction_schema
+    while their warranty_refund_rules maps purchase_timestamp →
+    'transaction_date' would silently break eligibility for every subsequent
+    ticket.  Catch it here at taxonomy-change propose time.
+
+    Skip when:
+    - The proposed parameters omit extraction_schema (removing the schema
+      entirely reverts to legacy defaults, which are always valid).
+    - No active warranty_refund_rules policy exists.
+    - The warranty policy uses only the two legacy default values
+      (purchase_date / seller) — those are always valid.
+    """
+    if payload.get("policy_type") != RESOLUTION_TAXONOMY_POLICY_TYPE:
+        return
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, Mapping):
+        return
+    proposed_schema = parameters.get("extraction_schema")
+    if proposed_schema is None:
+        return
+    if not isinstance(proposed_schema, Mapping):
+        return
+
+    proposed_field_names = frozenset(proposed_schema.keys())
+
+    warranty_record = await tenant_configuration.resolve_active_governance_policy(
+        tenant_id=tenant_id,
+        policy_type=WARRANTY_REFUND_RULES_POLICY_TYPE,
+    )
+    if warranty_record is None:
+        return
+    try:
+        warranty_policy = parse_warranty_refund_policy(warranty_record)
+    except WarrantyRefundPolicyParseError:
+        return
+
+    _LEGACY_DEFAULTS = frozenset({"purchase_date", "seller"})
+    for role_key, mapped_field in warranty_policy.eligibility_field_mappings.items():
+        if mapped_field in _LEGACY_DEFAULTS:
+            continue
+        if mapped_field not in proposed_field_names:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"The proposed extraction_schema does not include field "
+                f"{mapped_field!r}, which is referenced by the active "
+                f"warranty_refund_rules eligibility_field_mappings "
+                f"(role: {role_key!r}). Update the eligibility role mapping "
+                f"first, or include {mapped_field!r} in the proposed schema."
+            )
 
 
 def _validate_template_placeholders_payload(payload: Mapping[str, Any]) -> None:

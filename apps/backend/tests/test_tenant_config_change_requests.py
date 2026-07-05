@@ -32,6 +32,7 @@ from app.tenant.change_requests import (
     TenantConfigChangeRequestSeparationError,
     TenantConfigChangeRequestStatus,
     TenantConfigChangeType,
+    TenantConfigChangeRequestValidationError,
     derive_tenant_config_change_request_id,
 )
 from app.tenant.chronology import canonical_sha256
@@ -275,6 +276,50 @@ async def test_propose_creates_pending_request(pg_session: AsyncSession) -> None
     assert record.proposed_by == "principal-a"
     assert record.proposed_payload["_schema_version"] == "1"
     assert record.approved_by is None
+
+
+@pytest.mark.asyncio
+async def test_policy_top_level_status_is_rejected_at_propose_with_clear_error(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+
+    with pytest.raises(
+        TenantConfigChangeRequestValidationError,
+        match=r"status must be one of \['active', 'draft', 'archived'\]; got 'ACTIVE'",
+    ):
+        await _service(pg_session).propose(
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.POLICY,
+            payload={
+                **_action_tools_policy_payload(_valid_action_tools_parameters()),
+                "status": "ACTIVE",
+            },
+            proposed_by="principal-a",
+        )
+
+
+@pytest.mark.asyncio
+async def test_policy_effective_from_is_rejected_at_propose_with_clear_error(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+
+    with pytest.raises(
+        TenantConfigChangeRequestValidationError,
+        match="effective_from must be an ISO 8601 datetime",
+    ):
+        await _service(pg_session).propose(
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.POLICY,
+            payload={
+                **_action_tools_policy_payload(_valid_action_tools_parameters()),
+                "effective_from": "not-a-timestamp",
+            },
+            proposed_by="principal-a",
+        )
 
 
 # ---------------------------------------------------------------------------

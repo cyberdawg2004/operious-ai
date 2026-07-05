@@ -29,6 +29,8 @@ from app.cognition.llm import (
     DiagnosticLLMClient,
     DiagnosticLLMMessage,
 )
+from app.cognition.llm_bedrock import BedrockAnthropicMessagesClient
+from app.cognition.llm_factory import build_llm_client
 from app.cognition.models import (
     ApprovalApplicationResult,
     ApprovalLifecycleResult,
@@ -47,6 +49,8 @@ __all__ = [
     "ApprovalApplicationResult",
     "ApprovalLifecycleResult",
     "AnthropicMessagesClient",
+    "BedrockAnthropicMessagesClient",
+    "build_llm_client",
     "CognitionError",
     "CognitionGovernanceRejectionError",
     "CognitionAuditRecord",

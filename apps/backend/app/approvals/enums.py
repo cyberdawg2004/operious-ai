@@ -14,6 +14,9 @@ class CaseApprovalEntryCategory(StrEnum):
     LOW_CONFIDENCE = "low_confidence"
     COORDINATION_HUMAN_REVIEW = "coordination_human_review"
     CRISIS_ACTION = "crisis_action"
+    # MVP-3/SME: FraudDetectionAgent returned risk_score ≥ threshold_high.
+    # Routes to the SME queue for human review of the fraud case.
+    FRAUD_RISK_HIGH = "fraud_risk_high"
 
 
 class CaseApprovalStatus(StrEnum):

@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import logging
 import ssl
-
-logger = logging.getLogger(__name__)
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -59,6 +57,8 @@ from app.core.ssrf import (
     validate_public_https_url,
 )
 from app.types.json import JsonObject
+
+logger = logging.getLogger(__name__)
 
 
 class OperationMode(StrEnum):

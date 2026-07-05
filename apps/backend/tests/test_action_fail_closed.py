@@ -15,8 +15,6 @@ from typing import Any, cast
 
 from app.agents.tools.actions import build_tenant_action_tool_registry
 from app.agents.tools.actions.fail_closed import FailClosedActionTool
-from app.agents.tools.actions.refund_request import RefundRequestTool
-from app.agents.tools.actions.warranty_claim import WarrantyClaimTool
 from app.agents.tools.capability import ToolCapability
 from app.core.config import Settings
 from app.dependencies.services import (
@@ -35,6 +33,18 @@ class _NoConfigRepo:
     ) -> None:
         del tenant_id, tool_name, expected_tenant_id
         return None
+
+    async def list_active_for_tenant(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> list:
+        del tenant_id, expected_tenant_id
+        return []
+
+    async def save_config(self, record: object, *, expected_tenant_id: str) -> None:
+        del record, expected_tenant_id
 
 
 async def test_fail_closed_tool_returns_governed_error_not_fake_success() -> None:
@@ -57,32 +67,63 @@ async def test_fail_closed_tool_returns_governed_error_not_fake_success() -> Non
     assert result.metadata.get("stub") is not True
 
 
-async def test_registry_fails_closed_when_stubs_disallowed() -> None:
+async def test_registry_is_empty_when_no_connectors_configured() -> None:
+    """A tenant with no configured connectors gets an empty registry.
+
+    The new domain-agnostic model never registers hardcoded tool names. Only
+    tools with an active ConnectorConfigRecord are registered. An unconfigured
+    tenant has no tools; the agent will receive a governed error via the
+    tool-session's unknown-tool path if it calls an unconfigured tool.
+    """
     registry = await build_tenant_action_tool_registry(
         tenant_id="t-1",
         config_repository=cast(Any, _NoConfigRepo()),
         credential_runtime=cast(Any, object()),
         allow_stub_actions=False,
     )
-    for name in (
-        "refund.request",
-        "warranty.claim",
-        "replacement.order",
-        "warehouse.repair.report",
-    ):
-        tool = registry.get(name)
-        assert isinstance(tool, FailClosedActionTool), f"{name} should be fail-closed"
+    assert registry.names() == (), (
+        "unconfigured tenant must have no registered tools — "
+        "no hardcoded tool names, no stubs"
+    )
 
 
-async def test_registry_uses_stubs_when_explicitly_allowed() -> None:
+async def test_registry_registers_generic_connector_from_config() -> None:
+    """A tenant with an active connector config gets a GenericConnectorTool.
+
+    This verifies the full generic registration path: a configured connector
+    produces a real tool in the registry regardless of tool name or domain.
+    """
+    from app.agents.tools.connectors import GenericConnectorTool
+    from app.agents.tools.connectors.config import (
+        ConnectorConfigRecord,
+        InMemoryConnectorConfigRepository,
+    )
+
+    repo = InMemoryConnectorConfigRepository()
+    await repo.save_config(
+        ConnectorConfigRecord(
+            tenant_id="t-1",
+            connector_type="money.refund",
+            tool_name="refund.request",
+            http_method="POST",
+            endpoint_template="https://example.com/refund",
+            endpoint_host="example.com",
+        ),
+        expected_tenant_id="t-1",
+    )
     registry = await build_tenant_action_tool_registry(
         tenant_id="t-1",
-        config_repository=cast(Any, _NoConfigRepo()),
+        config_repository=repo,
         credential_runtime=cast(Any, object()),
-        allow_stub_actions=True,
+        allow_stub_actions=False,
     )
-    assert isinstance(registry.get("refund.request"), RefundRequestTool)
-    assert isinstance(registry.get("warranty.claim"), WarrantyClaimTool)
+    # GenericConnectorTool.name is derived from tool_name by splitting on the
+    # last "." — "refund.request" → connector_id="refund", operation_id="request"
+    # → name="refund.request". The registry key equals config.tool_name.
+    assert "refund.request" in registry.names(), (
+        f"expected 'refund.request' in registry, got {registry.names()}"
+    )
+    assert isinstance(registry.get("refund.request"), GenericConnectorTool)
 
 
 def test_allow_stub_actions_effective_derivation() -> None:

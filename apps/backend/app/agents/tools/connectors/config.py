@@ -67,6 +67,13 @@ class ConnectorConfigRepository(Protocol):
         expected_tenant_id: str,
     ) -> None: ...
 
+    async def list_active_for_tenant(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> list[ConnectorConfigRecord]: ...
+
 
 class InMemoryConnectorConfigRepository:
     """Tenant-clamped connector config store for unit tests."""
@@ -97,6 +104,19 @@ class InMemoryConnectorConfigRepository:
         _assert_tenant(record.tenant_id, expected_tenant_id)
         self._records[(record.tenant_id, record.tool_name)] = record
 
+    async def list_active_for_tenant(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> list[ConnectorConfigRecord]:
+        if tenant_id != expected_tenant_id:
+            return []
+        return [
+            r for (t, _), r in self._records.items()
+            if t == tenant_id and r.status == "active"
+        ]
+
 
 class PostgresConnectorConfigRepository(BaseRepository):
     """Postgres-backed connector config store."""
@@ -126,6 +146,34 @@ class PostgresConnectorConfigRepository(BaseRepository):
         )
         row = (await self.session.execute(stmt)).scalar_one_or_none()
         return None if row is None else _row_to_record(row)
+
+    async def list_active_for_tenant(
+        self,
+        *,
+        tenant_id: str,
+        expected_tenant_id: str,
+    ) -> list[ConnectorConfigRecord]:
+        if tenant_id != expected_tenant_id:
+            return []
+        await self._scope(expected_tenant_id)
+        stmt = (
+            select(ConnectorConfigRow)
+            .where(
+                ConnectorConfigRow.tenant_id == expected_tenant_id,
+                ConnectorConfigRow.status == "active",
+            )
+            .order_by(ConnectorConfigRow.tool_name, ConnectorConfigRow.version.desc())
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        # Keep only the highest version per tool_name (rows are ordered
+        # tool_name ASC, version DESC so the first occurrence per tool wins).
+        seen: set[str] = set()
+        result: list[ConnectorConfigRecord] = []
+        for row in rows:
+            if row.tool_name not in seen:
+                seen.add(row.tool_name)
+                result.append(_row_to_record(row))
+        return result
 
     async def save_config(
         self,

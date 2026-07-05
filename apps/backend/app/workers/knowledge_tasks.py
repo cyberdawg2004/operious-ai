@@ -28,6 +28,8 @@ from app.queues import QUEUE_KNOWLEDGE_INDEXING
 from app.tenant.enums import TenantKnowledgeDocumentStatus
 from app.tenant.identity import TenantKnowledgeDocumentId
 from app.tenant.persistence import PostgresTenantConfigurationRepository
+from app.agents.governed.sop_contradiction import SOPContradictionAgent
+from app.cognition.llm_factory import build_llm_client
 from app.workers.celery_app import celery_app
 
 _logger = get_logger(__name__)
@@ -176,15 +178,16 @@ async def _persist_index_failed(
 def _knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
     settings = get_settings()
     data_protection = _data_protection_service(session)
+    tenant_config_repo = PostgresTenantConfigurationRepository(
+        session,
+        data_protection=data_protection,
+    )
     return KnowledgeRuntime(
         repository=PostgresKnowledgeRepository(
             session,
             data_protection=data_protection,
         ),
-        tenant_configuration_repository=PostgresTenantConfigurationRepository(
-            session,
-            data_protection=data_protection,
-        ),
+        tenant_configuration_repository=tenant_config_repo,
         embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
@@ -193,6 +196,10 @@ def _knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
         ),
         vector_index_name=settings.VECTOR_DEFAULT_INDEX,
         default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
+        sop_contradiction_agent=SOPContradictionAgent(
+            llm_client=build_llm_client(settings),
+            tenant_configuration_repository=tenant_config_repo,
+        ),
     )
 
 

@@ -21,6 +21,7 @@ from app.agents.tools.grants import (
     compute_agent_execution_actor,
 )
 from app.agents.tools.operation_metadata import (
+    ACTION_STRUCTURAL_KEYS as _ACTION_STRUCTURAL_KEYS,
     operation_metadata,
     payload_for_operation,
     resolve_operation,
@@ -44,6 +45,7 @@ _ACTION_PENDING_APPROVAL = "action_pending_approval"
 _ACTION_DENIED = "action_denied"
 _ACTION_SKIPPED = "action_skipped"
 _ACTION_ERROR = "action_error"
+
 
 class ActionTimelineAppender(Protocol):
     async def append_event(
@@ -556,16 +558,17 @@ def _request_metadata(
         "resolution_category": proposal.resolution_category,
     }
     metadata.update(operation_metadata(resolved))
-    for key in (
-        "issue_category",
-        "refund_amount_cents",
-        "severity",
-        "product_sku",
-        "order_id",
-    ):
-        value = _metadata_value(action, key)
-        if value is not None:
-            metadata[key] = value
+    # Pass through all scalar values from the action dict as governance metadata.
+    # This is domain-agnostic: whatever field names _merge_extracted_fields put into
+    # the action dict (order_id/product_sku for e-commerce, account_number/service_id
+    # for other verticals) flow through here without hardcoding any specific names.
+    # Structural keys (type, tool_name, label, etc.) and complex objects are excluded.
+    for key, value in action.items():
+        if key in _ACTION_STRUCTURAL_KEYS:
+            continue
+        scalar = _metadata_value(action, key)
+        if scalar is not None:
+            metadata[key] = scalar
     payload = action.get("payload")
     if isinstance(payload, Mapping):
         payload_map = cast(Mapping[str, Any], payload)

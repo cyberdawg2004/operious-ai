@@ -38,7 +38,6 @@ from app.agents.results import ToolInvocationRequest, ToolInvocationResult
 from app.agents.tools import BaseTool, ToolCapability, ToolInvoker, ToolRegistry
 from app.agents.tools.invoker import (
     AGENT_ACTION_BINDING_KEY,
-    _action_governance_decision_seed,  # private but importable
     _build_governance_context,  # private but importable
     _seeded_governance_decision_id,  # private but importable
     compute_agent_action_binding,
@@ -58,7 +57,6 @@ from app.governance.enforcement.handlers import (
 from app.governance.enforcement.runtime import GovernanceRuntime
 from app.governance.enums import Decision, EnforcementStage
 from app.governance.evaluators.engine import PolicyEvaluationEngine
-from app.governance.identity.decision_ids import derive_decision_id
 from app.governance.persistence.memory import InMemoryGovernanceRepository
 from app.governance.persistence.records import GovernanceDecisionRecord
 from app.governance.policies.base import BaseGovernancePolicy
@@ -366,5 +364,5 @@ async def test_seeded_replay_deny_decision_is_rejected() -> None:
         tool_registry=_make_registry(tool),
         governance_runtime=_make_governance(persistence),
     )
-    envelope = await invoker.invoke(request, ctx, invocation_ordinal=1)
+    await invoker.invoke(request, ctx, invocation_ordinal=1)
     assert tool.call_count == 0

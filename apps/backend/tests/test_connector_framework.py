@@ -27,7 +27,6 @@ from app.agents.results import ToolInvocationRequest
 from app.agents.tools import ToolInvoker, ToolRegistry
 from app.agents.tools.action_governance import build_action_tool_governance_runtime
 from app.agents.tools.actions import (
-    RefundRequestTool,
     build_tenant_action_tool_registry,
 )
 from app.agents.tools.connectors import (
@@ -218,31 +217,38 @@ async def test_connector_config_queryable_without_decrypting_credentials(
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_tenant_keeps_refund_stub_in_nonprod() -> None:
-    """allow_stub_actions=True (non-prod) → stub tool for unconfigured connector."""
+async def test_unconfigured_tenant_has_empty_registry_in_nonprod() -> None:
+    """Unconfigured tenant → empty registry regardless of allow_stub_actions.
+
+    Domain-agnostic design: no hardcoded tool names are pre-registered.
+    Only tools with an active ConnectorConfigRecord appear in the registry.
+    An unconfigured tenant has no tools. The agent receives a governed error
+    via the tool-session unknown-tool path if it calls an unconfigured tool,
+    rather than a fake FailClosedActionTool with a hardcoded e-commerce name.
+    """
     registry = await build_tenant_action_tool_registry(
         tenant_id=TENANT_ID,
         config_repository=InMemoryConnectorConfigRepository(),
         credential_runtime=_CredentialRuntime(),
         allow_stub_actions=True,
     )
-
-    assert isinstance(registry.get(TOOL_NAME), RefundRequestTool)
+    assert registry.names() == (), (
+        "unconfigured tenant must have empty registry — no hardcoded tool stubs"
+    )
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_tenant_fails_closed_in_prod() -> None:
-    """allow_stub_actions=False (production default) → FailClosedActionTool."""
-    from app.agents.tools.actions.fail_closed import FailClosedActionTool
-
+async def test_unconfigured_tenant_has_empty_registry_in_prod() -> None:
+    """allow_stub_actions=False (production default) → empty registry."""
     registry = await build_tenant_action_tool_registry(
         tenant_id=TENANT_ID,
         config_repository=InMemoryConnectorConfigRepository(),
         credential_runtime=_CredentialRuntime(),
         allow_stub_actions=False,
     )
-
-    assert isinstance(registry.get(TOOL_NAME), FailClosedActionTool)
+    assert registry.names() == (), (
+        "unconfigured tenant must have empty registry in production"
+    )
 
 
 async def _memory_config(

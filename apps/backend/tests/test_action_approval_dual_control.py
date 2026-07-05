@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,7 +27,6 @@ from app.agents.tools.approvals import (
     build_pending_action_approval,
 )
 from app.services.action_approval_service import (
-    ActionApprovalLifecycleError,
     ActionApprovalSeparationError,
     ActionApprovalService,
 )

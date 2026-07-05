@@ -296,6 +296,20 @@ class Settings(BaseSettings):
     QA_QUEUE_MAX_DEPTH: int = 10_000
     TRAINER_RECOMMENDATION_THRESHOLD: float = 0.75
     TRAINER_RECOMMENDATION_DIMENSION_THRESHOLD: float = 0.7
+    # MVP-5: QA signal aggregator configuration.
+    # avg_semantic_grounding below this triggers KBTrainerAgent per plan spec.
+    TRAINER_GROUNDING_THRESHOLD: float = Field(
+        default=0.60,
+        description="Avg semantic grounding below this triggers KB improvement proposals.",
+    )
+    TRAINER_MIN_TICKET_COUNT: int = Field(
+        default=3,
+        description="Minimum scored tickets in window to trigger trainer (50 in production).",
+    )
+    TRAINER_WINDOW_DAYS: int = Field(
+        default=7,
+        description="Rolling window in days for QA signal aggregation.",
+    )
     SOP_INTELLIGENCE_QUEUE_NAME: str = QUEUE_SOP_INTELLIGENCE
     SOP_INTELLIGENCE_QUEUE_MAX_DEPTH: int = 10_000
     SOP_REPEATED_FAILURE_THRESHOLD: int = 3
@@ -342,6 +356,17 @@ class Settings(BaseSettings):
     # Native pgvector storage is currently migrated to one coherent dimension.
     OPENAI_EMBEDDING_DIMENSIONS: int | None = 1536
 
+    # ─── LLM provider selector ───────────────────────────────────────
+    # "anthropic" (default): direct Anthropic API, requires ANTHROPIC_API_KEY.
+    # "bedrock": AWS Bedrock via AnthropicBedrock; authenticates via the
+    #   standard AWS credential chain (env vars → ~/.aws → IAM role).
+    #   Requires AWS_REGION (or LLM_AWS_REGION). Uses inference-profile
+    #   model IDs (e.g. us.anthropic.claude-haiku-4-5-20251001).
+    LLM_PROVIDER: str = Field(
+        default="anthropic",
+        description="LLM transport: 'anthropic' (direct key) or 'bedrock' (AWS).",
+    )
+
     # ─── Anthropic provider ──────────────────────────────────────────
     # Used by Phase 5-C diagnostic cognition. The key is platform-owned
     # deployment secret material: it is read only at runtime composition
@@ -358,6 +383,33 @@ class Settings(BaseSettings):
     # everything on ANTHROPIC_MAX_OUTPUT_TOKENS alone being "big enough".
     ANTHROPIC_MAX_OUTPUT_TOKENS_ESCALATED: int = 3072
     ANTHROPIC_TEMPERATURE: float = 0.0
+
+    # ─── AWS Bedrock provider ────────────────────────────────────────
+    # Only consulted when LLM_PROVIDER=bedrock. Credentials come from the
+    # standard AWS credential chain — do NOT add secret keys here.
+    LLM_AWS_REGION: str = Field(
+        default="us-east-1",
+        description="AWS region for Bedrock inference (e.g. us-east-1, us-west-2).",
+    )
+    # Inference-profile model IDs (region-prefixed). These differ from bare
+    # model IDs used by the direct Anthropic API. Set per-workload so spend
+    # is controlled: cheap Haiku for classification/agents, Sonnet for
+    # reasoning-heavy tasks.
+    BEDROCK_DEFAULT_MODEL: str = Field(
+        default="global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        description=(
+            "Bedrock inference-profile model ID for general/agent workloads. "
+            "Defaults to Haiku 4.5 (cheapest capable model). "
+            "Use global. prefix for cross-region inference profiles."
+        ),
+    )
+    BEDROCK_REASONING_MODEL: str = Field(
+        default="us.anthropic.claude-sonnet-4-6",
+        description=(
+            "Bedrock inference-profile model ID for reasoning-heavy workloads "
+            "(SME review, SOP contradiction)."
+        ),
+    )
 
     # ─── Translation provider ────────────────────────────────────────
     TRANSLATION_PROVIDER: str = Field(

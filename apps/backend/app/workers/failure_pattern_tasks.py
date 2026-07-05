@@ -19,8 +19,8 @@ from app.agents.sop_synthesis_agent import (
     DeterministicSOPImprovementLLMClient,
     SOPSynthesisAgent,
 )
-from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMClient
-from app.core.config import get_settings
+from app.cognition.llm import DiagnosticLLMClient
+from app.core.config import Settings, get_settings
 from app.data_protection.crypto import DataProtectionService
 from app.data_protection.kms import build_master_key_unwrap
 from app.db.session import get_owner_session_factory
@@ -341,16 +341,12 @@ def _sop_synthesis_agent(session: AsyncSession) -> SOPSynthesisAgent:
 
 
 def _sop_synthesis_llm_client() -> DiagnosticLLMClient:
+    from app.cognition.llm_factory import build_llm_client
+
     settings = get_settings()
-    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+    if _running_under_pytest() or not _llm_configured(settings):
         return DeterministicSOPImprovementLLMClient()
-    return AnthropicMessagesClient(
-        api_key=settings.ANTHROPIC_API_KEY,
-        model=settings.ANTHROPIC_DEFAULT_MODEL,
-        base_url=settings.ANTHROPIC_BASE_URL,
-        anthropic_version=settings.ANTHROPIC_VERSION,
-        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
-    )
+    return build_llm_client(settings)
 
 
 def _sop_knowledge_runtime(session: AsyncSession) -> KnowledgeRuntime:
@@ -393,6 +389,13 @@ def _data_protection_service(session: AsyncSession) -> DataProtectionService | N
 
 def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+
+def _llm_configured(settings: Settings) -> bool:
+    provider = settings.LLM_PROVIDER.strip().casefold()
+    if provider == "bedrock":
+        return bool(settings.LLM_AWS_REGION.strip())
+    return bool(settings.ANTHROPIC_API_KEY.strip())
 
 
 async def _tenant_ids_for_failure_pattern_scan(

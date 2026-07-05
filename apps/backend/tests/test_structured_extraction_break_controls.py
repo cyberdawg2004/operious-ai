@@ -38,8 +38,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.agents.tools.connectors.repair_dispatch import (
     _target_resource_from_payload,  # pyright: ignore[reportPrivateUsage]
 )
-from app.agents.tools.orchestration import (
+from app.agents.tools.operation_metadata import (
     _amount_to_cents,  # pyright: ignore[reportPrivateUsage]
+)
+from app.agents.tools.orchestration import (
     _default_payload,  # pyright: ignore[reportPrivateUsage]
 )
 from app.attachments.repository import AttachmentRepository

@@ -55,6 +55,10 @@ class ResolutionProposalRecord:
         default_factory=_empty_json_list
     )
     source_language: str = "en"
+    # JSONB metadata column (migration 0096). Stores gate_reasons (list of
+    # strings from _evaluate_gate e.g. "fraud_risk_high") and future context.
+    # Backward-compat: {} for pre-migration rows.
+    metadata: Mapping[str, Any] = field(default_factory=_empty_json_mapping)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the API/timeline-safe representation."""
@@ -85,7 +89,18 @@ class ResolutionProposalRecord:
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "metadata": dict(self.metadata),
         }
+
+
+def resolution_proposal_gate_reasons(
+    proposal: "ResolutionProposalRecord",
+) -> tuple[str, ...]:
+    """Extract gate reasons from a proposal's metadata (e.g. 'fraud_risk_high')."""
+    raw = proposal.metadata.get("gate_reasons")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(str(r) for r in raw if isinstance(r, str))
 
 
 @dataclass(frozen=True, slots=True)

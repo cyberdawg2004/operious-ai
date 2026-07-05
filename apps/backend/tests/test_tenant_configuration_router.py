@@ -142,6 +142,44 @@ async def test_channel_endpoint_redacts_credentials(
 
 
 @pytest.mark.asyncio
+async def test_change_request_invalid_policy_status_fails_at_propose_with_clear_400(
+    tenant_client: httpx.AsyncClient,
+) -> None:
+    response = await tenant_client.post(
+        "/api/v1/tenant/config/change-requests",
+        headers=_headers(),
+        json={
+            "change_type": "policy",
+            "payload": {
+                "_schema_version": "1",
+                "policy_type": "warranty_refund_rules",
+                "parameters": {
+                    "warranty_window_days": 730,
+                    "authorized_resellers": [],
+                    "required_evidence_by_claim_type": {
+                        "warranty_claim": ["order_id", "purchase_date", "seller"],
+                    },
+                    "remedy_sequence_by_claim_type": {
+                        "warranty_claim": ["replacement", "refund"],
+                    },
+                },
+                "status": "ACTIVE",
+                "effective_from": datetime.now(timezone.utc).isoformat(),
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["status"] == 400
+    assert body["title"] == "http_error"
+    assert body["detail"] == (
+        "{'code': 'tenant_config_change_request_invalid', 'message': "
+        "\"status must be one of ['active', 'draft', 'archived']; got 'ACTIVE'\"}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_channel_point_update_and_verify_are_tenant_scoped(
     tenant_client: httpx.AsyncClient,
 ) -> None:

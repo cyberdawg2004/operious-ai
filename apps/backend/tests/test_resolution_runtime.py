@@ -794,19 +794,41 @@ def test_recommended_actions_falls_back_to_collect_context_when_category_unrecog
     )
 
 
-def test_monetary_commitment_exceeds_threshold_has_no_keyword_precondition() -> None:
+def test_monetary_commitment_exceeds_threshold_requires_configured_currency() -> None:
+    """Currency detection returns False when tenant has not configured any currency.
+
+    The old USD hardcoded default is removed. A tenant with empty monetary_currency_*
+    gets no currency detection — no false positives for non-USD verticals.
+    """
+    # Empty taxonomy (no currency configured) → no detection regardless of text
     assert (
         _monetary_commitment_exceeds_threshold(
             "we can offer $75 today", 5_000, _EMPTY_TAXONOMY
         )
-        is True
+        is False
+    ), "empty taxonomy must never detect currency — no hardcoded USD default"
+
+    # Tenant that configures USD symbols/codes → detection works
+    usd_taxonomy = ResolutionTaxonomyPolicy(
+        categories=(),
+        monetary_remedy_keywords=frozenset(),
+        monetary_currency_symbols=frozenset({"$"}),
+        monetary_currency_codes=frozenset({"usd", "dollars"}),
+        unsupported_commitment_patterns=frozenset(),
+        extraction_schema=None,
     )
     assert (
         _monetary_commitment_exceeds_threshold(
-            "we can offer $25 today", 5_000, _EMPTY_TAXONOMY
+            "we can offer $75 today", 5_000, usd_taxonomy
+        )
+        is True
+    ), "configured USD taxonomy must detect $75"
+    assert (
+        _monetary_commitment_exceeds_threshold(
+            "we can offer $25 today", 5_000, usd_taxonomy
         )
         is False
-    )
+    ), "$25 below 5000 cents threshold"
 
 
 def test_unsupported_commitment_patterns_includes_baseline_for_empty_taxonomy() -> None:

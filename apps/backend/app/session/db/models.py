@@ -157,6 +157,12 @@ class SessionRow(Base):
         default=dict,
         server_default=text("'{}'"),
     )
+    # MVP-7: cross-channel customer identity correlation key. NULL for
+    # tickets with no cross-channel match. Set by IdentityResolutionRuntime
+    # when Stage 1 or Stage 2 links this session to a prior customer session.
+    customer_identity_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
 
 
 # ─── session_events ──────────────────────────────────────────────────────

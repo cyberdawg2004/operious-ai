@@ -497,9 +497,9 @@ def create_app(
         )
 
     # Fail-closed production readiness gate (S-09 stubs / secrets).
-    # Refuses to boot on stubbed providers or missing security secrets
-    # unless each is explicitly acknowledged. Disabled outside production
-    # and overridable via PRODUCTION_READINESS_ENFORCED.
+    # Refuses to boot on stubbed providers or missing security secrets.
+    # Disabled outside production and overridable via
+    # PRODUCTION_READINESS_ENFORCED for test harnesses only.
     if settings.production_readiness_enforced:
         validate_production_config(settings)
 

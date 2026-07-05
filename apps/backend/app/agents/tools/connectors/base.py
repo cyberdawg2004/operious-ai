@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, ClassVar, Protocol
 
-logger = logging.getLogger(__name__)
-
 from app.agents.context import AgentExecutionContext
 from app.agents.results import ToolInvocationRequest, ToolInvocationResult
 from app.agents.tools.base import BaseTool
@@ -32,6 +30,8 @@ from app.core.ssrf import (
 )
 from app.tenant.enums import TenantChannelType
 from app.types.json import JsonObject
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_SECONDS = 10.0
 

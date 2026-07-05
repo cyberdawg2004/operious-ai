@@ -463,6 +463,7 @@ _ENTRY_CATEGORY_LABELS: dict[str, str] = {
     "low_confidence": "Low-confidence resolution",
     "coordination_human_review": "Coordination — human review",
     "crisis_action": "Crisis action",
+    "fraud_risk_high": "Fraud risk — SME review required",
 }
 
 

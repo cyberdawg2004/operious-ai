@@ -25,11 +25,9 @@ These tests confirm:
 
 from __future__ import annotations
 
-import pytest
 
 from app.runtime.money_goods_commitment import (
     has_money_or_goods_commitment,
-    money_or_goods_commitment_kinds,
 )
 
 

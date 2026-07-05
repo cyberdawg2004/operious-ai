@@ -23,8 +23,6 @@ This will trigger tenant_config_approver_must_differ (403) - expected for same-p
 import asyncio
 import os
 import sys
-import time
-import uuid
 from argparse import ArgumentParser
 from datetime import datetime, timezone
 from typing import Any
@@ -241,16 +239,16 @@ class Stage3bValidator:
                 error_detail = approve_response.json().get("detail", "")
                 if "approver_must_differ" in error_detail:
                     self.log(
-                        f"✗ Dual-control enforced: proposer cannot approve their own change",
+                        "✗ Dual-control enforced: proposer cannot approve their own change",
                         "WARN"
                     )
-                    self.log(f"   This is EXPECTED if using same token for both propose and approve.", "WARN")
+                    self.log("   This is EXPECTED if using same token for both propose and approve.", "WARN")
                     self.log(f"   Change request ID: {cr_id}", "WARN")
-                    self.log(f"   To fix: set OPERIOUS_SERVICE_TOKEN (Auth0 M2M) for propose", "WARN")
-                    self.log(f"   Options:", "WARN")
-                    self.log(f"     1. Set OPERIOUS_SERVICE_TOKEN and re-run", "WARN")
+                    self.log("   To fix: set OPERIOUS_SERVICE_TOKEN (Auth0 M2M) for propose", "WARN")
+                    self.log("   Options:", "WARN")
+                    self.log("     1. Set OPERIOUS_SERVICE_TOKEN and re-run", "WARN")
                     self.log(f"     2. Have a second user approve: {cr_id}", "WARN")
-                    self.log(f"     3. Press Enter to skip and continue", "WARN")
+                    self.log("     3. Press Enter to skip and continue", "WARN")
                     input("\nPress Enter to continue (will skip this connector)...")
                     self.log("⚠ Skipping connector creation - dual-control test incomplete", "WARN")
                     return False  # Indicate failure, script will abort step 1
@@ -327,11 +325,11 @@ class Stage3bValidator:
             if existing:
                 cr_id = existing[0].get("change_request_id")
                 self.log(f"Existing pending CR found: {cr_id} — needs approval")
-                self.log(f"")
-                self.log(f"  ACTION REQUIRED: Have a second authorized user approve this CR:")
+                self.log("")
+                self.log("  ACTION REQUIRED: Have a second authorized user approve this CR:")
                 self.log(f"  curl -X POST '{API_BASE}/tenant/config/change-requests/{cr_id}/approve' \\")
-                self.log(f"       -H 'Authorization: Bearer <approver-token>'")
-                self.log(f"  Then re-run this script.")
+                self.log("       -H 'Authorization: Bearer <approver-token>'")
+                self.log("  Then re-run this script.")
                 self.results["live_read"] = {"status": "PENDING_APPROVAL", "cr_id": cr_id}
                 input("\nPress Enter after approving, then this script will retry the probe... ")
                 http_probe2 = await self._probe_connector(HTTPBIN_READ_TOOL)
@@ -422,7 +420,7 @@ class Stage3bValidator:
         self.log("To complete the round-trip test:")
         self.log(f"  1. The {WEBHOOK_ACT_TOOL} connector is configured")
         self.log(f"  2. Open webhook.site tab: {self.webhook_url}")
-        self.log(f"  3. Verify webhook.site shows NO requests yet (empty)")
+        self.log("  3. Verify webhook.site shows NO requests yet (empty)")
         self.log("  4. Trigger a test action that uses the connector")
         self.log("     (e.g., via agent test harness or internal tool)")
         self.log("  5. Action should queue as pending_human_approval")
@@ -529,11 +527,11 @@ class Stage3bValidator:
                     print(f"      {key}: {value}")
 
         print("\n🎯 Stage 3b Proof:")
-        print(f"  • LIVE READ: Prod egress reached httpbin.org")
+        print("  • LIVE READ: Prod egress reached httpbin.org")
         print(f"  • HTTP PROBE: {self.results.get('live_read', {}).get('http_probe', 'N/A')}")
-        print(f"  • ROUND-TRIP: Queue → Approve → POST (manual verification)")
-        print(f"  • FAIL-CLOSED: Undeclared commitment_kind → human approval")
-        print(f"  • DEPLOYED: baa0e31 on operious-ai-imad.fly.dev")
+        print("  • ROUND-TRIP: Queue → Approve → POST (manual verification)")
+        print("  • FAIL-CLOSED: Undeclared commitment_kind → human approval")
+        print("  • DEPLOYED: baa0e31 on operious-ai-imad.fly.dev")
         print()
 
     async def run(self):
@@ -612,10 +610,10 @@ async def main():
     print(f"   User token: ***REDACTED*** ({len(user_token)} chars)")
     if service_token:
         print(f"   Service token: ***REDACTED*** ({len(service_token)} chars)")
-        print(f"   Dual-control: SERVICE proposes, USER approves (different principals)")
+        print("   Dual-control: SERVICE proposes, USER approves (different principals)")
     else:
-        print(f"   Service token: NOT SET (will use user token for both - expect 403)")
-        print(f"   Set OPERIOUS_SERVICE_TOKEN for proper dual-control test")
+        print("   Service token: NOT SET (will use user token for both - expect 403)")
+        print("   Set OPERIOUS_SERVICE_TOKEN for proper dual-control test")
     print()
 
     validator = Stage3bValidator(

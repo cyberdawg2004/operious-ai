@@ -26,7 +26,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from app.cognition.extraction import EXTRACTED_ORDER_FIELD_NAMES
 from app.tenant.persistence import (
     TenantConfigurationRepository,
     TenantGovernancePolicyRecord,
@@ -49,6 +48,13 @@ class WarrantyRefundPolicyParseError(ValueError):
     """Raised when a tenant's warranty_refund_rules policy JSON is malformed."""
 
 
+def _default_eligibility_field_mappings() -> dict[str, str]:
+    # Legacy e-commerce defaults — present when no eligibility_field_mappings
+    # key exists in the tenant's policy.  Non-commerce tenants override these
+    # via the policy's eligibility_field_mappings object.
+    return {"purchase_timestamp": "purchase_date", "authorized_seller": "seller"}
+
+
 @dataclass(frozen=True, slots=True)
 class WarrantyRefundPolicy:
     """Per-tenant warranty/refund eligibility configuration."""
@@ -63,6 +69,20 @@ class WarrantyRefundPolicy:
     remedy_requires_availability_check: Mapping[str, bool] = field(
         default_factory=_empty_availability_check_map
     )
+    # Maps semantic eligibility roles to the tenant's extraction field names.
+    # Roles:
+    #   "purchase_timestamp" → field used for warranty-window date comparison
+    #   "authorized_seller"  → field used for authorized-reseller membership check
+    # Defaults preserve the legacy e-commerce behavior (purchase_date / seller).
+    eligibility_field_mappings: Mapping[str, str] = field(
+        default_factory=_default_eligibility_field_mappings
+    )
+
+    def date_field_name(self) -> str:
+        return self.eligibility_field_mappings.get("purchase_timestamp", "purchase_date")
+
+    def seller_field_name(self) -> str:
+        return self.eligibility_field_mappings.get("authorized_seller", "seller")
 
     def required_evidence_for(self, claim_type: str) -> tuple[str, ...] | None:
         return self.required_evidence_by_claim_type.get(claim_type)
@@ -145,6 +165,14 @@ def _parse_warranty_refund_parameters(
             allow_empty=False,
         )
     )
+    # Parse eligibility_field_mappings FIRST so the date role field name is
+    # known before we validate window_days_by_claim_type.
+    eligibility_field_mappings = _parse_eligibility_field_mappings(
+        parameters.get("eligibility_field_mappings")
+    )
+    date_field_name = eligibility_field_mappings.get(
+        "purchase_timestamp", "purchase_date"
+    )
     required_evidence_by_claim_type = _parse_required_evidence_by_claim_type(
         parameters.get("required_evidence_by_claim_type")
     )
@@ -155,6 +183,7 @@ def _parse_warranty_refund_parameters(
     window_days_by_claim_type = _parse_window_days_by_claim_type(
         parameters.get("window_days_by_claim_type"),
         required_evidence_by_claim_type=required_evidence_by_claim_type,
+        date_field_name=date_field_name,
     )
     known_remedies = frozenset(
         step
@@ -172,7 +201,37 @@ def _parse_warranty_refund_parameters(
         remedy_sequence_by_claim_type=remedy_sequence_by_claim_type,
         window_days_by_claim_type=window_days_by_claim_type,
         remedy_requires_availability_check=remedy_requires_availability_check,
+        eligibility_field_mappings=eligibility_field_mappings,
     )
+
+
+def _parse_eligibility_field_mappings(
+    value: object,
+) -> Mapping[str, str]:
+    """Parse optional eligibility_field_mappings.
+
+    Returns the legacy e-commerce defaults when absent so existing e-commerce
+    tenants see no behavior change.  Non-commerce tenants override to map
+    semantic roles to their own field names.
+    """
+    if value is None:
+        return _default_eligibility_field_mappings()
+    if not isinstance(value, Mapping):
+        raise WarrantyRefundPolicyParseError(
+            "eligibility_field_mappings must be an object"
+        )
+    result: dict[str, str] = dict(_default_eligibility_field_mappings())
+    for role, field_name in value.items():
+        if not isinstance(role, str) or not role.strip():
+            raise WarrantyRefundPolicyParseError(
+                "eligibility_field_mappings keys must be non-empty strings"
+            )
+        if not isinstance(field_name, str) or not field_name.strip():
+            raise WarrantyRefundPolicyParseError(
+                f"eligibility_field_mappings.{role} must be a non-empty string"
+            )
+        result[role.strip()] = field_name.strip()
+    return result
 
 
 def _parse_required_evidence_by_claim_type(
@@ -194,19 +253,13 @@ def _parse_required_evidence_by_claim_type(
             f"required_evidence_by_claim_type[{claim_type!r}]",
             allow_empty=False,
         )
-        unknown = field_names - set(EXTRACTED_ORDER_FIELD_NAMES)
-        if unknown:
-            raise WarrantyRefundPolicyParseError(
-                f"required_evidence_by_claim_type[{claim_type!r}] references "
-                f"unknown extracted field(s): {sorted(unknown)!r} — must be a "
-                f"subset of {EXTRACTED_ORDER_FIELD_NAMES!r}"
-            )
-        # Preserve a deterministic order (extraction field declaration
-        # order) rather than dict/set iteration order, so grounding output
-        # is stable across runs.
-        result[claim_type.strip()] = tuple(
-            name for name in EXTRACTED_ORDER_FIELD_NAMES if name in field_names
-        )
+        # Preserve a deterministic order by iterating in declaration order
+        # (the order the fields appear in the source list). Any field name is
+        # valid — the tenant's extraction_schema declares the universe of
+        # extractable fields, and that schema may differ across verticals.
+        # The old cross-check against EXTRACTED_ORDER_FIELD_NAMES was an
+        # e-commerce-only sanity check that blocks non-commerce tenants.
+        result[claim_type.strip()] = tuple(sorted(field_names))
     return result
 
 
@@ -258,6 +311,7 @@ def _parse_window_days_by_claim_type(
     value: object,
     *,
     required_evidence_by_claim_type: Mapping[str, tuple[str, ...]],
+    date_field_name: str = "purchase_date",
 ) -> Mapping[str, int]:
     if value is None:
         return {}
@@ -275,10 +329,11 @@ def _parse_window_days_by_claim_type(
                 f"window_days_by_claim_type[{claim_type!r}] has no "
                 "corresponding entry in required_evidence_by_claim_type"
             )
-        if "purchase_date" not in required_evidence:
+        if date_field_name not in required_evidence:
             raise WarrantyRefundPolicyParseError(
                 f"window_days_by_claim_type[{claim_type!r}] requires "
-                "purchase_date evidence to be meaningful"
+                f"{date_field_name!r} evidence (the configured date role field) "
+                "to be meaningful"
             )
         result[claim_type] = _require_non_negative_int(
             raw_window_days,

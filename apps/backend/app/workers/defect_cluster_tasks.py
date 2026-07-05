@@ -19,8 +19,8 @@ from app.agents.defect_report_agent import (
     DeterministicDefectReportLLMClient,
     derive_defect_report_id,
 )
-from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMClient
-from app.core.config import get_settings
+from app.cognition.llm import DiagnosticLLMClient
+from app.core.config import Settings, get_settings
 from app.db.session import get_owner_session_factory
 from app.db.tenant_context import get_current_tenant, set_current_tenant
 from app.runtime.defect_cluster_runtime import DefectClusterDetectionRuntime
@@ -316,20 +316,23 @@ def _defect_report_synthesis_agent(
 
 
 def _defect_report_llm_client() -> DiagnosticLLMClient:
+    from app.cognition.llm_factory import build_llm_client
+
     settings = get_settings()
-    if _running_under_pytest() or not settings.ANTHROPIC_API_KEY.strip():
+    if _running_under_pytest() or not _llm_configured(settings):
         return DeterministicDefectReportLLMClient()
-    return AnthropicMessagesClient(
-        api_key=settings.ANTHROPIC_API_KEY,
-        model=settings.ANTHROPIC_DEFAULT_MODEL,
-        base_url=settings.ANTHROPIC_BASE_URL,
-        anthropic_version=settings.ANTHROPIC_VERSION,
-        timeout_seconds=settings.AI_TIMEOUT_SECONDS,
-    )
+    return build_llm_client(settings)
 
 
 def _running_under_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+
+def _llm_configured(settings: Settings) -> bool:
+    provider = settings.LLM_PROVIDER.strip().casefold()
+    if provider == "bedrock":
+        return bool(settings.LLM_AWS_REGION.strip())
+    return bool(settings.ANTHROPIC_API_KEY.strip())
 
 
 def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:

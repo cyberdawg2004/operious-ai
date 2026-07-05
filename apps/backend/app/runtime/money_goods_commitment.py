@@ -10,6 +10,9 @@ _COMMITMENT_ACTION_TYPES = frozenset(
         "refund_request",
         "replacement_order",
         "warranty_claim",
+        "repair_dispatch",
+        "service_dispatch",
+        "repair_booking",
     }
 )
 
@@ -20,6 +23,9 @@ _COMMITMENT_TOOL_NAMES = frozenset(
         "warranty.claim",
         "replacement.dispatch",
         "warranty.dispatch",
+        "repair.dispatch",
+        "service.dispatch",
+        "repair.booking",
     }
 )
 
@@ -64,6 +70,28 @@ _COMMITMENT_REPLY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "prepaid_label",
         re.compile(r"\bprepaid label\b|\bprepaid return label\b|\breturn label\b"),
+    ),
+    (
+        "service_dispatch",
+        re.compile(
+            r"\b(?:we(?:'ll| will)?|i'll|i will|let me)\b.{0,80}"
+            r"\b(?:dispatch|schedule|book|arrange)\b.{0,40}"
+            r"\b(?:repair|technician|service|engineer|visit|appointment|pickup)\b"
+        ),
+    ),
+    (
+        "service_dispatch",
+        re.compile(
+            r"\b(?:repair|service|technician|engineer)\b.{0,40}"
+            r"\b(?:scheduled|booked|dispatched|arranged|on the way|coming)\b"
+        ),
+    ),
+    (
+        "service_dispatch",
+        re.compile(
+            r"\bappointment (?:is |has been )?(?:scheduled|booked|confirmed)\b|"
+            r"\bscheduled (?:a |an )?(?:repair|service|visit|pickup|appointment)\b"
+        ),
     ),
     # --- Broad, fail-closed catch-all below this line ----------------------
     # The named categories above are a denylist of phrasings we happen to
