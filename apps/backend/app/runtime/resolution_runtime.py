@@ -1543,7 +1543,7 @@ def _required_fields_for_action(
         return extraction_schema.required_for_auto()
     payload_template = action.get("payload_template")
     if isinstance(payload_template, Mapping):
-        return tuple(str(k) for k in payload_template)
+        return tuple(str(k) for k in cast("Iterable[Any]", payload_template))
     return ()
 
 
@@ -1878,9 +1878,9 @@ async def _run_fraud_gate(
 
         extracted_dict: dict[str, Any] = {}
         if extracted_fields is not None:
-            for fname in getattr(
-                getattr(extracted_fields, "model_fields", None) or {}, "__iter__", lambda: []
-            )():
+            _model_fields_obj: Any = cast("Any", getattr(extracted_fields, "model_fields", None) or {})
+            _iter_fn: Any = cast("Any", getattr(_model_fields_obj, "__iter__", lambda: iter(())))
+            for fname in cast("Iterable[str]", _iter_fn()):
                 ef = extracted_fields.get_field(fname)
                 if ef and ef.value:
                     extracted_dict[fname] = ef.value

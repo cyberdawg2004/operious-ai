@@ -91,10 +91,11 @@ def _sanitize_signals(signals: Iterable[object]) -> list[dict[str, Any]]:
     for raw in signals:
         if not isinstance(raw, Mapping):
             continue
-        clean = {
+        raw_typed: Mapping[str, Any] = cast("Mapping[str, Any]", raw)
+        clean: dict[str, Any] = {
             k: v
-            for k, v in raw.items()
-            if isinstance(k, str) and k in _SAFE_SIGNAL_FIELDS
+            for k, v in raw_typed.items()
+            if k in _SAFE_SIGNAL_FIELDS
         }
         if clean:
             sanitized.append(clean)

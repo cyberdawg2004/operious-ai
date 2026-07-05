@@ -27,7 +27,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from app.agents.governed.policy import AgentPolicyRecord, load_tenant_agent_policy
 from app.agents.governed.proposal import AgentProposal, AgentProposalStatus
@@ -270,9 +270,9 @@ class BaseGovernedLLMAgent(ABC):
         """Check if the agent's output contains money/goods commitments."""
         recommended_actions: Sequence[Mapping[str, Any]] = ()
         if "recommended_actions" in parsed:
-            raw_actions = parsed["recommended_actions"]
+            raw_actions: Any = parsed["recommended_actions"]
             if isinstance(raw_actions, list):
-                recommended_actions = raw_actions
+                recommended_actions = cast("Sequence[Mapping[str, Any]]", raw_actions)
         reply = parsed.get("reply") or parsed.get("reasoning") or ""
         if not isinstance(reply, str):
             reply = ""

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 
 class AgentProposalStatus(StrEnum):
@@ -26,4 +26,4 @@ class AgentProposal:
     reason: str = ""
     governance_decision_id: uuid.UUID | None = None
     invocation_id: str = ""
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=lambda: cast("dict[str, Any]", {}))

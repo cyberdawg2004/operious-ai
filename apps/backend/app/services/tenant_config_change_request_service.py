@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -1202,7 +1202,7 @@ async def _validate_resolution_autonomy_policy_payload(
     except ResolutionTaxonomyPolicyParseError:
         return
 
-    allowlist = {str(category) for category in category_allowlist}
+    allowlist = {str(category) for category in cast("Iterable[Any]", category_allowlist)}
     if UNCLASSIFIED_CATEGORY_ID in allowlist:
         raise TenantConfigChangeRequestLifecycleError(
             "resolution_autonomy category_allowlist must not contain the "
@@ -1281,9 +1281,11 @@ async def _validate_warranty_refund_role_field_references(
     parameters = payload.get("parameters")
     if not isinstance(parameters, Mapping):
         return
-    eligibility_mappings = parameters.get("eligibility_field_mappings")
+    _parameters_typed: Mapping[str, Any] = cast("Mapping[str, Any]", parameters)
+    eligibility_mappings = _parameters_typed.get("eligibility_field_mappings")
     if not isinstance(eligibility_mappings, Mapping) or not eligibility_mappings:
         return
+    eligibility_mappings_typed: Mapping[str, Any] = cast("Mapping[str, Any]", eligibility_mappings)
 
     taxonomy_record = await tenant_configuration.resolve_active_governance_policy(
         tenant_id=tenant_id,
@@ -1299,7 +1301,7 @@ async def _validate_warranty_refund_role_field_references(
         return
 
     declared = taxonomy.extraction_schema.field_names()
-    for role_key, mapped_field in eligibility_mappings.items():
+    for role_key, mapped_field in eligibility_mappings_typed.items():
         if not isinstance(mapped_field, str) or not mapped_field.strip():
             continue
         field = mapped_field.strip()
@@ -1341,13 +1343,16 @@ async def _validate_taxonomy_schema_role_consistency(
     parameters = payload.get("parameters")
     if not isinstance(parameters, Mapping):
         return
-    proposed_schema = parameters.get("extraction_schema")
+    _parameters_typed2: Mapping[str, Any] = cast("Mapping[str, Any]", parameters)
+    proposed_schema = _parameters_typed2.get("extraction_schema")
     if proposed_schema is None:
         return
     if not isinstance(proposed_schema, Mapping):
         return
 
-    proposed_field_names = frozenset(proposed_schema.keys())
+    proposed_field_names: frozenset[str] = frozenset(
+        str(k) for k in cast("Mapping[Any, Any]", proposed_schema).keys()
+    )
 
     warranty_record = await tenant_configuration.resolve_active_governance_policy(
         tenant_id=tenant_id,

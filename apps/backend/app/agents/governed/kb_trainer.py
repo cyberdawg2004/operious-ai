@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import logging
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -146,13 +146,14 @@ class KBTrainerAgent(BaseGovernedLLMAgent):
         ]
 
         if representative_cases:
-            case_parts = []
-            for i, case in enumerate(representative_cases[:_MAX_CASES], 1):
-                ticket = case.get("ticket_text", "")[:1000]
-                reply = case.get("proposed_reply", "")[:500]
-                score = case.get("semantic_grounding", 0.0)
-                case_id = case.get("case_id", f"case-{i}")
-                cited_docs = case.get("cited_titles", [])
+            case_parts: list[str] = []
+            for i, case in enumerate(cast("list[Any]", representative_cases)[:_MAX_CASES], 1):
+                case_d: dict[str, Any] = cast("dict[str, Any]", case)
+                ticket = str(case_d.get("ticket_text", ""))[:1000]
+                reply = str(case_d.get("proposed_reply", ""))[:500]
+                score = case_d.get("semantic_grounding", 0.0)
+                case_id = case_d.get("case_id", f"case-{i}")
+                cited_docs = case_d.get("cited_titles", [])
                 case_parts.append(
                     f"### Case {case_id} (grounding={score:.2f})\n"
                     f"Ticket: {ticket}\n"
@@ -164,11 +165,12 @@ class KBTrainerAgent(BaseGovernedLLMAgent):
             parts.append("## REPRESENTATIVE CASES\n(none provided)")
 
         if current_kb_docs:
-            doc_parts = []
-            for doc in current_kb_docs[:_MAX_KB_DOCS]:
-                doc_id = doc.get("doc_id", "")
-                title = doc.get("title", "")
-                doc_content = doc.get("content", "")[:2000]
+            doc_parts: list[str] = []
+            for doc in cast("list[Any]", current_kb_docs)[:_MAX_KB_DOCS]:
+                doc_d: dict[str, Any] = cast("dict[str, Any]", doc)
+                doc_id = doc_d.get("doc_id", "")
+                title = doc_d.get("title", "")
+                doc_content = str(doc_d.get("content", ""))[:2000]
                 doc_parts.append(f"### [{doc_id}] {title}\n{doc_content}")
             parts.append("## CURRENT KB DOCUMENTS FOR THIS CATEGORY\n" + "\n\n".join(doc_parts))
         else:
@@ -213,35 +215,37 @@ class KBTrainerAgent(BaseGovernedLLMAgent):
         if not isinstance(parsed, dict):
             return None
 
-        improvement_type = parsed.get("improvement_type")
+        d: dict[str, Any] = cast("dict[str, Any]", parsed)
+
+        improvement_type: Any = d.get("improvement_type")
         valid_types = {t.value for t in KBImprovementType}
         if improvement_type not in valid_types:
             # Default to GAP_NOTICE — always safe
-            parsed["improvement_type"] = KBImprovementType.GAP_NOTICE.value
+            d["improvement_type"] = KBImprovementType.GAP_NOTICE.value
 
-        confidence = parsed.get("confidence")
+        confidence: Any = d.get("confidence")
         if not isinstance(confidence, (int, float)):
-            parsed["confidence"] = 0.0
+            d["confidence"] = 0.0
         else:
-            parsed["confidence"] = max(0.0, min(1.0, float(confidence)))
+            d["confidence"] = max(0.0, min(1.0, float(confidence)))
 
-        if not isinstance(parsed.get("evidence_case_ids"), list):
-            parsed["evidence_case_ids"] = []
+        if not isinstance(d.get("evidence_case_ids"), list):
+            d["evidence_case_ids"] = []
 
         # Enforce: proposed_content and gap_description must be str or null
-        for field in ("proposed_content", "gap_description", "target_document_id"):
-            v = parsed.get(field)
+        for field_name in ("proposed_content", "gap_description", "target_document_id"):
+            v: Any = d.get(field_name)
             if v is not None and not isinstance(v, str):
-                parsed[field] = str(v)
+                d[field_name] = str(v)
 
         # Truncate content to stay within KB size limits
-        if isinstance(parsed.get("proposed_content"), str):
-            parsed["proposed_content"] = parsed["proposed_content"][:_MAX_CONTENT_CHARS]
+        if isinstance(d.get("proposed_content"), str):
+            d["proposed_content"] = cast("str", d["proposed_content"])[:_MAX_CONTENT_CHARS]
 
-        if isinstance(parsed.get("gap_description"), str):
-            parsed["gap_description"] = parsed["gap_description"][:2000]
+        if isinstance(d.get("gap_description"), str):
+            d["gap_description"] = cast("str", d["gap_description"])[:2000]
 
-        return parsed
+        return d
 
     def _check_money_goods(self, parsed: dict[str, Any]) -> bool:
         # KB improvement proposals never contain money/goods commitments.

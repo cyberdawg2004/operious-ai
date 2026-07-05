@@ -57,7 +57,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -157,7 +157,7 @@ class SupervisorPatternFinding:
     affected_session_ids: tuple[str, ...] = ()
     action_taken: str | None = None
     detected_at: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: cast("dict[str, Any]", {}))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -298,22 +298,24 @@ class AutonomousSupervisorAgent(BaseGovernedLLMAgent):
         if not isinstance(parsed, dict):
             return None
 
-        if not self._validate_output_safety(parsed):
+        d: dict[str, Any] = cast("dict[str, Any]", parsed)
+
+        if not self._validate_output_safety(d):
             return None
 
-        severity = parsed.get("severity")
+        severity: str | Any = d.get("severity")
         if not isinstance(severity, str) or severity not in {
             s.value for s in SupervisorFindingSeverity
         }:
             return None
 
-        pattern_kind = parsed.get("pattern_kind")
+        pattern_kind: str | Any = d.get("pattern_kind")
         if not isinstance(pattern_kind, str) or pattern_kind not in {
             k.value for k in SupervisorPatternKind
         }:
             return None
 
-        recommended_action = parsed.get("recommended_action")
+        recommended_action: str | Any = d.get("recommended_action")
         if not isinstance(recommended_action, str):
             return None
         if recommended_action not in _PERMITTED_ACTIONS:
@@ -322,23 +324,23 @@ class AutonomousSupervisorAgent(BaseGovernedLLMAgent):
         if not self._validate_severity_action_alignment(severity, recommended_action):
             return None
 
-        confidence = parsed.get("confidence")
+        confidence: float | Any = d.get("confidence")
         if not isinstance(confidence, (int, float)):
             return None
-        parsed["confidence"] = max(0.0, min(1.0, float(confidence)))
+        d["confidence"] = max(0.0, min(1.0, float(confidence)))
 
-        if not isinstance(parsed.get("affected_category"), str):
+        if not isinstance(d.get("affected_category"), str):
             return None
-        if not isinstance(parsed.get("evidence_summary"), str):
+        if not isinstance(d.get("evidence_summary"), str):
             return None
 
-        session_ids = parsed.get("affected_session_ids")
+        session_ids: list[Any] | Any = d.get("affected_session_ids")
         if session_ids is not None and not isinstance(session_ids, list):
-            parsed["affected_session_ids"] = []
+            d["affected_session_ids"] = []
         elif session_ids is None:
-            parsed["affected_session_ids"] = []
+            d["affected_session_ids"] = []
 
-        return parsed
+        return d
 
     def _validate_output_safety(self, parsed: dict[str, Any]) -> bool:
         """Reject any output that contains forbidden governance terms.

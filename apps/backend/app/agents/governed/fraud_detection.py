@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -153,36 +153,39 @@ class FraudDetectionAgent(BaseGovernedLLMAgent):
         if not isinstance(parsed, dict):
             return None
 
-        risk_score = parsed.get("risk_score")
+        d: dict[str, Any] = cast("dict[str, Any]", parsed)
+
+        risk_score: Any = d.get("risk_score")
         if not isinstance(risk_score, (int, float)):
             return None
-        parsed["risk_score"] = max(0.0, min(1.0, float(risk_score)))
+        d["risk_score"] = max(0.0, min(1.0, float(risk_score)))
 
-        confidence = parsed.get("confidence")
+        confidence: Any = d.get("confidence")
         if not isinstance(confidence, (int, float)):
-            parsed["confidence"] = parsed["risk_score"]
+            d["confidence"] = d["risk_score"]
         else:
-            parsed["confidence"] = max(0.0, min(1.0, float(confidence)))
+            d["confidence"] = max(0.0, min(1.0, float(confidence)))
 
-        signal_kinds = parsed.get("signal_kinds")
+        signal_kinds: Any = d.get("signal_kinds")
         if not isinstance(signal_kinds, list):
-            parsed["signal_kinds"] = []
+            d["signal_kinds"] = []
         else:
             valid_kinds = {k.value for k in FraudSignalKind}
-            parsed["signal_kinds"] = [
-                k for k in signal_kinds if isinstance(k, str) and k in valid_kinds
+            sk_list: list[Any] = cast("list[Any]", signal_kinds)
+            d["signal_kinds"] = [
+                k for k in sk_list if isinstance(k, str) and k in valid_kinds
             ]
 
-        if not isinstance(parsed.get("ticket_id"), str):
-            parsed["ticket_id"] = ""
+        if not isinstance(d.get("ticket_id"), str):
+            d["ticket_id"] = ""
 
-        reasoning = parsed.get("reasoning")
+        reasoning: Any = d.get("reasoning")
         if not isinstance(reasoning, str):
-            parsed["reasoning"] = ""
+            d["reasoning"] = ""
         elif len(reasoning) > 500:
-            parsed["reasoning"] = reasoning[:500]
+            d["reasoning"] = reasoning[:500]
 
-        return parsed
+        return d
 
     def _check_money_goods(self, parsed: dict[str, Any]) -> bool:
         # Fraud signal output never contains money/goods commitments.
@@ -199,8 +202,9 @@ def resolve_fraud_thresholds(
     fraud_config = policy.configuration.get("fraud_config", {})
     if not isinstance(fraud_config, dict):
         return (_DEFAULT_THRESHOLD_LOW, _DEFAULT_THRESHOLD_HIGH)
-    low = fraud_config.get("threshold_low", _DEFAULT_THRESHOLD_LOW)
-    high = fraud_config.get("threshold_high", _DEFAULT_THRESHOLD_HIGH)
+    fd: dict[str, Any] = cast("dict[str, Any]", fraud_config)
+    low: Any = fd.get("threshold_low", _DEFAULT_THRESHOLD_LOW)
+    high: Any = fd.get("threshold_high", _DEFAULT_THRESHOLD_HIGH)
     if not isinstance(low, (int, float)):
         low = _DEFAULT_THRESHOLD_LOW
     if not isinstance(high, (int, float)):

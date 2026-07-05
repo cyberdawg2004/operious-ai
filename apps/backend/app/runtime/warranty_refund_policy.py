@@ -221,7 +221,7 @@ def _parse_eligibility_field_mappings(
             "eligibility_field_mappings must be an object"
         )
     result: dict[str, str] = dict(_default_eligibility_field_mappings())
-    for role, field_name in value.items():
+    for role, field_name in cast("Mapping[Any, Any]", value).items():
         if not isinstance(role, str) or not role.strip():
             raise WarrantyRefundPolicyParseError(
                 "eligibility_field_mappings keys must be non-empty strings"

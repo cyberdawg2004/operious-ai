@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from app.cognition.exceptions import (
     CognitionLLMConfigurationError,
@@ -68,7 +68,7 @@ class BedrockAnthropicMessagesClient:
         # this path), but boto3 is pinned in requirements.txt for production.
         import boto3
 
-        self._bedrock = boto3.client(
+        self._bedrock: Any = cast("Any", boto3).client(
             "bedrock-runtime",
             region_name=self._aws_region,
         )
@@ -87,7 +87,7 @@ class BedrockAnthropicMessagesClient:
         converse_messages = _build_converse_messages(messages)
 
         try:
-            response = self._bedrock.converse(
+            response: dict[str, Any] = cast("dict[str, Any]", self._bedrock.converse(
                 modelId=self.model_name,
                 messages=converse_messages,
                 system=[{"text": system_prompt}],
@@ -95,7 +95,7 @@ class BedrockAnthropicMessagesClient:
                     "maxTokens": max_output_tokens,
                     "temperature": temperature,
                 },
-            )
+            ))
         except Exception as exc:
             error_code = _bedrock_error_code(exc)
             if error_code == "ThrottlingException":

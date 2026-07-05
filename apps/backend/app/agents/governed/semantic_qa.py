@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -140,11 +140,12 @@ class SemanticQAAgent(BaseGovernedLLMAgent):
         ]
 
         if citations:
-            citation_parts = []
-            for i, cit in enumerate(citations, 1):
-                title = cit.get("title", f"Document {i}")
-                excerpt = cit.get("safe_excerpt") or cit.get("content", "")
-                score = cit.get("score", 0.0)
+            citation_parts: list[str] = []
+            for i, cit in enumerate(cast("list[Any]", citations), 1):
+                cit_d: dict[str, Any] = cast("dict[str, Any]", cit)
+                title = cit_d.get("title", f"Document {i}")
+                excerpt = cit_d.get("safe_excerpt") or cit_d.get("content", "")
+                score = cit_d.get("score", 0.0)
                 citation_parts.append(
                     f"### Citation {i}: {title} (relevance score={score:.2f})\n{excerpt}"
                 )

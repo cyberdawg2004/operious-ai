@@ -13,6 +13,8 @@ here is defense-in-depth, not the boundary. No AWS KMS is used or required.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import boto3
 from botocore.config import Config as BotoConfig
 
@@ -39,7 +41,7 @@ class AttachmentBlobStore:
         secret_access_key: str,
     ) -> None:
         self._bucket = bucket
-        self._client = boto3.client(
+        self._client: Any = cast("Any", boto3).client(
             "s3",
             region_name=region,
             aws_access_key_id=access_key_id,
@@ -65,8 +67,8 @@ class AttachmentBlobStore:
         )
 
     def get(self, key: str) -> bytes:
-        response = self._client.get_object(Bucket=self._bucket, Key=key)
-        return response["Body"].read()
+        response: dict[str, Any] = cast("dict[str, Any]", self._client.get_object(Bucket=self._bucket, Key=key))
+        return cast("bytes", response["Body"].read())
 
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)

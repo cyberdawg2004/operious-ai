@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 from uuid import UUID
 
 from app.resolution.enums import (
@@ -100,7 +100,7 @@ def resolution_proposal_gate_reasons(
     raw = proposal.metadata.get("gate_reasons")
     if not isinstance(raw, list):
         return ()
-    return tuple(str(r) for r in raw if isinstance(r, str))
+    return tuple(str(r) for r in cast("list[Any]", raw) if isinstance(r, str))
 
 
 @dataclass(frozen=True, slots=True)

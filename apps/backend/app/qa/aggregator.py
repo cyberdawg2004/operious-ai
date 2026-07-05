@@ -62,7 +62,7 @@ class WeakCategory:
     representative_case_ids: tuple[str, ...]  # score_ids of worst-performing tickets
     window_start: datetime
     window_end: datetime
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 class QASignalAggregator:

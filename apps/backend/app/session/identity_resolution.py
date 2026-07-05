@@ -69,7 +69,7 @@ class IdentityResolutionResult:
     match_stage: int = 0
     match_confidence: float = 0.0
     match_field: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def has_context(self) -> bool:
         return self.match_stage > 0 and len(self.matched_session_ids) > 0

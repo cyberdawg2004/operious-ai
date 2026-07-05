@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
@@ -78,7 +78,9 @@ class ExtractionSchema:
 
     fields: tuple[ExtractionFieldSpec, ...]
     _by_name: dict[str, ExtractionFieldSpec] = field(
-        default_factory=dict, compare=False, repr=False
+        default_factory=lambda: cast("dict[str, ExtractionFieldSpec]", {}),
+        compare=False,
+        repr=False,
     )
 
     def __post_init__(self) -> None:
@@ -178,8 +180,9 @@ def _parse_field_spec(name: str, raw: object) -> ExtractionFieldSpec:
             raise ExtractionSchemaParseError(
                 f"extraction_schema.{name}.values must be a non-empty list for enum type"
             )
+        typed_values = cast("Sequence[object]", raw_values)
         enum_values = tuple(
-            v for v in raw_values if isinstance(v, str) and v.strip()
+            v for v in typed_values if isinstance(v, str) and v.strip()
         )
         if not enum_values:
             raise ExtractionSchemaParseError(
@@ -333,7 +336,7 @@ def parse_extracted_fields_against_schema(
     cleaned: dict[str, Any] = {}
     for k, v in gated.items():
         if isinstance(v, dict):
-            entry: dict[str, Any] = {key: val for key, val in v.items() if key != "type"}
+            entry: dict[str, Any] = {k2: v2 for k2, v2 in cast("dict[str, Any]", v).items() if k2 != "type"}
             if entry.get("value") is not None and not isinstance(entry["value"], str):
                 entry["value"] = str(entry["value"])
             v = entry

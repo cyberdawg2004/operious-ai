@@ -13,7 +13,7 @@ derive a different answer for the same dispatch.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +80,7 @@ def outbound_reply_context_from_dispatch_body(
     raw dispatch body itself."""
     canonical_payload = body.get("canonical_payload")
     if isinstance(canonical_payload, Mapping):
-        return extract_outbound_reply_context(canonical_payload)
+        return extract_outbound_reply_context(cast("Mapping[str, Any]", canonical_payload))
     return extract_outbound_reply_context(body)
 
 

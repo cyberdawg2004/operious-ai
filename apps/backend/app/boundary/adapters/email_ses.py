@@ -103,7 +103,7 @@ class S3SesRawEmailFetcher:
         access_key_id: str,
         secret_access_key: str,
     ) -> None:
-        self._client = boto3.client(
+        self._client: Any = cast("Any", boto3).client(
             "s3",
             region_name=region,
             aws_access_key_id=access_key_id,
@@ -130,8 +130,8 @@ class S3SesRawEmailFetcher:
         return await asyncio.to_thread(self._get_object, bucket_name, object_key)
 
     def _get_object(self, bucket_name: str, object_key: str) -> bytes:
-        response = self._client.get_object(Bucket=bucket_name, Key=object_key)
-        return response["Body"].read()
+        response: dict[str, Any] = cast("dict[str, Any]", self._client.get_object(Bucket=bucket_name, Key=object_key))
+        return cast("bytes", response["Body"].read())
 
 
 @dataclass(frozen=True, slots=True)
@@ -744,7 +744,7 @@ def _attachments(body: Mapping[str, Any]) -> tuple[object, ...]:
                 for key, val in cast(dict[str, Any], item).items()
                 if key != _ATTACHMENT_RAW_BYTES_KEY
             }
-        cleaned.append(item)
+        cleaned.append(cast("object", item))
     return tuple(cleaned)
 
 
