@@ -1,0 +1,42 @@
+{
+  "capture_date": "2026-07-05",
+  "capture_status": "captured",
+  "requirement": "workers_and_dlq_smoke_replay",
+  "git_commit": "c65fda5",
+  "git_branch": "phase-2-2-stabilized",
+  "fly_app": "operious-ai-imad",
+  "fly_release": "operious-ai-imad:deployment-01KWR9E2Q7KHWM3XZDZYFD8QE4",
+  "fly_machine": "683e3d1cd77228",
+  "fly_region": "iad",
+  "probe_command": "python3 scripts/s10_prep/live_verification_probes.py workers-dlq",
+  "evidence": {
+    "result": "PASS",
+    "celery_task_id": "cd61bd51-c07b-4df1-b80f-2f5dc234ec98",
+    "dispatch_id": "s10-probe-dispatch:s10-899ea9d7da544812955582564a701009",
+    "execution_id": "6438ccca-3d6d-5566-890c-624ac7f0c81a",
+    "expected_dead_letter_task_id": "df67296f-7955-5e26-8f18-14ba7bc5fbf3",
+    "probe_id": "s10-899ea9d7da544812955582564a701009",
+    "queue": "dead_letter",
+    "row": {
+      "dead_letter_task_id": "df67296f-7955-5e26-8f18-14ba7bc5fbf3",
+      "execution_id": "6438ccca-3d6d-5566-890c-624ac7f0c81a",
+      "metadata": {
+        "attempt_count": 0,
+        "enqueued_at": "2026-07-05T04:46:27.887123+00:00",
+        "execution_id": "6438ccca-3d6d-5566-890c-624ac7f0c81a",
+        "probe_id": "s10-899ea9d7da544812955582564a701009",
+        "purpose": "s10_live_production_worker_dlq_proof",
+        "session_id": "s10-probe-session:s10-899ea9d7da544812955582564a701009",
+        "tenant_id": "anker-pilot"
+      },
+      "queue": "dead_letter",
+      "reason": "s10_probe_deliberate_failure",
+      "retry_count": 0,
+      "task_id": "cd61bd51-c07b-4df1-b80f-2f5dc234ec98",
+      "task_name": "s10_dead_letter_probe"
+    },
+    "session_id": "s10-probe-session:s10-899ea9d7da544812955582564a701009",
+    "tenant_id": "anker-pilot"
+  },
+  "interpretation": "Live worker consumed a labeled deliberate-failure task, dead-lettered it, and the DLQ row was read back with matching IDs. Workers are running and processing. DLQ path is functional."
+}

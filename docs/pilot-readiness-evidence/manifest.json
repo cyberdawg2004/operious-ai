@@ -1,47 +1,73 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "bundle": "s10-pilot-readiness-evidence",
-  "capture_date": "2026-06-06",
+  "capture_date": "2026-07-05",
   "capture_status": "captured",
   "capture_runbook": "capture-populate-runbook.md",
   "captured_against": {
     "fly_app": "operious-ai-imad",
     "fly_hostname": "https://operious-ai-imad.fly.dev",
-    "fly_release": "v125",
-    "fly_image": "operious-ai-imad:deployment-01KTEZ2QESEC8AK3PWQ686GZ5E",
-    "fly_machine_id": "6e8207e3b215e8",
-    "fly_region": "sin",
-    "git_commit": "3a3d7fc",
+    "fly_release": "operious-ai-imad:deployment-01KWR9E2Q7KHWM3XZDZYFD8QE4",
+    "fly_version": 235,
+    "fly_region": "iad",
+    "git_commit": "c65fda5",
     "git_branch": "phase-2-2-stabilized"
   },
   "proof_files": [
     {
       "requirement": "direct_spoofed_authority_header_rejection",
-      "path": "2026-06-06-spoofing-pass.json"
+      "path": "2026-07-05-spoofing-pass.json"
     },
     {
       "requirement": "bearer_auth0_verified_claims_success",
-      "path": "2026-06-06-bearer-auth0-verified-claims.json"
+      "path": "2026-06-06-bearer-auth0-verified-claims.json",
+      "note": "Auth0 bearer proof from 2026-06-06 still valid — Auth0 config unchanged"
     },
     {
       "requirement": "production_role_rls_tenant_isolation",
-      "path": "2026-06-06-rls-pass.json"
+      "path": "2026-07-05-rls-pass.json"
     },
     {
       "requirement": "workers_and_dlq_smoke_replay",
-      "path": "2026-06-06-workers-dlq-pass.json"
+      "path": "2026-07-05-workers-dlq-pass.json"
     },
     {
       "requirement": "live_workflow_recovered_smoke_trace",
-      "path": "2026-06-06-live-workflow-recovered-smoke.json"
+      "path": "2026-06-06-live-workflow-recovered-smoke.json",
+      "note": "Smoke trace pending bearer token — see smoke_pending note below"
     },
     {
       "requirement": "production_readiness_output",
-      "path": "2026-06-06-readiness-ready.json"
+      "path": "2026-07-05-readiness-ready.json"
     },
     {
       "requirement": "rollback_evidence",
-      "path": "2026-06-06-rollback-reference.json"
+      "path": "2026-06-06-rollback-reference.json",
+      "note": "Rollback path unchanged: Fly release history + Neon PITR"
+    }
+  ],
+  "smoke_pending": "Smoke probe requires operator bearer token (Auth0 JWT). Run: python3 scripts/s10_prep/live_verification_probes.py smoke --base-url https://operious-ai-imad.fly.dev --bearer-token <token> --tenant-id <tenant-id>",
+  ,
+  "bugs_surfaced_and_fixed_2026_07_05": [
+    {
+      "commit": "2d42cd0",
+      "summary": "#25 auth-error malformed-parse paths now fully coarsened in production"
+    },
+    {
+      "commit": "2d42cd0",
+      "summary": "fulfillment callback HMAC: callback_hmac_secret column + verify_callback_hmac"
+    },
+    {
+      "commit": "c65fda5",
+      "summary": "raw_body + connector_config_repository wired into fulfillment callback path"
+    },
+    {
+      "commit": "9b29e0a",
+      "summary": "hardcoded CORS fallback removed — empty CORS_ALLOW_ORIGINS now fail-closed"
+    },
+    {
+      "commit": "2113e01",
+      "summary": "MVPs 1-9 committed: intelligence layer, domain-agnostic refactor, governed-agent scaffold"
     }
   ],
   "bugs_surfaced_and_fixed": [

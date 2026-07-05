@@ -1,0 +1,21 @@
+{
+  "capture_date": "2026-07-05",
+  "capture_status": "captured",
+  "requirement": "direct_spoofed_authority_header_rejection",
+  "git_commit": "c65fda5",
+  "git_branch": "phase-2-2-stabilized",
+  "fly_app": "operious-ai-imad",
+  "fly_release": "operious-ai-imad:deployment-01KWR9E2Q7KHWM3XZDZYFD8QE4",
+  "fly_machine": "8024d9b64edd98",
+  "fly_region": "iad",
+  "probe_command": "python3 scripts/s10_prep/live_verification_probes.py spoofing --base-url https://operious-ai-imad.fly.dev",
+  "evidence": {
+    "result": "PASS",
+    "error": "unauthorized",
+    "expected_internal_code": "header_authority_disabled",
+    "forged_tenant_id": "forged-tenant",
+    "production_coarsened": true,
+    "status_code": 401
+  },
+  "interpretation": "Direct request with forged X-Tenant-ID header returned 401 unauthorized. Production coarsening active — external body is generic, internal code logged server-side only. Legacy header authority is disabled by default in production (S-01 closed)."
+}

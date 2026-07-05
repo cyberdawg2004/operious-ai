@@ -1,0 +1,31 @@
+{
+  "capture_date": "2026-07-05",
+  "capture_status": "captured",
+  "requirement": "production_readiness_output",
+  "git_commit": "c65fda5",
+  "git_branch": "phase-2-2-stabilized",
+  "fly_app": "operious-ai-imad",
+  "fly_release": "operious-ai-imad:deployment-01KWR9E2Q7KHWM3XZDZYFD8QE4",
+  "fly_machine": "7812614c936018",
+  "fly_region": "iad",
+  "probe_command": "python3 scripts/check_production_readiness.py",
+  "evidence": {
+    "result": "production readiness: READY",
+    "exit_code": 0
+  },
+  "workers": {
+    "web": "started",
+    "worker_beat": "started",
+    "worker_diagnostic": "started",
+    "worker_escalation": "started",
+    "worker_ingress": "started",
+    "worker_maintenance": "started",
+    "worker_sme_approval": "started",
+    "worker_sop": "started",
+    "worker_supervisor": "started",
+    "worker_voice_realtime": "started",
+    "worker_outbound_send": "stopped (standby — no pending outbound)",
+    "version": 235
+  },
+  "interpretation": "check_production_readiness.py exited 0 (READY) inside the deployed container. All stub providers, required secrets, webhook URL posture, CORS, auth, and KMS checks passed. All critical worker process groups are started at release v235."
+}

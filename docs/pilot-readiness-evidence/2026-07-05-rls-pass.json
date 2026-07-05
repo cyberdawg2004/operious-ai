@@ -1,0 +1,26 @@
+{
+  "capture_date": "2026-07-05",
+  "capture_status": "captured",
+  "requirement": "production_role_rls_tenant_isolation",
+  "git_commit": "c65fda5",
+  "git_branch": "phase-2-2-stabilized",
+  "fly_app": "operious-ai-imad",
+  "fly_release": "operious-ai-imad:deployment-01KWR9E2Q7KHWM3XZDZYFD8QE4",
+  "fly_machine": "683e3d1cd77228",
+  "fly_region": "iad",
+  "probe_command": "python3 scripts/s10_prep/live_verification_probes.py rls --tenant-a anker-pilot --tenant-b operious-platform --allow-empty-control",
+  "evidence": {
+    "result": "PASS",
+    "control_count_as_row_tenant": 0,
+    "cross_count_as_other_tenant": 0,
+    "current_user": "operious_app",
+    "effective_role": "operious_app",
+    "initial_role": "operious_app",
+    "require_control_row": false,
+    "role_requested": "operious_app",
+    "row_tenant": "operious-platform",
+    "session_tenant": "anker-pilot",
+    "table": "operational_sessions"
+  },
+  "interpretation": "Under operious_app role with anker-pilot as session tenant, zero rows owned by operious-platform are visible. Cross-tenant leakage count is 0. RLS tenant isolation is active under the production application role."
+}
