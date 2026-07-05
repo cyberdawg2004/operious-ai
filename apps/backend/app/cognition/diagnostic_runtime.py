@@ -155,7 +155,7 @@ def _build_extraction_instruction(taxonomy: ResolutionTaxonomyPolicy) -> str:
     comma-separated list so e-commerce behavior is unchanged.
     """
     if taxonomy.extraction_schema is not None:
-        field_entries = []
+        field_entries: list[str] = []
         for spec in taxonomy.extraction_schema.fields:
             annotation = spec.prompt_annotation()
             field_entries.append(f"{spec.name} ({annotation})")
