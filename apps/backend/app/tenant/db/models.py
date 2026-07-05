@@ -202,6 +202,16 @@ class ConnectorConfigRow(Base):
         String(64),
         nullable=True,
     )
+    callback_hmac_secret: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        server_default=text("NULL"),
+        comment=(
+            "Optional HMAC-SHA256 shared secret for callback signature "
+            "verification. If set, X-Operious-Signature must be present "
+            "on inbound callbacks."
+        ),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -237,6 +247,10 @@ class ConnectorConfigRow(Base):
             name="source_approval_id_nonempty",
         ),
         CheckConstraint("length(content_sha256) = 64", name="content_sha256_len"),
+        CheckConstraint(
+            "callback_hmac_secret IS NULL OR length(callback_hmac_secret) > 0",
+            name="callback_hmac_secret_nonempty_if_set",
+        ),
         Index("ix_connector_configs_tenant_status", "tenant_id", "status"),
         Index("ix_connector_configs_tenant_tool", "tenant_id", "tool_name"),
     )

@@ -47,6 +47,7 @@ class ConnectorConfigRecord:
     source_approval_id: str = "test"
     content_sha256: str = "0" * 64
     previous_version_sha256: str | None = None
+    callback_hmac_secret: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -240,6 +241,7 @@ def _record_to_row(record: ConnectorConfigRecord) -> ConnectorConfigRow:
         source_approval_id=record.source_approval_id,
         content_sha256=record.content_sha256,
         previous_version_sha256=record.previous_version_sha256,
+        callback_hmac_secret=record.callback_hmac_secret,
         created_at=record.created_at or now,
         updated_at=record.updated_at or now,
     )
@@ -261,6 +263,7 @@ def _update_row(
     row.source_approval_id = record.source_approval_id
     row.content_sha256 = record.content_sha256
     row.previous_version_sha256 = record.previous_version_sha256
+    row.callback_hmac_secret = record.callback_hmac_secret
     row.updated_at = record.updated_at or _utcnow()
 
 
@@ -282,6 +285,7 @@ def _row_to_record(row: ConnectorConfigRow) -> ConnectorConfigRecord:
         source_approval_id=row.source_approval_id,
         content_sha256=row.content_sha256,
         previous_version_sha256=row.previous_version_sha256,
+        callback_hmac_secret=row.callback_hmac_secret,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
