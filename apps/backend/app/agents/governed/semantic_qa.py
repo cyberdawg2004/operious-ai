@@ -192,41 +192,44 @@ class SemanticQAAgent(BaseGovernedLLMAgent):
         if not isinstance(parsed, dict):
             return None
 
-        if not isinstance(parsed.get("proposal_id"), str):
+        d: dict[str, Any] = cast("dict[str, Any]", parsed)
+
+        if not isinstance(d.get("proposal_id"), str):
             return None
 
-        overall = parsed.get("overall_semantic_grounding")
+        overall: Any = d.get("overall_semantic_grounding")
         if not isinstance(overall, (int, float)):
             return None
-        parsed["overall_semantic_grounding"] = max(0.0, min(1.0, float(overall)))
+        d["overall_semantic_grounding"] = max(0.0, min(1.0, float(overall)))
 
-        verdict = parsed.get("grounding_verdict")
+        verdict: Any = d.get("grounding_verdict")
         valid_verdicts = {v.value for v in SemanticGroundingVerdict}
         if verdict not in valid_verdicts:
             # Derive verdict from score if model gave a wrong value
-            parsed["grounding_verdict"] = score_to_verdict(
-                parsed["overall_semantic_grounding"]
+            d["grounding_verdict"] = score_to_verdict(
+                d["overall_semantic_grounding"]
             ).value
 
-        claim_scores = parsed.get("claim_scores")
+        claim_scores: Any = d.get("claim_scores")
         if not isinstance(claim_scores, list):
-            parsed["claim_scores"] = []
+            d["claim_scores"] = []
         else:
-            cleaned = []
-            for item in claim_scores:
+            cleaned: list[dict[str, Any]] = []
+            for item in cast("list[Any]", claim_scores):
                 if not isinstance(item, dict):
                     continue
-                relevance = item.get("relevance_score", 0.0)
+                item_d: dict[str, Any] = cast("dict[str, Any]", item)
+                relevance: Any = item_d.get("relevance_score", 0.0)
                 if not isinstance(relevance, (int, float)):
                     relevance = 0.0
                 cleaned.append({
-                    "segment_id": str(item.get("segment_id", "")),
+                    "segment_id": str(item_d.get("segment_id", "")),
                     "relevance_score": max(0.0, min(1.0, float(relevance))),
-                    "reason": str(item.get("reason", ""))[:300],
+                    "reason": str(item_d.get("reason", ""))[:300],
                 })
-            parsed["claim_scores"] = cleaned
+            d["claim_scores"] = cleaned
 
-        return parsed
+        return d
 
     def _check_money_goods(self, parsed: dict[str, Any]) -> bool:
         # Semantic QA output is a grounding score. No money/goods commitment possible.

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -127,11 +127,12 @@ class SOPContradictionAgent(BaseGovernedLLMAgent):
         ]
 
         if corpus_documents:
-            corpus_parts = []
-            for doc in corpus_documents[:_MAX_CORPUS_DOCUMENTS]:
-                doc_id = doc.get("doc_id", "")
-                doc_title = doc.get("title", "")
-                doc_content = doc.get("content", "")
+            corpus_parts: list[str] = []
+            for doc in cast("list[Any]", corpus_documents)[:_MAX_CORPUS_DOCUMENTS]:
+                doc_d: dict[str, Any] = cast("dict[str, Any]", doc)
+                doc_id = doc_d.get("doc_id", "")
+                doc_title = doc_d.get("title", "")
+                doc_content = str(doc_d.get("content", ""))
                 if len(doc_content) > _MAX_DOCUMENT_CHARS:
                     doc_content = doc_content[:_MAX_DOCUMENT_CHARS] + "\n[truncated]"
                 corpus_parts.append(
@@ -187,41 +188,44 @@ class SOPContradictionAgent(BaseGovernedLLMAgent):
         if not isinstance(parsed, dict):
             return None
 
-        if not isinstance(parsed.get("document_id"), str):
+        d: dict[str, Any] = cast("dict[str, Any]", parsed)
+
+        if not isinstance(d.get("document_id"), str):
             return None
 
-        has_contradiction = parsed.get("has_contradiction")
+        has_contradiction: Any = d.get("has_contradiction")
         if not isinstance(has_contradiction, bool):
             return None
 
-        contradicting = parsed.get("contradicting_documents")
+        contradicting: Any = d.get("contradicting_documents")
         if not isinstance(contradicting, list):
-            parsed["contradicting_documents"] = []
+            d["contradicting_documents"] = []
         else:
             valid_types = {t.value for t in ContradictionType}
-            cleaned = []
-            for item in contradicting:
+            cleaned: list[dict[str, Any]] = []
+            for item in cast("list[Any]", contradicting):
                 if not isinstance(item, dict):
                     continue
-                ctype = item.get("contradiction_type", "")
+                item_d: dict[str, Any] = cast("dict[str, Any]", item)
+                ctype: Any = item_d.get("contradiction_type", "")
                 if ctype not in valid_types:
                     continue
-                confidence = item.get("confidence", 0.0)
+                confidence: Any = item_d.get("confidence", 0.0)
                 if not isinstance(confidence, (int, float)):
                     confidence = 0.0
                 cleaned.append({
-                    "doc_id": str(item.get("doc_id", "")),
-                    "excerpt": str(item.get("excerpt", ""))[:500],
-                    "contradicting_excerpt": str(item.get("contradicting_excerpt", ""))[:500],
+                    "doc_id": str(item_d.get("doc_id", "")),
+                    "excerpt": str(item_d.get("excerpt", ""))[:500],
+                    "contradicting_excerpt": str(item_d.get("contradicting_excerpt", ""))[:500],
                     "contradiction_type": ctype,
                     "confidence": max(0.0, min(1.0, float(confidence))),
                 })
-            parsed["contradicting_documents"] = cleaned
+            d["contradicting_documents"] = cleaned
 
         if not has_contradiction:
-            parsed["contradicting_documents"] = []
+            d["contradicting_documents"] = []
 
-        return parsed
+        return d
 
     def _check_money_goods(self, parsed: dict[str, Any]) -> bool:
         # Contradiction report output contains no money/goods commitments.

@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -184,12 +184,13 @@ class SMEReviewerAgent(BaseGovernedLLMAgent):
             )
 
         if citations:
-            cit_parts = []
-            for i, cit in enumerate(citations[:8], 1):
-                title = cit.get("title", f"Citation {i}")
-                excerpt = cit.get("safe_excerpt") or cit.get("content", "")
-                score = cit.get("score", 0.0)
-                cit_parts.append(f"### [{i}] {title} (score={score:.2f})\n{excerpt[:500]}")
+            cit_parts: list[str] = []
+            for i, cit in enumerate(cast("list[Any]", citations)[:8], 1):
+                cit_d: dict[str, Any] = cast("dict[str, Any]", cit)
+                title = cit_d.get("title", f"Citation {i}")
+                excerpt = cit_d.get("safe_excerpt") or cit_d.get("content", "")
+                score = cit_d.get("score", 0.0)
+                cit_parts.append(f"### [{i}] {title} (score={score:.2f})\n{str(excerpt)[:500]}")
             parts.append("## KNOWLEDGE CITATIONS\n" + "\n\n".join(cit_parts))
         else:
             parts.append("## KNOWLEDGE CITATIONS\n(none)")
@@ -200,11 +201,12 @@ class SMEReviewerAgent(BaseGovernedLLMAgent):
             )
 
         if lineage_events:
-            event_lines = []
-            for ev in lineage_events[:15]:
-                act = ev.get("act", "")
-                substrate = ev.get("substrate", "")
-                ts = ev.get("timestamp", "")
+            event_lines: list[str] = []
+            for ev in cast("list[Any]", lineage_events)[:15]:
+                ev_d: dict[str, Any] = cast("dict[str, Any]", ev)
+                act = ev_d.get("act", "")
+                substrate = ev_d.get("substrate", "")
+                ts = ev_d.get("timestamp", "")
                 event_lines.append(f"- [{ts}] {substrate}:{act}")
             parts.append("## OPERATIONAL LINEAGE\n" + "\n".join(event_lines))
 
@@ -245,59 +247,63 @@ class SMEReviewerAgent(BaseGovernedLLMAgent):
         if not isinstance(parsed, dict):
             return None
 
-        if not isinstance(parsed.get("case_id"), str):
+        d: dict[str, Any] = cast("dict[str, Any]", parsed)
+
+        if not isinstance(d.get("case_id"), str):
             return None
 
         # Sanitize ticket_summary
-        if not isinstance(parsed.get("ticket_summary"), str):
-            parsed["ticket_summary"] = ""
+        if not isinstance(d.get("ticket_summary"), str):
+            d["ticket_summary"] = ""
         else:
-            parsed["ticket_summary"] = parsed["ticket_summary"][:1000]
+            d["ticket_summary"] = cast("str", d["ticket_summary"])[:1000]
 
         # Sanitize evidence_summary
-        if not isinstance(parsed.get("evidence_summary"), str):
-            parsed["evidence_summary"] = ""
+        if not isinstance(d.get("evidence_summary"), str):
+            d["evidence_summary"] = ""
         else:
-            parsed["evidence_summary"] = parsed["evidence_summary"][:1500]
+            d["evidence_summary"] = cast("str", d["evidence_summary"])[:1500]
 
         # Validate recommended_resolution
-        rec = parsed.get("recommended_resolution")
+        rec: Any = d.get("recommended_resolution")
         if not isinstance(rec, dict):
-            parsed["recommended_resolution"] = {
+            d["recommended_resolution"] = {
                 "action": "ESCALATE_FURTHER",
                 "reasoning": "Case package assembly incomplete.",
                 "confidence": 0.0,
             }
         else:
-            confidence = rec.get("confidence", 0.0)
+            rec_d: dict[str, Any] = cast("dict[str, Any]", rec)
+            confidence: Any = rec_d.get("confidence", 0.0)
             if not isinstance(confidence, (int, float)):
                 confidence = 0.0
-            parsed["recommended_resolution"] = {
-                "action": str(rec.get("action", "ESCALATE_FURTHER"))[:200],
-                "reasoning": str(rec.get("reasoning", ""))[:800],
+            d["recommended_resolution"] = {
+                "action": str(rec_d.get("action", "ESCALATE_FURTHER"))[:200],
+                "reasoning": str(rec_d.get("reasoning", ""))[:800],
                 "confidence": max(0.0, min(1.0, float(confidence))),
             }
 
         # Enforce decision_options — always exactly the canonical four
-        parsed["decision_options"] = SME_DECISION_OPTIONS
+        d["decision_options"] = SME_DECISION_OPTIONS
 
         # Sanitize lineage_trace
-        lineage = parsed.get("lineage_trace")
+        lineage: Any = d.get("lineage_trace")
         if not isinstance(lineage, list):
-            parsed["lineage_trace"] = []
+            d["lineage_trace"] = []
         else:
-            cleaned = []
-            for item in lineage:
+            cleaned: list[dict[str, Any]] = []
+            for item in cast("list[Any]", lineage):
                 if isinstance(item, dict):
+                    item_d: dict[str, Any] = cast("dict[str, Any]", item)
                     cleaned.append({
-                        "act": str(item.get("act", ""))[:100],
-                        "substrate": str(item.get("substrate", ""))[:50],
-                        "timestamp": str(item.get("timestamp", "")),
-                        "note": str(item.get("note", ""))[:200],
+                        "act": str(item_d.get("act", ""))[:100],
+                        "substrate": str(item_d.get("substrate", ""))[:50],
+                        "timestamp": str(item_d.get("timestamp", "")),
+                        "note": str(item_d.get("note", ""))[:200],
                     })
-            parsed["lineage_trace"] = cleaned
+            d["lineage_trace"] = cleaned
 
-        return parsed
+        return d
 
     def _check_money_goods(self, parsed: dict[str, Any]) -> bool:
         # SME case packages never contain money/goods commitments.
