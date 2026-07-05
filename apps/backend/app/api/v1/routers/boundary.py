@@ -83,11 +83,13 @@ async def record_work_order_fulfillment(
     ),
     expected_tenant_id: str = Depends(require_tenant_scope),
 ) -> WorkOrderFulfillmentReceiptResponse:
+    raw_body = await request.body()
     try:
         receipt = await service.record_callback(
             expected_tenant_id=expected_tenant_id,
             payload=payload.model_dump(mode="json"),
             headers={str(k): str(v) for k, v in request.headers.items()},
+            raw_body=raw_body,
             request_path=str(request.url.path),
         )
     except WorkOrderFulfillmentReceiptError as exc:

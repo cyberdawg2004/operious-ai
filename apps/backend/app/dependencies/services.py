@@ -400,6 +400,7 @@ def get_work_order_fulfillment_receipt_service(
             session,
             data_protection=_data_protection_service(session),
         ),
+        connector_config_repository=PostgresConnectorConfigRepository(session),
     )
 
 

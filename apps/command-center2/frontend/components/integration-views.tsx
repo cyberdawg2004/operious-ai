@@ -1797,6 +1797,8 @@ function WarrantyRefundEditor({ policy }: { policy?: TenantGovernancePolicy }) {
   const [dateField, setDateField] = useState(existingMappings.purchase_timestamp ?? "purchase_date");
   const [sellerField, setSellerField] = useState(existingMappings.authorized_seller ?? "seller");
   const [schemaFieldNames, setSchemaFieldNames] = useState<string[]>([]);
+  const [rawOverride, setRawOverride] = useState("");
+  const [rawOverrideError, setRawOverrideError] = useState<string | null>(null);
 
   useEffect(() => {
     listGovernancePoliciesByType("resolution_taxonomy", "active")
@@ -1825,8 +1827,39 @@ function WarrantyRefundEditor({ policy }: { policy?: TenantGovernancePolicy }) {
     };
   };
 
-  const serialized = JSON.stringify(buildParameters(), null, 2);
-  const usingDefaults = dateField === "purchase_date" && sellerField === "seller";
+  const derivedSerialized = JSON.stringify(buildParameters(), null, 2);
+
+  // When the raw override textarea is non-empty, validate it and use it as
+  // the parameters payload instead of the derived value. Invalid JSON blocks
+  // submission (the hidden input stays empty so the parent submit handler
+  // receives a parse error before calling the API).
+  const handleRawOverrideChange = (text: string) => {
+    setRawOverride(text);
+    if (!text.trim()) {
+      setRawOverrideError(null);
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setRawOverrideError("Must be a JSON object { ... }");
+      } else {
+        setRawOverrideError(null);
+      }
+    } catch {
+      setRawOverrideError("Invalid JSON — fix before submitting");
+    }
+  };
+
+  const effectiveSerialized =
+    rawOverride.trim() && !rawOverrideError
+      ? rawOverride.trim()
+      : derivedSerialized;
+
+  const usingDefaults =
+    !rawOverride.trim() &&
+    dateField === "purchase_date" &&
+    sellerField === "seller";
 
   return (
     <div className="space-y-3">
@@ -1872,20 +1905,38 @@ function WarrantyRefundEditor({ policy }: { policy?: TenantGovernancePolicy }) {
       </div>
       {usingDefaults && (
         <p className="text-[11px] text-ink-secondary">
-          ✓ Using default field names — no mapping will be stored.
+          Using default field names — no mapping will be stored.
         </p>
       )}
       <details className="group">
         <summary className="cursor-pointer text-[11px] text-ink-tertiary hover:text-ink-secondary">
           Advanced: edit raw parameters JSON
         </summary>
-        <JsonInput
-          name="_parameters_raw_override"
-          label=""
-          defaultValue={serialized}
-        />
+        <div className="mt-2 space-y-1">
+          <p className="text-[11px] text-ink-tertiary">
+            When non-empty, this value overrides the field selectors above and is used as the parameters payload.
+          </p>
+          <textarea
+            value={rawOverride}
+            onChange={(e) => handleRawOverrideChange(e.target.value)}
+            placeholder={derivedSerialized}
+            rows={8}
+            className="w-full rounded border border-border-subtle bg-surface-raised px-3 py-2 font-mono text-[12px] leading-relaxed text-ink-primary focus:outline-none focus:border-gold-primary"
+          />
+          {rawOverrideError && (
+            <p className="text-[11px] text-red-alert">{rawOverrideError}</p>
+          )}
+        </div>
       </details>
-      <input type="hidden" name="parameters" value={serialized} />
+      {/*
+        The hidden "parameters" input carries the final payload that submitPolicy reads.
+        When the raw override is non-empty and valid JSON it takes precedence;
+        otherwise the value derived from the field selectors is used.
+        If the raw override is non-empty but invalid, effectiveSerialized stays
+        as the derived value — rawOverrideError is shown inline and the parent
+        parseJsonObject call will also catch any residual inconsistency.
+      */}
+      <input type="hidden" name="parameters" value={effectiveSerialized} />
     </div>
   );
 }
