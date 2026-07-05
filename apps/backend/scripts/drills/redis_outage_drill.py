@@ -22,10 +22,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 import urllib.request
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 
 
 def _get(url: str, *, headers: dict[str, str], timeout: float = 10.0) -> tuple[int, Any]:
@@ -51,12 +50,10 @@ def _post(url: str, *, headers: dict[str, str], body: bytes, timeout: float = 10
 
 def run_drill(base_url: str, bearer_token: str) -> dict[str, Any]:
     auth = {"Authorization": f"Bearer {bearer_token}"}
-    json_auth = {**auth, "Content-Type": "application/json"}
     results: dict[str, Any] = {"base_url": base_url, "checks": [], "overall": "PASS"}
 
     # Check 1: Health endpoint reflects Redis status
     status, body = _get(f"{base_url}/api/v1/health", headers=auth)
-    redis_ok = isinstance(body, dict) and body.get("status") not in ("critical",)
     results["checks"].append({
         "name": "health_endpoint_responds",
         "result": "PASS" if status in (200, 503) else "FAIL",

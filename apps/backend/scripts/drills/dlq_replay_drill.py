@@ -108,7 +108,6 @@ async def _ensure_probe_execution_row(
     """Upsert a probe execution row — same pattern as live_verification_probes."""
     from datetime import datetime, timezone
 
-    from sqlalchemy import text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -222,7 +221,7 @@ def _poll_dlq_api_for_probe(
 ) -> dict[str, Any] | None:
     """Poll GET /api/v1/operations/dead-letters until the probe row appears."""
     api_base = base_url.rstrip("/") + "/"
-    url = urljoin(api_base, "api/v1/operations/dead-letters") + f"?limit=50"
+    url = urljoin(api_base, "api/v1/operations/dead-letters") + "?limit=50"
     headers = _api_headers(bearer_token)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
