@@ -104,13 +104,6 @@ from app.survivability import (
 
 _unhandled_logger = logging.getLogger("app.main.unhandled")
 
-ALLOWED_ORIGINS = [
-    "https://app.operious.com",
-    "https://www.operious.com",
-    "https://operious.com",
-    "https://operious-ai-command-center.vercel.app",
-]
-
 _POLICY_INVALIDATION_PATTERN = "governance:policy:invalidate:*"
 _POLICY_INVALIDATION_RETRY_INITIAL_SECONDS = 1.0
 _POLICY_INVALIDATION_RETRY_MAX_SECONDS = 30.0
@@ -120,15 +113,25 @@ _POLICY_INVALIDATION_POLL_TIMEOUT_SECONDS = 1.0
 
 
 def _build_cors_origins(raw: str) -> list[str]:
-    """Parse CORS origins and reject wildcard transport posture."""
+    """Parse CORS origins and reject wildcard transport posture.
 
+    Returns the explicit allowlist from CORS_ALLOW_ORIGINS, or an empty list
+    when the env var is not set.  An empty list means the CORS middleware
+    allows *no* cross-origin requests — fail-closed.
+
+    Production deployments must set CORS_ALLOW_ORIGINS explicitly;
+    collect_production_problems() enforces this at boot.  Local dev must
+    also set the var (e.g. ``CORS_ALLOW_ORIGINS=http://localhost:3000``) —
+    there is intentionally no hardcoded fallback that could drift into
+    production.
+    """
     items = [origin.strip() for origin in raw.split(",") if origin.strip()]
     if any(origin == "*" for origin in items):
         raise ValueError(
             "CORS_ALLOW_ORIGINS must be a concrete allowlist; "
             "wildcard '*' is forbidden by transport doctrine."
         )
-    return items or list(ALLOWED_ORIGINS)
+    return items
 
 
 def _build_cors_headers(raw: str) -> list[str]:
