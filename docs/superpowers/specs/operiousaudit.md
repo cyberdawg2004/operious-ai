@@ -1,10 +1,10 @@
 # Operious AI Full Repository Audit
 
 Date: 2026-05-31
-Current-state update: 2026-07-05, after post-Phase-2.2 security hardening, Stage 3b connector proof tooling, default-auth/stub/CORS/seeded-replay/action-approval fixes, MVP-1 extraction-schema agnosticism, MVP-2 generic action-registry agnosticism, MVP-3 through MVP-9 governed intelligence work, tenant-config payload validation, frontend schema/role editors, and Phase 0 release-hygiene / no-stub production-fail-closed review.
+Current-state update: 2026-07-05, after post-Phase-2.2 security hardening, Stage 3b connector proof tooling, default-auth/stub/CORS/seeded-replay/action-approval fixes, MVP-1 extraction-schema agnosticism, MVP-2 generic action-registry agnosticism, MVP-3 through MVP-9 governed intelligence work, tenant-config payload validation, frontend schema/role editors, Phase 0 release-hygiene / no-stub production-fail-closed review, and partial S-10 live-production evidence capture.
 Auditor: Codex static architecture/security review
-Audited HEAD: `f416063` (`fix(pyright/annotations): tighten type annotations to clear remaining warnings`)
-Working-tree note: this update reviews committed changes through `f416063` plus current uncommitted MVP/intelligence-layer and Phase 0 work: extraction-schema agnosticism, generic custom action governance, governed LLM/fraud/SOP/QA/supervisor/repair scaffolds, tenant-config validation, frontend schema/role editors, live connector probe helpers, and local Codex fixes to production-fail-closed, connector credential, lint/type/test contracts. Local ignored artifacts `audit-artifacts/`, `aws/`, `awscliv2.zip`, and `infra/` are still not production readiness evidence. Phase 0 removes the previously tracked junk files `apps/backend/asyncio`, `apps/backend/asyncpg`, `apps/backend/apps/backend/migrations/versions/0004_drop_legacy_workflow_memory_tables.py`, and `h origin phase-2-2-stabilized` in the working tree; those deletions still need review/staging/commit before they count as repository state. Generated `__pycache__`/`.pyc` files are cleaned and must remain uncommitted. `docs/operiousaudit.md` was moved to `docs/superpowers/specs/operiousaudit.md`.
+Audited HEAD: `cccd538` (`fix(lint): remove unused import in test_rls_null_tenant_hardening`)
+Working-tree note: this update reviews committed changes through `cccd538`, including the committed MVP/intelligence-layer work, CORS fail-closed fallback removal, malformed auth/authority parse coarsening, callback HMAC protection, raw-body callback wiring, S-10 v235 evidence files, zero-warning pyright cleanup, compliance/ops docs, and the RLS nullable-tenant hardening invariant. The current working tree still has audit/test/evidence edits: `apps/backend/tests/test_system_smoke.py`, `apps/backend/tests/test_authority_context_coarsening.py`, `docs/pilot-readiness-evidence/manifest.json`, untracked `docs/pilot-readiness-evidence/2026-07-05-smoke-trace.json`, and this audit file. Local ignored artifacts `audit-artifacts/`, `aws/`, `awscliv2.zip`, and `infra/` are still not production readiness evidence. Generated `__pycache__`/`.pyc` files must remain uncommitted. `docs/operiousaudit.md` was moved to `docs/superpowers/specs/operiousaudit.md`.
 Embedding update note: the follow-on real-embeddings B work wires `build_embedding_provider()` into live knowledge composition, fixes native pgvector search at one 1536-dimensional HNSW column, adds a dry-run-first re-embed job for the Anker knowledge set, and proves the path with mocked OpenAI HTTP plus DB-backed retrieval tests. Production still needs the careful snapshot -> migrate -> re-embed -> retrieval-confirm rollout.
 
 ## Executive Verdict
@@ -54,30 +54,35 @@ The current state is materially stronger than the original May 31 audit. Claude/
 - Customer-reply quality and safety improved: bundled asks are split into per-segment questions, template placeholder fail-open behavior is closed, WhatsApp citation leakage is fixed, customer-facing labels are friendlier, and local-override denials no longer end in an escalation dead end.
 - Approval delivery reliability improved: the case-approval outbox now has a real email consumer, failed outbox rows are requeued so they retry, and stuck pending execution-outbox rows can be reclaimed after failed retry attempts.
 - Stage 2/3 connector architecture is committed: action governance metadata is generalized, generic connector/operation definitions model read vs act, idempotency, request/response mappings, commitment kind, approval policy, and target-resource expressions, and the Stage 3 path proves real external calls through the generic connector model.
-- The committed post-audit hardening cluster closes several high-risk defaults and edge cases: `AUTH_ENABLED` defaults on and is production-gated, seeded-replay governance has binding HMAC plus TTL, concurrent action approval is race-guarded, `allow_stub_actions` defaults fail-closed, money/goods actions fail closed without a connector ledger, `warranty_claim` is classified as `GOODS`, `max_tool_invocations` defaults to `50`, connector exceptions are sanitized, the cognition-audit null-key fallback is removed, ingress fields have size caps, rate-limit-off emits a warning, action-approval `status_filter` is an enum, and CORS now has production readiness gating for explicit origins.
+- The committed post-audit hardening cluster closes several high-risk defaults and edge cases: `AUTH_ENABLED` defaults on and is production-gated, seeded-replay governance has binding HMAC plus TTL, concurrent action approval is race-guarded, `allow_stub_actions` defaults fail-closed, money/goods actions fail closed without a connector ledger, `warranty_claim` is classified as `GOODS`, `max_tool_invocations` defaults to `50`, connector exceptions are sanitized, the cognition-audit null-key fallback is removed, ingress fields have size caps, rate-limit-off emits a warning, action-approval `status_filter` is an enum, CORS has production readiness gating for explicit origins, and the old hardcoded CORS fallback is now removed so an unset CORS allowlist fails closed.
+- Auth/authority reconnaissance hardening is materially better: malformed `Authorization` headers, malformed legacy `X-*-ID` headers, verification-unavailable responses, and disabled legacy authority responses coarsen in production. The previously open #25 malformed-parse leak is code-closed with regression tests.
+- Provider callback origin protection is stronger: work-order fulfillment callbacks can be bound to a tenant connector `callback_hmac_secret`, the router passes the raw body into the receipt service, and the service verifies `X-Operious-Signature` using HMAC-SHA256 before recording the receipt when a secret is configured.
+- Edge rate-limit client-IP behavior is code-correct for Fly-style proxying: `resolve_client_ip()` uses `Fly-Client-IP` only when the immediate peer is in `TRUSTED_PROXIES` and ignores spoofed headers from untrusted peers. Live rate-limit bucket proof against the currently deployed commit is still not archived.
+- RLS defense-in-depth improved: the new static invariant requires every direct FORCE-RLS tenant table in the model map to have `tenant_id nullable=False`, reducing the risk created by the policy helper's historic `row_tenant_id IS NULL OR ...` branch.
+- Type hygiene improved materially: `pyright -p pyrightconfig.json` now reports `0 errors, 0 warnings, 0 informations` at current HEAD, not merely zero errors with warning debt.
 - Phase 0 closes a real production-default gap found in review: the LLM factory no longer falls back to the deterministic diagnostic client in production when Anthropic credentials or Bedrock region are missing. It now raises a configuration error under production settings, with regression tests. Phase 0 also fixes the generic connector credential bridge so production tenant channel credentials can be used by `GenericConnectorTool` instead of failing through a mismatched credential-runtime interface.
-- Current uncommitted MVP work makes the product less commerce-hardcoded: tenant taxonomy can define extraction schemas, diagnostic extraction is schema-gated, warranty/refund policy can use semantic role mappings, custom tool names can be configured with required commitment kind, money/goods custom actions require human approval, and generic payload/target metadata is passed through instead of forcing e-commerce fields.
+- Current committed MVP work makes the product less commerce-hardcoded: tenant taxonomy can define extraction schemas, diagnostic extraction is schema-gated, warranty/refund policy can use semantic role mappings, custom tool names can be configured with required commitment kind, money/goods custom actions require human approval, and generic payload/target metadata is passed through instead of forcing e-commerce fields.
 - The new governed LLM agent scaffold and fraud-detection agent are useful architecture pieces: governance runtime hooks, proposal/policy records, fail-closed policy denial, persistence hooks, and fraud-signal act types now exist. This is a scaffold/MVP, not yet proof of a complete production intelligence substrate.
 - Tenant config change requests now fail earlier and more clearly for invalid enum, UUID, datetime, extraction-schema, and role-mapping payloads; frontend builders normalize status strings to lowercase wire enums; router errors return a clear `400 tenant_config_change_request_invalid` for validation failures.
 - Connector configuration testing now has an explicit `probe_http=false` default with opt-in `probe_http=true` GET probing through the same SSRF-pinned transport. This is useful for live egress evidence but remains an operator-controlled live call.
-- The forensic line-audit artifacts found no P0/P1 issue, but still identify valid defense-in-depth and hygiene findings: nullable tenant columns plus `row_tenant_id IS NULL OR ...` RLS predicate behavior, hardcoded CORS fallback/Vercel-origin release posture requiring explicit live configuration proof, 522 tracked dead duplicate Python files under the Next.js app trees, tracked junk files now deleted in the Phase 0 working tree but not committed, owner-session/RLS-off caveat, duplicate frontend API clients, and local AWS/Terraform artifacts that are not release-clean.
-- S-10 is still open, but live-verification tooling now exists for spoof rejection, RLS probes, worker/DLQ proof, smoke traces, and legacy Anker knowledge rewrap.
+- The forensic line-audit artifacts found no P0/P1 issue, but still identify valid defense-in-depth and hygiene findings: nullable tenant/RLS semantics need continued DB-level hardening even after the new static invariant, Vercel/Fly CORS release posture still needs archived live-origin proof, 522 tracked dead duplicate Python files under the Next.js app trees remain a repo hygiene issue, owner-session/RLS-off caveats remain, duplicate frontend API clients remain, and local AWS/Terraform artifacts are not release-clean evidence.
+- S-10 is still open, but it is no longer "no live proof." A partial live-production bundle is archived for Fly release v235 / commit `c65fda5`: direct spoof rejection, production readiness READY, one-table production-role RLS isolation, workers/DLQ proof, and worker/smoke pipeline progress. It does not close S-10 for current HEAD `cccd538` because full current-head deployment evidence, current Auth0 `/auth/me` proof, full production FORCE-RLS catalog proof, CORS/rate-limit live proof, and a clean provider-completing smoke are still missing.
 
-The blocking issue has shifted again. It is no longer "there are no controls," "there are no side-effect ledgers," "manager approvals can silently use fake-success stubs," "connector credential/RLS work is only local," "generic connectors are only a model," or "the product can only express warranty/refund e-commerce fields." The blocker is live proof, operational completeness, provider maturity, and repo/infra hygiene. `S-10` remains open because Phase E deployment verification is not archived: no current-HEAD live proof yet that production rejects direct spoofed authority headers, enforces RLS under production roles, runs workers/DLQ correctly, and has real secrets/providers configured. Remaining review caveats: auth-error coarsening is not yet wired to every malformed authority parse path, the per-IP limiter may key the immediate Fly proxy peer unless real client IP handling is proven live, data-protection controls need KMS/retention/legal-operation proof before compliance claims, live S3/Anthropic/provider drills are not archived, CORS still relies on a hardcoded fallback outside explicit production configuration, nullable-tenant RLS policy semantics need hardening, the new frontend advanced raw-JSON override is display-only unless submit handling is wired, dead duplicate Python trees and local ignored AWS/Terraform artifacts remain, and the Phase 0 tracked-junk deletions still need to be reviewed and committed.
+The blocking issue has shifted again. It is no longer "there are no controls," "there are no side-effect ledgers," "manager approvals can silently use fake-success stubs," "connector credential/RLS work is only local," "generic connectors are only a model," "the product can only express warranty/refund e-commerce fields," "CORS can silently fall back to hardcoded origins," or "#25 malformed auth parse leaks are still open." The blocker is current-head live proof, operational completeness, provider maturity, and repo/infra hygiene. `S-10` remains open because the archived live bundle was captured against deployed `c65fda5` / Fly v235, while the audited repo HEAD is `cccd538`, and because the bundle still lacks full current Auth0 `/auth/me` proof, full production FORCE-RLS catalog proof, archived CORS/rate-limit live proof, and a clean provider-completing smoke. Remaining review caveats: data-protection controls need KMS/retention/legal-operation proof before compliance claims, live S3/Anthropic/provider drills are not clean, the 2026-07-05 smoke trace reached the diagnostic worker but failed all retries on an Anthropic HTTP 400, nullable-tenant RLS policy semantics need continued DB-level hardening, the new frontend advanced raw-JSON override is display-only unless submit handling is wired, dead duplicate Python trees and local ignored AWS/Terraform artifacts remain, and the current smoke test suite still has a local DB/resource-lifespan timeout that is not counted as a pass.
 
-Final status: safer for controlled internal demo and a tightly scoped non-regulated pilot with irreversible actions constrained behind governed connectors. Still not safe to call enterprise-production-ready for Anker/Samsung/Microsoft/Amazon operations until S-10 live evidence, live provider drills, RLS/CORS live-configuration proof, repository/infra cleanup, DR/SLO proof, and compliance evidence are closed.
+Final status: safer for controlled internal demo and a tightly scoped non-regulated pilot with irreversible actions constrained behind governed connectors. Still not safe to call enterprise-production-ready for Anker/Samsung/Microsoft/Amazon operations until S-10 is recaptured against current HEAD, live provider drills pass, full FORCE-RLS/CORS/rate-limit live proof is archived, repository/infra cleanup is complete, DR/SLO proof is stronger, and compliance evidence is operational rather than mostly documentary.
 
 ## Scope And Evidence
 
-Repository traversal now finds 2,761 discoverable files via `rg --files`. This reflects the tracked hardening/MVP commits plus uncommitted MVP files and tests, while local ignored `aws/`, `awscliv2.zip`, `infra/`, and `audit-artifacts/` still exist on disk.
+Repository traversal now finds 2,793 discoverable files via `rg --files`. This reflects the tracked hardening/MVP/S-10/compliance commits plus current uncommitted audit/test/evidence edits, while local ignored `aws/`, `awscliv2.zip`, `infra/`, and `audit-artifacts/` still exist on disk.
 
 Top-level inventory:
 
 | Area | Count | Notes |
 | --- | ---: | --- |
-| `apps` | 2,550 | Backend, command center, platform console, marketing, connector, attachment, approval, warranty/refund, intelligence/governed-agent, and test changes |
+| `apps` | 2,580 | Backend, command center, platform console, marketing, connector, attachment, approval, warranty/refund, intelligence/governed-agent, and test changes |
 | `packages` | 77 | TS shared/types/contracts/sdk/ui/auth/tracing/topology/observability |
-| `docs` | 80 | Architecture, runbooks, readiness, current audit under superpowers/specs, and intelligence-layer build plan |
+| `docs` | 103 | Architecture, runbooks, compliance docs, readiness evidence, current audit under superpowers/specs, and intelligence-layer build plan |
 | `tests-frontend` | 22 | Static frontend architecture tests |
 | local ignored/artifact residue | n/a | `audit-artifacts/`, `aws/`, `awscliv2.zip`, `infra/`, generated `.next`/`node_modules` content, and generated Python bytecode are not product evidence; Phase 0 removes generated backend `__pycache__`/`.pyc` before handoff |
 
@@ -208,10 +213,11 @@ Recent security-relevant commits reviewed:
 | `dd5bb65` / `ffe1f7b` / `4f44686` / `4c30be0` / `e71e536` | Per-claim-type warranty windows, generalized action governance metadata, generic connector + operation model, Stage 3 real external calls through the generic connector model, and lint cleanup. |
 | `baa0e31` / `09b9d02` / `db6eae9` / `690c372` / `57aa3d3` / `65c6e5d` / `05991a3` / `014111d` / `874147f` / `857c1f1` | Stage 3b proof path: connector probe/test endpoints, route fixes, real-tenant path scoping, pending-change detection, and legitimate dual-control flow for connector configuration. |
 | `f15b5d7` / `5288eec` / `d3b7b6e` / `c34e839` / `9216447` / `026cd63` / `b715622` / `7b82cd6` / `6ba9143` / `af92c13` / `387edc5` / `f42a1f5` / `c036bba` / `fae4d8d` / `3ca6e99` / `50db697` / `98bfdc2` / `fc5824a` / `f416063` | Phase-1/2 security hardening and cleanup: sanitized connector exceptions, null-key encryption fallback removal, dual-control enforcement, enum validation, ingress size caps, rate-limit-disabled warning, auth-enabled default/prod gate, seeded-replay HMAC+TTL, approval race guard, stub-action fail-closed default, CORS production gate/localhost removal, tool invocation cap, warranty-claim `GOODS` reclassification, money/goods connector-ledger fail-closed behavior, and pyright cleanup. |
-| Current uncommitted MVP/intelligence-layer and Phase 0 work | Tenant-config validation now covers extraction schemas and role mappings; diagnostic extraction is tenant-schema-gated; generic action registry accepts custom tools with explicit commitment kind; custom money/goods actions require approval; unconfigured money/goods stubs fail closed; production LLM provider misconfiguration fails closed instead of using deterministic fallback; generic connector credentials bridge to tenant channel credentials; generic payload/target metadata is passed through; governed LLM/fraud/SOP/QA/supervisor/repair scaffolds were added; frontend schema/role editors were added; live connector probe script remains an operator proof helper. |
+| `2113e01` / `2d42cd0` / `9b29e0a` / `c65fda5` / `c1f39f5` / `244e32e` / `57e5b88` / `cccd538` | Current committed Phase-1/2 extension: MVPs 1-9 committed, malformed auth/authority parse coarsening code-closed, fulfillment callback HMAC added, raw callback body/repository wiring fixed, hardcoded CORS fallback removed, S-10 v235 evidence captured, pyright warning count reduced to zero, ops/compliance docs added, and RLS nullable-tenant static invariant linted. |
+| Current uncommitted audit/test/evidence work | Smoke-test env isolation, coarsening-test direct-ASGI harness, corrected S-10 evidence manifest, untracked 2026-07-05 partial smoke trace, and this audit update. These are not committed repository state until staged and committed. |
 | `c23421c` / `77253d4` / `bdc2369` / `f133f7f` / `2a998c8` / `16978e0` / `803a3f4` / `d56db3d` | Queue/admission/deploy/runtime hardening: queue-age race fix, queue snapshot per-queue isolation, truncated completion escalation, event-loop-safe shared HTTP client, GCP unwrap call-site coverage, Fly release command, web memory increase, and deploy-stop bug evidence package. |
 | `3f27604` / `8ac83ac` / `b8a93cf` | Security/test hygiene: `pypdf` bumped to 6.13.3 for GHSA-jm82-fx9c-mx94 and pre-existing pyright/vision-test format issues corrected. |
-| `audit-artifacts/forensic-line-audit/12_final_report.md` | Untracked forensic audit artifact reviewed. It reports no P0/P1 findings. Current code has improved CORS via localhost removal and a production explicit-origin gate, but F-009 nullable-tenant RLS hardening, hardcoded CORS fallback/live-origin proof, F-001 dead duplicate Python trees, F-002/F-003/F-004 tracked junk pending Phase 0 deletion commit, F-011 owner-session caveat, and F-012 duplicate frontend clients remain open. |
+| `audit-artifacts/forensic-line-audit/12_final_report.md` | Untracked forensic audit artifact reviewed. It reports no P0/P1 findings. Current code removed the hardcoded CORS fallback and added nullable-tenant static coverage, but live CORS proof, continued nullable/RLS DB hardening, F-001 dead duplicate Python trees, F-011 owner-session caveat, and F-012 duplicate frontend clients remain open. |
 | Local untracked `infra/`, `aws/`, `awscliv2.zip` | Not product evidence. Terraform contains placeholder DB passwords and open ingress/public-IP defaults; AWS CLI archive/vendor artifacts are repo hygiene/supply-chain blockers. |
 
 Focused verification evidence:
@@ -248,7 +254,11 @@ Focused verification evidence:
 | Connector RLS and RLS invariant | User normal-shell proof: `test_connector_rls.py`, `test_rls_coverage_invariant.py` -> `6 passed in 0.52s`; focused latest proof `test_connector_rls.py::test_connector_configs_force_rls_flags` -> `1 passed in 0.13s`; Codex alembic check reached current head `0092_resolution_verdict_template_purpose_rename` |
 | Connector approval/Auth0 capability mapping | User normal-shell proof: `test_authz_domain_capabilities.py` -> `46 passed in 4.29s`; Codex pyright `0 errors`, ruff clean on touched auth/connector/service/test files |
 | Full backend lint | Codex rerun: `venv/bin/ruff check apps/backend/app apps/backend/tests` -> `All checks passed!` |
-| Backend type check | Current pyright after governed-agent/test-contract cleanup and Phase 0 sanitizer fix: `pyright -p pyrightconfig.json --level error` -> `0 errors, 0 warnings, 0 informations`; full warning-level summary is `0 errors, 169 warnings, 0 informations` |
+| Backend type check | Current pyright at audited HEAD/worktree: `pyright -p pyrightconfig.json` -> `0 errors, 0 warnings, 0 informations` |
+| S-10 partial live production evidence bundle | Committed evidence captured against Fly v235 / commit `c65fda5`: `2026-07-05-spoofing-pass.json`, `2026-07-05-readiness-ready.json`, `2026-07-05-rls-pass.json`, `2026-07-05-workers-dlq-pass.json`; manifest repaired in the working tree and validates as JSON |
+| S-10 partial smoke trace | Untracked `2026-07-05-smoke-trace.json` validates as JSON and shows Auth0 bearer/tenant extraction, ingress, session creation, dispatch, diagnostic worker pickup, and retry behavior, but final diagnostic completion failed after Anthropic HTTP 400 |
+| Auth coarsening, callback HMAC, Fly client-IP, production readiness, nullable-RLS invariant | Codex rerun after test-harness fix: `test_rls_null_tenant_hardening.py`, `test_authority_context_coarsening.py`, `test_fulfillment_callback_hmac.py`, `test_edge_client_ip.py`, `test_production_readiness.py` -> `78 passed in 2.92s` |
+| Individual new hardening proof | `test_authority_context_coarsening.py` -> `8 passed in 0.12s`; `test_fulfillment_callback_hmac.py` -> `14 passed in 1.52s`; `test_edge_client_ip.py` -> `6 passed in 0.24s`; `test_production_readiness.py` -> `23 passed in 1.16s`; `test_rls_null_tenant_hardening.py` -> `27 passed in 1.60s` |
 | Deterministic agent multimodal regression coverage | Codex rerun: `test_generated_sme_reviewer.py`, `test_cognition_audit.py` -> `6 passed, 3 skipped`; skips require `TEST_DATABASE_URL` |
 | Committed connector/OMS/RLS DB bundle | Unsandboxed Codex rerun: `test_connector_rls.py`, `test_rls_coverage_invariant.py`, `test_oms_credential_storage.py`, `test_oms_credential_http_route.py` -> `21 passed in 41.72s` |
 | Case/action approval auto-delivery bundle | Unsandboxed Codex rerun: `test_case_approval_auto_send.py`, `test_case_approval_recovery_tasks.py`, `test_case_approval_workflow.py`, `test_action_approval_case_completion.py`, `test_action_approvals_router.py`, `test_warranty_refund_approval_wiring.py`, `test_warranty_refund_approve_reject.py` -> `64 passed in 3.87s` |
@@ -268,7 +278,7 @@ Focused verification evidence:
 | Current supervisor hardening proof | Phase 0 Codex rerun after sanitizer type fix: `test_mvp8_autonomous_supervisor.py` -> `45 passed in 1.77s` |
 | Current frontend config governance/schema editor proof | Codex rerun outside sandbox IPC restriction with approval: `npm run test:frontend -- tests-frontend/src/command-center2-config-governance.test.ts` -> `127 passed` |
 | Backend lint for current Python code | Phase 0 Codex rerun: `ruff check apps/backend/app apps/backend/tests apps/backend/scripts` -> `All checks passed!` |
-| Backend type check after Phase 0 cleanup | Phase 0 Codex rerun: `pyright -p pyrightconfig.json --level error` -> `0 errors, 0 warnings, 0 informations`; full pyright summary remains `0 errors, 169 warnings, 0 informations` because warnings are untyped JSON/client boundary debt, not current release-blocking errors |
+| Backend type check after current cleanup | Codex rerun: `pyright -p pyrightconfig.json` -> `0 errors, 0 warnings, 0 informations` |
 
 Non-clean verification:
 
@@ -284,11 +294,12 @@ Non-clean verification:
 | Commerce action fail-closed DI coverage | Previously non-clean; now closed in current code | `apps/backend/app/dependencies/services.py:1014-1019` passes `allow_stub_actions=settings.allow_stub_actions_effective`; `apps/backend/tests/test_action_fail_closed.py:111-115` guards the wiring. |
 | Codex sandbox DB run for embedding proof bundle | Timed out after an early marker, no traceback flushed before `timeout` | Superseded by the user's exact normal-shell rerun: combined retrieval/re-embed/FORCE-RLS bundle `8 passed in 1.06s`. |
 | Live S3/Anthropic/provider proof | Skipped where credentials were absent | Attachment/vision code has local and DB proof, but live object-storage and live LLM evidence is not archived. |
-| Pyright residual warnings | `0 errors, 169 warnings` | Warnings are mostly untyped boto3/client surfaces, mapping unknowns, and new governed-agent/fraud/SOP/QA/supervisor scaffold unknowns; not blockers, but still cleanup debt. |
+| System smoke tests | `test_system_smoke.py::test_health_endpoint_live` emitted a passing dot but the pytest process timed out; `test_ticket_ingress_chain` timed out; direct DB probe to `localhost:5433/operious_test` also timed out | Not counted as a pass. This looks like local DB/resource-lifespan availability rather than a failed smoke assertion, but it must be made deterministic before using `test_system_smoke.py` as release evidence. |
+| Live current-deploy provider smoke | `2026-07-05-smoke-trace.json` reached diagnostic worker/retry but ended `failed_all_retries` on Anthropic HTTP 400 | Not counted as a clean workflow pass. Fix live Anthropic model/key/request configuration and rerun smoke against current deployed commit. |
 | Local infra/AWS artifacts | Still present on disk but not tracked evidence | Not counted as verification. `awscliv2.zip`, `aws/`, `infra/`, and `audit-artifacts/` exist locally/ignored; they are not release proof. |
 | Current untracked helper residue | `apps/backend/scripts/test_http_probe.sh` remains untracked but was rewritten as an operator-configurable probe helper | Not product evidence unless intentionally reviewed/staged. It is excluded from Python lint/type proof because it is shell. |
 
-Residual gaps update: S-01 through S-09 are no longer open original vulnerabilities. They are closed or closed-with-residuals as described below. The previous tenant-config `applied_by` regression is fixed and proven by DB-backed tests. The previous action-approval stub DI residual is fixed in current code and has a regression guard. The connector/OMS/RLS work is committed and DB-proven, Stage 3 generic connector calls now have unit plus live external-call proof, and the Phase 0 tenant-config DB/router proof is clean. The newer Phase-1/2 hardening commits are materially correct in the reviewed source. S-10 remains open until live deployment evidence is archived, and the forensic/current residuals around nullable-tenant RLS semantics, hardcoded CORS fallback/live-origin posture, dead duplicate Python trees, owner-session/RLS-off assumptions, duplicate frontend clients, untracked helper probes, local ignored infra/AWS artifacts, and uncommitted Phase 0 junk-file deletions remain open.
+Residual gaps update: S-01 through S-09 are no longer open original vulnerabilities. They are closed or closed-with-residuals as described below. The previous tenant-config `applied_by` regression is fixed and proven by DB-backed tests. The previous action-approval stub DI residual is fixed in current code and has a regression guard. The connector/OMS/RLS work is committed and DB-proven, Stage 3 generic connector calls now have unit plus live external-call proof, and the Phase 0 tenant-config DB/router proof is clean. The newer Phase-1/2 hardening commits are materially correct in the reviewed source. The hardcoded CORS fallback and #25 malformed-parse leak are now code-closed. S-10 remains open because the partial live evidence is not current-head-complete and does not include full Auth0 `/auth/me`, full production FORCE-RLS catalog, CORS/rate-limit live proof, or clean provider-completing smoke evidence. Remaining forensic/current residuals are nullable-tenant/RLS DB hardening, dead duplicate Python trees, owner-session/RLS-off assumptions, duplicate frontend clients, untracked/working-tree evidence edits, local ignored infra/AWS artifacts, and deterministic smoke/release evidence gaps.
 
 ## Spec 1b Edge-Hardening Remediation (2026-06-01)
 
@@ -299,7 +310,7 @@ production proof remains part of Phase 3 / S-10):
 
 | # | Finding | Disposition after spec 1b |
 | ---: | --- | --- |
-| 16 | CORS credential posture | Partially code-closed. CORS respects `CORS_ALLOW_CREDENTIALS` / `CORS_ALLOW_METHODS`, rejects wildcard origins, removes the localhost production fallback residue, and now has a production-readiness gate requiring explicit `CORS_ALLOW_ORIGINS`. Residual: `_build_cors_origins()` still falls back to hardcoded origins outside that gate, and live production origin configuration/proof remains required. |
+| 16 | CORS credential posture | Code-closed for fallback/config posture. CORS respects `CORS_ALLOW_CREDENTIALS` / `CORS_ALLOW_METHODS`, rejects wildcard origins, production readiness requires explicit `CORS_ALLOW_ORIGINS`, and `_build_cors_origins()` now returns an empty list rather than hardcoded origins when unset. Residual: archive live production origin/preflight proof against current deployed commit. |
 | 23 | Twilio canonicalization should be server-derived | Code-closed. Webhook + voice provider signatures verify against a server-derived URL (`PUBLIC_BASE_URL` + path); client `x-operious-webhook-url` honoured only under non-prod `WEBHOOK_TRUST_URL_HEADER`, which prod boot rejects. |
 | 24 | Route enumeration risk | Code-closed. Unknown route / tenant mismatch / missing or invalid signature all return an identical `401 webhook_rejected`. Residual: content oracle closed, timing oracle mitigated by rate limiting, full constant-time rejection deemed impractical given variable DB-lookup timing. |
 | 25 | Auth error detail can aid recon | Partial. Authority-state errors such as disabled header authority and verification unavailable are coarsened in production, but malformed `Authorization` and malformed legacy authority headers still return detailed `reason` / `header` / `field` bodies. |
@@ -321,7 +332,7 @@ restored immediately after each run. Post-proof production diff check:
 | 1b-3 Server-derived canonical URL | Channel webhook verifier trusted `x-operious-webhook-url` again. | `test_channel_webhook_signature_url.py::test_signature_over_forged_url_rejected` failed: forged URL signature was accepted. | Restored; included in final `120 passed`. |
 | 1b-4 Voice WS caps | Frame-rate guard returned without enforcing the cap. | `test_voice_ws_caps.py::test_over_rate_stream_is_closed_and_call_terminated` failed: stream closed normally with `1000` instead of policy `1008`. | Restored; included in final `120 passed`. |
 
-Edge-hardening review update: #23, #24, #39, #40, and #63 are now materially closed in code/tests. #16 is closed for credential/method config but remains partially open for production-origin posture after forensic F-006. #25 is materially improved but not fully closed because malformed parse errors still leak detail. #38 is now code-closed for the audited rate-limit/quota/admission paths, with live outage proof still required.
+Edge-hardening review update: #23, #24, #25, #39, #40, and #63 are now materially closed in code/tests. #16 is code-closed for fallback/config posture but still needs archived live production-origin proof. #38 is code-closed for the audited rate-limit/quota/admission paths, with live outage proof still required.
 
 ## Phase 1a-ext/1c/1d/1e Review (2026-06-02)
 
@@ -335,7 +346,7 @@ The latest committed tranche is materially correct at the production-code level.
 - Resilience controls are real: quota and queue admission fail closed when Redis-backed admission state is unavailable, webhook capture happens before processing admission, execution records bind governance config id/version/sha, completion-event emission failure records a DLQ task, and per-tenant queue QoS exists.
 - Cleanup/hardening is real: the `_deprecated` package is deleted and guarded by invariant tests; backend Docker now pins the Python image digest and runs as non-root; CI emits SBOM and `pip-audit` artifacts.
 
-Remaining fixes are not the old ledger regression. The real residuals are: complete #25 malformed-parse coarsening, archive Phase E live production proof for S-10, prove real-client-IP behavior for rate limiting, run DNS-rebinding loopback tests in normal CI, and avoid presenting data-protection controls as full compliance until KMS, retention/legal operations, and live erasure evidence are complete.
+Remaining fixes are not the old ledger regression. The real residuals are: recapture Phase E/S-10 live production proof against current HEAD, archive current-deploy real-client-IP rate-limit bucket behavior, run DNS-rebinding loopback tests in normal CI, clean the live Anthropic/provider smoke path, and avoid presenting data-protection controls as full compliance until KMS, retention/legal operations, and live erasure evidence are complete.
 
 ## Phase 2 Governed Operations Review (2026-06-17)
 
@@ -352,18 +363,20 @@ The Phase 2 changes are materially correct in the reviewed production-code paths
 
 Residuals from this review:
 
-- Fulfillment callback ingress is tenant-authenticated and receipt-only, which is safer than direct mutation, but provider-origin signature verification/replay TTL for public provider callbacks is not yet proven.
-- Connector invocation ledger, connector RLS, OMS credential storage/route, repair dispatch, warranty/refund, and case-approval DB suites now have normal-shell/unsandboxed proof recorded above. S-10-prep still needs live deployed proof.
+- Fulfillment callback ingress is tenant-authenticated, receipt-only, and now supports connector-configured HMAC verification over the raw callback body. Residual: live provider callback signature proof and replay-window proof are still needed before broad provider-origin claims.
+- Connector invocation ledger, connector RLS, OMS credential storage/route, repair dispatch, warranty/refund, and case-approval DB suites now have normal-shell/unsandboxed proof recorded above. S-10-prep now has partial live deployed proof, but not current-head-complete closure.
 - OpenAI embeddings are code/test-closed for runtime wiring and dimension-aware pgvector retrieval. Remaining work is production rollout evidence: snapshot, migration, real-provider re-embed of the Anker documents, and retrieval confirmation.
-- Live provider idempotency, live outbound private-IP blocking, real client IP rate limiting, and Phase E production verification remain outside local code proof.
+- Live provider idempotency, live outbound private-IP blocking, current-deploy real-client-IP rate-limit bucket proof, and complete Phase E production verification remain outside local code proof.
 - The warranty/replacement connector and OMS credential/RLS patch is no longer local-only; it is committed and locally/DB proven. It still needs CI and live-provider evidence before it can support production claims.
 - The local AWS CLI archive/tree and Terraform scaffold should be cleaned before release work. Terraform placeholders/open ingress/public IP defaults are not acceptable production posture.
 
 ## Phase B/Current-State Review (2026-07-03)
 
-The current work is materially stronger than the July 2 state. The committed hardening fixes close several ways a deployment could drift open by default, and the uncommitted MVP work meaningfully reduces the original e-commerce/warranty coupling. The distinction is still important: committed hardening is stronger evidence than uncommitted MVP scaffolding, and S-10 live deployment proof remains absent.
+The current work is materially stronger than the July 2 state. The committed hardening fixes close several ways a deployment could drift open by default, and the MVP/intelligence-layer work is now committed rather than just local scaffolding. The distinction has shifted: current committed code is stronger, but S-10 live deployment proof is only partial and was captured against `c65fda5`, not current HEAD `cccd538`.
 
-- Post-audit hardening: auth now defaults on and is production-gated, stub actions default fail-closed, seeded-replay governance requires binding HMAC plus TTL, concurrent action approval is race-guarded, CORS has a production explicit-origin gate, default tool invocation count is capped, connector exception messages are sanitized, null-key cognition-audit encryption fallback is removed, ingress field sizes are capped, and action-approval status filters are enum-validated.
+- Post-audit hardening: auth now defaults on and is production-gated, stub actions default fail-closed, seeded-replay governance requires binding HMAC plus TTL, concurrent action approval is race-guarded, CORS has a production explicit-origin gate and no hardcoded fallback, default tool invocation count is capped, connector exception messages are sanitized, null-key cognition-audit encryption fallback is removed, ingress field sizes are capped, action-approval status filters are enum-validated, and malformed auth/authority parse errors coarsen in production.
+- Callback and edge hardening: work-order fulfillment callbacks can require HMAC-SHA256 signatures, the router passes raw body bytes to verification, and Fly client-IP rate limiting is code/test-covered with trusted-proxy anti-spoofing. Live callback and rate-limit bucket proof remain required.
+- Verification quality: current focused hardening bundle passes `78 passed`; ruff is clean on touched files; pyright is `0 errors, 0 warnings, 0 informations`; evidence JSON validates. `test_system_smoke.py` is non-clean locally because DB/resource-lifespan paths time out, and the 2026-07-05 live smoke reaches provider execution but fails all retries on Anthropic HTTP 400.
 - Money/goods safety: `warranty_claim` is now classified as `GOODS`, money/goods commitments require human approval, and configured money/goods actions fail closed when no connector ledger exists. This closes a real class of "looks harmless but causes value movement" risks.
 - MVP-1 extraction-schema agnosticism: tenant taxonomy can define extraction schemas, diagnostic extraction is schema-gated, out-of-schema fields are dropped, and legacy e-commerce defaults remain. This is the right direction for non-commerce tenants.
 - MVP-1 warranty/refund role mapping: eligibility can use semantic roles such as `purchase_timestamp` and `authorized_seller` instead of hardcoded field names. That makes the workflow configurable, but it still needs production tenant examples and DB-backed tenant-config proof.
@@ -371,9 +384,9 @@ The current work is materially stronger than the July 2 state. The committed har
 - MVP-3 governed-agent scaffold: `BaseGovernedLLMAgent`, proposal/policy records, governance runtime factory, and `FraudDetectionAgent` now exist and have focused tests. They are scaffolding for the intelligence layer, not a complete autonomous multi-agent production system.
 - Command Center schema/role editors: the UI can edit extraction schema and warranty role mappings, and frontend invariants still pass. Caveat: the advanced raw JSON override in the warranty/refund editor is display-only unless submit handling reads `_parameters_raw_override`.
 - Connector probing: the test endpoint defaults to TLS/SSRF validation only and performs a real pinned-IP HTTP GET only with `probe_http=true`. That remains an appropriate operator-controlled live evidence path.
-- Verification quality: focused backend MVP/domain/action tests now pass `478 passed, 16 skipped`; production LLM/readiness tests pass `44 passed`; supervisor hardening passes `45 passed`; DB-backed connector, warranty/replacement, tenant-config change-request, and tenant-configuration router tests pass; frontend config governance passes `127 passed`; backend ruff is clean on `apps/backend/app`, `apps/backend/tests`, and `apps/backend/scripts`; pyright has `0 errors` with `169` warning-level diagnostics; alembic test DB head is `0097_mvp7_customer_identity_id`.
+- Verification quality: focused backend MVP/domain/action tests previously passed `478 passed, 16 skipped`; production LLM/readiness tests passed `44 passed`; supervisor hardening passed `45 passed`; DB-backed connector, warranty/replacement, tenant-config change-request, and tenant-configuration router tests passed; frontend config governance passed `127 passed`; current touched-file ruff is clean; current pyright is `0 errors, 0 warnings, 0 informations`; alembic test DB head evidence remains `0097_mvp7_customer_identity_id`.
 - Phase 0 proof: the previous tenant-config DB file/subset uncertainty is closed in the unsandboxed Codex run (`17 passed in 468.77s`). The evidence is local test-DB proof, not production proof.
-- Forensic/current residuals: nullable tenant columns plus `row_tenant_id IS NULL OR ...` RLS behavior remain defense-in-depth weaknesses; CORS production readiness is better but still depends on explicit live origin configuration; duplicate/dead tracked Python trees, uncommitted Phase 0 tracked-junk deletions, untracked probe helper classification, and local ignored AWS/Terraform artifacts remain release hygiene blockers.
+- Forensic/current residuals: nullable tenant columns plus `row_tenant_id IS NULL OR ...` RLS behavior remain defense-in-depth weaknesses even after the new static invariant; CORS code posture is better but still needs explicit live origin configuration proof; duplicate/dead tracked Python trees and local ignored AWS/Terraform artifacts remain release hygiene blockers; current untracked/modified evidence and test edits need review/commit.
 
 ## What Operious Is Today
 
@@ -453,8 +466,8 @@ What is implemented:
 
 What is partial:
 
-- Production proof remains missing: trusted proxy/Auth0/RLS/worker/DLQ/secrets checks are not archived.
-- Auth-error coarsening is partial: authority-state failures coarsen, but malformed authorization/header parse errors still return detailed bodies.
+- Production proof is partial: spoof rejection, one-table RLS, readiness, and worker/DLQ evidence are archived for Fly v235 / `c65fda5`, but current-head Auth0/RLS/FORCE-RLS/CORS/rate-limit/provider-smoke proof is not complete.
+- Auth-error coarsening is code-closed for the audited authority-state and malformed-parse paths.
 - Voice auth/cap controls are closed, but production token issuance UX/API and real STT/TTS provider proof remain incomplete.
 - Action grants and the connector invocation ledger are much stronger. Real external connector side effects now have refund/repair/work-order plus committed warranty/replacement connector paths, but live provider idempotency drills and provider-origin callback signatures remain.
 - Quotas include diagnostic token-per-minute enforcement, fail-closed pre-call Redis policy, queue admission, and inbound request rate limiting; idempotent rate-limit reads still degrade open by design, per-IP limiting may key the Fly proxy peer, and quota is not a universal enterprise budget system.
@@ -487,12 +500,12 @@ What is planned/missing:
 - Provider-origin signature/replay protection for public fulfillment callbacks.
 - CI-prove and live-provider-prove the committed warranty/replacement connector, OMS credential update, connector approval, connector RLS, and generic connector operation model.
 - Harden nullable-tenant RLS semantics: backfill/repair nullable tenant rows, set tenant IDs NOT NULL on FORCE-RLS tenant tables where business semantics require tenancy, and remove or narrow the `row_tenant_id IS NULL OR ...` branch.
-- Finish CORS production posture: localhost fallback residue is removed and production now requires explicit `CORS_ALLOW_ORIGINS`, but the hardcoded fallback still exists outside the production gate and live production origin configuration must be archived.
+- Finish CORS production posture: localhost fallback residue is removed, production requires explicit `CORS_ALLOW_ORIGINS`, and the hardcoded fallback is removed; live production origin/preflight configuration must still be archived against the current release.
 - Commit/review the MVP-1 through MVP-9 intelligence-layer work only after generated `__pycache__` bytecode stays removed and `apps/backend/scripts/test_http_probe.sh` is classified as a product helper, local operator helper, or intentionally untracked scratch file.
 - Promote the Phase 0 DB proof into CI evidence for the latest tenant-config schema/role-mapping/router validation paths.
 - Wire or remove the warranty/refund editor raw JSON override so UI behavior matches operator expectations.
 - Promote the governed LLM/fraud scaffold into production composition only after live model evals, persistence/readback proof, operator workflow, and failure-mode tests.
-- Delete or quarantine tracked duplicate/dead Python app trees, and commit/review the Phase 0 tracked-junk deletions before release.
+- Delete or quarantine tracked duplicate/dead Python app trees, and keep generated/junk artifacts out of tracked release commits.
 - Clean local AWS CLI archive/vendor files and harden or quarantine the Terraform scaffold before any infra commit.
 - Command-center workflow maturity for the tenant config change-request ledger and action approvals.
 - Data-protection operator workflow, KMS-backed key custody, live erasure/legal-hold/retention evidence, and compliance runbooks.
@@ -585,16 +598,16 @@ Sensitive data classes remain:
 | Compliance layer | 35 | 72 | Partial | DSAR erasure, legal holds, retention policy, envelope encryption, GCP KMS custody path, attachment controls, and reconstruction metadata exist; SOC 2, live evidence, retention/legal operations, and customer artifacts remain incomplete. |
 | Human escalation layer | 58 | 90 | Partial | Tenant config dual-control ledger, connector/action onboarding, apply attribution, revocation, action approvals, durable crisis handoff, escalation outbox/runtime coverage, and case-approval delivery exist; UI workflow, expiry, and live operator drills remain. |
 | Intelligence layer | 52 | 91 | Partial | Anthropic/Bedrock paths, TPM quota, RAG controls, grounded response governance, taxonomy/autonomy fail-closed policy, safety floors, vision attachments, schema-gated structured extraction, malformed JSON retry, encrypted sensitive audit/prompt fields, governed LLM/fraud/SOP/QA scaffolds, and Phase 0 production LLM fail-closed behavior improved; provider/quality proof and full production composition remain. |
-| Auth/RBAC | 57 | 91 | Partial | Header authority, Auth0 namespaced mapping, `AUTH_ENABLED` default/prod gate, scope-less principal rejection, domain capabilities, connector approval mapping, platform/tenant capability split, object-RBAC sweep, data-protection caps, and conversation ownership improved; live proof and partial auth-error coarsening remain. |
-| Tenancy | 76 | 91 | Partial | RLS discipline plus header/voice/data-protection/object-RBAC/platform-lifecycle/work-order/connector RLS fixes, DB router proof, and connector credential bridge fixes improve isolation; production proof and nullable-tenant RLS hardening remain. |
+| Auth/RBAC | 57 | 92 | Partial | Header authority, Auth0 namespaced mapping, `AUTH_ENABLED` default/prod gate, scope-less principal rejection, domain capabilities, connector approval mapping, platform/tenant capability split, object-RBAC sweep, data-protection caps, conversation ownership, and production auth-error coarsening improved; current live Auth0 `/auth/me` proof remains. |
+| Tenancy | 76 | 92 | Partial | RLS discipline plus header/voice/data-protection/object-RBAC/platform-lifecycle/work-order/connector RLS fixes, DB router proof, connector credential bridge fixes, partial production-role RLS proof, and nullable-tenant static invariant improve isolation; full current-head production FORCE-RLS/RLS proof remains. |
 | Observability | 58 | 76 | Partial | Logs/metrics/alerts exist, completion-event DLQ, work-order states, connector invocation records, nonce backlog signal, case-approval delivery records, and real governance denial reasons are stronger; live operator and compliance proof incomplete. |
-| Reliability | 55 | 91 | Partial | Boot gates, CI, durable grants, repaired voice load harnesses, rate-limit fail policy, quota/queue fail-closed behavior, durable ingress capture, completion DLQ, connector idempotency, generic connector live tests, work-order state, stale-claim reconciliation, queue/admission fixes, outbox retry fixes, approval race guard, tool cap, worker fixes, Phase 0 connector credential fix, and clean tenant-config DB proof help; live worker/DLQ/full-suite production proof keeps this capped. |
-| Scalability | 49 | 72 | Partial | Queue topology, token quota, inbound rate limiting, per-tenant QoS, admission controls, worker right-sizing, CloudAMQP volume reduction, tool invocation caps, and connector/work-order/generic operation ledgers help; no meaningful live load/scale proof and per-IP proxy semantics remain unproven. |
-| Enterprise readiness | 43 | 84 | Not ready | Security/governance primitives, domain agnosticism, production-fail-closed defaults, and DB proof improved, but S-10, formal compliance, production provider integrations, DR/SLO evidence, production proof, live CORS/RLS evidence, uncommitted Phase 0 cleanup, and repo/infra hygiene cap readiness. |
+| Reliability | 55 | 92 | Partial | Boot gates, CI, durable grants, repaired voice load harnesses, rate-limit fail policy, quota/queue fail-closed behavior, durable ingress capture, completion DLQ, connector idempotency, generic connector live tests, work-order state, stale-claim reconciliation, queue/admission fixes, outbox retry fixes, approval race guard, tool cap, worker fixes, Phase 0 connector credential fix, partial live worker/DLQ proof, and clean tenant-config DB proof help; provider smoke and current-head full-suite production proof keep this capped. |
+| Scalability | 49 | 74 | Partial | Queue topology, token quota, inbound rate limiting, Fly-aware client-IP resolution, per-tenant QoS, admission controls, worker right-sizing, CloudAMQP volume reduction, tool invocation caps, and connector/work-order/generic operation ledgers help; no meaningful live load/scale proof and current-deploy rate-limit bucket proof remain. |
+| Enterprise readiness | 43 | 86 | Not ready | Security/governance primitives, domain agnosticism, production-fail-closed defaults, compliance docs, zero-warning type state, and partial S-10 evidence improved readiness, but current-head S-10, clean provider smoke, formal compliance operations, DR/SLO evidence, full live CORS/RLS/rate-limit proof, duplicate-tree/repo hygiene, and production provider integrations cap readiness. |
 
 ## Security Audit Summary
 
-### S-01: Production Header Authority Spoofing - CLOSED, Live Proof Pending
+### S-01: Production Header Authority Spoofing - CLOSED, Current-Head Live Proof Pending
 
 Original finding: production could accept spoofable legacy `X-Tenant-ID` / `X-Principal-ID` authority headers if deployed without trusted ingress.
 
@@ -607,7 +620,7 @@ Current evidence:
 - `apps/command-center2/frontend/lib/api-client.ts` defaults to `verified-bearer`.
 - Tests: `test_authority_header_disabled.py`, `test_main_legacy_header_disabled.py`, `test_config_security_posture.py`.
 
-Status: closed in code and tests by `c9a2712`. Live production ingress proof is still part of S-10.
+Status: closed in code and tests by `c9a2712`. Live production ingress proof exists for Fly v235 / `c65fda5`; current-head proof remains part of S-10.
 
 Prior attack path is no longer valid by default:
 
@@ -765,23 +778,30 @@ Current evidence:
 - `apps/backend/scripts/check_production_readiness.py` exposes release-gate CLI.
 - `.github/workflows/ci.yml` runs backend/frontend and DB-backed checks.
 - `test_rls_coverage_invariant.py` requires tenant tables with RLS to force RLS.
-- Tests: `test_production_readiness.py`, `test_check_production_readiness_script.py`, `test_rls_coverage_invariant.py`.
-- Production-readiness rejection for `WEBHOOK_TRUST_URL_HEADER=true` and missing `PUBLIC_BASE_URL` is covered by `test_production_readiness_webhook.py`; the readiness bundle passed `16` tests.
+- Tests: `test_production_readiness.py`, `test_check_production_readiness_script.py`, `test_rls_coverage_invariant.py`, `test_rls_null_tenant_hardening.py`.
+- Production-readiness rejection for `WEBHOOK_TRUST_URL_HEADER=true`, missing `PUBLIC_BASE_URL`, empty production `CORS_ALLOW_ORIGINS`, and related gates is covered by tests. Latest focused hardening bundle including production readiness passed `78` tests.
 - `apps/backend/scripts/s10_prep/live_verification_probes.py` adds deploy-time probes for direct spoof rejection, Auth0/bearer smoke, production-role RLS isolation, worker/DLQ proof, and smoke trace evidence.
 - `apps/backend/app/workers/s10_probe_tasks.py` adds a DLQ probe task.
 - `apps/backend/scripts/s10_prep/rewrap_legacy_anker_knowledge.py` adds a dry-run-first rewrap path for legacy Anker knowledge ciphertext.
-- Committed migration `0087_connector_configs_force_rls` extends the RLS posture for connector configs, but it is not a substitute for production-role live RLS proof.
+- Committed migration `0087_connector_configs_force_rls` extends the RLS posture for connector configs, and the static nullable-tenant invariant now guards direct FORCE-RLS tenant tables. These are not substitutes for full production-role live catalog proof.
+- `docs/pilot-readiness-evidence/manifest.json` now points at a 2026-07-05 partial S-10 bundle captured against Fly v235 / commit `c65fda5`: direct spoof rejection (`2026-07-05-spoofing-pass.json`), in-container readiness READY (`2026-07-05-readiness-ready.json`), one-table production-role RLS isolation (`2026-07-05-rls-pass.json`), and worker/DLQ proof (`2026-07-05-workers-dlq-pass.json`).
+- `docs/pilot-readiness-evidence/2026-07-05-smoke-trace.json` is a partial live smoke: Auth0 bearer/tenant extraction, ingress, session creation, dispatch, diagnostic worker pickup, and retry behavior reached production, but final diagnostic completion failed all retries due to Anthropic HTTP 400.
+- The only archived `/api/v1/auth/me` Auth0 verified-claims proof remains `2026-06-06-bearer-auth0-verified-claims.json`, captured against an older deployment. The 2026-07-05 partial smoke supports live bearer use but is not a clean replacement for current `/auth/me` proof.
 
-Status: open. The boot gate is committed, but live production verification is not done.
+Status: open. The boot gate is committed and partial live production evidence exists, but S-10 is not closed for current HEAD `cccd538`.
 
 Required to close:
 
-- Live direct spoofed authority-header rejection.
-- Live bearer/Auth0 success path with namespaced claims.
-- Live production-role RLS tenant isolation.
-- Live workers and DLQ smoke/replay proof.
-- Live secrets/provider/readiness CLI output.
-- Rollback evidence.
+- Deploy a clean current HEAD or exact release candidate and recapture evidence against that exact commit SHA.
+- Current live direct spoofed authority-header rejection.
+- Current live bearer/Auth0 `/api/v1/auth/me` success path with namespaced claims and expected capability mapping.
+- Full production-role RLS tenant isolation across representative sensitive tables plus full production FORCE-RLS catalog proof.
+- Current live workers and DLQ smoke/replay proof.
+- Current live secrets/provider/readiness CLI output.
+- Current live CORS preflight proof for allowed and disallowed origins.
+- Current live rate-limit real-client-IP/proxy-aware proof.
+- Clean live workflow smoke where diagnostic completion succeeds or safely escalates for product reasons, not provider misconfiguration.
+- Rollback evidence tied to the current release candidate.
 
 ## Data Protection, Resilience, And Cleanup Review
 
@@ -802,17 +822,16 @@ Residuals: data protection is now real code, not a stub, and a GCP KMS custody p
 Claude's latest committed tranche materially improves the edge posture:
 
 - #23 webhook/voice canonical URL spoofing: closed in production code and tests. `derive_canonical_webhook_url` builds URLs from `PUBLIC_BASE_URL` plus trusted path/query, channel webhook signatures pass `request_path`, and voice provider signatures now ignore forged canonical URL headers unless `WEBHOOK_TRUST_URL_HEADER` is explicitly enabled for non-production testing.
-- #39 inbound rate limiting: closed at code/test level. `EdgeRateLimitMiddleware` runs pre-auth by IP, `TenantRateLimitMiddleware` runs post-auth by tenant/principal, and `main.py` registers both in the request pipeline.
+- #39 inbound rate limiting: closed at code/test level. `EdgeRateLimitMiddleware` runs pre-auth by IP, `TenantRateLimitMiddleware` runs post-auth by tenant/principal, `main.py` registers both in the request pipeline, and `resolve_client_ip()` now keys on `Fly-Client-IP` only when the immediate peer is in `TRUSTED_PROXIES`.
 - #38 Redis backend-loss policy: code-closed for the audited quota/admission paths. Rate-limiter production writes fail closed in 1b; quota and queue admission now fail closed for pre-call/publish decisions in 1d. Residual: live outage drills and idempotent rate-limit degrade-open semantics must be documented.
 - #63 stale voice load/capacity harnesses: closed. The fake WebSocket harnesses now include signed session token, provider auth loader, server-derived signature URL, and provider signature headers.
-- #25 auth-error coarsening: partial. Authority-state errors are coarsened in production, but malformed `Authorization` and malformed legacy authority-header parse paths still return detailed bodies.
+- #25 auth-error coarsening: code-closed. Authority-state errors, malformed `Authorization`, malformed legacy authority-header parse paths, and verification-unavailable cases are routed through the same coarsening helper in production posture.
 - #40 voice wall-clock, idle, and frame-rate caps: closed at code/test level in the voice WebSocket route.
 
 Remaining edge-hardening gaps:
 
-- Per-IP rate limiting may be per Fly proxy, not per real internet client, because the middleware keys `scope["client"]` and the Fly deployment comments say the app observes the proxy as an `fdaa::/16` peer. This still provides a coarse abuse brake, but live proxy/client-IP semantics must be proven before claiming true per-client edge rate limiting.
-- Malformed auth/header parse errors should be routed through the same coarsening helper used by verification/source-state failures before #25 is called closed. Evidence: `AuthorityContextMiddleware` returns direct detailed `JSONResponse` bodies for malformed authorization and legacy authority headers at `apps/backend/app/middleware/authority_context.py:207-214`, `224-232`, and `322-330`.
-- CORS posture is improved but still not fully closed: production readiness now rejects empty `CORS_ALLOW_ORIGINS`, and the previous localhost fallback residue is gone, but `_build_cors_origins()` still falls back to hardcoded origins outside that gate and the Vercel-origin release posture requires explicit production configuration proof. This is not an S-01 class auth bypass, but it is still a release hygiene/security posture issue.
+- Per-IP rate limiting is code/test-correct for Fly proxy semantics, but live proxy/client-IP bucket proof must be archived against current deployment before claiming true production per-client edge limiting.
+- CORS posture is code-closed for fallback behavior: production readiness rejects empty `CORS_ALLOW_ORIGINS` and `_build_cors_origins()` has no hardcoded fallback. Remaining work is archived live preflight proof for allowed/disallowed production origins against current deployment.
 - Redis quota/admission outage policy is no longer deferred: spec 1d implemented fail-closed pre-call/publish behavior. Remaining work is live chaos proof and operator runbook evidence.
 
 ## Multi-Tenancy Audit
@@ -842,7 +861,7 @@ Tenant isolation strengths:
 
 Tenant isolation weaknesses:
 
-- S-10 live production proof is still missing.
+- S-10 live production proof is partial and not current-head-complete.
 - Owner sessions bypass RLS and are used by maintenance tasks.
 - The base tenant RLS helper still allows `row_tenant_id IS NULL`, and forensic review found nullable tenant columns on some forced-RLS legacy/core tables. That is a defense-in-depth gap even where no active cross-tenant leak was proven.
 - Command center still has local/non-production header mode support.
@@ -962,7 +981,7 @@ Strengths:
 
 Risks:
 
-- Production worker process verification is not archived.
+- Production worker/DLQ proof is archived for Fly v235 / `c65fda5`, but it must be recaptured against the current release candidate.
 - Voice load/capacity test suite has been repaired after the auth gate.
 - Some periodic tasks intentionally do not DLQ.
 - Live Redis outage drills are not archived; rate-limit idempotent paths still degrade open by design.
@@ -1001,13 +1020,14 @@ Debt:
 
 - Duplicate app trees still create deployment ambiguity, but the `_deprecated` backend package has been deleted and guarded by invariant tests.
 - Current repo scan counts 522 tracked dead duplicate Python files under `apps/marketing2/app/**/*.py` and `apps/command-center2/app/**/*.py`; this is still open repository hygiene and deployment ambiguity.
-- Phase 0 deletes tracked junk in the working tree: `apps/backend/asyncio`, `apps/backend/asyncpg`, duplicate migration copy `apps/backend/apps/backend/migrations/versions/0004_drop_legacy_workflow_memory_tables.py`, and `h origin phase-2-2-stabilized`; these deletions still need review/staging/commit.
+- Prior tracked junk files (`apps/backend/asyncio`, `apps/backend/asyncpg`, duplicate nested backend migration copy, and `h origin phase-2-2-stabilized`) are no longer present in the current dirty tree. Keep this invariant during commit review.
 - Multiple runtime compositions use in-memory/deterministic defaults outside production gates.
 - Tenant config workflow still needs UI adoption and expiry/time-bound approvals.
 - Voice load/capacity test harnesses now model the provider-signature contract; real provider load proof remains.
 - Command center demo/proof constants remain in active product code.
 - The tenant action registry no longer registers fake-success stubs in the generic path; production DI callers reviewed pass the derived fail-closed setting, and this needs to stay under regression guard.
 - Some abstractions are ahead of real integrations, increasing false confidence.
+- Current smoke/evidence test hygiene still needs cleanup: `test_system_smoke.py` can pass an assertion and then hang on local DB/resource-lifespan paths when the configured local Postgres is unreachable, so it is not reliable release evidence yet.
 
 ## Testing Audit
 
@@ -1023,6 +1043,10 @@ Known current proof:
 - Voice signed token and provider signature passed.
 - Voice signature URL spoofing and repaired voice load/capacity harnesses passed.
 - Edge/tenant rate-limit middleware and app pipeline tests passed.
+- Fly client-IP extraction/anti-spoofing tests passed.
+- Auth-error coarsening for malformed authorization/header parse paths passed after replacing the hanging minimal `TestClient` harness with direct ASGI invocation.
+- Fulfillment callback HMAC unit/integration tests passed.
+- Static nullable-tenant invariant for direct FORCE-RLS tenant tables passed.
 - Channel webhook canonical URL signature tests passed.
 - RAG poisoning controls exist and are covered by targeted tests.
 - Data-protection controls/admin API, legal hold, retention, crypto-shred, master-key rotation, and FK semantics passed in DB-backed tests.
@@ -1032,20 +1056,26 @@ Known current proof:
 - Work-order dispatch substrate passed in the user's normal shell.
 - Commerce action fail-closed tool/registry/settings tests passed, including the current action-approval/case-approved DI wiring guard.
 - Real OpenAI embedding provider/runtime tests passed, including provider HTTP shape, production composition wiring, native pgvector retrieval, tenant isolation, and re-embed behavior.
+- Current hardening bundle (`test_rls_null_tenant_hardening.py`, `test_authority_context_coarsening.py`, `test_fulfillment_callback_hmac.py`, `test_edge_client_ip.py`, `test_production_readiness.py`) passed `78 passed in 2.92s`.
+- Pyright passed with `0 errors, 0 warnings, 0 informations`; ruff passed on touched files; S-10 manifest and smoke trace JSON validate.
 
 Untested or insufficiently proven:
 
-- Live production Auth0 token claim mapping and role assignment.
-- Production trusted ingress behavior and direct spoof rejection.
-- Production FORCE RLS query proof.
-- Production worker/DLQ/health checks.
+- Current-head live production Auth0 `/auth/me` token claim mapping and role assignment.
+- Current-head production trusted ingress/direct spoof rejection. A 2026-07-05 proof exists for Fly v235 / `c65fda5`, not for current HEAD.
+- Full production FORCE-RLS catalog proof. A 2026-07-05 one-table RLS proof exists, but it is not full catalog evidence.
+- Current-head production worker/DLQ/health checks. A 2026-07-05 worker/DLQ proof exists for Fly v235 / `c65fda5`.
 - Live production SSRF/egress proof.
-- Auth-error coarsening for malformed authorization/header parse errors; authority-state errors are covered, parse errors still return detailed bodies.
+- Current-head auth/coarsening live proof.
+- Current-head CORS allowed/disallowed preflight proof.
+- Current-head real-client-IP rate-limit bucket proof.
 - Real provider STT/TTS/action integration behavior.
+- Clean provider-completing diagnostic smoke. The 2026-07-05 partial smoke reaches diagnostic worker/retry but fails all retries on Anthropic HTTP 400.
 - Live production embedding rollout evidence: the code path is wired and DB-tested, but the live Anker document re-embed and retrieval confirmation still need to be archived.
 - Warranty/replacement connector and OMS credential/RLS changes are committed and locally DB-proven; they still need CI/live provider evidence.
 - Local AWS CLI archive/vendor tree and Terraform scaffold are not release-clean.
 - Live quota/admission/rate-limit behavior under production Redis outage policy.
+- `test_system_smoke.py` is not reliable release evidence in the current local environment: health emits a passing dot but the process times out, ticket ingress times out, and direct local Postgres connection to `localhost:5433/operious_test` timed out.
 - DNS-rebinding loopback-server tests need normal-shell/CI proof because Codex sandbox could not bind `127.0.0.1:0`.
 
 ## Website And Command Center Update
@@ -1077,7 +1107,7 @@ Residual website/product trust gaps:
 | Fortune 500 | Not ready | 25 | 41 | Below expected security/compliance/change-control/supply-chain bar. |
 | Regulated enterprise | Not ready | 20 | 45 | Data-protection/KMS controls exist, but formal compliance, retention/legal operations, and live evidence are incomplete. |
 
-Scoped-pilot safety verdict: conditionally safe for a narrow, non-regulated pilot only if Phase E live checks pass, AWS/Terraform local artifacts are cleaned or quarantined, the untracked probe helper is intentionally classified, Phase 0 tracked-junk deletions are committed, generated bytecode remains absent, irreversible provider actions stay constrained behind proven connector/idempotency paths, tenant-config DB proof is promoted to CI/normal-shell evidence, live provider drills are archived, and operators do not present S-10 or compliance evidence as complete. It is not yet safe for broad enterprise production.
+Scoped-pilot safety verdict: conditionally safe for a narrow, non-regulated pilot only if Phase E/S-10 checks are recaptured against current HEAD, AWS/Terraform local artifacts are cleaned or quarantined, current untracked/modified evidence is intentionally reviewed and committed, generated bytecode remains absent, irreversible provider actions stay constrained behind proven connector/idempotency paths, tenant-config DB proof is promoted to CI/normal-shell evidence, live provider drills pass, and operators do not present S-10 or compliance evidence as complete. It is not yet safe for broad enterprise production.
 
 ## Red Team Review
 
@@ -1111,8 +1141,8 @@ Highest business risks:
 
 | # | Severity | Category | Current disposition | Recommended next action |
 | ---: | --- | --- | --- | --- |
-| 1 | Closed/High residual | Auth | S-01 closed in code; live proof pending under S-10 | Archive direct spoof rejection and bearer success proof |
-| 2 | Medium | Deployment | Fly/prod posture improved; proxy/secrets proof pending | Verify `TRUSTED_PROXIES`, secrets, health, RLS, workers |
+| 1 | Closed/High residual | Auth | S-01 closed in code; direct spoof rejection archived for Fly v235 / `c65fda5`; current-head proof still pending under S-10 | Recapture direct spoof rejection and bearer success proof against current release candidate |
+| 2 | Medium | Deployment | Fly/prod posture improved; partial v235 evidence exists; current-head proxy/secrets/provider proof pending | Verify `TRUSTED_PROXIES`, secrets, health, RLS, workers, CORS, rate-limit IP keying against current release |
 | 3 | Closed/Medium residual | Frontend | Command center defaults to verified bearer | Fail production if tenant-header mode is configured |
 | 4 | Closed/Medium residual | RBAC | S-02 closed; domain capabilities and object-RBAC sweep added | Verify live Auth0 roles and extend object-scope policy for uncovered/future routes |
 | 5 | Closed/Medium residual | Governance | `applied_by` persisted: service.apply() records applier, router threads principal, schema exposes it (spec 1a) | UI workflow + expiry remain |
@@ -1122,20 +1152,20 @@ Highest business risks:
 | 9 | Closed/High residual | RAG | S-07 original path closed | Add reviewer UX, evals, source trust policy |
 | 10 | Closed/Medium residual | Auth0 | S-08 code closed | Add live token contract fixture |
 | 11 | Closed/Medium residual | Quota | S-09 diagnostic TPM closed; Redis pre-call quota loss fails closed | Add enterprise budgets, provider-wide quotas, and live outage drills |
-| 12 | Open/High | Readiness | S-10 open | Complete Phase E live verification |
+| 12 | Open/High | Readiness | S-10 open with partial live evidence against `c65fda5`, not current-head-complete | Recapture full Phase E live verification against current release candidate |
 | 13 | High | Voice | Real STT/TTS provider proof missing | Integrate/prove providers or keep voice disabled |
 | 14 | Partial/High | Actions | Refund, repair, warranty/replacement, inventory-check, and generic connector operations now have connector/work-order/governance coverage; automatic and manager-approved unconfigured commerce actions fail closed in production; warehouse remains unintegrated | Add CI/production provider drills, then implement warehouse |
 | 15 | High | Governance | Tenant-specific policy residue risk remains | Move hardcoded proof policies to tenant data |
-| 16 | Partial/Medium | CORS/Auth | CORS credential flags respect config, wildcard is rejected, localhost fallback residue is removed, and production readiness now requires explicit origins; residual is the hardcoded fallback outside the gate plus missing live production origin proof | Remove/narrow hardcoded fallback if empty-is-disabled is required, keep the production gate, and archive live origin proof |
+| 16 | Closed/Medium residual | CORS/Auth | CORS credential flags respect config, wildcard is rejected, production readiness requires explicit origins, and hardcoded fallback is removed | Archive live allowed/disallowed origin preflight proof |
 | 17 | Medium | Secrets | Boot gate checks audit secret; live proof missing | Set, rotate, verify secret in Phase E |
-| 18 | High | RLS | Production FORCE RLS proof missing; forensic F-009 also keeps nullable-tenant RLS semantics open | Run and archive prod proof query, then harden nullable tenant columns/RLS helper |
-| 19 | High | Workers | Worker health proof missing | Verify all process groups and alerts |
+| 18 | High | RLS | One-table production-role RLS proof exists for v235; full production FORCE-RLS catalog proof missing; nullable-tenant semantics remain defense-in-depth work | Run and archive full prod FORCE-RLS/catalog proof, then continue nullable tenant hardening |
+| 19 | High | Workers | Worker/DLQ proof exists for v235; current-head worker health/process proof missing | Verify all process groups, DLQ, alerts, and clean smoke against current release |
 | 20 | Medium | Channel | Credentials and connector config are gated/read-redacted; live provider proof incomplete | Channel-specific admin/approval/live proof |
 | 21 | Medium | Topology | Ledger-gated; live workflow proof missing | Verify topology flow in CI/live |
 | 22 | Closed/Medium residual | Policy | Ledger revocation implemented: REVOKED status, revoke() service, /revoke endpoint, TENANT_CONFIG_CHANGE_REVOKE act (spec 1a) | Expiry (time-based) and UI workflow remain |
 | 23 | Closed/Medium residual | Webhook | Twilio/voice canonical URLs are server-derived in code/tests | Commit/readiness-gate `PUBLIC_BASE_URL`; archive live provider proof |
 | 24 | Closed/Medium residual | Webhook | Uniform `401 webhook_rejected` closes content oracle; timing oracle mitigated by rate limiting | Do not pursue constant-time DB lookups; keep rate limits live |
-| 25 | Partial | Auth | Authority-state errors coarsen in production, but malformed auth/header parse errors still expose detail | Route malformed parse paths through coarsening helper and add tests |
+| 25 | Closed/Medium residual | Auth | Authority-state and malformed auth/header parse errors coarsen in production posture with tests | Recapture live auth/coarsening proof against current release |
 | 26 | Closed/Medium residual | Tenant | Domain gates plus object-RBAC sweep cover selected sensitive tenant-scoped surfaces | Live Auth0 proof and route-coverage invariant expansion |
 | 27 | High | Audit | LLM prompts/completions are sensitive | Encrypt/redact/retain by policy |
 | 28 | Closed/Medium residual | Prompt/RAG | Baseline injection controls added | Add adversarial evals and policy tuning |
@@ -1149,7 +1179,7 @@ Highest business risks:
 | 36 | Closed/Medium residual | Migrations | RLS coverage invariant added | Keep invariant in CI and prove prod RLS |
 | 37 | Partial/Medium | Queue | Per-tenant queue QoS reservations added for diagnostic publication; broker still not isolated per tenant | Prove QoS live, extend priority/rate limits, and consider broker isolation |
 | 38 | Closed/Medium residual | Admission | Rate-limit, quota, and queue-admission audited paths fail closed for Redis-backed write/admission failures; idempotent rate-limit behavior still degrades open | Archive live Redis outage drills and runbooks |
-| 39 | Closed/Medium residual | Rate limit | Per-IP and tenant/principal rate limits are wired and tested | Prove real-client-IP behavior behind Fly/proxy |
+| 39 | Closed/Medium residual | Rate limit | Per-IP and tenant/principal rate limits are wired; Fly `Fly-Client-IP` trusted-proxy keying is code/test-covered | Archive current-deploy bucket proof behind Fly/proxy |
 | 40 | Closed/Low residual | WebSocket | Voice frame byte/count plus wall-clock/idle/rate caps are enforced and tested | Keep handler-level cap proof in CI |
 | 41 | Medium | UX/Product | Demo proof sessions remain | Remove/isolate proof sessions |
 | 42 | Medium | Business | Claims can outrun live proof | Align claims to S-10 status |
@@ -1171,7 +1201,7 @@ Highest business risks:
 | 58 | Medium | Observability | Alert tasks best-effort | Alert on evaluator failure |
 | 59 | Medium | Metrics | Beat/queue observability gaps remain | Track beat health |
 | 60 | Closed/Low residual | Testing | CI exists | Add artifact attestations/security gates |
-| 61 | Medium | Testing | Live Auth0 contract missing | Archive real token fixture |
+| 61 | Medium | Testing | Current-head live Auth0 `/auth/me` contract missing; older 2026-06-06 fixture exists | Archive real current token fixture |
 | 62 | Closed/Low residual | Testing | SSRF tests exist | Add live egress proof |
 | 63 | Closed/Low residual | Testing | Voice auth and load/capacity harnesses now pass with provider-signature contract | Keep load/capacity tests in CI; add real provider load proof |
 | 64 | Closed/Medium residual | Testing | Dual-control tests now exist | Keep in CI and add UI workflow tests |
@@ -1216,23 +1246,23 @@ Highest business risks:
 
 | Dimension | Prior score | Current score |
 | --- | ---: | ---: |
-| Architecture | 62 | 93 |
-| Security | 57 | 97 |
-| Scalability | 49 | 72 |
-| Reliability | 55 | 91 |
-| Governance | 72 | 97 |
-| Code quality | 68 | 88 |
-| Enterprise readiness | 43 | 84 |
+| Architecture | 62 | 94 |
+| Security | 57 | 98 |
+| Scalability | 49 | 74 |
+| Reliability | 55 | 92 |
+| Governance | 72 | 98 |
+| Code quality | 68 | 92 |
+| Enterprise readiness | 43 | 86 |
 
 ## Customer Survival Verdict
 
 Could Operious survive 10 customers?
 
-Yes, as a controlled pilot platform with verified bearer auth, production readiness gate enabled, risky features constrained, live tenant isolation checks archived, and manual monitoring.
+Yes, as a controlled pilot platform if verified bearer auth is used, risky features stay constrained, operators accept manual monitoring, and the current release candidate recaptures the partial v235 S-10 evidence before real customers are added.
 
 Could Operious survive 100 customers?
 
-Not safely as a general production platform today. A narrow non-regulated pilot cohort is plausible after Phase E proof and repo/infra cleanup, but queue, provider, support, compliance, and production verification gaps would surface quickly outside a constrained scope.
+Not safely as a general production platform today. A narrow non-regulated pilot cohort is plausible after current-head S-10 proof, clean provider smoke, and repo/infra cleanup, but queue, provider, support, compliance, and production verification gaps would surface quickly outside a constrained scope.
 
 Could Operious survive 1,000 customers?
 

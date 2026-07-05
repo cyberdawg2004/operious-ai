@@ -29,6 +29,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql as pg
 
 revision: str = "0097_mvp7_customer_identity_id"
 down_revision: Union[str, None] = "0096_sme_resolution_proposal_metadata"
@@ -41,7 +42,7 @@ def upgrade() -> None:
         "operational_sessions",
         sa.Column(
             "customer_identity_id",
-            sa.dialects.postgresql.UUID(as_uuid=True),
+            pg.UUID(as_uuid=True),
             nullable=True,
             comment="Cross-channel customer identity correlation key (MVP-7).",
         ),

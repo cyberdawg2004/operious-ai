@@ -2,17 +2,86 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
-from starlette.testclient import TestClient
 
 from app.middleware.authority_context import AuthorityContextMiddleware
 
 
-def _client(*, coarsen: bool) -> TestClient:
+@dataclass(frozen=True, slots=True)
+class _ASGIResponse:
+    status_code: int
+    text: str
+
+
+class _ASGITestClient:
+    def __init__(self, app: Starlette) -> None:
+        self._app = app
+
+    def get(
+        self,
+        path: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> _ASGIResponse:
+        return asyncio.run(_asgi_get(self._app, path, headers=headers))
+
+
+async def _asgi_get(
+    app: Starlette,
+    path: str,
+    *,
+    headers: Mapping[str, str] | None,
+) -> _ASGIResponse:
+    response_status = 500
+    body_parts: list[bytes] = []
+    sent_request = False
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": b"",
+        "headers": [
+            (key.lower().encode("latin-1"), value.encode("latin-1"))
+            for key, value in (headers or {}).items()
+        ],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+
+    async def receive() -> dict[str, object]:
+        nonlocal sent_request
+        if not sent_request:
+            sent_request = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def send(message: Mapping[str, object]) -> None:
+        nonlocal response_status
+        if message["type"] == "http.response.start":
+            response_status = int(message["status"])
+        elif message["type"] == "http.response.body":
+            body_parts.append(message.get("body", b""))
+
+    await app(scope, receive, send)
+    return _ASGIResponse(
+        status_code=response_status,
+        text=b"".join(body_parts).decode("utf-8"),
+    )
+
+
+def _client(*, coarsen: bool) -> _ASGITestClient:
     async def ok(request):  # noqa: ANN001
         return PlainTextResponse("ok")
 
@@ -23,7 +92,7 @@ def _client(*, coarsen: bool) -> TestClient:
         legacy_header_authority_enabled=False,
         coarsen_errors=coarsen,
     )
-    return TestClient(app)
+    return _ASGITestClient(app)
 
 
 def test_disabled_header_authority_coarsened() -> None:
@@ -60,7 +129,7 @@ def test_malformed_authorization_parse_detailed_when_not_coarsened() -> None:
     assert "reason" in body
 
 
-def _client_legacy_enabled(*, coarsen: bool) -> TestClient:
+def _client_legacy_enabled(*, coarsen: bool) -> _ASGITestClient:
     """Client with legacy header authority *enabled* to test parse-error coarsening."""
 
     async def ok(request):  # noqa: ANN001
@@ -73,7 +142,7 @@ def _client_legacy_enabled(*, coarsen: bool) -> TestClient:
         legacy_header_authority_enabled=True,
         coarsen_errors=coarsen,
     )
-    return TestClient(app)
+    return _ASGITestClient(app)
 
 
 def test_malformed_legacy_header_parse_coarsened() -> None:

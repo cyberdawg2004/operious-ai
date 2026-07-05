@@ -25,6 +25,32 @@ from tests.conftest import (
 
 pytestmark = pytest.mark.smoke
 
+# ─── Environment isolation ────────────────────────────────────────────────
+# _create_app() loads TEST_DATABASE_URL from .env into the process environ.
+# Without cleanup this contaminates later test modules — their pg_engine
+# fixture sees the env var, does NOT skip, and may fail against a stale
+# local database. The autouse fixture below saves & restores the env vars
+# this module touches so no cross-module leakage is possible.
+
+_SMOKE_ENV_KEYS = (
+    TEST_DATABASE_URL_ENV,
+    "DATABASE_URL",
+    "TENANT_CREDENTIAL_MASTER_KEY",
+    "TENANT_CONFIG_ALLOW_SELF_APPROVAL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_smoke_env():
+    """Save/restore env vars that _create_app mutates."""
+    saved = {k: os.environ.get(k) for k in _SMOKE_ENV_KEYS}
+    yield
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
 
 def _load_dotenv_key(key: str) -> None:
     """Load one simple KEY=VALUE entry from repo .env without logging it."""
@@ -44,11 +70,8 @@ def _load_dotenv_key(key: str) -> None:
         return
 
 
-for _env_key in (TEST_DATABASE_URL_ENV,):
-    _load_dotenv_key(_env_key)
-
-
 def _create_app():
+    _load_dotenv_key(TEST_DATABASE_URL_ENV)
     os.environ.setdefault(
         "TENANT_CREDENTIAL_MASTER_KEY",
         "system-smoke-master-key-material-32-bytes",

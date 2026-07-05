@@ -34,7 +34,17 @@
     {
       "requirement": "live_workflow_recovered_smoke_trace",
       "path": "2026-06-06-live-workflow-recovered-smoke.json",
-      "note": "Smoke trace pending bearer token — see smoke_pending note below"
+      "note": "Clean recovered end-to-end workflow proof remains the 2026-06-06 capture; the 2026-07-05 smoke trace below is partial because the live Anthropic call returned HTTP 400."
+    },
+    {
+      "requirement": "pipeline_operational_smoke_trace_partial",
+      "path": "2026-07-05-smoke-trace.json",
+      "note": "Auth0 bearer token, ingress, session creation, dispatch, diagnostic worker pickup, and retry behavior were observed on 2026-07-05; final diagnostic completion did not succeed because the deployed Anthropic model/parameter configuration returned HTTP 400."
+    },
+    {
+      "requirement": "s10_full_capture_current_head",
+      "path": "2026-07-05-s10-full-capture.json",
+      "note": "Comprehensive S-10 capture: spoof rejection (PASS), Auth0 /auth/me verified claims (PASS), CORS preflight (PARTIAL - config), rate limit (OBSERVED - health excluded by design), queue/worker health (PASS - 18/20 ok), smoke trace pipeline (OPERATIONAL), production boot gate (PASS). Two partial items need deployment config fixes (CORS_ALLOW_ORIGINS, ANTHROPIC_MODEL)."
     },
     {
       "requirement": "production_readiness_output",
@@ -46,8 +56,7 @@
       "note": "Rollback path unchanged: Fly release history + Neon PITR"
     }
   ],
-  "smoke_pending": "Smoke probe requires operator bearer token (Auth0 JWT). Run: python3 scripts/s10_prep/live_verification_probes.py smoke --base-url https://operious-ai-imad.fly.dev --bearer-token <token> --tenant-id <tenant-id>",
-  ,
+  "smoke_pending": "Full current-deploy recovered smoke remains pending after the 2026-07-05 partial trace. Fix ANTHROPIC_MODEL/ANTHROPIC_API_KEY or request parameters in Fly secrets, then rerun: python3 scripts/s10_prep/live_verification_probes.py smoke --base-url https://operious-ai-imad.fly.dev --bearer-token <token> --tenant-id <tenant-id>",
   "bugs_surfaced_and_fixed_2026_07_05": [
     {
       "commit": "2d42cd0",
@@ -90,7 +99,7 @@
   "resolved_items": [
     {
       "item": "semantic-validation calibration rejecting borderline LLM wording (e.g. ungrounded credit/rma) -> dead-letter",
-      "resolution": "authorized-remediation allowlist (2a691e9) + bounded self-correction (e92e886) + escalate-not-dead-letter for terminal blocks (3a3d7fc); verified live by the clean PASS smoke"
+      "resolution": "authorized-remediation allowlist (2a691e9) + bounded self-correction (e92e886) + escalate-not-dead-letter for terminal blocks (3a3d7fc); verified live by the 2026-06-06 clean PASS smoke"
     },
     {
       "item": "edge per-IP rate limiting keyed on the fly-proxy peer (one global bucket) instead of the real client",

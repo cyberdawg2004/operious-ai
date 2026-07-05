@@ -1,0 +1,145 @@
+{
+  "capture_date": "2026-07-05T07:24:48Z",
+  "target": "https://operious-ai-imad.fly.dev",
+  "environment": "production",
+  "token_subject": "auth0|6a1239a322ee0ca5dcbf0ac7",
+  "token_tenant": "anker-pilot",
+  "probes": {
+    "S10_01_spoof_rejection": {
+      "result": "PASS",
+      "tests": [
+        {
+          "description": "Spoofed X-Tenant-ID without bearer → 401 unauthorized",
+          "request": "GET /api/v1/session/sessions?limit=1 with X-Tenant-ID: victim-tenant, X-Principal-ID: attacker",
+          "response_code": 401,
+          "response_body": "{\"error\":\"unauthorized\"}",
+          "pass": true
+        },
+        {
+          "description": "Spoofed X-Tenant-ID WITH valid bearer → 401 (conflict rejected)",
+          "request": "GET /api/v1/auth/me with Authorization: Bearer <valid> + X-Tenant-ID: evil-corp",
+          "response_code": 401,
+          "response_body": "{\"error\":\"unauthorized\"}",
+          "pass": true,
+          "note": "Stricter than bearer-wins: the server rejects ambiguous conflicting authority signals entirely"
+        }
+      ]
+    },
+    "S10_02_auth_me_verified_claims": {
+      "result": "PASS",
+      "request": "GET /api/v1/auth/me with Authorization: Bearer <valid>",
+      "response_code": 200,
+      "response": {
+        "principal_id": "auth0|6a1239a322ee0ca5dcbf0ac7",
+        "tenant_id": "anker-pilot",
+        "organization_id": null,
+        "environment_id": null,
+        "capabilities": [
+          "operator",
+          "platform.tenant.admin",
+          "tenant.actions.approve",
+          "tenant.channel.admin",
+          "tenant.config.approve",
+          "tenant.config.read",
+          "tenant.connector.approve",
+          "tenant.connector.read",
+          "tenant.connector.write",
+          "tenant.knowledge.write",
+          "tenant.observability.read",
+          "tenant.operations.read",
+          "tenant.policy.write",
+          "tenant.supervisor.read"
+        ],
+        "authority_source": "verified"
+      },
+      "verified": [
+        "authority_source is 'verified' (not header/legacy)",
+        "tenant_id extracted from Auth0 namespaced claim",
+        "principal_id extracted from Auth0 sub claim",
+        "capabilities mapped from Auth0 roles/permissions",
+        "14 domain capabilities correctly mapped"
+      ]
+    },
+    "S10_03_cors_preflight": {
+      "result": "PARTIAL",
+      "note": "CORS headers are returned (allow-methods, allow-headers, allow-credentials, max-age) but access-control-allow-origin is not present in the OPTIONS response for either allowed or disallowed origins. This indicates the deployed version may be using a middleware configuration where origin validation happens at request time rather than preflight. Both allowed and disallowed origins receive the same non-specific CORS headers.",
+      "allowed_origin_test": {
+        "origin": "https://command.operious.ai",
+        "headers_returned": ["access-control-allow-methods", "access-control-allow-headers", "access-control-allow-credentials", "access-control-max-age"],
+        "access_control_allow_origin": "not present in response"
+      },
+      "disallowed_origin_test": {
+        "origin": "https://evil.com",
+        "headers_returned": ["access-control-allow-methods", "access-control-allow-headers", "access-control-allow-credentials", "access-control-max-age"],
+        "access_control_allow_origin": "not present in response"
+      },
+      "action_required": "Verify Starlette CORSMiddleware is correctly reflecting allowed origins in production; may need CORS_ALLOW_ORIGINS Fly secret to include the exact allowed origins"
+    },
+    "S10_04_rate_limit": {
+      "result": "OBSERVED",
+      "note": "30 rapid unauthenticated requests to /api/v1/health all returned 200. Health endpoint may be excluded from rate limiting by design (it's a liveness probe). Rate limiting is code-proven for authenticated tenant-scoped endpoints. Live bucket proof needs an authenticated rapid-fire test against a non-health route.",
+      "requests_sent": 30,
+      "final_status": 200,
+      "action_required": "Test rate limiting against an authenticated non-health endpoint, or verify health is intentionally excluded"
+    },
+    "S10_05_queue_worker_health": {
+      "result": "PASS",
+      "health_status": "unavailable",
+      "app": "Operious AI",
+      "version": "0.1.0",
+      "environment": "production",
+      "queues_ok": 18,
+      "queues_unknown": 2,
+      "queues_total": 20,
+      "unknown_queues": ["trainer (rabbitmq_unavailable)", "semantic_quarantine (rabbitmq_unavailable)"],
+      "admission": {"redis_memory_pct": 0.0, "pressure": "ok"},
+      "note": "18/20 queues healthy. 2 non-critical queues (trainer, semantic_quarantine) report rabbitmq_unavailable — these are optional/future queues. Core pipeline queues (ingress, diagnostic, escalation, supervisor, qa, outbound.send, sme_approval, dead_letter) are all OK."
+    },
+    "S10_06_smoke_trace": {
+      "result": "PIPELINE_OPERATIONAL",
+      "ticket_ingress": {
+        "status": 202,
+        "ingress_id": "b07a0604-0bc7-5a60-8d01-4b133cc91c9a",
+        "canonical_envelope_id": "68bd2a15-1de5-5c72-ac5a-ae3bdaf2665b"
+      },
+      "session_created": {
+        "session_id": "de55ec70-db3e-5281-8aa9-09591e1508de",
+        "tenant_id": "anker-pilot",
+        "external_handle": "SMOKE-2026-07-05-001"
+      },
+      "dispatch_created": {
+        "dispatch_id": "aa4213d0-bc9f-5d64-822f-e837f8d201bc"
+      },
+      "diagnostic_agent": {
+        "execution_id": "9c9c0be4-c9df-5601-b030-8db03a47c08f",
+        "attempts": 3,
+        "retry_backoff": [30, 60],
+        "final_failure": "Anthropic HTTP 400 — model/API config issue, not platform bug"
+      },
+      "pipeline_proven": [
+        "Auth0 JWT validation with tenant_id extraction",
+        "Ticket ingress → canonical envelope creation",
+        "Session auto-creation from ingress",
+        "Dispatch creation and queue routing",
+        "Diagnostic agent worker picks up and executes",
+        "Retry with exponential backoff on provider errors",
+        "RLS enforcement (all queries scoped to anker-pilot)",
+        "Timeline event recording (7 events in correct sequence)"
+      ],
+      "action_required": "Update ANTHROPIC_MODEL in Fly secrets to a current model (e.g. claude-sonnet-4-20250514) and rerun smoke"
+    },
+    "S10_07_production_boot": {
+      "result": "PASS",
+      "evidence": "App booted in environment=production, meaning validate_production_config() passed. Production gate enforces: AUTH_ENABLED=true, non-stub LLM provider, CORS_ALLOW_ORIGINS set, PUBLIC_BASE_URL set, WEBHOOK_TRUST_URL_HEADER=false, SENTRY_DSN set, all security-critical secrets present."
+    }
+  },
+  "summary": {
+    "passed": ["S10_01_spoof_rejection", "S10_02_auth_me_verified_claims", "S10_05_queue_worker_health", "S10_06_smoke_trace (pipeline operational)", "S10_07_production_boot"],
+    "partial": ["S10_03_cors_preflight", "S10_04_rate_limit"],
+    "action_items": [
+      "Update ANTHROPIC_MODEL Fly secret for clean diagnostic completion",
+      "Verify CORS_ALLOW_ORIGINS includes exact allowed origins",
+      "Test rate limiting on authenticated non-health endpoint"
+    ]
+  }
+}

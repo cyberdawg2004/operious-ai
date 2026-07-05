@@ -24,6 +24,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql as pg
 
 revision: str = "0096_sme_resolution_proposal_metadata"
 down_revision: Union[str, None] = "0095_mvp6_semantic_qa_grounding"
@@ -36,7 +37,7 @@ def upgrade() -> None:
         "resolution_proposals",
         sa.Column(
             "metadata",
-            sa.dialects.postgresql.JSONB(),
+            pg.JSONB(),
             nullable=False,
             server_default=sa.text("'{}'::jsonb"),
         ),
