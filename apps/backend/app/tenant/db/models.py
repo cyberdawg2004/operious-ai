@@ -295,6 +295,11 @@ class TenantKnowledgeDocumentRow(Base):
         onupdate=func.now(),
     )
     last_index_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # MVP-4: contradiction check result. NULL = not checked or not applicable.
+    # Populated by KnowledgeRuntime when SOPContradictionAgent quarantines doc.
+    contradiction_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     # Populated iff document_type='template' — see migration 0090 and
     # app.tenant.persistence.records.TenantKnowledgeDocumentRecord.
     template_purpose: Mapped[str | None] = mapped_column(

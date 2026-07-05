@@ -1288,6 +1288,7 @@ def _document_record_to_row(
         uploaded_by=record.uploaded_by,
         vector_indexed_at=record.vector_indexed_at,
         created_at=record.created_at,
+        contradiction_metadata=record.contradiction_metadata,
         template_purpose=record.template_purpose,
         template_channel=record.template_channel,
     )
@@ -1307,6 +1308,7 @@ def _update_document_row(
     row.vector_indexed_at = record.vector_indexed_at
     row.created_at = record.created_at
     row.last_index_error = record.last_index_error
+    row.contradiction_metadata = record.contradiction_metadata
     row.template_purpose = record.template_purpose
     row.template_channel = record.template_channel
 
@@ -1314,6 +1316,10 @@ def _update_document_row(
 def _document_row_to_record(
     row: TenantKnowledgeDocumentRow,
 ) -> TenantKnowledgeDocumentRecord:
+    raw_contradiction = getattr(row, "contradiction_metadata", None)
+    contradiction_metadata: dict[str, Any] | None = (
+        dict(raw_contradiction) if isinstance(raw_contradiction, dict) else None
+    )
     return TenantKnowledgeDocumentRecord(
         document_id=TenantKnowledgeDocumentId(row.document_id),
         tenant_id=row.tenant_id,
@@ -1328,6 +1334,7 @@ def _document_row_to_record(
         created_at=row.created_at,
         updated_at=getattr(row, "updated_at", None),
         last_index_error=row.last_index_error,
+        contradiction_metadata=contradiction_metadata,
         template_purpose=row.template_purpose,
         template_channel=row.template_channel,
     )

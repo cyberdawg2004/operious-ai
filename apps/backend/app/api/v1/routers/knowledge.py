@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.v1.schemas.knowledge import (
+    KnowledgeAnalyzeRequest,
+    KnowledgeAnalyzeResponse,
     KnowledgeIngestionResponse,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
@@ -78,6 +80,39 @@ async def search_knowledge(
         min_score=request.min_score,
     )
     return KnowledgeSearchResponse.from_result(result)
+
+
+@router.post(
+    "/analyze",
+    response_model=KnowledgeAnalyzeResponse,
+    dependencies=[Depends(require_tenant_knowledge_write)],
+    status_code=status.HTTP_200_OK,
+)
+async def analyze_knowledge_base(
+    request: KnowledgeAnalyzeRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    service: KnowledgeService = Depends(get_knowledge_service),
+) -> KnowledgeAnalyzeResponse:
+    """Analyze the entire KB for contradictions, gaps, and enhancements.
+
+    Runs SOPContradictionAgent across ALL active SOP/POLICY documents pairwise,
+    then dispatches aggregate_qa_signals for the tenant to detect knowledge gaps
+    and trigger KBTrainerAgent recommendations.
+
+    Returns a structured analysis report immediately (contradictions + gaps
+    found to date) and enqueues the trainer run asynchronously.
+    """
+    try:
+        result = await service.analyze_knowledge_base(
+            tenant_id=expected_tenant_id,
+            document_types=request.document_types,
+        )
+    except KnowledgeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "knowledge_analysis_failed"},
+        ) from exc
+    return KnowledgeAnalyzeResponse.from_result(result)
 
 
 __all__ = ["router"]

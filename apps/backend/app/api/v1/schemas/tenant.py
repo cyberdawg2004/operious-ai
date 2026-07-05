@@ -437,6 +437,10 @@ class TenantKnowledgeDocumentResponse(BaseModel):
     created_at: str
     updated_at: str | None = None
     last_index_error: str | None = None
+    # MVP-4: structured contradiction report. Present only when the document
+    # was quarantined by SOPContradictionAgent. Contains contradiction_count,
+    # contradicting_doc_ids, contradiction_types, highest_confidence.
+    contradiction_metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_record(
@@ -462,6 +466,7 @@ class TenantKnowledgeDocumentResponse(BaseModel):
                 record.updated_at.isoformat() if record.updated_at is not None else None
             ),
             last_index_error=record.last_index_error,
+            contradiction_metadata=record.contradiction_metadata,
         )
 
 

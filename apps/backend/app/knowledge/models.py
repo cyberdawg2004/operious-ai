@@ -139,8 +139,25 @@ class KnowledgeIngestionResult:
     contradiction_metadata: dict[str, object] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class KnowledgeAnalysisResult:
+    """Result of a full KB analysis (POST /knowledge/analyze)."""
+
+    tenant_id: str
+    documents_analyzed: int
+    contradictions_found: int
+    # Each conflict: {doc_a_id, doc_a_title, doc_b_id, doc_b_title,
+    #                  excerpt_a, excerpt_b, contradiction_type, confidence}
+    conflicts: list[dict[str, Any]]
+    # Already-quarantined documents that have stored contradiction_metadata
+    quarantined_with_detail: list[dict[str, Any]]
+    trainer_enqueued: bool
+    analyzed_at: Any  # datetime
+
+
 __all__ = [
     "ContradictionCheckStatus",
+    "KnowledgeAnalysisResult",
     "KnowledgeBudgetDecision",
     "KnowledgeBudgetDecisionReason",
     "KnowledgeCitation",

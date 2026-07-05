@@ -144,6 +144,10 @@ class KnowledgeRuntime:
                     document,
                     status=TenantKnowledgeDocumentStatus.ACTIVE,
                     review_status=TenantKnowledgeReviewStatus.QUARANTINED,
+                    # Persist contradiction_metadata so managers can read it via
+                    # the document API (GET /tenant/knowledge) and the Knowledge
+                    # Base UI can surface the conflict detail — not just a badge.
+                    contradiction_metadata=contradiction_meta,
                 ),
                 expected_tenant_id=tenant_id,
             )

@@ -314,6 +314,40 @@ export type TrainingRecommendation = {
   metadata: Record<string, unknown>;
 };
 
+export type KnowledgeConflict = {
+  doc_a_id: string;
+  doc_a_title: string;
+  doc_b_id: string;
+  doc_b_title: string;
+  excerpt_a: string;
+  excerpt_b: string;
+  contradiction_type: "direct_conflict" | "scope_overlap" | "temporal_conflict";
+  confidence: number;
+};
+
+export type KnowledgeContradictionMetadata = {
+  contradiction_flagged: boolean;
+  contradiction_count: number;
+  contradicting_doc_ids: string[];
+  highest_confidence: number;
+  contradiction_types: string[];
+};
+
+export type KnowledgeAnalysisResult = {
+  tenant_id: string;
+  documents_analyzed: number;
+  contradictions_found: number;
+  conflicts: KnowledgeConflict[];
+  quarantined_with_detail: Array<{
+    document_id: string;
+    title: string;
+    document_type: string;
+    contradiction_metadata: KnowledgeContradictionMetadata | null;
+  }>;
+  trainer_enqueued: boolean;
+  analyzed_at: string;
+};
+
 export type TenantKnowledgeDocument = {
   document_id: string;
   title: string;
@@ -327,6 +361,8 @@ export type TenantKnowledgeDocument = {
   created_at: string;
   updated_at: string | null;
   last_index_error: string | null;
+  // MVP-4: contradiction report stored when this document was quarantined
+  contradiction_metadata: KnowledgeContradictionMetadata | null;
 };
 
 export type TenantKnowledgeUpload = {
@@ -1245,6 +1281,14 @@ export function ingestKnowledgeDocument(documentId: string) {
     `/knowledge/documents/${encodeURIComponent(documentId)}/ingest`,
     { method: "POST" }
   );
+}
+
+export function analyzeKnowledgeBase(documentTypes?: string[]) {
+  return apiRequest<KnowledgeAnalysisResult>("/knowledge/analyze", {
+    method: "POST",
+    body: JSON.stringify({ document_types: documentTypes ?? [] }),
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 export function listKnowledgeVersions(documentId: string) {

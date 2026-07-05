@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -11,6 +12,7 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -23,6 +25,7 @@ import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-da
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { TechnicalDetails } from "@/components/technical-details";
 import {
+  analyzeKnowledgeBase,
   ApiError,
   createKnowledgeDocument,
   formatApiError,
@@ -31,6 +34,7 @@ import {
   listKnowledgeVersions,
   updateKnowledgeDocument,
   uploadKnowledgeDocument,
+  type KnowledgeAnalysisResult,
   type KnowledgeDocumentVersion,
   type TenantKnowledgeDocument,
 } from "@/lib/api";
@@ -96,6 +100,10 @@ export function KnowledgeBase() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
+  // KB Analysis state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<KnowledgeAnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const loadDocuments = useCallback(
     () =>
@@ -178,6 +186,20 @@ export function KnowledgeBase() {
     setModal({ type: "none" });
     setFormError(null);
     setIsSubmitting(false);
+  };
+
+  const handleAnalyzeKb = async () => {
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    setAnalysisResult(null);
+    try {
+      const result = await analyzeKnowledgeBase();
+      setAnalysisResult(result);
+    } catch (caught: unknown) {
+      setAnalysisError(formatApiError(caught));
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleCreateDocument = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -426,8 +448,136 @@ export function KnowledgeBase() {
             <Upload size={14} strokeWidth={1.8} />
             Upload document
           </button>
+
+          <button
+            type="button"
+            onClick={() => void handleAnalyzeKb()}
+            disabled={isAnalyzing}
+            className="cc-btn cc-btn-secondary h-10"
+            title="Analyze the full knowledge base for contradictions, gaps, and recommendations"
+          >
+            <Sparkles size={14} strokeWidth={1.8} className={cn(isAnalyzing && "animate-pulse")} />
+            {isAnalyzing ? "Analyzing…" : "Analyze KB"}
+          </button>
         </div>
       </div>
+
+      {/* KB Analysis Results Panel */}
+      {(analysisResult || analysisError) && (
+        <div className="mb-6 rounded-lg border border-border-subtle bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-semibold text-[14px] text-ink-primary flex items-center gap-2">
+              <Sparkles size={14} strokeWidth={1.8} className="text-gold-primary" />
+              Knowledge Base Analysis
+            </h3>
+            <button
+              type="button"
+              onClick={() => { setAnalysisResult(null); setAnalysisError(null); }}
+              className="text-ink-tertiary hover:text-ink-primary"
+              aria-label="Dismiss analysis"
+            >
+              <X size={14} strokeWidth={1.8} />
+            </button>
+          </div>
+
+          {analysisError && (
+            <p className="text-[13px] text-status-danger">{analysisError}</p>
+          )}
+
+          {analysisResult && (
+            <div className="flex flex-col gap-4">
+              {/* Summary stats */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[
+                  { label: "Documents analyzed", value: analysisResult.documents_analyzed },
+                  { label: "Contradictions found", value: analysisResult.contradictions_found, warn: analysisResult.contradictions_found > 0 },
+                  { label: "Quarantined with detail", value: analysisResult.quarantined_with_detail.length },
+                  { label: "Trainer enqueued", value: analysisResult.trainer_enqueued ? "Yes" : "No" },
+                ].map(({ label, value, warn }) => (
+                  <div key={label} className="rounded border border-border-subtle bg-surface-raised p-3">
+                    <p className="font-technical text-[10px] uppercase tracking-[0.14em] text-ink-tertiary">{label}</p>
+                    <p className={cn("mt-1 text-[20px] font-semibold", warn ? "text-status-warning" : "text-ink-primary")}>
+                      {String(value)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Cross-document conflicts */}
+              {analysisResult.conflicts.length > 0 && (
+                <div>
+                  <h4 className="mb-2 font-technical text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+                    Cross-document conflicts detected
+                  </h4>
+                  <div className="flex flex-col gap-2">
+                    {analysisResult.conflicts.map((conflict, i) => (
+                      <div key={i} className="rounded border border-status-warning/30 bg-surface-raised p-3">
+                        <div className="mb-2 flex items-center gap-2">
+                          <AlertTriangle size={12} strokeWidth={1.8} className="text-status-warning shrink-0" />
+                          <span className="font-technical text-[11px] uppercase tracking-[0.10em] text-status-warning">
+                            {conflict.contradiction_type.replace(/_/g, " ")} — {Math.round(conflict.confidence * 100)}% confidence
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                          <div>
+                            <p className="font-technical text-[10px] text-ink-tertiary mb-1">{conflict.doc_a_title}</p>
+                            <p className="text-[12px] text-ink-secondary italic">"{conflict.excerpt_a}"</p>
+                          </div>
+                          <div>
+                            <p className="font-technical text-[10px] text-ink-tertiary mb-1">{conflict.doc_b_title}</p>
+                            <p className="text-[12px] text-ink-secondary italic">"{conflict.excerpt_b}"</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Previously quarantined with contradiction detail */}
+              {analysisResult.quarantined_with_detail.length > 0 && (
+                <div>
+                  <h4 className="mb-2 font-technical text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+                    Quarantined documents with contradiction detail
+                  </h4>
+                  <div className="flex flex-col gap-2">
+                    {analysisResult.quarantined_with_detail.map((q) => (
+                      <div key={q.document_id} className="rounded border border-border-subtle bg-surface-raised p-3">
+                        <p className="font-medium text-[13px] text-ink-primary">{q.title}</p>
+                        {q.contradiction_metadata && (
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            <span className="font-technical text-[10px] text-status-warning">
+                              {q.contradiction_metadata.contradiction_count} conflict{q.contradiction_metadata.contradiction_count !== 1 ? "s" : ""} — {q.contradiction_metadata.contradiction_types.join(", ")}
+                            </span>
+                            <span className="font-technical text-[10px] text-ink-tertiary">
+                              Conflicts with: {q.contradiction_metadata.contradicting_doc_ids.join(", ")}
+                            </span>
+                            <span className="font-technical text-[10px] text-ink-tertiary">
+                              Highest confidence: {Math.round(q.contradiction_metadata.highest_confidence * 100)}%
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {analysisResult.trainer_enqueued && (
+                <p className="text-[12px] text-ink-tertiary">
+                  Gap detection and KB improvement proposals queued — trainer will analyze ticket history for this knowledge base and propose enhancements. Results appear in the Cognition Hub.
+                </p>
+              )}
+
+              {analysisResult.contradictions_found === 0 && analysisResult.quarantined_with_detail.length === 0 && (
+                <p className="text-[13px] text-status-success">
+                  No contradictions or conflicts detected across {analysisResult.documents_analyzed} analyzed document{analysisResult.documents_analyzed !== 1 ? "s" : ""}.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {isLoading && <div className="mt-8"><LoadingState label="Loading tenant knowledge..." /></div>}
 
@@ -787,9 +937,30 @@ function DocumentDetail({ document }: { document: TenantKnowledgeDocument }) {
           <span className="text-meta">Updated {formatDate(document.created_at)}</span>
         </div>
         {document.review_status === "quarantined" && (
-          <p className="mt-2 text-[12px] text-amber-600">
-            This document is quarantined and not used for AI grounding. Approve it via the Knowledge Uploads tab in Needs Your Attention.
-          </p>
+          <div className="mt-2">
+            <p className="text-[12px] text-amber-600">
+              This document is quarantined and not used for AI grounding. Approve it via the Knowledge Uploads tab in Needs Your Attention.
+            </p>
+            {document.contradiction_metadata && (
+              <div className="mt-2 rounded border border-status-warning/40 bg-surface-raised p-3">
+                <p className="font-technical text-[10px] uppercase tracking-[0.12em] text-status-warning mb-2 flex items-center gap-1">
+                  <AlertTriangle size={10} strokeWidth={1.8} />
+                  Contradiction detected — {document.contradiction_metadata.contradiction_count} conflict{document.contradiction_metadata.contradiction_count !== 1 ? "s" : ""}
+                </p>
+                <p className="text-[12px] text-ink-secondary mb-1">
+                  <span className="font-medium">Types:</span> {document.contradiction_metadata.contradiction_types.map((t) => t.replace(/_/g, " ")).join(", ")}
+                </p>
+                <p className="text-[12px] text-ink-secondary mb-1">
+                  <span className="font-medium">Conflicts with document IDs:</span>{" "}
+                  {document.contradiction_metadata.contradicting_doc_ids.join(", ") || "—"}
+                </p>
+                <p className="text-[12px] text-ink-secondary">
+                  <span className="font-medium">Highest confidence:</span>{" "}
+                  {Math.round(document.contradiction_metadata.highest_confidence * 100)}%
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

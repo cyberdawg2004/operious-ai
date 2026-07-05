@@ -104,6 +104,10 @@ class TenantKnowledgeDocumentRecord:
     )
     updated_at: datetime | None = None
     last_index_error: str | None = None
+    # MVP-4: contradiction check result stored on the document row.
+    # NULL = no check ran or document type is not subject to contradiction check.
+    # Populated by KnowledgeRuntime when SOPContradictionAgent quarantines doc.
+    contradiction_metadata: dict[str, Any] | None = None
     # Populated iff document_type is TEMPLATE; the (tenant_id,
     # template_purpose, template_channel) tuple is the exact-match
     # retrieval key — see TenantConfigurationRuntime.get_approved_template.

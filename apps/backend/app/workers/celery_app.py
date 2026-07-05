@@ -126,6 +126,7 @@ celery_conf.update(
         "scan_training_recommendation_gaps": {"queue": QUEUE_SOP_INTELLIGENCE},
         "detect_sop_failure_patterns": {"queue": QUEUE_SOP_INTELLIGENCE},
         "aggregate_qa_signals": {"queue": QUEUE_TRAINER},
+        "trigger_kb_trainer_all_tenants": {"queue": QUEUE_TRAINER},
         "reindex_knowledge_document": {"queue": QUEUE_KNOWLEDGE_INDEXING},
         "recover_stale_executions": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
         "dispatch_ingress": {"queue": QUEUE_INGRESS_EMAIL},
@@ -306,6 +307,15 @@ celery_conf.update(
             "task": "poll_stale_work_orders",
             "schedule": 3600.0,
             "options": {"queue": QUEUE_WEBHOOK_MAINTENANCE},
+        },
+        # MVP-5: aggregate QA signals and run KBTrainerAgent to generate KB
+        # gap / improvement proposals for all active tenants. Runs daily.
+        # aggregate_qa_signals is dispatched once per tenant by the orchestrator
+        # task trigger_kb_trainer_all_tenants.
+        "trigger-kb-trainer-all-tenants-daily": {
+            "task": "trigger_kb_trainer_all_tenants",
+            "schedule": 86400.0,
+            "options": {"queue": QUEUE_TRAINER},
         },
     },
 )

@@ -382,4 +382,76 @@ def _run_async(coro: Coroutine[Any, Any, _T], *, tenant_id: str) -> _T:
     return results[0]
 
 
-__all__ = ["aggregate_qa_signals", "aggregate_qa_signals_runtime"]
+@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
+    name="trigger_kb_trainer_all_tenants",
+    queue=QUEUE_TRAINER,
+    bind=True,
+    ignore_result=True,
+    max_retries=1,
+    default_retry_delay=60,
+)
+def trigger_kb_trainer_all_tenants(
+    _self: Any,
+    _enqueued_at: str | None = None,
+) -> dict[str, object]:
+    """Daily orchestrator: dispatch aggregate_qa_signals for every active tenant.
+
+    Each tenant gets an independent aggregate_qa_signals task so failures are
+    isolated. This is the scheduled entry point that was missing — without it
+    the trainer loop never ran automatically.
+    """
+    del _enqueued_at
+    try:
+        return _run_async(
+            _trigger_trainer_for_all_tenants(),
+            tenant_id="platform",
+        )
+    except Exception as exc:
+        logger.exception("trigger_kb_trainer_all_tenants_failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+async def _trigger_trainer_for_all_tenants() -> dict[str, object]:
+    """Load every tenant that has active KB documents and dispatch the trainer."""
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        # Load all tenant IDs that have active KB documents
+        # (no cross-tenant query needed — we just iterate all known tenants)
+        from sqlalchemy import select, distinct
+        from app.tenant.db.models import TenantKnowledgeDocumentRow
+        stmt = select(distinct(TenantKnowledgeDocumentRow.tenant_id)).where(
+            TenantKnowledgeDocumentRow.status.in_(["active", "pending_index"])
+        )
+        result = await session.execute(stmt)
+        tenant_ids = [row[0] for row in result.fetchall()]
+
+    dispatched = 0
+    for tenant_id in tenant_ids:
+        try:
+            from typing import cast, Any as _Any
+            cast(_Any, aggregate_qa_signals).apply_async(
+                kwargs={"tenant_id": tenant_id},
+            )
+            dispatched += 1
+        except Exception:
+            logger.warning(
+                "trigger_kb_trainer_dispatch_failed tenant=%s", tenant_id,
+                exc_info=True,
+            )
+
+    logger.info(
+        "trigger_kb_trainer_all_tenants_complete tenants=%d dispatched=%d",
+        len(tenant_ids), dispatched,
+    )
+    return {
+        "status": "completed",
+        "tenants_found": len(tenant_ids),
+        "dispatched": dispatched,
+    }
+
+
+__all__ = [
+    "aggregate_qa_signals",
+    "aggregate_qa_signals_runtime",
+    "trigger_kb_trainer_all_tenants",
+]

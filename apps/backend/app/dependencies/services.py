@@ -92,7 +92,7 @@ from app.cognition.persistence import PostgresCognitionUsagePersistence
 from app.cognition.sop_approval_event_publisher import (
     PostgresSOPApprovalApplyEventProjector,
 )
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.admission import admission_thresholds_from_settings
 from app.core.queue_depth import get_queue_depth_provider
 from app.core.redis import get_redis_client
@@ -140,6 +140,8 @@ from app.knowledge import (
 )
 from app.knowledge.persistence import PostgresKnowledgeRepository
 from app.knowledge.reindex_publisher import CeleryKnowledgeReindexPublisher
+from app.agents.governed.sop_contradiction import SOPContradictionAgent
+from app.cognition.llm_factory import build_llm_client
 from app.observability.persistence import (
     PostgresOperationalObservabilityPersistence,
 )
@@ -272,6 +274,28 @@ def get_quota_runtime(request: Request) -> TenantQuotaRuntime:
     """Return the application-scoped tenant quota runtime."""
 
     return cast(TenantQuotaRuntime, request.app.state.quota_runtime)
+
+
+def _build_sop_contradiction_agent(
+    session: AsyncSession,
+    settings: Settings,
+) -> SOPContradictionAgent | None:
+    """Build the SOPContradictionAgent for KB ingestion and analysis.
+
+    Returns None in environments where the LLM client cannot be built
+    (no credentials) — the KnowledgeRuntime gracefully omits the check.
+    """
+    try:
+        tenant_config_repo = PostgresTenantConfigurationRepository(
+            session,
+            data_protection=_data_protection_service(session),
+        )
+        return SOPContradictionAgent(
+            llm_client=build_llm_client(settings),
+            tenant_configuration_repository=tenant_config_repo,
+        )
+    except Exception:
+        return None
 
 
 def _data_protection_service(
@@ -1263,15 +1287,16 @@ def get_knowledge_service(
     """Return the tenant knowledge ingestion/retrieval service."""
     settings = get_settings()
     data_protection = _data_protection_service(session)
+    tenant_config_repo = PostgresTenantConfigurationRepository(
+        session,
+        data_protection=data_protection,
+    )
     runtime = KnowledgeRuntime(
         repository=PostgresKnowledgeRepository(
             session,
             data_protection=data_protection,
         ),
-        tenant_configuration_repository=PostgresTenantConfigurationRepository(
-            session,
-            data_protection=data_protection,
-        ),
+        tenant_configuration_repository=tenant_config_repo,
         embedding_provider=build_embedding_provider(settings),
         chunker=DeterministicKnowledgeChunker(
             target_size=settings.CHUNK_TARGET_SIZE,
@@ -1280,8 +1305,15 @@ def get_knowledge_service(
         ),
         vector_index_name=settings.VECTOR_DEFAULT_INDEX,
         default_context_token_budget=settings.RAG_DEFAULT_CONTEXT_TOKEN_BUDGET,
+        sop_contradiction_agent=_build_sop_contradiction_agent(session, settings),
     )
-    return KnowledgeService(runtime=runtime, session=session)
+    contradiction_agent = _build_sop_contradiction_agent(session, settings)
+    return KnowledgeService(
+        runtime=runtime,
+        session=session,
+        tenant_configuration_repository=tenant_config_repo,
+        sop_contradiction_agent=contradiction_agent,
+    )
 
 
 def get_sop_intelligence_service(

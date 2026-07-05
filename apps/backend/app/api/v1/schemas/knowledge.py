@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.knowledge.models import (
+    KnowledgeAnalysisResult,
     KnowledgeBudgetDecision,
     KnowledgeCitation,
     KnowledgeIngestionResult,
@@ -189,9 +190,74 @@ class KnowledgeSearchResponse(BaseModel):
         )
 
 
+class KnowledgeConflictResponse(BaseModel):
+    """One detected contradiction between two KB documents."""
+    model_config = ConfigDict(frozen=True)
+
+    doc_a_id: str
+    doc_a_title: str
+    doc_b_id: str
+    doc_b_title: str
+    excerpt_a: str
+    excerpt_b: str
+    contradiction_type: str
+    confidence: float
+
+
+class KnowledgeAnalyzeRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    document_types: list[str] = Field(
+        default_factory=list,
+        description="Filter to specific document types (sop, policy). Empty = all.",
+    )
+
+
+class KnowledgeAnalyzeResponse(BaseModel):
+    """Full KB analysis report returned to the manager."""
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: str
+    documents_analyzed: int
+    contradictions_found: int
+    conflicts: list[KnowledgeConflictResponse]
+    # Existing quarantined docs with contradiction_metadata already on file
+    quarantined_with_detail: list[dict[str, Any]]
+    # Whether the trainer (gap/recommendation) task was enqueued
+    trainer_enqueued: bool
+    analyzed_at: str
+
+    @classmethod
+    def from_result(cls, result: "KnowledgeAnalysisResult") -> "KnowledgeAnalyzeResponse":
+        return cls(
+            tenant_id=result.tenant_id,
+            documents_analyzed=result.documents_analyzed,
+            contradictions_found=result.contradictions_found,
+            conflicts=[
+                KnowledgeConflictResponse(
+                    doc_a_id=c["doc_a_id"],
+                    doc_a_title=c["doc_a_title"],
+                    doc_b_id=c["doc_b_id"],
+                    doc_b_title=c["doc_b_title"],
+                    excerpt_a=c["excerpt_a"],
+                    excerpt_b=c["excerpt_b"],
+                    contradiction_type=c["contradiction_type"],
+                    confidence=c["confidence"],
+                )
+                for c in result.conflicts
+            ],
+            quarantined_with_detail=result.quarantined_with_detail,
+            trainer_enqueued=result.trainer_enqueued,
+            analyzed_at=result.analyzed_at.isoformat(),
+        )
+
+
 __all__ = [
+    "KnowledgeAnalyzeRequest",
+    "KnowledgeAnalyzeResponse",
     "KnowledgeBudgetDecisionResponse",
     "KnowledgeCitationResponse",
+    "KnowledgeConflictResponse",
     "KnowledgeIngestionResponse",
     "KnowledgeSearchItemResponse",
     "KnowledgeSearchRequest",
