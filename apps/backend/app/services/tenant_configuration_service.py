@@ -826,6 +826,28 @@ class TenantConfigurationService:
             ),
         )
 
+    async def fetch_mcp_tools(
+        self,
+        server_url: str,
+        *,
+        timeout: float = 15.0,
+    ) -> list[dict[str, Any]]:
+        """Fetch the live tool manifest from an MCP server URL.
+
+        SSRF guard: validates the URL (HTTPS, public IP only, no private/link-local)
+        before opening any connection.  The resolved IP is pinned into the transport
+        so DNS-rebinding and redirect-following cannot steer the connection elsewhere.
+        """
+        from app.mcp_integration.client import fetch_mcp_tools as _fetch
+
+        loop = asyncio.get_running_loop()
+        from functools import partial
+        validated = await loop.run_in_executor(
+            None,
+            partial(self._connector_test_ssrf_validator, server_url, allowed_hosts=()),
+        )
+        return await _fetch(server_url, validated=validated, timeout=timeout)
+
 
 async def _verify_connector_tls(
     *,

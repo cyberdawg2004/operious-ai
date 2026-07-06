@@ -94,10 +94,14 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
             "credentials cannot be encrypted/used."
         )
     credential_kms_backend = settings.CREDENTIAL_KMS_BACKEND.strip().casefold()
+    # F16: CREDENTIAL_KMS_BACKEND=local is a hard production boot-fail, not a
+    # warning.  Plaintext master key at rest in a production environment is
+    # unacceptable; GCP Cloud KMS wrapping is required.
     if credential_kms_backend == "local":
         problems.append(
             "CREDENTIAL_KMS_BACKEND=local -> tenant channel credentials use "
-            "the local master key instead of GCP Cloud KMS."
+            "the local master key in plaintext instead of GCP Cloud KMS. "
+            "Set CREDENTIAL_KMS_BACKEND=gcp and configure OPERIOUS_KMS_KEY_RESOURCE."
         )
     elif credential_kms_backend == "gcp":
         if not settings.credential_kms_key_resource:
@@ -157,6 +161,16 @@ def collect_production_problems(settings: "Settings") -> tuple[str, ...]:
         problems.append(
             "AUDIT_EXPORT_HMAC_SECRET is empty -> audit exports cannot be "
             "signed/verified."
+        )
+
+    # ── MCP OAuth state HMAC key (F2) ────────────────────────────────
+    # Without this secret the HMAC is computed with the hardcoded dev string
+    # published in source, making OAuth state tokens forgeable by anyone.
+    if not settings.MCP_OAUTH_STATE_SECRET.strip():
+        problems.append(
+            "MCP_OAUTH_STATE_SECRET is empty -> MCP OAuth state tokens cannot "
+            "be HMAC-bound to the initiating tenant; cross-tenant OAuth state "
+            "replay is possible. Set MCP_OAUTH_STATE_SECRET to a random secret."
         )
 
     # ── Voice transport ──────────────────────────────────────────────

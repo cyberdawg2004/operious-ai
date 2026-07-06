@@ -222,6 +222,11 @@ class Settings(BaseSettings):
         default=100,
         description="Maximum concurrent active voice calls.",
     )
+    # ─── MCP OAuth state HMAC secret ─────────────────────────────────
+    # Used to HMAC-bind the OAuth state token to the initiating tenant_id,
+    # preventing cross-tenant OAuth state replay.  Must be set in production.
+    MCP_OAUTH_STATE_SECRET: str = ""
+
     # ─── Voice media gateway security (S-04) ─────────────────────────
     # Voice is DISABLED by default. The media WebSocket only accepts a
     # connection when voice is explicitly enabled AND the handshake

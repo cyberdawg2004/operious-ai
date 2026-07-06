@@ -23,6 +23,7 @@ def _ready_production(**overrides: object) -> Settings:
         ),
         "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/operious-kms.json",
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
+        "MCP_OAUTH_STATE_SECRET": "z" * 32,
         "PUBLIC_BASE_URL": "https://api.operious.com",
     }
     base.update(overrides)

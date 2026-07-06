@@ -36,6 +36,7 @@ def _production(**overrides: object) -> Settings:
         ),
         "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/operious-kms.json",
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
+        "MCP_OAUTH_STATE_SECRET": "z" * 32,
         "PUBLIC_BASE_URL": "https://api.operious.com",
         # Auth must be enabled with a recognised provider in production.
         "AUTH_ENABLED": True,

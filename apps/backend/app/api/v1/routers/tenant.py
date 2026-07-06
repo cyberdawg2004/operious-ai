@@ -138,6 +138,15 @@ from app.tenant.lifecycle import (
     TenantLifecycleError,
     TenantNotFoundError,
 )
+from app.api.v1.schemas.mcp import (
+    McpOAuthCallbackParams,
+    McpOAuthStartRequest,
+    McpOAuthStartResponse,
+    McpServerRegisterRequest,
+    McpToolManifestResponse,
+    McpToolPreviewRequest,
+)
+from app.core.ssrf import SSRFValidationError
 
 router = APIRouter(tags=["tenant"])
 require_platform_lifecycle_admin = require_platform_tenant_admin
@@ -634,17 +643,33 @@ async def propose_connector_credentials(
         get_tenant_config_change_request_service
     ),
 ) -> Response:
-    if tenant_id != expected_tenant_id or tool_name not in _OMS_CREDENTIAL_TOOL_NAMES:
+    if tenant_id != expected_tenant_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "tenant_connector_configuration_not_found"},
         )
+    principal = _principal_or_400(authority)
     try:
-        await service.propose_oms_credential_update(
-            tenant_id=expected_tenant_id,
-            credentials=credentials,
-            proposed_by=_principal_or_400(authority),
-        )
+        if tool_name in _OMS_CREDENTIAL_TOOL_NAMES:
+            # Legacy OMS path: credential stored in tenant_channel_configurations.
+            await service.propose_oms_credential_update(
+                tenant_id=expected_tenant_id,
+                credentials=credentials,
+                proposed_by=principal,
+            )
+        else:
+            # Generic path: per-connector credential store.
+            # Derive connector_id from tool_name: "account.freeze" → "account",
+            # "service.suspend" → "service", "myconn" → "myconn".
+            connector_id = (
+                tool_name[: tool_name.rfind(".")] if "." in tool_name else tool_name
+            )
+            await service.propose_connector_credential(
+                tenant_id=expected_tenant_id,
+                connector_id=connector_id,
+                credentials=credentials,
+                proposed_by=principal,
+            )
     except TenantConfigChangeRequestError as exc:
         raise _change_request_http_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1398,6 +1423,392 @@ def _tenant_lifecycle_http_error(exc: BaseException) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={"code": "tenant_lifecycle_failed"},
+    )
+
+
+@router.post(
+    "/{tenant_id}/mcp/preview-tools",
+    response_model=McpToolManifestResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def preview_mcp_tools(
+    tenant_id: str,
+    request: McpToolPreviewRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_connector_config_read),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> McpToolManifestResponse:
+    """Fetch a live tool manifest from a raw MCP endpoint URL (pre-registration preview).
+
+    Does NOT require an existing ConnectorConfigRecord. Used by the UI add-server
+    flow to show tools before the server is registered. The URL must be a public HTTPS
+    address — private/link-local/metadata IPs are rejected by the SSRF guard.
+    """
+    if tenant_id != expected_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_not_found"},
+        )
+    mcp_url = request.endpoint_url.rstrip("/") + "/mcp"
+    try:
+        tools = await service.fetch_mcp_tools(mcp_url, timeout=request.timeout_seconds)
+    except SSRFValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "endpoint_ssrf_rejected", "message": str(exc)},
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "mcp_server_unreachable",
+                "message": f"{type(exc).__name__}: could not fetch tool manifest",
+            },
+        ) from exc
+
+    return McpToolManifestResponse(mcp_server_id="preview", tools=tools)
+
+
+@router.post(
+    "/{tenant_id}/mcp/servers",
+    response_model=TenantConfigChangeRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_mcp_server(
+    tenant_id: str,
+    request: McpServerRegisterRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_tenant_connector_write),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> TenantConfigChangeRequestResponse:
+    """Propose an MCP_SERVER change-request.
+
+    Stores the server registration (endpoint URL, tool manifest, execution policies)
+    as a dual-control change request. Must be approved + applied before the server
+    is used in the agent's tool registry.
+    """
+    if tenant_id != expected_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_not_found"},
+        )
+    try:
+        record = await service.propose(
+            tenant_id=expected_tenant_id,
+            change_type=TenantConfigChangeType.MCP_SERVER,
+            payload={
+                "mcp_server_id": request.mcp_server_id,
+                "endpoint_url": request.endpoint_url,
+                "mcp_tools": request.mcp_tools,
+                **({"oauth_config": request.oauth_config} if request.oauth_config else {}),
+                "timeout_seconds": request.timeout_seconds,
+            },
+            proposed_by=_principal_or_400(authority),
+        )
+    except TenantConfigChangeRequestError as exc:
+        raise _change_request_http_error(exc) from exc
+    return TenantConfigChangeRequestResponse.from_record(record)
+
+
+@router.get(
+    "/{tenant_id}/mcp/servers/{mcp_server_id}/tools",
+    response_model=McpToolManifestResponse,
+)
+async def list_mcp_server_tools(
+    tenant_id: str,
+    mcp_server_id: str,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_connector_config_read),
+    service: TenantConfigurationService = Depends(get_tenant_configuration_service),
+) -> McpToolManifestResponse:
+    """Fetch a live tool manifest from the configured MCP server via tools/list.
+
+    Calls the MCP server's /mcp endpoint using the MCP Python SDK, returning
+    the current tool names, descriptions, and input schemas.
+    """
+    if tenant_id != expected_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_not_found"},
+        )
+    # Load the active connector config for this MCP server.
+    connector_page = await service.list_connector_configurations(
+        tenant_id=expected_tenant_id,
+        connector_type="mcp_server",
+        tool_name=mcp_server_id,
+        status="active",
+        limit=1,
+        offset=0,
+    )
+    if connector_page.total == 0 or not connector_page.items:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "mcp_server_not_found"},
+        )
+    server_record = connector_page.items[0]
+    # Re-validate the stored endpoint_template at fetch time (TOCTOU guard: a
+    # stored URL could have been mutated between validation and use).
+    server_url = f"{server_record.endpoint_template.rstrip('/')}/mcp"
+
+    try:
+        tools = await service.fetch_mcp_tools(server_url, timeout=15.0)
+    except SSRFValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "endpoint_ssrf_rejected", "message": str(exc)},
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "mcp_server_unreachable",
+                "message": f"{type(exc).__name__}: could not fetch tool manifest",
+            },
+        ) from exc
+
+    return McpToolManifestResponse(mcp_server_id=mcp_server_id, tools=tools)
+
+
+@router.post(
+    "/{tenant_id}/mcp/oauth/start",
+    response_model=McpOAuthStartResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def mcp_oauth_start(
+    tenant_id: str,
+    request: McpOAuthStartRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    _writer: AuthorityContext = Depends(require_tenant_connector_write),
+) -> McpOAuthStartResponse:
+    """Initiate an OAuth authorization code + PKCE dance for an MCP server.
+
+    Generates a PKCE code_verifier/challenge and a HMAC-bound state token,
+    stores the OAuth context in Redis (TTL=600s), and returns the authorization URL
+    the operator should redirect the user to.
+    """
+    if tenant_id != expected_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "tenant_not_found"},
+        )
+    import base64
+    import hashlib
+    import hmac
+    import os
+    import json as _json
+
+    from app.core.config import get_settings
+    from app.core.redis import get_redis_client
+
+    settings = get_settings()
+    redis = get_redis_client()
+
+    # Generate PKCE code_verifier (43-128 chars, URL-safe base64).
+    code_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+
+    # Generate state token and HMAC-bind it to the tenant_id.
+    raw_state = base64.urlsafe_b64encode(os.urandom(24)).rstrip(b"=").decode()
+    _secret = settings.MCP_OAUTH_STATE_SECRET
+    state_hmac = hmac.new(
+        _secret.encode(),
+        f"{tenant_id}:{raw_state}".encode(),
+        "sha256",
+    ).hexdigest()
+    state_token = f"{raw_state}.{state_hmac}"
+
+    # Store in Redis with TTL=600s.  oauth_config is serialised as a plain dict
+    # so the callback can deserialise it without importing the schema.
+    oauth_cfg = request.oauth_config
+    oauth_state: dict[str, object] = {
+        "tenant_id": tenant_id,
+        "mcp_server_id": request.mcp_server_id,
+        "code_verifier": code_verifier,
+        "oauth_config": oauth_cfg.model_dump(),
+    }
+    redis_key = f"mcp:oauth:state:{state_token}"
+    await redis.setex(redis_key, 600, _json.dumps(oauth_state))
+
+    # Build authorization URL with PKCE.
+    scopes_str = " ".join(oauth_cfg.scopes)
+    redirect_uri = oauth_cfg.redirect_uri
+    client_id = oauth_cfg.client_id
+    auth_endpoint = oauth_cfg.auth_endpoint
+
+    from urllib.parse import urlencode
+
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scopes_str,
+        "state": state_token,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+    authorization_url = f"{auth_endpoint}?{urlencode(params)}"
+
+    return McpOAuthStartResponse(
+        authorization_url=authorization_url,
+        state_token=state_token,
+    )
+
+
+@router.get(
+    "/mcp/oauth/callback",
+    status_code=status.HTTP_302_FOUND,
+)
+async def mcp_oauth_callback(
+    params: McpOAuthCallbackParams = Depends(),
+    _tenant_scope: str | None = Depends(request_tenant_scope_opt),
+    service: TenantConfigChangeRequestService = Depends(
+        get_tenant_config_change_request_service
+    ),
+) -> Response:
+    """OAuth callback handler (tenant-agnostic path; tenant_id is in Redis state).
+
+    Validates the state HMAC, retrieves the OAuth context from Redis, exchanges
+    the authorization code + PKCE verifier for tokens (server-to-server), encrypts
+    the token via OPCRED2, and proposes an MCP_OAUTH_TOKEN change-request.
+    """
+    import hmac
+    import json as _json
+
+    from app.core.config import get_settings
+    from app.core.http import get_shared_http_client
+    from app.core.redis import get_redis_client
+
+    settings = get_settings()
+    redis = get_redis_client()
+    _secret = settings.MCP_OAUTH_STATE_SECRET
+
+    # Validate HMAC on the state token.
+    state_token = params.state
+    if "." not in state_token:
+        return Response(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/connectors?oauth=error&reason=invalid_state"},
+        )
+    raw_state, received_hmac = state_token.rsplit(".", 1)
+
+    # Retrieve from Redis first (we need tenant_id for HMAC verification).
+    redis_key = f"mcp:oauth:state:{state_token}"
+    raw_value = await redis.get(redis_key)
+    if raw_value is None:
+        return Response(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/connectors?oauth=error&reason=state_expired"},
+        )
+    oauth_state = _json.loads(raw_value)
+    tenant_id: str = oauth_state["tenant_id"]
+
+    # Verify HMAC (binding state to tenant_id prevents cross-tenant replay).
+    expected_hmac = hmac.new(
+        _secret.encode(),
+        f"{tenant_id}:{raw_state}".encode(),
+        "sha256",
+    ).hexdigest()
+    if not hmac.compare_digest(received_hmac, expected_hmac):
+        return Response(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/connectors?oauth=error&reason=invalid_state"},
+        )
+
+    # Delete from Redis — single use.
+    await redis.delete(redis_key)
+
+    mcp_server_id: str = oauth_state["mcp_server_id"]
+    code_verifier: str = oauth_state["code_verifier"]
+    oauth_config: dict[str, object] = oauth_state["oauth_config"]
+
+    # Exchange code for tokens (server-to-server call).
+    token_endpoint = str(oauth_config.get("token_endpoint", ""))
+    redirect_uri = str(oauth_config.get("redirect_uri", ""))
+    client_id = str(oauth_config.get("client_id", ""))
+    client_secret = str(oauth_config.get("client_secret", ""))
+
+    # SSRF guard on token_endpoint — re-validate even though the start
+    # endpoint already validated it, to cover pre-schema Redis state.
+    import asyncio as _asyncio
+    from functools import partial as _partial
+    from app.core.ssrf import SSRFValidationError as _SSRFErr, validate_public_https_url as _ssrf
+    try:
+        _loop = _asyncio.get_running_loop()
+        _validated_token = await _loop.run_in_executor(
+            None, _partial(_ssrf, token_endpoint, allowed_hosts=())
+        )
+    except _SSRFErr:
+        return Response(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/connectors?oauth=error&reason=token_endpoint_rejected"},
+        )
+
+    import httpx as _httpx
+    from app.core.ssrf import PinnedIPAsyncHTTPTransport as _PinnedTransport
+    _pinned_transport = _PinnedTransport(pinned_ip=_validated_token.pinned_ip)
+
+    try:
+        async with _httpx.AsyncClient(
+            transport=_pinned_transport,
+            follow_redirects=False,
+            timeout=15.0,
+        ) as _http:
+            token_response = await _http.post(
+                token_endpoint,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": params.code,
+                    "redirect_uri": redirect_uri,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code_verifier": code_verifier,
+                },
+                headers={"Accept": "application/json"},
+            )
+        if token_response.status_code != 200:
+            return Response(
+                status_code=status.HTTP_302_FOUND,
+                headers={
+                    "Location": (
+                        f"/connectors?oauth=error"
+                        f"&reason=token_exchange_failed"
+                        f"&status={token_response.status_code}"
+                    )
+                },
+            )
+        token_data = token_response.json()
+    except Exception:  # noqa: BLE001
+        return Response(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/connectors?oauth=error&reason=token_exchange_error"},
+        )
+
+    # Store the token via propose_connector_credential (encrypted via OPCRED2).
+    # The token_data dict is the full OAuth response (access_token, refresh_token, etc.)
+    try:
+        await service.propose_connector_credential(
+            tenant_id=tenant_id,
+            connector_id=mcp_server_id,
+            credentials=token_data,
+            proposed_by="oauth_callback",
+        )
+    except TenantConfigChangeRequestError:
+        return Response(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/connectors?oauth=error&reason=credential_store_failed"},
+        )
+
+    return Response(
+        status_code=status.HTTP_302_FOUND,
+        headers={
+            "Location": (
+                f"/connectors?oauth=success&mcp_server_id={mcp_server_id}"
+            )
+        },
     )
 
 
