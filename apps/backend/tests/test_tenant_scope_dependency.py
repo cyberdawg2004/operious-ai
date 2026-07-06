@@ -298,6 +298,7 @@ def test_module_exports_stable_contract() -> None:
         "TENANT_KNOWLEDGE_APPROVE_CAPABILITY",   # security fix F7: dual-control
         "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
         "TENANT_OBSERVABILITY_READ_CAPABILITY",  # spec 1a #26
+        "TENANT_OBSERVABILITY_WRITE_CAPABILITY",  # security fix F14: SLO/trace writes
         "TENANT_OPERATIONS_READ_CAPABILITY",      # spec 1a-ext #26
         "TENANT_POLICY_WRITE_CAPABILITY",
         "TENANT_PRIVACY_ADMIN_CAPABILITY",        # spec 1c-ext
@@ -325,6 +326,7 @@ def test_module_exports_stable_contract() -> None:
         "require_tenant_knowledge_approve",      # security fix F7: dual-control
         "require_tenant_knowledge_write",        # spec 1a-ext #26
         "require_tenant_observability_read",     # spec 1a #26
+        "require_tenant_observability_write",    # security fix F14: SLO/trace writes
         "require_tenant_operations_read",        # spec 1a-ext #26
         "require_tenant_privacy_admin",          # spec 1c-ext
         "require_tenant_privacy_approve",        # spec 1c-ext

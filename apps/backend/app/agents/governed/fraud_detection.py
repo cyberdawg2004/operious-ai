@@ -104,7 +104,8 @@ class FraudDetectionAgent(BaseGovernedLLMAgent):
         suspicious_patterns = fraud_config.get("suspicious_patterns", [])
 
         parts = [
-            f"## TICKET\nSession: {session_id}\n\n{ticket_text}",
+            f"## TICKET\nSession: {session_id}\n\n"
+            f"<BEGIN_UNTRUSTED_USER_INPUT>\n{ticket_text}\n<END_UNTRUSTED_USER_INPUT>",
         ]
         if extracted_fields:
             parts.append(

@@ -166,10 +166,16 @@ class SMEReviewerAgent(BaseGovernedLLMAgent):
         ]
 
         if ticket_text:
-            parts.append(f"## CUSTOMER TICKET\n{ticket_text}")
+            parts.append(
+                f"## CUSTOMER TICKET\n"
+                f"<BEGIN_UNTRUSTED_USER_INPUT>\n{ticket_text}\n<END_UNTRUSTED_USER_INPUT>"
+            )
 
         if proposed_reply:
-            parts.append(f"## PROPOSED REPLY\n{proposed_reply}")
+            parts.append(
+                f"## PROPOSED REPLY\n"
+                f"<BEGIN_UNTRUSTED_USER_INPUT>\n{proposed_reply}\n<END_UNTRUSTED_USER_INPUT>"
+            )
 
         if fraud_signal:
             parts.append(

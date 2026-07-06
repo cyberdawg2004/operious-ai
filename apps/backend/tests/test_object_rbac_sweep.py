@@ -92,6 +92,7 @@ _CAPABILITY_DEP_NAMES = {
     "require_tenant_knowledge_approve",
     "require_tenant_knowledge_write",
     "require_tenant_observability_read",
+    "require_tenant_observability_write",
     "require_tenant_operations_read",
     "require_tenant_privacy_admin",
     "require_tenant_privacy_approve",

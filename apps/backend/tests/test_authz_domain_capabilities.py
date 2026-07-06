@@ -231,20 +231,29 @@ def _observability_routes():  # noqa: ANN201
 
 
 def test_all_observability_endpoints_have_capability_dep() -> None:
-    """Every observability route must declare the capability gate."""
+    """Every observability route must declare an observability capability gate.
+
+    Write endpoints (POST /slo-definitions, POST /traces) use the write
+    capability (F14); read endpoints use the read capability. Either is
+    sufficient to count as gated.
+    """
+    _OBSERVABILITY_CAPS = {
+        "require_tenant_observability_read",
+        "require_tenant_observability_write",
+    }
     routes = _observability_routes()
     assert len(routes) >= 9, f"Expected ≥9 routes, got {len(routes)}"
     missing = []
     for route in routes:
-        deps = _dep_names(route)
-        if "require_tenant_observability_read" not in deps:
+        deps = set(_dep_names(route))
+        if not (deps & _OBSERVABILITY_CAPS):
             missing.append(getattr(route, "path", str(route)))
     assert not missing, f"Routes missing capability dep: {missing}"
 
 
 def test_observability_dep_present_on_metrics_dlq_alerts_traces() -> None:
     """Spot-check four representative endpoints by path."""
-    gated = {"require_tenant_observability_read"}
+    _CAPS = {"require_tenant_observability_read", "require_tenant_observability_write"}
     routes_by_path = {
         getattr(r, "path", ""): r for r in _observability_routes()
     }
@@ -252,7 +261,7 @@ def test_observability_dep_present_on_metrics_dlq_alerts_traces() -> None:
         route = routes_by_path.get(path)
         assert route is not None, f"Route {path!r} not found"
         deps = set(_dep_names(route))
-        assert gated <= deps, f"{path} missing cap dep, has: {deps}"
+        assert deps & _CAPS, f"{path} missing observability cap dep, has: {deps}"
 
 
 # ── Structural: audit export endpoint requires capability dep ─────────────────

@@ -184,6 +184,11 @@ TENANT_CONFIG_APPROVE_CAPABILITY: Final[str] = "tenant.config.approve"
 #: these surfaces are read-only but still sensitive (#26/#80).
 TENANT_OBSERVABILITY_READ_CAPABILITY: Final[str] = "tenant.observability.read"
 
+#: Domain capability required to write tenant observability configuration
+#: (SLO definitions). Distinct from read so that operators who can inspect
+#: metrics cannot unilaterally change alerting thresholds (F14).
+TENANT_OBSERVABILITY_WRITE_CAPABILITY: Final[str] = "tenant.observability.write"
+
 #: Domain capability required to read tenant operations records.
 TENANT_OPERATIONS_READ_CAPABILITY: Final[str] = "tenant.operations.read"
 
@@ -372,6 +377,18 @@ def require_tenant_observability_read(request: Request) -> AuthorityContext:
     return _require_capability_from_request(
         request,
         capability=TENANT_OBSERVABILITY_READ_CAPABILITY,
+    )
+
+
+def require_tenant_observability_write(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.observability.write capability.
+
+    Protects SLO-definition mutation endpoints (F14: observability writes
+    must not be gated only by the read capability).
+    """
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_OBSERVABILITY_WRITE_CAPABILITY,
     )
 
 
@@ -694,6 +711,7 @@ __all__ = [
     "TENANT_KNOWLEDGE_APPROVE_CAPABILITY",
     "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
     "TENANT_OBSERVABILITY_READ_CAPABILITY",
+    "TENANT_OBSERVABILITY_WRITE_CAPABILITY",
     "TENANT_OPERATIONS_READ_CAPABILITY",
     "TENANT_POLICY_WRITE_CAPABILITY",
     "TENANT_PRIVACY_ADMIN_CAPABILITY",
@@ -721,6 +739,7 @@ __all__ = [
     "require_tenant_knowledge_approve",
     "require_tenant_knowledge_write",
     "require_tenant_observability_read",
+    "require_tenant_observability_write",
     "require_tenant_operations_read",
     "require_tenant_privacy_admin",
     "require_tenant_privacy_approve",

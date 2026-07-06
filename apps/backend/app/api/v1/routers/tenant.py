@@ -183,6 +183,10 @@ _CHANGE_REQUEST_DOMAIN_CAPABILITIES: Final[dict[TenantConfigChangeType, str]] = 
     ),
     TenantConfigChangeType.CONNECTOR: TENANT_CONNECTOR_WRITE_CAPABILITY,
     TenantConfigChangeType.CREDENTIAL_UPDATE: TENANT_CONNECTOR_WRITE_CAPABILITY,
+    # F11: missing entries caused a KeyError → 500 for MCP change types.
+    TenantConfigChangeType.CONNECTOR_CREDENTIAL: TENANT_CONNECTOR_WRITE_CAPABILITY,
+    TenantConfigChangeType.MCP_SERVER: TENANT_CONNECTOR_WRITE_CAPABILITY,
+    TenantConfigChangeType.MCP_OAUTH_TOKEN: TENANT_CONNECTOR_WRITE_CAPABILITY,
 }
 
 # Connector config changes require a domain-specific approve capability instead of
@@ -742,6 +746,7 @@ async def list_channels(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantChannelConfigurationPage:
     page = await service.list_channels(
@@ -820,6 +825,7 @@ async def list_knowledge_documents(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantKnowledgeDocumentPage:
     page = await service.list_knowledge_documents(
@@ -999,6 +1005,7 @@ async def list_governance_policies(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantGovernancePolicyPage:
     page = await service.list_governance_policies(
@@ -1058,6 +1065,7 @@ async def list_execution_governance_configurations(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantExecutionGovernancePage:
     page = await service.list_execution_governance_configurations(
@@ -1085,6 +1093,7 @@ async def list_execution_circuit_breakers(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantExecutionCircuitBreakerPage:
     page = await service.list_execution_circuit_breakers(
@@ -1144,6 +1153,7 @@ async def list_topology_configurations(
     limit: int = Query(_DEFAULT_LIMIT, ge=_MIN_LIMIT, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     expected_tenant_id: str = Depends(require_tenant_scope),
+    _reader: AuthorityContext = Depends(require_tenant_config_read),
     service: TenantConfigurationService = Depends(get_tenant_configuration_service),
 ) -> TenantTopologyConfigurationPage:
     page = await service.list_topology_configurations(
@@ -1629,6 +1639,8 @@ async def mcp_oauth_start(
         "mcp_server_id": request.mcp_server_id,
         "code_verifier": code_verifier,
         "oauth_config": oauth_cfg.model_dump(),
+        # F15: attribute the callback's proposed_by to the operator who started OAuth.
+        "initiated_by": str(_writer.principal_id) if _writer.principal_id else "unknown",
     }
     redis_key = f"mcp:oauth:state:{state_token}"
     await redis.setex(redis_key, 600, _json.dumps(oauth_state))
@@ -1724,6 +1736,8 @@ async def mcp_oauth_callback(
     mcp_server_id: str = oauth_state["mcp_server_id"]
     code_verifier: str = oauth_state["code_verifier"]
     oauth_config: dict[str, object] = oauth_state["oauth_config"]
+    # F15: use the initiating operator's principal_id for attribution.
+    initiated_by: str = str(oauth_state.get("initiated_by", "oauth_callback"))
 
     # Exchange code for tokens (server-to-server call).
     token_endpoint = str(oauth_config.get("token_endpoint", ""))
@@ -1794,7 +1808,7 @@ async def mcp_oauth_callback(
             tenant_id=tenant_id,
             connector_id=mcp_server_id,
             credentials=token_data,
-            proposed_by="oauth_callback",
+            proposed_by=initiated_by,
         )
     except TenantConfigChangeRequestError:
         return Response(

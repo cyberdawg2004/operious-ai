@@ -23,6 +23,7 @@ from app.api.v1.schemas.observability import (
 from app.core.config import Settings, get_settings
 from app.dependencies.authority import (
     require_tenant_observability_read,
+    require_tenant_observability_write,
     require_tenant_scope,
 )
 from app.dependencies.services import get_operational_observability_service
@@ -186,7 +187,7 @@ async def get_inbound_message_timeline(
 async def define_slo(
     request: OperationalSLODefinitionRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _obs: AuthorityContext = Depends(require_tenant_observability_read),
+    _obs: AuthorityContext = Depends(require_tenant_observability_write),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
@@ -306,7 +307,7 @@ async def evaluate_alerts(
 async def record_trace_span(
     request: OperationalTraceSpanRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    _obs: AuthorityContext = Depends(require_tenant_observability_read),
+    _obs: AuthorityContext = Depends(require_tenant_observability_write),
     service: OperationalObservabilityService = Depends(
         get_operational_observability_service
     ),
