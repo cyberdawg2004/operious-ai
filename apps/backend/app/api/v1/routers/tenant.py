@@ -1697,13 +1697,15 @@ async def mcp_oauth_callback(
     settings = get_settings()
     redis = get_redis_client()
     _secret = settings.MCP_OAUTH_STATE_SECRET
+    # F18: use COMMAND_CENTER_BASE_URL so redirects work across environments.
+    _cc_base = settings.command_center_url
 
     # Validate HMAC on the state token.
     state_token = params.state
     if "." not in state_token:
         return Response(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/connectors?oauth=error&reason=invalid_state"},
+            headers={"Location": f"{_cc_base}/connectors?oauth=error&reason=invalid_state"},
         )
     raw_state, received_hmac = state_token.rsplit(".", 1)
 
@@ -1713,7 +1715,7 @@ async def mcp_oauth_callback(
     if raw_value is None:
         return Response(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/connectors?oauth=error&reason=state_expired"},
+            headers={"Location": f"{_cc_base}/connectors?oauth=error&reason=state_expired"},
         )
     oauth_state = _json.loads(raw_value)
     tenant_id: str = oauth_state["tenant_id"]
@@ -1727,7 +1729,7 @@ async def mcp_oauth_callback(
     if not hmac.compare_digest(received_hmac, expected_hmac):
         return Response(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/connectors?oauth=error&reason=invalid_state"},
+            headers={"Location": f"{_cc_base}/connectors?oauth=error&reason=invalid_state"},
         )
 
     # Delete from Redis — single use.
@@ -1758,7 +1760,7 @@ async def mcp_oauth_callback(
     except _SSRFErr:
         return Response(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/connectors?oauth=error&reason=token_endpoint_rejected"},
+            headers={"Location": f"{_cc_base}/connectors?oauth=error&reason=token_endpoint_rejected"},
         )
 
     from app.core.http import create_isolated_http_client as _create_client
@@ -1788,7 +1790,7 @@ async def mcp_oauth_callback(
                 status_code=status.HTTP_302_FOUND,
                 headers={
                     "Location": (
-                        f"/connectors?oauth=error"
+                        f"{_cc_base}/connectors?oauth=error"
                         f"&reason=token_exchange_failed"
                         f"&status={token_response.status_code}"
                     )
@@ -1798,7 +1800,7 @@ async def mcp_oauth_callback(
     except Exception:  # noqa: BLE001
         return Response(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/connectors?oauth=error&reason=token_exchange_error"},
+            headers={"Location": f"{_cc_base}/connectors?oauth=error&reason=token_exchange_error"},
         )
 
     # Store the token via propose_connector_credential (encrypted via OPCRED2).
@@ -1813,14 +1815,14 @@ async def mcp_oauth_callback(
     except TenantConfigChangeRequestError:
         return Response(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/connectors?oauth=error&reason=credential_store_failed"},
+            headers={"Location": f"{_cc_base}/connectors?oauth=error&reason=credential_store_failed"},
         )
 
     return Response(
         status_code=status.HTTP_302_FOUND,
         headers={
             "Location": (
-                f"/connectors?oauth=success&mcp_server_id={mcp_server_id}"
+                f"{_cc_base}/connectors?oauth=success&mcp_server_id={mcp_server_id}"
             )
         },
     )
