@@ -11,7 +11,6 @@ from app.api.v1.schemas.queue_operations import (
 )
 from app.dependencies.authority import (
     require_operator_authority,
-    require_tenant_observability_read,
     require_tenant_scope,
 )
 from app.dependencies.services import get_queue_operations_service
@@ -29,13 +28,17 @@ router = APIRouter(tags=["operations"])
 @router.get(
     "/operations/queue-status",
     response_model=QueueStatusResponse,
-    dependencies=[Depends(require_tenant_observability_read)],
+    # F8: queue depth is a platform-wide infrastructure metric, not per-tenant.
+    # require_operator_authority gates this to platform operators only; arbitrary
+    # tenant-scoped principals cannot infer global load or cross-tenant queue state.
+    # require_tenant_scope is kept to satisfy the router-level auth invariant (all
+    # handlers in a tenant-scoped router must resolve tenant context).
+    dependencies=[Depends(require_operator_authority)],
 )
 async def get_queue_status(
-    expected_tenant_id: str = Depends(require_tenant_scope),
+    _tenant: str = Depends(require_tenant_scope),
     service: QueueOperationsService = Depends(get_queue_operations_service),
 ) -> QueueStatusResponse:
-    _ = expected_tenant_id
     return QueueStatusResponse.from_record(await service.get_queue_status())
 
 

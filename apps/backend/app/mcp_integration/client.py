@@ -28,17 +28,16 @@ async def fetch_mcp_tools(
     Connects via the MCP Streamable HTTP transport, runs the initialize
     handshake, and returns the tool list as plain dicts.
     """
-    import httpx
-
+    from app.core.http import create_isolated_http_client
     from app.core.ssrf import PinnedIPAsyncHTTPTransport
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
     transport = PinnedIPAsyncHTTPTransport(pinned_ip=validated.pinned_ip)
-    http_client = httpx.AsyncClient(
+    http_client = create_isolated_http_client(
         transport=transport,
+        timeout_seconds=timeout,
         follow_redirects=False,
-        timeout=timeout,
     )
     async with streamable_http_client(
         server_url,

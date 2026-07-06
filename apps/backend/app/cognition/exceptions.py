@@ -15,6 +15,10 @@ class CognitionLifecycleError(CognitionError):
     """Raised when a lifecycle transition is not allowed."""
 
 
+class CognitionSeparationError(CognitionError):
+    """Raised when the approver and proposer are the same principal (dual-control)."""
+
+
 class CognitionPersistenceError(CognitionError):
     """Raised when cognition persistence collaborators refuse a write."""
 
@@ -133,6 +137,7 @@ __all__ = [
     "CognitionLLMProviderError",
     "CognitionLifecycleError",
     "CognitionNotFoundError",
+    "CognitionSeparationError",
     "CognitionParsingFailureError",
     "CognitionPersistenceError",
     "CognitionPersistenceFailureError",

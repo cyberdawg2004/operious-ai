@@ -294,10 +294,10 @@ class ActionApprovalService:
         )
         # Dual-control: the principal approving must differ from the agent/actor
         # that proposed the action. Mirrors the identical guard on the config-
-        # change path (tenant_config_change_request_service.py). proposed_by is
-        # None for records created before this column existed; skip the check in
-        # that case so old records remain approvable during migration rollout.
-        if approval.proposed_by is not None and approved_by == approval.proposed_by:
+        # change path (tenant_config_change_request_service.py).
+        # Migration 0103 backfilled all NULL proposed_by rows with the sentinel
+        # "pre-migration-unknown"; no records should be NULL after that migration.
+        if approved_by == approval.proposed_by:
             raise ActionApprovalSeparationError(
                 "action approver must differ from proposer"
             )
@@ -434,9 +434,8 @@ class ActionApprovalService:
             expected_tenant_id=expected_tenant_id,
         )
         # Dual-control: mirrors the identical guard in approve_in_transaction.
-        # A proposer cannot deny their own pending action; proposed_by=None
-        # (pre-migration rows) skips the check.
-        if approval.proposed_by is not None and denied_by == approval.proposed_by:
+        # Migration 0103 ensures no proposed_by=NULL rows remain.
+        if denied_by == approval.proposed_by:
             raise ActionApprovalSeparationError(
                 "action denier must differ from proposer"
             )

@@ -196,6 +196,13 @@ TENANT_GOVERNANCE_READ_CAPABILITY: Final[str] = "tenant.governance.read"
 #: Domain capability required to read cognition/knowledge-evolution records.
 TENANT_COGNITION_READ_CAPABILITY: Final[str] = "tenant.cognition.read"
 
+#: Domain capability required to APPROVE / APPLY a SOP or knowledge change
+#: proposed via the cognition hub. Deliberately DISTINCT from
+#: TENANT_KNOWLEDGE_WRITE_CAPABILITY (which covers proposal) so organisations
+#: can enforce dual-control on knowledge-base mutations: proposer≠approver.
+#: Granted by the ``TenantKnowledgeApprover`` Auth0 role.
+TENANT_KNOWLEDGE_APPROVE_CAPABILITY: Final[str] = "tenant.knowledge.approve"
+
 #: Domain capability required to approve/reject tenant operational actions.
 TENANT_ACTIONS_APPROVE_CAPABILITY: Final[str] = "tenant.actions.approve"
 
@@ -339,6 +346,20 @@ def require_tenant_knowledge_write(request: Request) -> AuthorityContext:
     return _require_capability_from_request(
         request,
         capability=TENANT_KNOWLEDGE_WRITE_CAPABILITY,
+    )
+
+
+def require_tenant_knowledge_approve(request: Request) -> AuthorityContext:
+    """FastAPI dependency: require the tenant.knowledge.approve capability.
+
+    Used on cognition approve/apply routes to enforce dual-control: the
+    principal approving a SOP change must be distinct from the proposer and
+    must hold this capability (not just knowledge.write).
+    """
+
+    return _require_capability_from_request(
+        request,
+        capability=TENANT_KNOWLEDGE_APPROVE_CAPABILITY,
     )
 
 
@@ -670,6 +691,7 @@ __all__ = [
     "TENANT_CONFIG_WRITE_CAPABILITY",
     "TENANT_EXECUTION_GOVERNANCE_WRITE_CAPABILITY",
     "TENANT_GOVERNANCE_READ_CAPABILITY",
+    "TENANT_KNOWLEDGE_APPROVE_CAPABILITY",
     "TENANT_KNOWLEDGE_WRITE_CAPABILITY",
     "TENANT_OBSERVABILITY_READ_CAPABILITY",
     "TENANT_OPERATIONS_READ_CAPABILITY",
@@ -696,6 +718,7 @@ __all__ = [
     "require_tenant_connector_approve",
     "require_tenant_connector_read",
     "require_tenant_governance_read",
+    "require_tenant_knowledge_approve",
     "require_tenant_knowledge_write",
     "require_tenant_observability_read",
     "require_tenant_operations_read",

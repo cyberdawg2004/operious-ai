@@ -22,6 +22,7 @@ from app.agents.tools.grants import (
 )
 from app.agents.tools.operation_metadata import (
     ACTION_STRUCTURAL_KEYS as _ACTION_STRUCTURAL_KEYS,
+    COMMITMENT_KIND_METADATA_KEY,
     operation_metadata,
     payload_for_operation,
     resolve_operation,
@@ -558,6 +559,16 @@ def _request_metadata(
         "resolution_category": proposal.resolution_category,
     }
     metadata.update(operation_metadata(resolved))
+    # F9: for custom/MCP tools, resolve_operation() returns None so
+    # operation_metadata() returns {} — operation_commitment_kind is never stamped.
+    # The invoker's money/goods-without-ledger guard reads this key; if absent it
+    # silently bypasses the guard.  Pull the commitment_kind from the action dict
+    # (where McpConnectorTool and GenericConnectorTool propagate it) so the guard
+    # fires correctly for all tool kinds.
+    if COMMITMENT_KIND_METADATA_KEY not in metadata:
+        fallback_kind = _text(action.get(COMMITMENT_KIND_METADATA_KEY))
+        if fallback_kind is not None:
+            metadata[COMMITMENT_KIND_METADATA_KEY] = fallback_kind
     # Pass through all scalar values from the action dict as governance metadata.
     # This is domain-agnostic: whatever field names _merge_extracted_fields put into
     # the action dict (order_id/product_sku for e-commerce, account_number/service_id

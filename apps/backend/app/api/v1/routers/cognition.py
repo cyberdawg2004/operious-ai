@@ -16,10 +16,12 @@ from app.cognition.exceptions import (
     CognitionError,
     CognitionLifecycleError,
     CognitionNotFoundError,
+    CognitionSeparationError,
 )
 from app.dependencies.authority import (
     require_authority,
     require_tenant_cognition_read,
+    require_tenant_knowledge_approve,
     require_tenant_knowledge_write,
     require_tenant_scope,
 )
@@ -37,7 +39,9 @@ _DEFAULT_LIMIT = 25
 @router.post(
     "/approvals/{approval_id}/approve",
     response_model=ApprovalLifecycleResponse,
-    dependencies=[Depends(require_tenant_knowledge_write)],
+    # F7: approve requires tenant.knowledge.approve, NOT tenant.knowledge.write.
+    # This enforces dual-control: the proposer (who has .write) cannot also approve.
+    dependencies=[Depends(require_tenant_knowledge_approve)],
 )
 async def approve_approval(
     approval_id: str,
@@ -56,6 +60,11 @@ async def approve_approval(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "approval_record_not_found"},
         ) from exc
+    except CognitionSeparationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "approval_separation_required"},
+        ) from exc
     except CognitionLifecycleError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -67,7 +76,8 @@ async def approve_approval(
 @router.post(
     "/approvals/{approval_id}/apply",
     response_model=ApprovalApplicationResponse,
-    dependencies=[Depends(require_tenant_knowledge_write)],
+    # F7: apply also requires tenant.knowledge.approve — not knowledge.write.
+    dependencies=[Depends(require_tenant_knowledge_approve)],
 )
 async def apply_approval(
     approval_id: str,
@@ -85,6 +95,11 @@ async def apply_approval(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "approval_record_not_found"},
+        ) from exc
+    except CognitionSeparationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "approval_separation_required"},
         ) from exc
     except CognitionLifecycleError as exc:
         raise HTTPException(

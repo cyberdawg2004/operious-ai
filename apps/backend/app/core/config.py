@@ -510,6 +510,13 @@ class Settings(BaseSettings):
     DATA_PROTECTION_KMS_BACKEND: Literal["local", "gcp"] = "local"
     DATA_PROTECTION_DEFAULT_RETENTION_DAYS: int = 90
 
+    # ─── Platform governance caps (F5) ───────────────────────────────
+    # Platform-enforced ceiling for auto-approve amount thresholds.
+    # Tenant action policies may not set refund/amount auto-approve thresholds
+    # above this value; the policy is rejected at parse time.
+    # Default: 10_000 cents = $100.00.
+    PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS: int = 10_000
+
     # ─── Outbound dispatch SSRF allowlist (S-06) ─────────────────────
     # Optional comma-separated host allowlist for tenant-configured
     # outbound webhook / connector URLs. Empty means "any PUBLIC host"

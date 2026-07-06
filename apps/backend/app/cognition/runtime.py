@@ -17,6 +17,7 @@ from app.cognition.exceptions import (
     CognitionLifecycleError,
     CognitionNotFoundError,
     CognitionPersistenceError,
+    CognitionSeparationError,
 )
 from app.cognition.models import (
     ApprovalApplicationResult,
@@ -77,6 +78,11 @@ class CognitionRuntime:
             tenant_id=tenant_id,
             approval_id=approval_id,
         )
+        # Dual-control: the approver must differ from the proposer (F7).
+        if reviewed_by == approval.proposed_by:
+            raise CognitionSeparationError(
+                "knowledge approver must differ from proposer"
+            )
         status = ApprovalStatus(approval.status)
         if status is ApprovalStatus.APPROVED or status is ApprovalStatus.APPLIED:
             return ApprovalLifecycleResult(approval=approval)

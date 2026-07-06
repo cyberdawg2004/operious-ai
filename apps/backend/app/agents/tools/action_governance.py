@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, FrozenSet, cast
 
+_logger = logging.getLogger(__name__)
+
+# Platform-enforced ceiling for auto-approve amount thresholds (F5).
+# Tenants may not configure a refund/amount auto-approve threshold above this
+# value.  Override via PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS env/settings.
+# Default: 10,000 cents = $100.00.
+_DEFAULT_MAX_AUTO_APPROVE_AMOUNT_CENTS = 10_000
+
+
+def _max_auto_approve_amount_cents() -> int:
+    """Return the platform ceiling for auto-approve thresholds."""
+    try:
+        from app.core.config import get_settings
+        raw = getattr(get_settings(), "PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS", None)
+        if raw is not None:
+            return int(raw)
+    except Exception:  # noqa: BLE001
+        pass
+    return _DEFAULT_MAX_AUTO_APPROVE_AMOUNT_CENTS
+
 from app.agents.tools.operation_metadata import (
     ApprovalPolicy,
     CommitmentKind,
+    ExecutionPolicy,
     RegisteredOperation,
     ResolvedOperation,
     RuleKind,
@@ -100,15 +122,24 @@ class CustomToolDeclaration:
     The tenant's action_tools policy may include tool_name keys that are not
     registered in operation_metadata.py.  Each such entry must declare:
 
-    - commitment_kind: the money/goods classification — drives the
-      INVIOLABLE money/goods gate.  Required; fail-closed if absent.
-    - decision: the governance decision when no other rule applies.
-      Defaults to REQUIRE_APPROVAL (safe default).
+    - commitment_kind: the money/goods classification — informational and for
+      audit; drives the safe-default behavior for unconfigured tools.
+    - execution_policy: how the tool executes.
+        auto_execute       — fire immediately, no Operious gate.
+                             Fully supported even for money/goods operations.
+                             The tenant's system owns downstream authorization.
+        operious_approval  — route to Operious human queue before firing.
+                             Safe default for unconfigured money/goods tools.
+    - decision: retained for backward compat with existing REST custom tools
+      that declare only commitment_kind+decision. When execution_policy is
+      present it takes precedence: auto_execute → ALLOW, operious_approval →
+      REQUIRE_APPROVAL. If absent, falls back to the decision field.
     """
 
     tool_name: str
     commitment_kind: CommitmentKind
     decision: Decision = Decision.REQUIRE_APPROVAL
+    execution_policy: ExecutionPolicy | None = None
 
 
 def _empty_custom_tools() -> dict[str, CustomToolDeclaration]:
@@ -285,14 +316,21 @@ def _evaluate_custom_tool(
 
     A tenant-registered custom tool (e.g. "account.credit" for a bank or
     "service.ticket" for a telecom) is declared in the policy's custom_tools
-    mapping with a commitment_kind and default decision.
+    mapping with a commitment_kind and execution_policy.
+
+    Execution model:
+    - auto_execute: fire immediately — no Operious gate. Supported for ALL
+      commitment kinds including money/goods. The tenant explicitly chose full
+      autonomy; their system owns downstream authorization. Fully audited.
+    - operious_approval: route to Operious human queue before firing.
+    - Unconfigured tool → operious_approval (safe default for unknown tools).
 
     Fail-closed contract:
     - No tool_name → REQUIRE_APPROVAL (governance metadata missing)
-    - tool_name not in custom_tools → REQUIRE_APPROVAL (unknown tool for tenant)
-    - commitment_kind MONEY/GOODS → always REQUIRE_APPROVAL regardless of decision
-    - commitment_kind none/record_update + metadata money/goods indicators →
-      REQUIRE_APPROVAL (misdeclaration backstop — conservative on conflict)
+    - tool_name not in custom_tools → REQUIRE_APPROVAL (unknown tool = safe default)
+    - Misdeclaration backstop: declared non-committing but metadata signals money/goods
+      AND execution_policy is NOT explicitly auto_execute → REQUIRE_APPROVAL.
+      (If the tenant explicitly set auto_execute they are aware; backstop is silent.)
     """
     if tool_name is None:
         return (
@@ -305,18 +343,61 @@ def _evaluate_custom_tool(
     if declaration is None:
         return (
             _require_approval(
-                f"tool {tool_name!r} is not registered in the tenant action policy",
+                f"tool {tool_name!r} is not registered in the tenant action policy; "
+                "routing to human review (safe default for unconfigured tools)",
                 binding=policy.binding,
             ),
         )
 
-    # INVIOLABLE: money/goods commitment always routes to human.
-    # The tenant's declared 'decision' field CANNOT override this.
-    # This mirrors the money_or_goods_commitment_kinds gate that fires at the
-    # proposal level for registered operations (via _COMMITMENT_TOOL_NAMES) — custom
-    # tools are not in that hardcoded set, so we enforce the invariant here at the
-    # governance layer where the commitment_kind IS known.
-    # A tenant declaring commitment_kind=money,decision=allow must still route to human.
+    # AUTO_EXECUTE: tenant explicitly set execution_policy=auto_execute.
+    # This is the ONLY way to auto-fire a money/goods MCP tool. The legacy
+    # 'decision=allow' field is NOT sufficient — it only works for non-committing
+    # commitment kinds on the legacy path. This preserves backward compat: existing
+    # REST connectors that declare commitment_kind=money,decision=allow still hit
+    # the inviolable gate below (as before), because execution_policy is absent.
+    if declaration.execution_policy is ExecutionPolicy.AUTO_EXECUTE:
+        # F4: emit a platform-visible alert when auto_execute is configured for
+        # money/goods tools so the platform operator can audit the decision.
+        if declaration.commitment_kind in (
+            CommitmentKind.MONEY,
+            CommitmentKind.GOODS,
+            CommitmentKind.SERVICE_COMMITMENT,
+        ):
+            _logger.warning(
+                "action_governance_auto_execute_money_goods",
+                extra={
+                    "tool_name": tool_name,
+                    "commitment_kind": declaration.commitment_kind.value,
+                    "event": "platform_alert",
+                    "note": (
+                        "Tenant configured auto_execute for a money/goods tool — "
+                        "no human approval gate. Platform operator should audit "
+                        "this configuration."
+                    ),
+                },
+            )
+        return (
+            _allow(
+                f"custom tool {tool_name!r} set to auto_execute by tenant policy; "
+                "firing immediately — tenant's system owns downstream authorization",
+                binding=policy.binding,
+            ),
+        )
+
+    # EXPLICIT OPERIOUS_APPROVAL: tenant set operious_approval — route to human.
+    if declaration.execution_policy is ExecutionPolicy.OPERIOUS_APPROVAL:
+        return (
+            _require_approval(
+                f"custom tool {tool_name!r} requires operious approval per tenant policy",
+                binding=policy.binding,
+            ),
+        )
+
+    # LEGACY PATH (execution_policy absent): use the old inviolable money/goods gate.
+    # This preserves backward compat for existing REST connectors that declare
+    # commitment_kind=money/goods — they still require human approval regardless
+    # of the 'decision' field, exactly as before.
+    # A tenant must EXPLICITLY set execution_policy=auto_execute to change this.
     if declaration.commitment_kind in (
         CommitmentKind.MONEY,
         CommitmentKind.GOODS,
@@ -326,22 +407,14 @@ def _evaluate_custom_tool(
             _require_approval(
                 f"custom tool {tool_name!r} declares commitment_kind="
                 f"{declaration.commitment_kind.value!r}; money/goods/service commitments "
-                "always require human approval — the tenant's declared decision "
-                "field cannot override this invariant",
+                "require explicit execution_policy=auto_execute to auto-fire — "
+                "routing to human approval (legacy invariant preserved)",
                 binding=policy.binding,
             ),
         )
 
-    # MISDECLARATION BACKSTOP (Finding 2):
-    # When a custom tool is declared as non-committing (none/record_update)
-    # but the governance context carries metadata signals suggesting a money/goods
-    # commitment, treat the conflict conservatively: route to human rather than
-    # trusting the declaration blindly.
-    # Signals checked:
-    #   - "operation_commitment_kind" key present with money/goods value (explicit metadata)
-    #   - "refund_amount_cents" present with a positive value
-    # This backstop catches accidental misdeclaration — e.g. a tenant copying a template
-    # and forgetting to set commitment_kind=money for a real money-moving operation.
+    # MISDECLARATION BACKSTOP: legacy path, non-committing declaration but metadata
+    # signals money/goods. Skip when execution_policy=auto_execute (already handled above).
     if subject_metadata is not None:
         conflict = _metadata_money_goods_conflict(
             subject_metadata, declared_kind=declaration.commitment_kind
@@ -364,10 +437,12 @@ def _evaluate_custom_tool(
         return (_deny("custom tool denied by tenant policy", binding=policy.binding),)
     return (
         _require_approval(
-            "custom tool requires human approval per tenant policy",
+            f"custom tool {tool_name!r} requires human approval per tenant policy",
             binding=policy.binding,
         ),
     )
+
+
 
 
 def _metadata_money_goods_conflict(
@@ -632,10 +707,14 @@ def _parse_custom_tool_declaration(
 ) -> CustomToolDeclaration:
     """Parse a custom tool entry from the action_tools policy.
 
-    Required field: commitment_kind (the M/G classification — none accepted).
-    Required field: decision (always | require_approval | deny).
+    Required: commitment_kind — the money/goods classification (informational/audit).
+    Optional: execution_policy (auto_execute | operious_approval).
+              When set, takes precedence over the legacy 'decision' field.
+              auto_execute is fully supported for all commitment kinds including
+              money/goods — the tenant explicitly chose full autonomy.
+    Optional: decision — legacy field, honored when execution_policy is absent.
+              Defaults to require_approval (safe default).
 
-    commitment_kind drives the INVIOLABLE money/goods gate downstream.
     Fail-closed: missing commitment_kind → raises ActionPolicyParseError.
     """
     raw_commitment = entry.get("commitment_kind")
@@ -652,6 +731,26 @@ def _parse_custom_tool_declaration(
             f"must be one of: {', '.join(c.value for c in CommitmentKind)}"
         )
 
+    # execution_policy — preferred over legacy decision field.
+    execution_policy: ExecutionPolicy | None = None
+    raw_exec = entry.get("execution_policy")
+    if raw_exec is not None:
+        if not isinstance(raw_exec, str) or not raw_exec.strip():
+            raise ActionPolicyParseError(
+                f"tools.{tool_name}.execution_policy must be a non-empty string"
+            )
+        ep_map = {
+            "auto_execute": ExecutionPolicy.AUTO_EXECUTE,
+            "operious_approval": ExecutionPolicy.OPERIOUS_APPROVAL,
+        }
+        execution_policy = ep_map.get(raw_exec.strip().lower().replace("-", "_"))
+        if execution_policy is None:
+            raise ActionPolicyParseError(
+                f"tools.{tool_name}.execution_policy {raw_exec!r} is not valid; "
+                f"must be one of: auto_execute, operious_approval"
+            )
+
+    # Legacy decision field — used when execution_policy is absent.
     raw_decision = entry.get("decision", "require_approval")
     if not isinstance(raw_decision, str) or not raw_decision.strip():
         raise ActionPolicyParseError(
@@ -675,6 +774,7 @@ def _parse_custom_tool_declaration(
         tool_name=tool_name,
         commitment_kind=commitment_kind,
         decision=decision,
+        execution_policy=execution_policy,
     )
 
 
@@ -720,12 +820,19 @@ def _parse_operation_rule(
         if limit is None:
             limit = allow.get("amount_cents_lte")
         confidence_gte = allow.get("confidence_gte")
+        parsed_limit = _require_int(limit, f"{prefix}.allow.refund_amount_cents_lte")
+        # F5: enforce platform ceiling — tenants cannot set an unconstrained threshold.
+        platform_ceiling = _max_auto_approve_amount_cents()
+        if parsed_limit > platform_ceiling:
+            raise ActionPolicyParseError(
+                f"{prefix}.allow.refund_amount_cents_lte={parsed_limit} exceeds the "
+                f"platform ceiling of {platform_ceiling} cents "
+                f"(PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS). "
+                f"Reduce the threshold or increase the platform ceiling."
+            )
         return AmountThresholdRule(
             amount_field="refund_amount_cents",
-            amount_lte=_require_int(
-                limit,
-                f"{prefix}.allow.refund_amount_cents_lte",
-            ),
+            amount_lte=parsed_limit,
             confidence_field="diagnostic_confidence",
             confidence_gte=(
                 None
@@ -915,6 +1022,7 @@ __all__ = [
     "KNOWN_ACTION_TOOL_NAMES",
     "ActionPolicyParseError",
     "CustomToolDeclaration",
+    "ExecutionPolicy",
     "ParsedActionPolicy",
     "TenantActionPolicy",
     "build_action_tool_governance_runtime",

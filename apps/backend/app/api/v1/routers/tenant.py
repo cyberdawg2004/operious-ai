@@ -1747,15 +1747,15 @@ async def mcp_oauth_callback(
             headers={"Location": "/connectors?oauth=error&reason=token_endpoint_rejected"},
         )
 
-    import httpx as _httpx
+    from app.core.http import create_isolated_http_client as _create_client
     from app.core.ssrf import PinnedIPAsyncHTTPTransport as _PinnedTransport
     _pinned_transport = _PinnedTransport(pinned_ip=_validated_token.pinned_ip)
 
     try:
-        async with _httpx.AsyncClient(
+        async with _create_client(
             transport=_pinned_transport,
+            timeout_seconds=15.0,
             follow_redirects=False,
-            timeout=15.0,
         ) as _http:
             token_response = await _http.post(
                 token_endpoint,
