@@ -74,6 +74,8 @@ def pg_tenant_id() -> str:
 
 
 async def _executed_outcome(
+    self: object,
+    *,
     approval_record: ActionApprovalRecord,
     approved_decision_id: str,
     execution_context: object,
