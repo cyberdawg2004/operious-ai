@@ -170,8 +170,8 @@ class GenericRestRepairDispatchConnector(ConnectorTool):
             work_order,
             provider_status=_result_text(result, "provider_status"),
             provider_error=(
-                result.error_message
-                or _result_text(result, "provider_error")
+                _result_text(result, "provider_error")
+                or result.error_message
                 or "provider_error"
             ),
         )

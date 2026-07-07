@@ -292,8 +292,12 @@ def parse_extracted_fields(raw: Mapping[str, Any] | None) -> ExtractedOrderField
     """
     if raw is None:
         return ExtractedOrderFields()
+    known = ExtractedOrderFields.model_fields
+    filtered = {k: v for k, v in raw.items() if k in known}
+    if not filtered:
+        return ExtractedOrderFields()
     try:
-        return ExtractedOrderFields.model_validate(raw)
+        return ExtractedOrderFields.model_validate(filtered)
     except ValidationError as exc:
         logger.warning(
             "extracted_fields_parse_failed",
@@ -341,7 +345,16 @@ def parse_extracted_fields_against_schema(
                 entry["value"] = str(entry["value"])
             v = entry
         cleaned[k] = v
-    return parse_extracted_fields(cleaned)
+    if not cleaned:
+        return ExtractedOrderFields()
+    try:
+        return ExtractedOrderFields.model_validate(cleaned)
+    except ValidationError as exc:
+        logger.warning(
+            "extracted_fields_parse_failed",
+            extra={"error": str(exc)[:500]},
+        )
+        return ExtractedOrderFields()
 
 
 __all__ = [

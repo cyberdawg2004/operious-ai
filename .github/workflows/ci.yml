@@ -61,6 +61,7 @@ jobs:
       # this override is redundant belt-and-suspenders, kept so CI still
       # pins explicitly rather than relying solely on the code default.
       ANTHROPIC_DEFAULT_MODEL: claude-sonnet-4-6
+      SKIP_LIVE_CONNECTOR_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

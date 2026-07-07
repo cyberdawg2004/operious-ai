@@ -344,7 +344,7 @@ def _provider_error_result(
             "status": "error",
             "provider_id": provider_fields.provider_id,
             "provider_status": provider_fields.provider_status,
-            "provider_error": message,
+            "provider_error": provider_fields.provider_error or message,
         },
         status="error",
         error_code="provider_error",
