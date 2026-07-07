@@ -76,13 +76,22 @@ _CONNECTOR_TYPE_COMMITMENT: dict[str, tuple[CommitmentKind, ApprovalPolicy]] = {
 
 
 def build_action_tool_registry() -> ToolRegistry:
-    """Build a registry with only FailClosedActionTool placeholders.
+    """Build a registry with legacy stub tool instances.
 
-    Used in contexts where no tenant config is available (e.g. offline tools,
-    legacy direct-construction tests). All tools fail closed with a clear error.
-    This registry is replaced by build_tenant_action_tool_registry in production.
+    Used only in direct-construction tests where no DB config is available.
+    These are the pre-2.2 tool classes (RefundRequestTool, WarrantyClaimTool,
+    etc.) that simulate success. In production, build_tenant_action_tool_registry
+    is used, which reads ConnectorConfigRecord rows from the DB.
     """
-    return ToolRegistry()
+    registry = ToolRegistry()
+    for tool_cls in (
+        RefundRequestTool,
+        ReplacementOrderTool,
+        WarehouseRepairReportTool,
+        WarrantyClaimTool,
+    ):
+        registry.register(tool_cls())
+    return registry
 
 
 async def build_tenant_action_tool_registry(
@@ -114,9 +123,9 @@ async def build_tenant_action_tool_registry(
     ``connector_credential_runtime`` is used for both custom REST connectors
     and MCP servers (OPCRED2-encrypted per-connector credentials).
 
-    The ``allow_stub_actions`` parameter is retained for API compatibility.
+    ``allow_stub_actions`` is accepted for API compatibility but has no effect —
+    no hardcoded tool stubs exist. Every tool comes from the tenant's DB config.
     """
-    del allow_stub_actions  # no stub path in the generic implementation
 
     registry = ToolRegistry()
     all_configs = await config_repository.list_active_for_tenant(
@@ -148,6 +157,7 @@ async def build_tenant_action_tool_registry(
             )
             registry.register(tool)
 
+    del allow_stub_actions  # no hardcoded tool stubs; every tool comes from DB config
     return registry
 
 

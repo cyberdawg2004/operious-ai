@@ -25,6 +25,7 @@ from app.agents.tools.invoker import (
     AGENT_ACTION_BINDING_KEY,
     compute_agent_action_binding,
 )
+from app.agents.tools.orchestration import ActionOrchestrationRuntime, ActionOutcome
 from app.dependencies.authority import (
     require_tenant_actions_approve,
     require_tenant_operations_read,
@@ -72,6 +73,22 @@ def pg_tenant_id() -> str:
     return _TENANT_ID
 
 
+async def _executed_outcome(
+    approval_record: ActionApprovalRecord,
+    approved_decision_id: str,
+    execution_context: object,
+    expected_tenant_id: str,
+) -> ActionOutcome:
+    """Test double: always returns executed without a real connector call."""
+    return ActionOutcome(
+        tool_name=approval_record.tool_name,
+        idempotency_key=approval_record.idempotency_key,
+        status="executed",
+        governance_decision_id=approved_decision_id,
+        approval_record_id=approval_record.approval_id,
+    )
+
+
 @pytest_asyncio.fixture
 async def approval_client(
     pg_session: AsyncSession,
@@ -81,6 +98,13 @@ async def approval_client(
     monkeypatch.setattr(redis_module, "_redis_client", redis)
     monkeypatch.setattr(main_module, "get_redis_client", lambda: redis)
     monkeypatch.setattr(service_dependencies, "get_redis_client", lambda: redis)
+    # Patch re_invoke_approved_action so the test doesn't need a real connector
+    # config in the DB. The test verifies governance wiring, not connector execution.
+    monkeypatch.setattr(
+        ActionOrchestrationRuntime,
+        "re_invoke_approved_action",
+        _executed_outcome,
+    )
     app = create_app()
 
     async def _override() -> AsyncIterator[AsyncSession]:

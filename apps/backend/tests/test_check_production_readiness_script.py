@@ -25,6 +25,8 @@ def _ready_production(**overrides: object) -> Settings:
         "AUDIT_EXPORT_HMAC_SECRET": "y" * 32,
         "MCP_OAUTH_STATE_SECRET": "z" * 32,
         "PUBLIC_BASE_URL": "https://api.operious.com",
+        "CORS_ALLOW_ORIGINS": "https://app.operious.com",
+        "AUTH_PROVIDER": "auth0",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
