@@ -62,21 +62,35 @@ async def invoke_mcp_tool(
     tool_name: str,
     arguments: dict[str, Any],
     *,
+    validated: "ValidatedPublicHTTPSURL",
     auth_headers: dict[str, str] | None = None,
     timeout: float = 15.0,
 ) -> dict[str, Any]:
     """Invoke a named tool on an MCP server.
 
+    ``validated`` is a pre-validated SSRF-safe destination; the TCP connection
+    is pinned to the resolved IP so DNS-rebinding and redirect following are
+    closed at the transport layer.
+
     Returns the raw tool result as a plain dict. Raises on transport error.
     """
+    from app.core.http import create_isolated_http_client
+    from app.core.ssrf import PinnedIPAsyncHTTPTransport
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
+    _transport = PinnedIPAsyncHTTPTransport(pinned_ip=validated.pinned_ip)
+    _http_client = create_isolated_http_client(
+        transport=_transport,
+        timeout_seconds=timeout,
+        follow_redirects=False,
+    )
     extra_headers = auth_headers or {}
     async with streamablehttp_client(
         server_url,
         timeout=timeout,
         headers=extra_headers,
+        http_client=_http_client,
     ) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
