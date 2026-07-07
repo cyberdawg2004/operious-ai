@@ -20,6 +20,11 @@ they have zero external dependencies.
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+# mcp is a dev/local-only dependency (forbidden in production requirements.txt
+# per the dependency constitution). pytest.importorskip raises Skipped at
+# module level so CI skips collection cleanly when mcp is not installed.
+
 import asyncio
 import json
 import threading
@@ -29,6 +34,9 @@ from typing import Any
 
 import pytest
 import uvicorn
+
+pytest.importorskip("mcp", reason="mcp package not installed; skipping MCP E2E tests")
+
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server.fastmcp import FastMCP
