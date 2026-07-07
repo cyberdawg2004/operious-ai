@@ -43,6 +43,10 @@ from app.agents.tools.action_governance import (
 )
 from app.agents.tools.actions import build_tenant_action_tool_registry
 from app.agents.tools.connectors import PostgresConnectorConfigRepository
+from app.agents.tools.connectors.credentials import (
+    ConnectorCredentialRepository,
+    ConnectorScopedCredentialRuntime,
+)
 from app.agents.tools.approvals import (
     ActionApprovalError,
     PostgresActionApprovalRepository,
@@ -2949,6 +2953,11 @@ async def _action_orchestration_runtime(
                 tenant_id=tenant_id,
                 config_repository=PostgresConnectorConfigRepository(session),
                 credential_runtime=tenant_runtime,
+                connector_credential_runtime=ConnectorScopedCredentialRuntime(
+                    repository=ConnectorCredentialRepository(session),
+                    codec=build_tenant_credential_encryptor_from_settings(settings),
+                    tenant_id=tenant_id,
+                ),
                 work_order_repository=PostgresWorkOrderRepository(session),
                 allow_stub_actions=settings.allow_stub_actions_effective,
             ),

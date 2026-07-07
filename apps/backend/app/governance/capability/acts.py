@@ -149,6 +149,9 @@ class OperationalAct(StrEnum):
     SUPERVISOR_PATTERN_DETECT = "agents:supervisor_pattern_detect"
     FOLLOW_UP_TRIGGER = "agents:follow_up_trigger"
 
+    # ─── manager assistant (read-only analytics queries) ───────────
+    MANAGER_ASSISTANT_QUERY = "agents:manager_assistant_query"
+
 
 CAPABILITY_GOVERNED_ACTS: frozenset[OperationalAct] = frozenset(
     {

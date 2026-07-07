@@ -32,6 +32,25 @@ class TenantConfigChangeType(StrEnum):
     # plaintext credential. The encrypted envelope lives in
     # tenant_channel_configurations.credentials_enc (FORCE RLS, OPCRED2).
     CREDENTIAL_UPDATE = "credential_update"
+    # CONNECTOR_CREDENTIAL: dual-control per-connector credential lifecycle.
+    # proposed_payload stores ONLY a sentinel hash — never the ciphertext or
+    # plaintext credential. The encrypted envelope lives in connector_credentials
+    # (OPCRED2, AAD bound to connector_id). Supports any custom connector, not
+    # just OMS channels.
+    CONNECTOR_CREDENTIAL = "connector_credential"
+    # MCP_SERVER: dual-control MCP server registration and tool manifest.
+    # proposed_payload stores: {mcp_server_id, endpoint_url, oauth_config, mcp_tools}.
+    # mcp_tools is a list of {tool_name, commitment_kind, execution_policy,
+    # description_snapshot, input_schema_snapshot, enabled}.
+    # On apply: creates/updates a ConnectorConfigRecord with
+    # connector_type="mcp_server".
+    MCP_SERVER = "mcp_server"
+    # MCP_OAUTH_TOKEN: dual-control OAuth token storage for an MCP server.
+    # proposed_payload stores ONLY {mcp_server_id, token_hash} — never the token.
+    # The encrypted token envelope lives in connector_credentials (OPCRED2,
+    # AAD bound to f"{tenant_id}:{mcp_server_id}"). On apply: sets credential
+    # status to 'active' and updates source_approval_id.
+    MCP_OAUTH_TOKEN = "mcp_oauth_token"
 
 
 class TenantConfigChangeRequestStatus(StrEnum):

@@ -31,9 +31,14 @@ Measured: 2026-05-29, local PR_RT10 test environment unless noted.
 
 | Metric | Target | Current |
 | --- | --- | --- |
-| Phase A ack (p95) | < 500ms | NOT_MEASURED |
-| Full resolution delivery (p95) | < 120s | NOT_MEASURED |
-| Stream publish latency (p95) | < 200ms | NOT_MEASURED |
+| Phase A ack (p95) | < 500ms | not yet measured — no load test covers the SSE path; requires `tests/load/test_realtime_chat_load.py` |
+| Full resolution delivery (p95) | < 120s | not yet measured — reuses Tier 1 diagnostic pipeline; expected ≤ Tier 1 p95 (3,558ms in PR_T9) |
+| Stream publish latency (p95) | < 200ms | not yet measured — `conversation_generation.py` publish path; requires load fixture |
+
+**Measurement gap:** Tier 2 metrics have no dedicated load test. Before pilot Day 1, add
+`apps/backend/tests/load/test_realtime_chat_load.py` exercising the `/conversation` WebSocket
+path and record p95 values here. The Phase A ack target (< 500ms) is the most customer-visible;
+measure it first.
 
 ## Tier 3 - Voice Calls (Stub Providers)
 

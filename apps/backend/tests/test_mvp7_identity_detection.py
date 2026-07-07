@@ -24,15 +24,11 @@ import pytest
 
 from app.cognition.extraction import ExtractionFieldSpec, ExtractionSchema
 from app.session.enums import (
-    SessionContinuityMode,
-    SessionCorrelationKind,
-    SessionEventKind,
     SessionLifecyclePhase,
     SessionScope,
 )
-from app.session.identity import SessionId, SessionLineageId, as_session_id
+from app.session.identity import SessionId, SessionLineageId
 from app.session.identity_resolution import (
-    IDENTITY_CORRELATION_KIND,
     IdentityResolutionRuntime,
 )
 from app.session.persistence.memory import InMemorySessionPersistence
@@ -654,7 +650,7 @@ async def test_tenant_isolation_identity_ids_are_tenant_scoped() -> None:
 def test_extracted_fields_to_identity_dict_filters_blanks() -> None:
     """The worker-layer helper that converts ExtractedOrderFields to a plain dict
     must filter out None and empty values before passing to identity resolution."""
-    from app.cognition.extraction import ExtractedField, ExtractedOrderFields
+    from app.cognition.extraction import ExtractedOrderFields
     from app.workers.agent_tasks import _extracted_fields_to_identity_dict
 
     schema = _extraction_schema_with_identity("email", "phone", "serial_number")

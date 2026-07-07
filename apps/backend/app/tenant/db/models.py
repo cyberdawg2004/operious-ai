@@ -256,6 +256,83 @@ class ConnectorConfigRow(Base):
     )
 
 
+class ConnectorCredentialRow(Base):
+    """Per-connector credential envelope.
+
+    Stores OPCRED2 AES-256-GCM encrypted credentials for a specific
+    connector_id owned by a tenant. Completely separate from the
+    channel-level credential store (tenant_channel_configurations) so
+    non-commerce connectors (bank, telecom, etc.) can carry their own
+    auth without needing a TenantChannelType entry.
+
+    credentials_enc: OPCRED2 envelope (binary) — never exposed in API responses.
+    credential_hash: SHA-256 of credentials_enc — stored in change-request sentinels.
+    status: 'pending_validation' | 'active' | 'disabled'
+    """
+
+    __tablename__ = "connector_credentials"
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(TENANT_ID_MAX_LENGTH),
+        ForeignKey("tenants.tenant_id", ondelete="RESTRICT"),
+        nullable=False,
+        primary_key=True,
+    )
+    connector_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        primary_key=True,
+        comment="Matches the connector_id segment in ConnectorDefinition (prefix of tool_name).",
+    )
+    credentials_enc: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False,
+        comment="OPCRED2 envelope — AES-256-GCM encrypted credential JSON.",
+    )
+    credential_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        comment="SHA-256 hex of credentials_enc for change-request sentinel integrity.",
+    )
+    status: Mapped[str] = mapped_column(
+        String(_ENUM_WIDTH),
+        nullable=False,
+        default="pending_validation",
+        server_default=text("'pending_validation'"),
+    )
+    configured_by: Mapped[str] = mapped_column(String(_HANDLE_WIDTH), nullable=False)
+    source_approval_id: Mapped[str] = mapped_column(
+        String(_HANDLE_WIDTH),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(tenant_id) > 0", name="cc_tenant_id_nonempty"),
+        CheckConstraint("length(connector_id) > 0", name="cc_connector_id_nonempty"),
+        CheckConstraint(
+            "status IN ('pending_validation', 'active', 'disabled')",
+            name="cc_status_valid",
+        ),
+        CheckConstraint("length(configured_by) > 0", name="cc_configured_by_nonempty"),
+        CheckConstraint(
+            "length(source_approval_id) > 0",
+            name="cc_source_approval_id_nonempty",
+        ),
+        CheckConstraint("length(credential_hash) = 64", name="cc_credential_hash_len"),
+        Index("ix_connector_credentials_tenant_status", "tenant_id", "status"),
+    )
+
+
 class TenantKnowledgeDocumentRow(Base):
     """ORM row for ``tenant_knowledge_documents``."""
 
@@ -763,6 +840,7 @@ class TenantConfigChangeRequestRow(Base):
 
 __all__ = [
     "ConnectorConfigRow",
+    "ConnectorCredentialRow",
     "TenantChannelConfigurationRow",
     "TenantConfigChangeRequestRow",
     "TenantExecutionCircuitBreakerRow",

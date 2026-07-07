@@ -42,9 +42,9 @@
       "note": "Auth0 bearer token, ingress, session creation, dispatch, diagnostic worker pickup, and retry behavior were observed on 2026-07-05; final diagnostic completion did not succeed because the deployed Anthropic model/parameter configuration returned HTTP 400."
     },
     {
-      "requirement": "s10_full_capture_current_head",
+      "requirement": "s10_expanded_capture_deployed_v235",
       "path": "2026-07-05-s10-full-capture.json",
-      "note": "Comprehensive S-10 capture: spoof rejection (PASS), Auth0 /auth/me verified claims (PASS), CORS preflight (PARTIAL - config), rate limit (OBSERVED - health excluded by design), queue/worker health (PASS - 18/20 ok), smoke trace pipeline (OPERATIONAL), production boot gate (PASS). Two partial items need deployment config fixes (CORS_ALLOW_ORIGINS, ANTHROPIC_MODEL)."
+      "note": "Expanded S-10 capture for deployed Fly v235 / c65fda5: spoof rejection (PASS), Auth0 /auth/me verified claims (PASS), CORS preflight (PARTIAL - config), rate limit (OBSERVED - health excluded by design), queue/worker health (PASS - 18/20 ok), smoke trace pipeline (OPERATIONAL), production boot gate (PASS). This is not current-HEAD closure for 2b7cacd; CORS, rate-limit, and clean Anthropic completion still need recapture."
     },
     {
       "requirement": "production_readiness_output",

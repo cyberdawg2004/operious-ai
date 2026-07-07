@@ -460,6 +460,58 @@ export function buildSesSelfServiceChannelChangePayload(
   return { change_type: "channel", payload };
 }
 
+// ─── MCP server change payloads ───────────────────────────────────────────
+
+export const MCP_COMMITMENT_KIND_OPTIONS = [
+  "none",
+  "record_update",
+  "goods",
+  "money",
+  "service_commitment",
+] as const;
+export type McpCommitmentKind = (typeof MCP_COMMITMENT_KIND_OPTIONS)[number];
+
+export const MCP_EXECUTION_POLICY_OPTIONS = [
+  "operious_approval",
+  "auto_execute",
+] as const;
+export type McpExecutionPolicy = (typeof MCP_EXECUTION_POLICY_OPTIONS)[number];
+
+export const MCP_MONEY_GOODS_KINDS: ReadonlySet<McpCommitmentKind> = new Set([
+  "money",
+  "goods",
+  "service_commitment",
+]);
+
+export type McpToolDeclarationInput = {
+  tool_name: string;
+  commitment_kind: McpCommitmentKind;
+  execution_policy: McpExecutionPolicy;
+  description_snapshot: string;
+  input_schema_snapshot: Record<string, unknown>;
+  enabled: boolean;
+};
+
+export type McpServerChangeInput = {
+  mcp_server_id: string;
+  endpoint_url: string;
+  mcp_tools: McpToolDeclarationInput[];
+  timeout_seconds?: number;
+};
+
+export function buildMcpServerChangePayload(input: McpServerChangeInput): ConfigChangeRequestBody {
+  return {
+    change_type: "mcp_server" as TenantConfigChangeType,
+    payload: {
+      _schema_version: CONFIG_CHANGE_SCHEMA_VERSION,
+      mcp_server_id: input.mcp_server_id,
+      endpoint_url: input.endpoint_url,
+      mcp_tools: input.mcp_tools,
+      timeout_seconds: input.timeout_seconds ?? 15,
+    },
+  };
+}
+
 function compactValues(value: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
@@ -488,7 +540,8 @@ export type ConfigChangeKind =
   | "connector"
   | "action_policy"
   | "governance_policy"
-  | "knowledge";
+  | "knowledge"
+  | "mcp_server";
 
 /**
  * Any `policy` change classifies — action_tools keeps its dedicated kind
@@ -512,6 +565,7 @@ export function classifyConfigChange(item: {
       : "governance_policy";
   }
   if (item.change_type === "knowledge") return "knowledge";
+  if (item.change_type === "mcp_server" || item.change_type === "mcp_oauth_token") return "mcp_server";
   return null;
 }
 

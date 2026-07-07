@@ -29,6 +29,8 @@ from app.api.v1.routers.dispatch import router as dispatch_router
 from app.api.v1.routers.escalation import router as escalation_router
 from app.api.v1.routers.governance import router as governance_router
 from app.api.v1.routers.health import router as health_router
+from app.api.v1.routers.inbox import router as inbox_router
+from app.api.v1.routers.manager_assistant import router as manager_assistant_router
 from app.api.v1.routers.ingress import router as ingress_router
 from app.api.v1.routers.knowledge import router as knowledge_router
 from app.api.v1.routers.observability import router as observability_router
@@ -78,6 +80,8 @@ api_router_v1.include_router(
 )
 api_router_v1.include_router(supervisor_router, prefix="/supervisor")
 api_router_v1.include_router(session_router, prefix="/session")
+api_router_v1.include_router(inbox_router, prefix="/inbox")
+api_router_v1.include_router(manager_assistant_router, prefix="/manager-assistant")
 api_router_v1.include_router(tenant_router, prefix="/tenant")
 api_router_v1.include_router(knowledge_router, prefix="/knowledge")
 api_router_v1.include_router(observability_router, prefix="/observability")

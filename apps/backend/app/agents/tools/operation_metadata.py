@@ -29,6 +29,33 @@ class ApprovalPolicy(StrEnum):
     ALWAYS_REQUIRE_APPROVAL = "always_require_approval"
 
 
+class ExecutionPolicy(StrEnum):
+    """Tenant-declared execution policy for a configured operation.
+
+    auto_execute   — fire the tool immediately without waiting for Operious
+                     approval. The tenant's system owns any downstream
+                     authorization. Even money/goods operations auto-execute
+                     when the tenant explicitly sets this. Fully supported.
+    operious_approval — route to the Operious human approval queue before
+                        firing. Default for unconfigured money/goods tools.
+    """
+    AUTO_EXECUTE = "auto_execute"
+    OPERIOUS_APPROVAL = "operious_approval"
+
+
+# Metadata key used to carry the execution policy decision through the
+# governance envelope so OperationalEvent records it for audit.
+EXECUTION_POLICY_METADATA_KEY = "operation_execution_policy"
+
+# Trigger patterns used by the misdeclaration backstop at synthesis time.
+# A tool whose name or description snapshot contains any of these patterns
+# (case-insensitive) is upgraded to GOODS if declared below that level.
+MCP_MONEY_GOODS_TRIGGER_PATTERNS: frozenset[str] = frozenset({
+    "refund", "payment", "charge", "credit", "transfer", "send",
+    "wire", "issue", "disburse", "reimburse", "pay", "debit",
+})
+
+
 class RuleKind(StrEnum):
     CONFIDENCE_MEMBERSHIP = "confidence_membership"
     ALWAYS = "always"
@@ -637,6 +664,9 @@ __all__ = [
     "APPROVAL_POLICY_METADATA_KEY",
     "COMMITMENT_KIND_METADATA_KEY",
     "CommitmentKind",
+    "EXECUTION_POLICY_METADATA_KEY",
+    "ExecutionPolicy",
+    "MCP_MONEY_GOODS_TRIGGER_PATTERNS",
     "OPERATION_ID_METADATA_KEY",
     "RegisteredOperation",
     "ResolvedOperation",

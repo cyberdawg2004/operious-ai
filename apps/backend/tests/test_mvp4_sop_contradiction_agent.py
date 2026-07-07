@@ -99,13 +99,16 @@ def _contradiction_output(
     contradicting_documents: list[dict[str, Any]] | None = None,
 ) -> str:
     if contradicting_documents is None and has_contradiction:
+        # excerpt MUST be from anchor doc ("Refunds accepted within 30 days.")
+        # contradicting_excerpt MUST be from corpus doc ("Returns are allowed within 7 days.")
+        # confidence MUST be >= 0.93 (code-level backstop)
         contradicting_documents = [
             {
                 "doc_id": "existing-doc-1",
-                "excerpt": "Returns are allowed within 7 days.",
-                "contradicting_excerpt": "Our policy allows 30-day returns.",
+                "excerpt": "Refunds accepted within 30 days.",
+                "contradicting_excerpt": "Returns are allowed within 7 days.",
                 "contradiction_type": ContradictionType.DIRECT_CONFLICT.value,
-                "confidence": 0.92,
+                "confidence": 0.97,
             }
         ]
     return json.dumps({
@@ -211,7 +214,7 @@ async def test_direct_conflict_detected() -> None:
     assert proposal.output["has_contradiction"] is True
     assert len(proposal.output["contradicting_documents"]) == 1
     assert proposal.output["contradicting_documents"][0]["contradiction_type"] == "direct_conflict"
-    assert proposal.output["contradicting_documents"][0]["confidence"] == pytest.approx(0.92)
+    assert proposal.output["contradicting_documents"][0]["confidence"] == pytest.approx(0.97)
 
 
 @pytest.mark.asyncio
@@ -338,14 +341,14 @@ def test_parse_output_filters_invalid_contradiction_types() -> None:
                 "excerpt": "a",
                 "contradicting_excerpt": "b",
                 "contradiction_type": "invented_type",
-                "confidence": 0.9,
+                "confidence": 0.97,
             },
             {
                 "doc_id": "d2",
                 "excerpt": "c",
                 "contradicting_excerpt": "d",
                 "contradiction_type": ContradictionType.SCOPE_OVERLAP.value,
-                "confidence": 0.8,
+                "confidence": 0.97,
             },
         ],
     })
@@ -389,7 +392,7 @@ def test_parse_output_clears_contradicting_docs_when_no_contradiction() -> None:
                 "excerpt": "a",
                 "contradicting_excerpt": "b",
                 "contradiction_type": ContradictionType.DIRECT_CONFLICT.value,
-                "confidence": 0.9,
+                "confidence": 0.97,
             }
         ],
     })
@@ -458,7 +461,7 @@ def test_quarantine_metadata_extracted_correctly() -> None:
                 "excerpt": "7-day return",
                 "contradicting_excerpt": "30-day return",
                 "contradiction_type": "direct_conflict",
-                "confidence": 0.95,
+                "confidence": 0.97,
             },
             {
                 "doc_id": "doc-b",
@@ -474,7 +477,7 @@ def test_quarantine_metadata_extracted_correctly() -> None:
     assert meta["contradiction_flagged"] is True
     assert meta["contradiction_count"] == 2
     assert set(meta["contradicting_doc_ids"]) == {"doc-a", "doc-b"}
-    assert meta["highest_confidence"] == pytest.approx(0.95)
+    assert meta["highest_confidence"] == pytest.approx(0.97)
     assert set(meta["contradiction_types"]) == {"direct_conflict", "scope_overlap"}
 
 
@@ -605,7 +608,18 @@ async def _save_knowledge_doc(
 async def test_contradiction_quarantines_sop_document() -> None:
     """Contradicting SOP → document stays QUARANTINED, not indexed."""
     runtime, repo, knowledge_repo = await _knowledge_runtime_with_agent(
-        _contradiction_output(document_id="doc-new", has_contradiction=True)
+        _contradiction_output(
+            document_id="doc-new",
+            has_contradiction=True,
+            contradicting_documents=[{
+                "doc_id": "existing-doc-1",
+                # excerpt from anchor, contradicting_excerpt from corpus
+                "excerpt": "Returns accepted within 30 days.",
+                "contradicting_excerpt": "Returns are allowed within 7 days.",
+                "contradiction_type": ContradictionType.DIRECT_CONFLICT.value,
+                "confidence": 0.97,
+            }],
+        )
     )
     doc = await _save_knowledge_doc(
         repo,
@@ -786,7 +800,16 @@ async def test_three_states_are_distinguishable() -> None:
 
     # CHECKED_CONTRADICTION
     runtime_contra, repo_contra, _ = await _knowledge_runtime_with_agent(
-        _contradiction_output(has_contradiction=True)
+        _contradiction_output(
+            has_contradiction=True,
+            contradicting_documents=[{
+                "doc_id": "existing-doc-1",
+                "excerpt": "Returns allowed within 7 days.",
+                "contradicting_excerpt": "Refunds accepted within 30 days.",
+                "contradiction_type": ContradictionType.DIRECT_CONFLICT.value,
+                "confidence": 0.97,
+            }],
+        )
     )
     doc_contra = await _save_knowledge_doc(
         repo_contra, title="Contradicting Doc", content="Returns allowed within 7 days."

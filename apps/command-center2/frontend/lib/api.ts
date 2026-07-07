@@ -605,7 +605,9 @@ export type TenantConfigChangeType =
   | "topology"
   | "channel"
   | "connector"
-  | "credential_update";
+  | "credential_update"
+  | "mcp_server"
+  | "mcp_oauth_token";
 
 /** Mirrors backend TenantConfigChangeRequestStatus. */
 export type TenantConfigChangeRequestStatus =
@@ -1655,6 +1657,168 @@ export function releaseSemanticQuarantine(
       method: "POST",
       body: JSON.stringify(request),
     }
+  );
+}
+
+// ─── MCP server integration ──────────────────────────────────────────────
+
+export type McpToolInfo = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+};
+
+export type McpOAuthStartRequest = {
+  mcp_server_id: string;
+  oauth_config: {
+    client_id: string;
+    auth_endpoint: string;
+    token_endpoint: string;
+    scopes: string[];
+    redirect_uri: string;
+    client_secret?: string;
+  };
+};
+
+export type McpOAuthStartResponse = {
+  authorization_url: string;
+  state_token: string;
+};
+
+export type McpToolsResponse = {
+  mcp_server_id: string;
+  tools: McpToolInfo[];
+};
+
+export function startMcpOAuth(
+  tenantId: string,
+  body: McpOAuthStartRequest
+): Promise<McpOAuthStartResponse> {
+  return apiRequest<McpOAuthStartResponse>(
+    `/${encodeURIComponent(tenantId)}/mcp/oauth/start`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  );
+}
+
+export function fetchMcpServerTools(
+  tenantId: string,
+  mcpServerId: string
+): Promise<McpToolsResponse> {
+  return apiRequest<McpToolsResponse>(
+    `/${encodeURIComponent(tenantId)}/mcp/servers/${encodeURIComponent(mcpServerId)}/tools`
+  );
+}
+
+/** Fetch tools from a raw endpoint URL before the server is registered. */
+export function previewMcpServerTools(
+  tenantId: string,
+  endpointUrl: string
+): Promise<McpToolsResponse> {
+  return apiRequest<McpToolsResponse>(
+    `/${encodeURIComponent(tenantId)}/mcp/preview-tools`,
+    {
+      method: "POST",
+      body: JSON.stringify({ endpoint_url: endpointUrl, timeout_seconds: 10 }),
+    }
+  );
+}
+
+// ─── Manager Assistant ────────────────────────────────────────────────────────
+
+export type ManagerAssistantChartData = {
+  value?: number;
+  label?: string;
+  unit?: string;
+  labels?: string[];
+  values?: number[];
+};
+
+export type ManagerAssistantResponse = {
+  answer: string;
+  chart_type: "none" | "bar" | "number";
+  chart_data: ManagerAssistantChartData;
+  query_key: string;
+  cannot_answer: boolean;
+  invocation_id: string;
+};
+
+export function queryManagerAssistant(question: string, sessionId?: string) {
+  return apiRequest<ManagerAssistantResponse>("/manager-assistant/query", {
+    method: "POST",
+    body: JSON.stringify({ question, session_id: sessionId ?? null }),
+  });
+}
+
+// ─── Conversation Inbox ───────────────────────────────────────────────────────
+
+export type InboxGovernanceContext = {
+  proposal_id: string;
+  governance_verdict: string;
+  autonomy_decision: string;
+  supervisor_verdict: string;
+  status: string;
+  resolution_category: string;
+  confidence: number;
+  governance_decision_id: string | null;
+};
+
+export type InboxThreadMessage = {
+  event_id: string;
+  sequence: number;
+  role: "customer" | "assistant" | "system";
+  content: string;
+  occurred_at: string;
+  governance: InboxGovernanceContext | null;
+  governance_decision_id: string | null;
+};
+
+export type InboxConversationSummary = {
+  session_id: string;
+  external_handle: string;
+  channel: string;
+  lifecycle_phase: string;
+  opened_at: string;
+  last_message_at: string | null;
+  message_count: number;
+  customer_identity_id: string | null;
+  has_governance_context: boolean;
+};
+
+export type InboxConversationsPage = {
+  items: InboxConversationSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type InboxThreadResponse = {
+  session_id: string;
+  external_handle: string;
+  channel: string;
+  lifecycle_phase: string;
+  opened_at: string;
+  customer_identity_id: string | null;
+  messages: InboxThreadMessage[];
+  total: number;
+};
+
+export function listInboxConversations(query: {
+  phase?: string;
+  channel?: string;
+  customer_identity_id?: string;
+  limit: number;
+  offset: number;
+}) {
+  return apiRequest<InboxConversationsPage>("/inbox", { query });
+}
+
+export function getInboxThread(sessionId: string, includeSiblings = false) {
+  return apiRequest<InboxThreadResponse>(
+    `/inbox/${encodeURIComponent(sessionId)}`,
+    { query: { include_siblings: includeSiblings } }
   );
 }
 

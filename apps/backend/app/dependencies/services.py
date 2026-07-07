@@ -54,6 +54,10 @@ from app.agents.tools.action_governance import (
 )
 from app.agents.tools.actions import build_tenant_action_tool_registry
 from app.agents.tools.connectors import PostgresConnectorConfigRepository
+from app.agents.tools.connectors.credentials import (
+    ConnectorCredentialRepository,
+    ConnectorScopedCredentialRuntime,
+)
 from app.agents.tools.approvals import PostgresActionApprovalRepository
 from app.agents.tools.connector_invocations import (
     PostgresConnectorInvocationRepository,
@@ -352,6 +356,27 @@ def _maybe_tenant_credential_codec(settings: object) -> TenantCredentialCodec | 
         return None
 
 
+def _connector_scoped_credential_runtime(
+    *,
+    session: "AsyncSession",
+    tenant_id: str,
+    settings: object,
+) -> ConnectorScopedCredentialRuntime | None:
+    """Build a per-connector credential runtime for non-channel connectors.
+
+    Returns None when the credential codec is unavailable so the caller
+    falls back to channel-credential bridging gracefully.
+    """
+    codec = _maybe_tenant_credential_codec(settings)
+    if codec is None:
+        return None
+    return ConnectorScopedCredentialRuntime(
+        repository=ConnectorCredentialRepository(session),
+        codec=codec,
+        tenant_id=tenant_id,
+    )
+
+
 # ─── Phase 3.2 substrate repository factories ───────────────────────────
 
 
@@ -408,6 +433,72 @@ def get_boundary_repository(
         session,
         data_protection=_data_protection_service(session),
     )
+
+
+def get_resolution_proposal_repository(
+    session: AsyncSession = Depends(get_db_session),
+) -> PostgresResolutionProposalPersistence:
+    """Return the Postgres resolution-proposal-persistence backend for this request."""
+    return PostgresResolutionProposalPersistence(
+        session,
+        data_protection=_data_protection_service(session),
+    )
+
+
+def get_inbox_service(
+    session_repo: SessionPersistenceProtocol = Depends(get_session_repository),
+    resolution_repo: PostgresResolutionProposalPersistence = Depends(
+        get_resolution_proposal_repository
+    ),
+) -> "InboxService":  # noqa: F821
+    """Return the read-only inbox service for conversation thread views."""
+    from app.services.inbox_service import InboxService
+
+    return InboxService(
+        session_repo=session_repo,
+        resolution_repo=resolution_repo,
+    )
+
+
+def get_manager_assistant_service(
+    session: AsyncSession = Depends(get_db_session),
+) -> "ManagerAssistantService":  # noqa: F821
+    """Return the Manager Assistant service for natural-language analytics queries."""
+    from app.services.manager_assistant_service import (
+        ManagerAssistantService,
+        ManagerQueryRunner,
+    )
+
+    settings = get_settings()
+    data_protection = _data_protection_service(session)
+    tenant_config_repo = PostgresTenantConfigurationRepository(
+        session,
+        data_protection=data_protection,
+    )
+    try:
+        llm_client = build_llm_client(settings)
+    except Exception:
+        llm_client = None  # type: ignore[assignment]
+
+    from app.agents.governed.manager_assistant import ManagerAssistantAgent
+
+    agent = ManagerAssistantAgent(
+        llm_client=llm_client,
+        tenant_configuration_repository=tenant_config_repo,
+    ) if llm_client is not None else None  # type: ignore[assignment]
+
+    runner = ManagerQueryRunner(
+        observability_persistence=PostgresOperationalObservabilityPersistence(session),
+        escalation_persistence=PostgresEscalationPersistence(session),
+        case_approval_persistence=PostgresCaseApprovalPersistence(session),
+        action_approval_persistence=PostgresActionApprovalRepository(session),
+        session_persistence=PostgresSessionPersistence(
+            session,
+            data_protection=data_protection,
+        ),
+        tenant_config_repo=tenant_config_repo,
+    )
+    return ManagerAssistantService(agent=agent, query_runner=runner)  # type: ignore[arg-type]
 
 
 def get_work_order_fulfillment_receipt_service(
@@ -952,6 +1043,8 @@ def get_tenant_config_change_request_service(
     ),
 ) -> TenantConfigChangeRequestService:
     """Return the durable tenant config dual-control ledger service."""
+    settings = get_settings()
+    codec = _maybe_tenant_credential_codec(settings)
     return TenantConfigChangeRequestService(
         repository=PostgresTenantConfigChangeRequestRepository(session),
         tenant_configuration_service=tenant_configuration_service,
@@ -960,6 +1053,8 @@ def get_tenant_config_change_request_service(
         ),
         session=session,
         knowledge_reindex_publisher=CeleryKnowledgeReindexPublisher(),
+        connector_credential_repository=ConnectorCredentialRepository(session),
+        connector_credential_codec=codec,
     )
 
 
@@ -1119,6 +1214,11 @@ def build_action_approval_service(
                     tenant_id=tenant_id,
                     config_repository=PostgresConnectorConfigRepository(session),
                     credential_runtime=tenant_runtime,
+                    connector_credential_runtime=_connector_scoped_credential_runtime(
+                        session=session,
+                        tenant_id=tenant_id,
+                        settings=settings,
+                    ),
                     work_order_repository=PostgresWorkOrderRepository(session),
                     allow_stub_actions=settings.allow_stub_actions_effective,
                 ),
@@ -1603,8 +1703,11 @@ __all__ = [
     "get_operational_observability_service",
     "get_queue_operations_service",
     "get_quarantine_service",
+    "get_inbox_service",
+    "get_manager_assistant_service",
     "get_quota_operations_service",
     "get_quota_runtime",
+    "get_resolution_proposal_repository",
     "get_semantic_circuit_service",
     "get_session_read_service",
     "get_session_repository",

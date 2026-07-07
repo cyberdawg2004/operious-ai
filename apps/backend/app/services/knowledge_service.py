@@ -218,18 +218,8 @@ class KnowledgeService:
 
 def _enqueue_trainer_for_tenant(tenant_id: str) -> bool:
     """Enqueue aggregate_qa_signals for this tenant. Returns True if enqueued."""
-    try:
-        from typing import cast, Any as _Any
-        from app.workers.trainer_tasks import aggregate_qa_signals
-        cast(_Any, aggregate_qa_signals).apply_async(
-            kwargs={"tenant_id": tenant_id},
-        )
-        return True
-    except Exception:
-        logger.warning(
-            "trainer_enqueue_failed tenant=%s", tenant_id, exc_info=True
-        )
-        return False
+    from app.knowledge.trainer_publisher import enqueue_trainer_for_tenant
+    return enqueue_trainer_for_tenant(tenant_id)
 
 
 __all__ = ["KnowledgeService"]

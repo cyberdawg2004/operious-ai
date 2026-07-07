@@ -30,6 +30,14 @@ from app.agents.tools.connectors.generic import (
     validate_connector_definition,
 )
 from app.agents.tools.connectors.inventory import InventoryCheckConnector
+from app.agents.tools.connectors.mcp import (
+    McpConnectorTool,
+    McpCredentialRuntime,
+    McpServerConfig,
+    McpToolDeclaration,
+    McpTransportError,
+    parse_mcp_server_config,
+)
 from app.agents.tools.connectors.repair_dispatch import (
     GenericRestRepairDispatchConnector,
 )
@@ -64,6 +72,11 @@ __all__ = [
     "IdempotencyStrategy",
     "InMemoryConnectorConfigRepository",
     "InventoryCheckConnector",
+    "McpConnectorTool",
+    "McpCredentialRuntime",
+    "McpServerConfig",
+    "McpToolDeclaration",
+    "McpTransportError",
     "OperationDefinition",
     "OperationMode",
     "PostgresConnectorConfigRepository",
@@ -71,6 +84,7 @@ __all__ = [
     "SSRFValidator",
     "TenantCredentialRuntime",
     "fail_closed_governance_check",
+    "parse_mcp_server_config",
     "validate_connector_definition",
     "validate_connector_endpoint_url",
     "WarrantyClaimConnector",

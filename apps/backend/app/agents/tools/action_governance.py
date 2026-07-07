@@ -7,26 +7,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, FrozenSet, cast
 
-_logger = logging.getLogger(__name__)
-
-# Platform-enforced ceiling for auto-approve amount thresholds (F5).
-# Tenants may not configure a refund/amount auto-approve threshold above this
-# value.  Override via PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS env/settings.
-# Default: 10,000 cents = $100.00.
-_DEFAULT_MAX_AUTO_APPROVE_AMOUNT_CENTS = 10_000
-
-
-def _max_auto_approve_amount_cents() -> int:
-    """Return the platform ceiling for auto-approve thresholds."""
-    try:
-        from app.core.config import get_settings
-        raw = getattr(get_settings(), "PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS", None)
-        if raw is not None:
-            return int(raw)
-    except Exception:  # noqa: BLE001
-        pass
-    return _DEFAULT_MAX_AUTO_APPROVE_AMOUNT_CENTS
-
 from app.agents.tools.operation_metadata import (
     ApprovalPolicy,
     CommitmentKind,
@@ -61,6 +41,26 @@ from app.tenant.persistence import (
     TenantConfigurationRepository,
     TenantGovernancePolicyRecord,
 )
+
+_logger = logging.getLogger(__name__)
+
+# Platform-enforced ceiling for auto-approve amount thresholds (F5).
+# Tenants may not configure a refund/amount auto-approve threshold above this
+# value.  Override via PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS env/settings.
+# Default: 10,000 cents = $100.00.
+_DEFAULT_MAX_AUTO_APPROVE_AMOUNT_CENTS = 10_000
+
+
+def _max_auto_approve_amount_cents() -> int:
+    """Return the platform ceiling for auto-approve thresholds."""
+    try:
+        from app.core.config import get_settings
+        raw = getattr(get_settings(), "PLATFORM_MAX_AUTO_APPROVE_AMOUNT_CENTS", None)
+        if raw is not None:
+            return int(raw)
+    except Exception:  # noqa: BLE001
+        pass
+    return _DEFAULT_MAX_AUTO_APPROVE_AMOUNT_CENTS
 
 _CHAIN_ID = "agent.action_tools.pre_execution"
 ACTION_TOOLS_POLICY_TYPE = "action_tools"

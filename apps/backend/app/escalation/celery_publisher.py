@@ -20,10 +20,6 @@ from app.core.queue_depth import (
 from app.core.queue_admission import QueueDepthClient, RedisQueueDepthAdmission
 from app.core.redis import get_redis_client
 from app.escalation.publisher import EscalationPublisher
-from app.workers.escalation_tasks import (
-    create_governance_escalation,
-    create_governance_escalation_runtime,
-)
 from app.workers.celery_app import enqueued_at_iso
 from app.queues import QUEUE_ESCALATION
 
@@ -106,6 +102,11 @@ class CeleryEscalationPublisher(EscalationPublisher):
         tenant_id: str,
         session_id: str | None = None,
     ) -> None:
+        from app.workers.escalation_tasks import (  # lazy: breaks the celery_publisher→escalation_tasks→celery_app→alert_evaluator_factory→runtime→invoker→celery_publisher cycle
+            create_governance_escalation,
+            create_governance_escalation_runtime,
+        )
+
         await self.check_backpressure(tenant_id=tenant_id)
         task = cast(Any, create_governance_escalation)
         if _running_under_pytest():

@@ -24,6 +24,7 @@ import {
   getConfiguredTenantId,
   listChannelConfigurations,
   listConfigChangeRequests,
+  listConnectorConfigurations,
   listConnectorConfigurationHistory,
   listGovernancePolicies,
   proposeConnectorCredentials,
@@ -50,6 +51,7 @@ import {
 import { useAuthSession } from "@/lib/use-auth-session";
 import { useApiResource } from "@/lib/use-api-resource";
 import { ConfigChangeApprovals } from "@/components/config-change-approvals";
+import { McpConnectorView } from "@/components/mcp-connector-views";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import { TechnicalDetails } from "@/components/technical-details";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,10 +100,25 @@ type ConnectorModal =
   | { type: "none" }
   | {
       type: "configure";
-      tool: ConnectorToolDefinition;
+      tool: ConnectorToolDefinition | CustomConnectorTool;
       connector: TenantConnectorConfiguration | null;
     }
-  | { type: "credential" };
+  | { type: "credential" }
+  | { type: "add_custom" }
+  | {
+      type: "custom_credential";
+      connectorId: string;
+      toolName: string;
+      label: string;
+    };
+
+type CustomConnectorTool = {
+  toolName: string;
+  label: string;
+  summary: string;
+  defaultConnectorType: string;
+  isCustom: true;
+};
 
 type KeyValueRow = {
   id: string;
@@ -114,6 +131,7 @@ type ConnectorDashboardData = {
   policies: TenantGovernancePolicy[];
   pendingRequests: TenantConfigChangeRequest[];
   connectorHistory: Record<string, TenantConnectorConfiguration[]>;
+  customToolNames: string[];
 };
 
 type ConnectorCardStatus = "active" | "inactive" | "pending_approval";
@@ -128,7 +146,7 @@ type GateState = {
 };
 
 type ConnectorCardView = {
-  tool: ConnectorToolDefinition;
+  tool: ConnectorToolDefinition | CustomConnectorTool;
   connector: TenantConnectorConfiguration | null;
   pendingRequestCount: number;
   pendingProposal: Record<string, unknown> | null;
@@ -165,25 +183,49 @@ export function ConnectorConfigView() {
   const canWrite = principal?.capabilities.includes(TENANT_CONNECTOR_WRITE_CAPABILITY) ?? false;
 
   const load = useCallback(async (): Promise<ConnectorDashboardData> => {
-    const [channels, policies, proposed, approved, histories] = await Promise.all([
-      listChannelConfigurations(),
-      listGovernancePolicies(),
-      listConfigChangeRequests({ status: "PROPOSED", limit: 100, offset: 0 }),
-      listConfigChangeRequests({ status: "APPROVED", limit: 100, offset: 0 }),
-      Promise.all(
-        CONNECTOR_TOOLS.map(
-          async (tool): Promise<[string, TenantConnectorConfiguration[]]> => [
-            tool.toolName,
-            (
-              await listConnectorConfigurationHistory(tool.toolName, {
-                limit: 25,
-                offset: 0,
-              })
-            ).items,
-          ]
-        )
-      ),
-    ]);
+    const builtinToolNames: string[] = CONNECTOR_TOOLS.map((t) => t.toolName);
+
+    const [channels, policies, proposed, approved, allConfigs, histories] =
+      await Promise.all([
+        listChannelConfigurations(),
+        listGovernancePolicies(),
+        listConfigChangeRequests({ status: "PROPOSED", limit: 100, offset: 0 }),
+        listConfigChangeRequests({ status: "APPROVED", limit: 100, offset: 0 }),
+        listConnectorConfigurations({ limit: 100, offset: 0 }),
+        Promise.all(
+          CONNECTOR_TOOLS.map(
+            async (tool): Promise<[string, TenantConnectorConfiguration[]]> => [
+              tool.toolName,
+              (
+                await listConnectorConfigurationHistory(tool.toolName, {
+                  limit: 25,
+                  offset: 0,
+                })
+              ).items,
+            ]
+          )
+        ),
+      ]);
+
+    // Discover custom connector tool names: any active config not in the built-in set.
+    const customToolNames = allConfigs.items
+      .map((c) => c.tool_name)
+      .filter((name) => !builtinToolNames.includes(name));
+
+    // Fetch history for custom connectors too.
+    const customHistories = await Promise.all(
+      customToolNames.map(
+        async (toolName): Promise<[string, TenantConnectorConfiguration[]]> => [
+          toolName,
+          (
+            await listConnectorConfigurationHistory(toolName, {
+              limit: 25,
+              offset: 0,
+            })
+          ).items,
+        ]
+      )
+    );
 
     return {
       channels: channels.items,
@@ -191,7 +233,8 @@ export function ConnectorConfigView() {
       pendingRequests: [...proposed.items, ...approved.items].filter(
         (request) => classifyConfigChange(request) === "connector"
       ),
-      connectorHistory: Object.fromEntries(histories),
+      connectorHistory: Object.fromEntries([...histories, ...customHistories]),
+      customToolNames,
     };
   }, []);
 
@@ -201,8 +244,9 @@ export function ConnectorConfigView() {
     const policies = data?.policies ?? [];
     const pendingRequests = data?.pendingRequests ?? [];
     const history = data?.connectorHistory ?? {};
+    const customToolNames = data?.customToolNames ?? [];
 
-    return CONNECTOR_TOOLS.map((tool) =>
+    const builtinCards = CONNECTOR_TOOLS.map((tool) =>
       buildConnectorCardView({
         tool,
         history: history[tool.toolName] ?? [],
@@ -210,6 +254,26 @@ export function ConnectorConfigView() {
         policies,
       })
     );
+
+    const customCards = customToolNames.map((toolName) => {
+      const customTool: CustomConnectorTool = {
+        toolName,
+        label: toolName,
+        summary: "Custom connector configured by this tenant.",
+        defaultConnectorType: toolName.includes(".")
+          ? toolName.split(".")[0]!
+          : toolName,
+        isCustom: true,
+      };
+      return buildConnectorCardView({
+        tool: customTool,
+        history: history[toolName] ?? [],
+        pendingRequests,
+        policies,
+      });
+    });
+
+    return [...builtinCards, ...customCards];
   }, [data]);
 
   const omsCredentialState = useMemo(
@@ -344,34 +408,73 @@ export function ConnectorConfigView() {
                   execution tool.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={reload}
-                className="cc-btn cc-btn-secondary"
-              >
-                <RefreshCw size={14} strokeWidth={1.8} />
-                Refresh
-              </button>
+              <div className="flex items-center gap-2">
+                {canWrite && (
+                  <button
+                    type="button"
+                    onClick={() => setModal({ type: "add_custom" })}
+                    className="cc-btn cc-btn-secondary"
+                  >
+                    <PlugZap size={14} strokeWidth={1.8} />
+                    Add custom connector
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={reload}
+                  className="cc-btn cc-btn-secondary"
+                >
+                  <RefreshCw size={14} strokeWidth={1.8} />
+                  Refresh
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
-              {cards.map((card) => (
-                <ConnectorToolCard
-                  key={card.tool.toolName}
-                  card={card}
-                  canWrite={canWrite}
-                  testState={testStates[card.tool.toolName] ?? null}
-                  onConfigure={() =>
-                    setModal({
-                      type: "configure",
-                      tool: card.tool,
-                      connector: card.connector,
-                    })
-                  }
-                  onTest={() => runTest(card.tool.toolName)}
-                />
-              ))}
+              {cards.map((card) => {
+                const isCustom = "isCustom" in card.tool && card.tool.isCustom;
+                const connectorId = card.tool.toolName.includes(".")
+                  ? card.tool.toolName.split(".").slice(0, -1).join(".")
+                  : card.tool.toolName;
+                return (
+                  <ConnectorToolCard
+                    key={card.tool.toolName}
+                    card={card}
+                    canWrite={canWrite}
+                    testState={testStates[card.tool.toolName] ?? null}
+                    onConfigure={() =>
+                      setModal({
+                        type: "configure",
+                        tool: card.tool,
+                        connector: card.connector,
+                      })
+                    }
+                    onTest={() => runTest(card.tool.toolName)}
+                    onManageCredential={
+                      isCustom
+                        ? () =>
+                            setModal({
+                              type: "custom_credential",
+                              connectorId,
+                              toolName: card.tool.toolName,
+                              label: card.tool.label,
+                            })
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </div>
+          </section>
+
+          <section>
+            <div className="mb-3">
+              <h2 className="text-[20px] font-semibold text-ink-primary">MCP Servers</h2>
+              <p className="text-[13px] text-ink-secondary">
+                Connect any MCP-compatible server your tenant uses. Tools are classified and governed per the existing approval model.
+              </p>
+            </div>
+            <McpConnectorView tenantId={tenantId} canWrite={canWrite} />
           </section>
 
           <section>
@@ -425,7 +528,296 @@ export function ConnectorConfigView() {
           />
         </Modal>
       )}
+
+      {modal.type === "add_custom" && (
+        <Modal onClose={() => setModal({ type: "none" })}>
+          <AddCustomConnectorForm
+            onProposed={(toolName) => {
+              setNotice(
+                `Custom connector "${toolName}" proposed. It now awaits approval in Pending Approvals.`
+              );
+              setModal({ type: "none" });
+              reload();
+            }}
+          />
+        </Modal>
+      )}
+
+      {modal.type === "custom_credential" && (
+        <Modal onClose={() => setModal({ type: "none" })}>
+          <ConnectorCredentialForm
+            tenantId={tenantId}
+            toolName={modal.toolName}
+            connectorId={modal.connectorId}
+            label={modal.label}
+            canWrite={canWrite}
+            onProposed={() => {
+              setNotice(
+                `Credential for "${modal.label}" proposed. It now awaits approval in Pending Approvals.`
+              );
+              setModal({ type: "none" });
+              reload();
+            }}
+          />
+        </Modal>
+      )}
     </main>
+  );
+}
+
+function AddCustomConnectorForm({
+  onProposed,
+}: {
+  onProposed: (toolName: string) => void;
+}) {
+  const [toolName, setToolName] = useState("");
+  const [connectorType, setConnectorType] = useState("record");
+  const [httpMethod, setHttpMethod] = useState("POST");
+  const [endpointTemplate, setEndpointTemplate] = useState("");
+  const [idempotencyHeader, setIdempotencyHeader] = useState("Idempotency-Key");
+  const [successStatusCodes, setSuccessStatusCodes] = useState("200, 201, 202");
+  const [fieldMappings, setFieldMappings] = useState<KeyValueRow[]>([createRow()]);
+  const [responseParse, setResponseParse] = useState<KeyValueRow[]>([createRow()]);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const endpointPreview = sanitizeEndpointDisplay(endpointTemplate);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setError(null);
+    const trimmedName = toolName.trim();
+    if (!trimmedName) {
+      setError("Tool name is required.");
+      setIsSubmitting(false);
+      return;
+    }
+    try {
+      const parsedUrl = parseHttpsUrl(endpointTemplate);
+      const body = buildConnectorChangePayload({
+        connector_type: connectorType,
+        tool_name: trimmedName,
+        http_method: httpMethod,
+        endpoint_template: endpointTemplate.trim(),
+        endpoint_host: parsedUrl.host,
+        field_mappings: rowsToRecord(fieldMappings),
+        response_parse: rowsToRecord(responseParse),
+        idempotency_header_name: idempotencyHeader.trim(),
+        success_status_codes: parseStatusCodes(successStatusCodes),
+        status: "active",
+      });
+      await proposeConfigChangeRequest(body);
+      onProposed(trimmedName);
+    } catch (caught: unknown) {
+      setError(formatApiError(caught));
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <h2 className="font-display text-[24px] font-semibold text-ink-primary">
+          Add Custom Connector
+        </h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
+          Define a governed connector for any integration your tenant needs.
+          Domain-agnostic: bank account.freeze, telecom service.suspend, or any
+          custom HTTP endpoint. The tool name you choose here becomes the
+          identifier the agent uses to call this action.
+        </p>
+      </div>
+
+      {error && <FormError message={error} />}
+
+      <Fieldset legend="Identity">
+        <Text
+          label="Tool name (e.g. account.freeze)"
+          name="tool_name"
+          value={toolName}
+          onChange={setToolName}
+          placeholder="account.freeze"
+          required
+        />
+        <Select
+          label="Connector type"
+          name="connector_type"
+          value={connectorType}
+          options={[...CONNECTOR_TYPE_OPTIONS]}
+          onChange={setConnectorType}
+        />
+      </Fieldset>
+
+      <Fieldset legend="Endpoint">
+        <Select
+          label="HTTP method"
+          name="http_method"
+          value={httpMethod}
+          options={[...HTTP_METHOD_OPTIONS]}
+          onChange={setHttpMethod}
+        />
+        <Text
+          label="Endpoint URL"
+          name="endpoint_template"
+          value={endpointTemplate}
+          onChange={setEndpointTemplate}
+          placeholder="https://api.tenant.example/accounts/freeze"
+          required
+        />
+        <Field label="Validated host preview" value={endpointPreview} />
+        <Text
+          label="Idempotency header"
+          name="idempotency_header_name"
+          value={idempotencyHeader}
+          onChange={setIdempotencyHeader}
+          required
+        />
+        <Text
+          label="Success status codes"
+          name="success_status_codes"
+          value={successStatusCodes}
+          onChange={setSuccessStatusCodes}
+          placeholder="200, 201, 202"
+          required
+        />
+      </Fieldset>
+
+      <Fieldset legend="Field mappings">
+        <p className="text-[13px] text-ink-secondary">
+          Map Operious action payload fields to the target API schema.
+        </p>
+        <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
+      </Fieldset>
+
+      <Fieldset legend="Response parsing">
+        <p className="text-[13px] text-ink-secondary">
+          Map tenant response fields for provider id, status, and errors.
+        </p>
+        <MappingEditor rows={responseParse} onChange={setResponseParse} />
+      </Fieldset>
+
+      <Submit isSubmitting={isSubmitting} label="Propose custom connector" />
+    </form>
+  );
+}
+
+const GENERIC_AUTH_TYPES = ["bearer", "api_key", "basic"] as const;
+
+function ConnectorCredentialForm({
+  tenantId,
+  toolName,
+  connectorId,
+  label,
+  canWrite,
+  onProposed,
+}: {
+  tenantId: string | null;
+  toolName: string;
+  connectorId: string;
+  label: string;
+  canWrite: boolean;
+  onProposed: () => void;
+}) {
+  const [authType, setAuthType] =
+    useState<(typeof GENERIC_AUTH_TYPES)[number]>("bearer");
+  const [token, setToken] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!tenantId) {
+      setError("Tenant scope is missing, so credential submission is unavailable.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const request = buildOmsCredentialRequest({ authType, token, apiKey, username, password });
+      await proposeConnectorCredentials(tenantId, toolName, request);
+      onProposed();
+    } catch (caught: unknown) {
+      setError(formatApiError(caught));
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <h2 className="font-display text-[24px] font-semibold text-ink-primary">
+          Manage Credential: {label}
+        </h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
+          Write-only. The credential is encrypted via OPCRED2 immediately on
+          submission and stored per-connector. Values are never returned by the
+          API. A separate approver must approve this change request.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
+        <Field label="Connector ID" value={connectorId} />
+        <Field label="Tool name" value={toolName} />
+      </div>
+
+      {error && <FormError message={error} />}
+
+      <Fieldset legend="Credential">
+        <Select
+          label="Auth type"
+          name="auth_type"
+          value={authType}
+          options={[...GENERIC_AUTH_TYPES]}
+          onChange={(value) =>
+            setAuthType(value as (typeof GENERIC_AUTH_TYPES)[number])
+          }
+        />
+        {authType === "bearer" && (
+          <WriteOnlyInput
+            name="token"
+            label="Bearer token"
+            value={token}
+            onChange={setToken}
+          />
+        )}
+        {authType === "api_key" && (
+          <WriteOnlyInput
+            name="api_key"
+            label="API key"
+            value={apiKey}
+            onChange={setApiKey}
+          />
+        )}
+        {authType === "basic" && (
+          <>
+            <WriteOnlyInput
+              name="username"
+              label="Username"
+              value={username}
+              onChange={setUsername}
+            />
+            <WriteOnlyInput
+              name="password"
+              label="Password"
+              value={password}
+              onChange={setPassword}
+            />
+          </>
+        )}
+      </Fieldset>
+
+      <button
+        type="submit"
+        disabled={!canWrite || !tenantId || isSubmitting}
+        className="inline-flex min-h-11 items-center justify-center rounded bg-gold-primary px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
+      >
+        {isSubmitting ? "Proposing..." : "Propose credential"}
+      </button>
+    </form>
   );
 }
 
@@ -499,12 +891,14 @@ function ConnectorToolCard({
   testState,
   onConfigure,
   onTest,
+  onManageCredential,
 }: {
   card: ConnectorCardView;
   canWrite: boolean;
   testState: TestState | null;
   onConfigure: () => void;
   onTest: () => void;
+  onManageCredential?: () => void;
 }) {
   const statusMeta = connectorStatusMeta(card.status);
   const connector = card.connector;
@@ -596,6 +990,17 @@ function ConnectorToolCard({
           <TestTubeDiagonal size={14} strokeWidth={1.8} />
           {testState?.busy ? "Testing..." : "Test Connection"}
         </button>
+        {onManageCredential && (
+          <button
+            type="button"
+            onClick={onManageCredential}
+            disabled={!canWrite}
+            className="cc-btn cc-btn-secondary disabled:opacity-50"
+          >
+            <KeyRound size={14} strokeWidth={1.8} />
+            Manage credential
+          </button>
+        )}
       </div>
 
       {testState && <ConnectorTestResult result={testState} />}
@@ -677,7 +1082,7 @@ function ConnectorProposeForm({
   connector,
   onProposed,
 }: {
-  tool: ConnectorToolDefinition;
+  tool: ConnectorToolDefinition | CustomConnectorTool;
   connector: TenantConnectorConfiguration | null;
   onProposed: () => void;
 }) {
@@ -1535,7 +1940,7 @@ function buildConnectorCardView({
   pendingRequests,
   policies,
 }: {
-  tool: ConnectorToolDefinition;
+  tool: ConnectorToolDefinition | CustomConnectorTool;
   history: TenantConnectorConfiguration[];
   pendingRequests: TenantConfigChangeRequest[];
   policies: TenantGovernancePolicy[];

@@ -6,15 +6,17 @@ error tool so an agent never tells a customer an action happened when it did not
 
 Domain-agnostic: no tool names, action types, or business domains are hardcoded.
 Every registered connector comes from the tenant's active ConnectorConfigRecord
-rows. Commerce, banking, healthcare, telecom — all verticals work through the
-same generic registration loop.
+rows. Commerce, banking, healthcare, telecom, MCP servers — all verticals work
+through the same generic registration loop.
 
-Money/goods commitment rule (INVIOLABLE):
-  A configured connector for a money/goods operation MUST always require human
-  approval before execution. Connectors inherit CommitmentKind from their
-  connector_type prefix (``money.*``, ``goods.*``) or default to GOODS
-  (fail-closed). The FailClosedActionTool fires for any configured operation
-  missing a real connector endpoint.
+Money/goods commitment rule:
+  For custom REST connectors (connector_type prefix): CommitmentKind is derived
+  from the prefix. For MCP tools: CommitmentKind and ExecutionPolicy are declared
+  per-tool in the tenant's action_tools policy. Both models are fully audited.
+
+  Unconfigured MCP tool (absent from policy) → REQUIRE_APPROVAL (safe default).
+  MCP tool with execution_policy=auto_execute → ALLOW (fires immediately).
+  MCP tool with execution_policy=operious_approval → REQUIRE_APPROVAL.
 """
 
 from __future__ import annotations
@@ -41,6 +43,13 @@ from app.agents.tools.connectors import (
     TenantCredentialRuntime,
 )
 from app.agents.tools.connectors.config import ConnectorConfigRecord
+from app.agents.tools.connectors.credentials import ConnectorScopedCredentialRuntime
+from app.agents.tools.connectors.mcp import (
+    McpConnectorTool,
+    McpCredentialRuntime,
+    McpToolDeclaration,
+    parse_mcp_server_config,
+)
 from app.agents.tools.operation_metadata import (
     ApprovalPolicy,
     CommitmentKind,
@@ -48,6 +57,9 @@ from app.agents.tools.operation_metadata import (
 from app.tenant.enums import TenantChannelType
 from app.agents.tools.registry import ToolRegistry
 from app.work_orders.persistence.repository import WorkOrderRepositoryProtocol
+
+# connector_type value for MCP servers registered via the MCP_SERVER change type.
+MCP_SERVER_CONNECTOR_TYPE = "mcp_server"
 
 # connector_type prefix → (CommitmentKind, ApprovalPolicy).
 # Any prefix not listed falls through to the GOODS/ALWAYS_REQUIRE_APPROVAL
@@ -78,6 +90,7 @@ async def build_tenant_action_tool_registry(
     tenant_id: str,
     config_repository: ConnectorConfigRepository,
     credential_runtime: TenantCredentialRuntime,
+    connector_credential_runtime: ConnectorScopedCredentialRuntime | None = None,
     work_order_repository: WorkOrderRepositoryProtocol | None = None,
     ssl_context: ssl.SSLContext | None = None,
     ssrf_validator: SSRFValidator | None = None,
@@ -86,21 +99,22 @@ async def build_tenant_action_tool_registry(
     """Build one action registry driven entirely by the tenant's connector configs.
 
     Domain-agnostic: no tool name, action type, or business domain is hardcoded.
-    Every registered tool comes from an active ConnectorConfigRecord row. A tenant
-    with refund/warranty configs gets those connectors. A bank tenant with
-    account.freeze/dispute.file configs gets those. A telecom with service.suspend
-    gets that. Same code path for all.
+    Every registered tool comes from an active ConnectorConfigRecord row.
 
-    CommitmentKind is derived from the connector_type prefix so the
-    money/goods-always-human governance invariant is preserved for all verticals.
-    When no connector is configured for a tool, a FailClosedActionTool is NOT
-    registered — the tool simply does not exist in this tenant's registry. If
-    the agent attempts to call an unconfigured tool, the tool session returns a
-    governed error via the registry's unknown-tool path.
+    MCP servers (connector_type="mcp_server") are expanded into one
+    McpConnectorTool per enabled, configured tool declaration in the config's
+    ``mcp_tools`` payload field. Each MCP tool is registered under the name
+    f"{mcp_server_id}.{tool_name}" and flows through TenantActionPolicy just
+    like any custom tool — the execution_policy in the declaration drives
+    whether the gate returns ALLOW (auto_execute) or REQUIRE_APPROVAL.
 
-    The ``allow_stub_actions`` parameter is retained for API compatibility with
-    non-production test callers; it has no effect in the generic path because
-    no stubs are registered — only real connectors or nothing.
+    Custom REST connectors (all other connector_type values) continue to use
+    GenericConnectorTool with CommitmentKind derived from the connector_type prefix.
+
+    ``connector_credential_runtime`` is used for both custom REST connectors
+    and MCP servers (OPCRED2-encrypted per-connector credentials).
+
+    The ``allow_stub_actions`` parameter is retained for API compatibility.
     """
     del allow_stub_actions  # no stub path in the generic implementation
 
@@ -111,20 +125,88 @@ async def build_tenant_action_tool_registry(
     )
 
     for config in all_configs:
-        if registry.has(config.tool_name):
-            continue  # duplicate tool_name in configs — first wins
-
-        tool = _connector_tool_from_config(
-            config=config,
-            config_repository=config_repository,
-            credential_runtime=credential_runtime,
-            work_order_repository=work_order_repository,
-            ssl_context=ssl_context,
-            ssrf_validator=ssrf_validator,
-        )
-        registry.register(tool)
+        if config.connector_type.lower() == MCP_SERVER_CONNECTOR_TYPE:
+            # MCP server: expand one config row into N McpConnectorTool instances.
+            _register_mcp_tools(
+                registry=registry,
+                config=config,
+                connector_credential_runtime=connector_credential_runtime,
+                ssl_context=ssl_context,
+                ssrf_validator=ssrf_validator,
+            )
+        else:
+            if registry.has(config.tool_name):
+                continue  # duplicate tool_name — first wins
+            tool = _connector_tool_from_config(
+                config=config,
+                config_repository=config_repository,
+                credential_runtime=credential_runtime,
+                connector_credential_runtime=connector_credential_runtime,
+                work_order_repository=work_order_repository,
+                ssl_context=ssl_context,
+                ssrf_validator=ssrf_validator,
+            )
+            registry.register(tool)
 
     return registry
+
+
+def _register_mcp_tools(
+    *,
+    registry: ToolRegistry,
+    config: ConnectorConfigRecord,
+    connector_credential_runtime: ConnectorScopedCredentialRuntime | None,
+    ssl_context: ssl.SSLContext | None,
+    ssrf_validator: SSRFValidator | None,
+) -> None:
+    """Expand an MCP server ConnectorConfigRecord into per-tool McpConnectorTool instances.
+
+    The config's endpoint_template is the MCP server base URL.
+    The config's field_mappings["mcp_tools"] is a list of tool declarations.
+
+    Tools whose canonical name is already registered are skipped (first wins).
+    If connector_credential_runtime is absent, MCP tools are not registered
+    (fail-closed: no credential runtime = no tools).
+    """
+    if connector_credential_runtime is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "mcp_tools_skipped_no_credential_runtime",
+            extra={"connector_type": config.connector_type, "tool_name": config.tool_name},
+        )
+        return
+
+    mcp_server_id = config.tool_name  # tool_name IS the mcp_server_id for MCP configs
+    endpoint_url = config.endpoint_template
+    raw_tools = config.field_mappings.get("mcp_tools")
+    if not isinstance(raw_tools, list) or not raw_tools:
+        return
+
+    mcp_config = parse_mcp_server_config(
+        mcp_server_id=mcp_server_id,
+        endpoint_url=endpoint_url,
+        raw_tools=list(raw_tools),
+        timeout_seconds=float(config.field_mappings.get("timeout_seconds", 15.0)),
+    )
+    mcp_credential_runtime = McpCredentialRuntime(
+        credential_runtime=connector_credential_runtime
+    )
+
+    for declaration in mcp_config.tools:
+        if not declaration.enabled:
+            continue
+        canonical_name = f"{mcp_server_id}.{declaration.tool_name}"
+        if registry.has(canonical_name):
+            continue
+        tool = McpConnectorTool(
+            declaration=declaration,
+            endpoint_url=endpoint_url,
+            credential_runtime=mcp_credential_runtime,
+            ssl_context=ssl_context,
+            ssrf_validator=ssrf_validator,
+            timeout_seconds=mcp_config.timeout_seconds,
+        )
+        registry.register(tool)
 
 
 def _commitment_from_connector_type(
@@ -153,6 +235,7 @@ def _connector_tool_from_config(
     config: ConnectorConfigRecord,
     config_repository: ConnectorConfigRepository,
     credential_runtime: TenantCredentialRuntime,
+    connector_credential_runtime: ConnectorScopedCredentialRuntime | None,
     work_order_repository: WorkOrderRepositoryProtocol | None,
     ssl_context: ssl.SSLContext | None,
     ssrf_validator: SSRFValidator | None,
@@ -223,53 +306,66 @@ def _connector_tool_from_config(
         connector=connector,
         operation=operation,
         config_repository=config_repository,
-        credential_runtime=_connector_credential_runtime(
+        credential_runtime=_resolve_credential_runtime(
             config=config,
             connector_id=cid,
-            credential_runtime=credential_runtime,
+            channel_credential_runtime=credential_runtime,
+            connector_credential_runtime=connector_credential_runtime,
         ),
         ssl_context=ssl_context,
         ssrf_validator=ssrf_validator,
     )
 
 
-def _connector_credential_runtime(
+def _resolve_credential_runtime(
     *,
     config: ConnectorConfigRecord,
     connector_id: str,
-    credential_runtime: TenantCredentialRuntime,
+    channel_credential_runtime: TenantCredentialRuntime,
+    connector_credential_runtime: ConnectorScopedCredentialRuntime | None,
 ) -> ConnectorCredentialRuntime:
-    """Bridge existing channel credentials into generic connector credentials.
+    """Resolve the correct credential runtime for a connector.
 
-    Some newer test/dedicated runtimes already expose ``load_connector_credentials``.
-    The production tenant runtime exposes channel credentials only, so generic
-    connector configs bind their ``connector_type`` to an existing
-    ``TenantChannelType``. Unknown connector types fail closed at credential
-    load time rather than fabricating credentials.
+    Priority:
+    1. If the runtime already exposes load_connector_credentials, use it directly.
+    2. If connector_credential_runtime is provided AND connector_type is NOT a
+       known TenantChannelType, use the per-connector credential store.
+       This covers custom (non-commerce) connectors — bank account.freeze,
+       telecom service.suspend, etc.
+    3. Fall back to ChannelBridgedConnectorCredentialRuntime that maps
+       connector_type → TenantChannelType for built-in commerce connectors.
     """
-
-    if hasattr(credential_runtime, "load_connector_credentials"):
-        return cast(ConnectorCredentialRuntime, credential_runtime)
+    if hasattr(channel_credential_runtime, "load_connector_credentials"):
+        return cast(ConnectorCredentialRuntime, channel_credential_runtime)
 
     try:
         channel_type = TenantChannelType(config.connector_type)
     except ValueError:
+        # Not a known channel type — use per-connector credential store if available.
+        if connector_credential_runtime is not None:
+            return connector_credential_runtime
+        # No per-connector runtime available: fail closed at credential load time.
         connector_channel_map: dict[str, TenantChannelType] = {}
     else:
         connector_channel_map = {connector_id: channel_type}
 
     return ChannelBridgedConnectorCredentialRuntime(
-        channel_credential_loader=credential_runtime,
+        channel_credential_loader=channel_credential_runtime,
         connector_channel_map=connector_channel_map,
     )
 
 
 __all__ = [
     "FailClosedActionTool",
+    "MCP_SERVER_CONNECTOR_TYPE",
+    "McpConnectorTool",
+    "McpCredentialRuntime",
+    "McpToolDeclaration",
     "RefundRequestTool",
     "ReplacementOrderTool",
     "WarehouseRepairReportTool",
     "WarrantyClaimTool",
     "build_action_tool_registry",
     "build_tenant_action_tool_registry",
+    "ConnectorScopedCredentialRuntime",
 ]

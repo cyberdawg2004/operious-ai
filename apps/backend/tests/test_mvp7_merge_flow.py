@@ -24,7 +24,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.cognition.extraction import ExtractionFieldSpec, ExtractionSchema
 from app.session.cross_channel_merge import (
     EVT_MERGE_ABANDONED,
     EVT_MERGE_CANDIDATE_FLAGGED,
@@ -41,13 +40,10 @@ from app.session.cross_channel_merge import (
     record_confirmation_sent,
 )
 from app.session.enums import (
-    SessionContinuityMode,
-    SessionEventKind,
     SessionLifecyclePhase,
     SessionScope,
 )
 from app.session.identity import SessionId, SessionLineageId
-from app.session.identity_resolution import IdentityResolutionRuntime
 from app.session.persistence.memory import InMemorySessionPersistence
 from app.session.persistence.models import SessionEventQuery
 from app.session.persistence.records import SessionRecord

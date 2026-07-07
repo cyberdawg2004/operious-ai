@@ -1691,7 +1691,6 @@ async def mcp_oauth_callback(
     import json as _json
 
     from app.core.config import get_settings
-    from app.core.http import get_shared_http_client
     from app.core.redis import get_redis_client
 
     settings = get_settings()

@@ -77,6 +77,12 @@ from app.tenant.identity import (
     derive_channel_configuration_id,
 )
 from app.services.tenant_configuration_service import TenantConfigurationService
+from app.agents.tools.connectors.credentials import (
+    ConnectorCredentialCodec,
+    ConnectorCredentialRecord,
+    ConnectorCredentialRepository,
+    encrypt_connector_credentials,
+)
 
 _LEDGER_APPROVAL_NAMESPACE = uuid.UUID("b61074c6-a757-51f4-ae19-947742f31705")
 _CHANGE_EVENT_NAMESPACE = uuid.UUID("01f77264-1518-5a56-9327-0472414e7dc0")
@@ -98,12 +104,16 @@ class TenantConfigChangeRequestService:
         event_appender: OperationalEventAppender,
         session: AsyncSession,
         knowledge_reindex_publisher: _KnowledgeReindexPublisherProtocol | None = None,
+        connector_credential_repository: ConnectorCredentialRepository | None = None,
+        connector_credential_codec: ConnectorCredentialCodec | None = None,
     ) -> None:
         self._repository = repository
         self._tenant_configuration = tenant_configuration_service
         self._events = event_appender
         self._session = session
         self._knowledge_reindex_publisher = knowledge_reindex_publisher
+        self._connector_credential_repository = connector_credential_repository
+        self._connector_credential_codec = connector_credential_codec
 
     async def propose(
         self,
@@ -386,6 +396,12 @@ class TenantConfigChangeRequestService:
             return await self._apply_connector(record, payload, approval)
         if change is TenantConfigChangeType.CREDENTIAL_UPDATE:
             return await self._apply_credential_update(record, payload)
+        if change is TenantConfigChangeType.CONNECTOR_CREDENTIAL:
+            return await self._apply_connector_credential(record, payload, approval)
+        if change is TenantConfigChangeType.MCP_SERVER:
+            return await self._apply_mcp_server(record, payload, approval)
+        if change is TenantConfigChangeType.MCP_OAUTH_TOKEN:
+            return await self._apply_mcp_oauth_token(record, payload, approval)
         raise TenantConfigChangeRequestLifecycleError(
             f"unsupported tenant config change type: {change.value}"
         )
@@ -746,6 +762,88 @@ class TenantConfigChangeRequestService:
         await self._session.commit()
         return persisted
 
+    async def propose_connector_credential(
+        self,
+        *,
+        tenant_id: str,
+        connector_id: str,
+        credentials: Mapping[str, Any],
+        proposed_by: str,
+    ) -> TenantConfigChangeRequestRecord:
+        """Propose a per-connector credential through the dual-control workflow.
+
+        Credentials are encrypted immediately at propose time via OPCRED2 and
+        stored in connector_credentials with status='pending_validation'.
+        The change-request proposed_payload stores ONLY a SHA-256 sentinel of
+        the ciphertext — never plaintext or the envelope itself.
+
+        Domain-agnostic: works for any connector_id (account.freeze, service.suspend,
+        refund.request, etc.) — not limited to OMS channel connectors.
+        """
+        repo = self._connector_credential_repository
+        codec = self._connector_credential_codec
+        if repo is None or codec is None:
+            raise TenantConfigChangeRequestLifecycleError(
+                "connector credential store is not configured on this service instance"
+            )
+        if not connector_id or not connector_id.strip():
+            raise TenantConfigChangeRequestLifecycleError(
+                "connector_id is required"
+            )
+        if not credentials:
+            raise TenantConfigChangeRequestLifecycleError(
+                "credentials are required"
+            )
+
+        # Encrypt and store the credential immediately (pending_validation).
+        ciphertext, credential_hash = encrypt_connector_credentials(
+            tenant_id=tenant_id,
+            connector_id=connector_id,
+            credentials=dict(credentials),
+            codec=codec,
+        )
+        now = _utcnow()
+        credential_record = ConnectorCredentialRecord(
+            tenant_id=tenant_id,
+            connector_id=connector_id,
+            credentials_enc=ciphertext,
+            credential_hash=credential_hash,
+            status="pending_validation",
+            configured_by=proposed_by,
+            source_approval_id="pending",
+            created_at=now,
+            updated_at=now,
+        )
+        await repo.upsert(credential_record, expected_tenant_id=tenant_id)
+
+        # Build sentinel — only the hash goes into the change-request payload.
+        sentinel: dict[str, Any] = {
+            "connector_id": connector_id,
+            "credential_hash": credential_hash,
+        }
+        versioned = _versioned_payload(sentinel)
+        change_record = TenantConfigChangeRequestRecord(
+            change_request_id=derive_tenant_config_change_request_id(
+                tenant_id=tenant_id,
+                change_type=TenantConfigChangeType.CONNECTOR_CREDENTIAL,
+                proposed_payload=versioned,
+                proposed_by=proposed_by,
+            ),
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.CONNECTOR_CREDENTIAL,
+            proposed_payload=versioned,
+            status=TenantConfigChangeRequestStatus.PROPOSED,
+            proposed_by=proposed_by,
+            proposed_at=now,
+        )
+        persisted = await self._repository.create(
+            change_record,
+            expected_tenant_id=tenant_id,
+        )
+        await self._append_status_event(persisted)
+        await self._session.commit()
+        return persisted
+
     async def _apply_connector(
         self,
         record: TenantConfigChangeRequestRecord,
@@ -837,6 +935,259 @@ class TenantConfigChangeRequestService:
             "config_id": str(result.config_id),
             "status": result.status.value,
         }
+
+    async def _apply_connector_credential(
+        self,
+        record: TenantConfigChangeRequestRecord,
+        payload: Mapping[str, Any],
+        approval: ApprovalRecord,
+    ) -> dict[str, Any]:
+        repo = self._connector_credential_repository
+        if repo is None:
+            raise TenantConfigChangeRequestLifecycleError(
+                "connector credential store is not configured on this service instance"
+            )
+        connector_id = _str(payload, "connector_id")
+        expected_hash = _str(payload, "credential_hash")
+
+        # Load the pending credential row written at propose time.
+        cred = await repo.get(
+            tenant_id=record.tenant_id,
+            connector_id=connector_id,
+            expected_tenant_id=record.tenant_id,
+        )
+        if cred is None:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"connector credential not found for connector {connector_id!r}; "
+                "pending credential may have been cleared"
+            )
+        if cred.status != "pending_validation":
+            raise TenantConfigChangeRequestLifecycleError(
+                f"connector credential is not in pending state "
+                f"(status={cred.status!r})"
+            )
+
+        # Integrity: hash of stored ciphertext must match sentinel.
+        import hashlib as _hashlib
+        actual_hash = _hashlib.sha256(cred.credentials_enc).hexdigest()
+        if actual_hash != expected_hash:
+            raise TenantConfigChangeRequestLifecycleError(
+                "connector credential hash mismatch; "
+                "stored ciphertext does not match proposal sentinel"
+            )
+
+        # Activate: write updated record with status=active and approval id.
+        activated = ConnectorCredentialRecord(
+            tenant_id=cred.tenant_id,
+            connector_id=cred.connector_id,
+            credentials_enc=cred.credentials_enc,
+            credential_hash=cred.credential_hash,
+            status="active",
+            configured_by=record.approved_by or record.proposed_by,
+            source_approval_id=approval.approval_id,
+            created_at=cred.created_at,
+            updated_at=_utcnow(),
+        )
+        await repo.upsert(activated, expected_tenant_id=record.tenant_id)
+        return {
+            "kind": "connector_credential",
+            "operation": "activate",
+            "connector_id": connector_id,
+            "status": "active",
+        }
+
+    async def _apply_mcp_server(
+        self,
+        record: TenantConfigChangeRequestRecord,
+        payload: Mapping[str, Any],
+        approval: ApprovalRecord,
+    ) -> dict[str, Any]:
+        """Apply an MCP_SERVER change: create/update a ConnectorConfigRecord.
+
+        The MCP server is stored as a connector_type="mcp_server" record.
+        tool_name = mcp_server_id (the tenant's chosen identifier).
+        endpoint_template = endpoint_url (MCP server base URL).
+        field_mappings = {mcp_tools: [...], timeout_seconds: N}.
+
+        The governance gate looks up MCP tools from the action_tools policy
+        (declared separately via the POLICY change type), not from this record.
+        This record is the runtime wiring; the policy is the governance declaration.
+        """
+        mcp_server_id = _str(payload, "mcp_server_id")
+        endpoint_url = _str(payload, "endpoint_url")
+        mcp_tools_raw = payload.get("mcp_tools")
+        if not isinstance(mcp_tools_raw, list):
+            raise TenantConfigChangeRequestLifecycleError(
+                "mcp_server payload must include mcp_tools as a list"
+            )
+        if not mcp_tools_raw:
+            raise TenantConfigChangeRequestLifecycleError(
+                "mcp_server payload must include at least one tool declaration"
+            )
+        # Validate each tool entry has required fields.
+        for i, tool in enumerate(mcp_tools_raw):
+            if not isinstance(tool, dict):
+                raise TenantConfigChangeRequestLifecycleError(
+                    f"mcp_tools[{i}] must be an object"
+                )
+            if not tool.get("tool_name"):
+                raise TenantConfigChangeRequestLifecycleError(
+                    f"mcp_tools[{i}].tool_name is required"
+                )
+            if not tool.get("commitment_kind"):
+                raise TenantConfigChangeRequestLifecycleError(
+                    f"mcp_tools[{i}].commitment_kind is required"
+                )
+            if not tool.get("execution_policy"):
+                raise TenantConfigChangeRequestLifecycleError(
+                    f"mcp_tools[{i}].execution_policy is required "
+                    "(auto_execute or operious_approval)"
+                )
+
+        # Parse endpoint host for the ConnectorConfigRecord.
+        from urllib.parse import urlparse as _urlparse
+        parsed_host = (_urlparse(endpoint_url).hostname or "").lower()
+        if not parsed_host:
+            raise TenantConfigChangeRequestLifecycleError(
+                "mcp_server endpoint_url must be a valid HTTPS URL with a hostname"
+            )
+
+        timeout_seconds = float(payload.get("timeout_seconds") or 15.0)
+        field_mappings: dict[str, Any] = {
+            "mcp_tools": list(mcp_tools_raw),
+            "timeout_seconds": timeout_seconds,
+        }
+
+        result = await self._tenant_configuration.configure_connector(
+            tenant_id=record.tenant_id,
+            connector_type="mcp_server",
+            tool_name=mcp_server_id,
+            http_method="POST",
+            endpoint_template=endpoint_url,
+            endpoint_host=parsed_host,
+            field_mappings=field_mappings,
+            idempotency_header_name="Idempotency-Key",
+            response_parse={},
+            success_status_codes=(200, 201, 202),
+            status="active",
+            configured_by=record.approved_by or record.proposed_by,
+            approval=approval,
+            bypass_direct_apply_gate=True,
+            commit=False,
+        )
+        return {
+            "kind": "mcp_server",
+            "operation": "configure",
+            "mcp_server_id": mcp_server_id,
+            "tool_count": len(mcp_tools_raw),
+            "version": result.version,
+            "content_sha256": result.content_sha256,
+        }
+
+    async def _apply_mcp_oauth_token(
+        self,
+        record: TenantConfigChangeRequestRecord,
+        payload: Mapping[str, Any],
+        approval: ApprovalRecord,
+    ) -> dict[str, Any]:
+        """Apply an MCP_OAUTH_TOKEN change: activate the pending credential.
+
+        The encrypted OAuth token was stored in connector_credentials at
+        propose time (status='pending_validation'). This apply step:
+        1. Verifies the stored ciphertext hash matches the sentinel.
+        2. Activates the credential (status='active', source_approval_id set).
+
+        connector_id for OAuth tokens is the mcp_server_id, so the
+        ConnectorScopedCredentialRuntime resolves them transparently.
+        """
+        repo = self._connector_credential_repository
+        if repo is None:
+            raise TenantConfigChangeRequestLifecycleError(
+                "connector credential store is not configured on this service instance"
+            )
+        mcp_server_id = _str(payload, "mcp_server_id")
+        expected_hash = _str(payload, "token_hash")
+
+        cred = await repo.get(
+            tenant_id=record.tenant_id,
+            connector_id=mcp_server_id,
+            expected_tenant_id=record.tenant_id,
+        )
+        if cred is None:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp oauth token not found for server {mcp_server_id!r}; "
+                "pending token may have been cleared"
+            )
+        if cred.status != "pending_validation":
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp oauth token is not in pending state (status={cred.status!r})"
+            )
+
+        import hashlib as _hashlib
+        actual_hash = _hashlib.sha256(cred.credentials_enc).hexdigest()
+        if actual_hash != expected_hash:
+            raise TenantConfigChangeRequestLifecycleError(
+                "mcp oauth token hash mismatch; "
+                "stored ciphertext does not match proposal sentinel"
+            )
+
+        activated = ConnectorCredentialRecord(
+            tenant_id=cred.tenant_id,
+            connector_id=cred.connector_id,
+            credentials_enc=cred.credentials_enc,
+            credential_hash=cred.credential_hash,
+            status="active",
+            configured_by=record.approved_by or record.proposed_by,
+            source_approval_id=approval.approval_id,
+            created_at=cred.created_at,
+            updated_at=_utcnow(),
+        )
+        await repo.upsert(activated, expected_tenant_id=record.tenant_id)
+        return {
+            "kind": "mcp_oauth_token",
+            "operation": "activate",
+            "mcp_server_id": mcp_server_id,
+            "status": "active",
+        }
+
+    def propose_mcp_server(
+        self,
+        *,
+        tenant_id: str,
+        mcp_server_id: str,
+        endpoint_url: str,
+        mcp_tools: list[dict[str, Any]],
+        proposed_by: str,
+        timeout_seconds: float = 15.0,
+    ) -> "TenantConfigChangeRequestRecord":
+        """Build (but do not persist) an MCP_SERVER change-request record.
+
+        Callers must call .create() on the repository and .commit() on the session.
+        Used by the API router to keep propose logic out of the service.
+        """
+        payload: dict[str, Any] = {
+            "mcp_server_id": mcp_server_id,
+            "endpoint_url": endpoint_url,
+            "mcp_tools": mcp_tools,
+            "timeout_seconds": timeout_seconds,
+        }
+        from datetime import datetime as _dt, timezone as _tz
+        versioned = _versioned_payload(payload)
+        from app.tenant.change_requests import derive_tenant_config_change_request_id as _derive
+        return TenantConfigChangeRequestRecord(
+            change_request_id=_derive(
+                tenant_id=tenant_id,
+                change_type=TenantConfigChangeType.MCP_SERVER,
+                proposed_payload=versioned,
+                proposed_by=proposed_by,
+            ),
+            tenant_id=tenant_id,
+            change_type=TenantConfigChangeType.MCP_SERVER,
+            proposed_payload=versioned,
+            status=TenantConfigChangeRequestStatus.PROPOSED,
+            proposed_by=proposed_by,
+            proposed_at=_dt.now(_tz.utc),
+        )
 
     async def _append_status_event(
         self,
@@ -1111,6 +1462,19 @@ async def _validate_payload(
         # Plaintext credentials must never appear here.
         required = ("channel", "credential_hash")
         _validate_credential_update_sentinel(payload)
+    elif change_type is TenantConfigChangeType.CONNECTOR_CREDENTIAL:
+        # Sentinel-only validation: payload must contain only the hash and connector_id.
+        # Plaintext credentials must never appear here.
+        required = ("connector_id", "credential_hash")
+        _validate_connector_credential_sentinel(payload)
+    elif change_type is TenantConfigChangeType.MCP_SERVER:
+        required = ("mcp_server_id", "endpoint_url", "mcp_tools")
+        _validate_mcp_server_payload(payload)
+    elif change_type is TenantConfigChangeType.MCP_OAUTH_TOKEN:
+        # Sentinel-only: payload must contain only mcp_server_id and token_hash.
+        # Plaintext / ciphertext token must never appear here.
+        required = ("mcp_server_id", "token_hash")
+        _validate_mcp_oauth_token_sentinel(payload)
     else:
         required = (
             ("config_id",)
@@ -1416,12 +1780,11 @@ def _validate_connector_payload(payload: Mapping[str, Any]) -> None:
             "forbidden field(s): "
             + ", ".join(forbidden)
         )
-    try:
-        TenantChannelType(_str(payload, "connector_type"))
-    except ValueError as exc:
+    connector_type = _str(payload, "connector_type")
+    if not connector_type or not connector_type.strip():
         raise TenantConfigChangeRequestLifecycleError(
-            "connector_type must map to a tenant channel type"
-        ) from exc
+            "connector_type is required"
+        )
     method = _str(payload, "http_method").upper()
     if method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}:
         raise TenantConfigChangeRequestLifecycleError(
@@ -1498,6 +1861,133 @@ def _validate_credential_update_sentinel(payload: Mapping[str, Any]) -> None:
     ):
         raise TenantConfigChangeRequestLifecycleError(
             "credential_update credential_hash must be a 64-character hex SHA-256"
+        )
+
+
+_CONNECTOR_CREDENTIAL_SENTINEL_KEYS: frozenset[str] = frozenset(
+    {"connector_id", "credential_hash", "_schema_version"}
+)
+
+
+def _validate_connector_credential_sentinel(payload: Mapping[str, Any]) -> None:
+    """Validate connector_credential change-request sentinel payload.
+
+    Plaintext credentials must NEVER appear here — only the connector_id
+    (non-secret) and SHA-256 hash of the encrypted ciphertext.
+    """
+    forbidden = sorted(k for k in _CREDENTIAL_SENTINEL_FORBIDDEN_KEYS if k in payload)
+    if forbidden:
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector_credential payload must not contain credential fields; "
+            "forbidden field(s): " + ", ".join(forbidden)
+        )
+    unknown = sorted(
+        k for k in payload if k not in _CONNECTOR_CREDENTIAL_SENTINEL_KEYS
+    )
+    if unknown:
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector_credential payload contains unexpected field(s): "
+            + ", ".join(unknown)
+        )
+    connector_id = _str(payload, "connector_id")
+    if not connector_id.strip():
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector_credential connector_id must be non-empty"
+        )
+    credential_hash = _str(payload, "credential_hash")
+    if len(credential_hash) != 64 or not all(
+        c in "0123456789abcdef" for c in credential_hash
+    ):
+        raise TenantConfigChangeRequestLifecycleError(
+            "connector_credential credential_hash must be a 64-character hex SHA-256"
+        )
+
+
+_VALID_COMMITMENT_KINDS: frozenset[str] = frozenset(
+    {"none", "record_update", "money", "goods", "service_commitment"}
+)
+_VALID_EXECUTION_POLICIES: frozenset[str] = frozenset(
+    {"auto_execute", "operious_approval"}
+)
+_MCP_OAUTH_TOKEN_SENTINEL_KEYS: frozenset[str] = frozenset(
+    {"mcp_server_id", "token_hash", "_schema_version"}
+)
+
+
+def _validate_mcp_server_payload(payload: Mapping[str, Any]) -> None:
+    """Validate MCP_SERVER change-request payload.
+
+    Required: mcp_server_id (non-empty), endpoint_url (HTTPS), mcp_tools (list).
+    Each tool must have: tool_name, commitment_kind, execution_policy.
+    """
+    mcp_server_id = payload.get("mcp_server_id")
+    if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_server payload mcp_server_id must be a non-empty string"
+        )
+    endpoint_url = payload.get("endpoint_url")
+    if not isinstance(endpoint_url, str) or not endpoint_url.strip():
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_server payload endpoint_url must be a non-empty string"
+        )
+    if not endpoint_url.strip().lower().startswith("https://"):
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_server endpoint_url must use HTTPS"
+        )
+    mcp_tools = payload.get("mcp_tools")
+    if not isinstance(mcp_tools, list) or not mcp_tools:
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_server payload mcp_tools must be a non-empty list"
+        )
+    for i, tool in enumerate(mcp_tools):
+        if not isinstance(tool, dict):
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp_tools[{i}] must be an object"
+            )
+        tool_name = tool.get("tool_name")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp_tools[{i}].tool_name is required and must be a non-empty string"
+            )
+        commitment_kind = str(tool.get("commitment_kind") or "").lower()
+        if commitment_kind not in _VALID_COMMITMENT_KINDS:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp_tools[{i}].commitment_kind {commitment_kind!r} is not valid; "
+                f"must be one of: {', '.join(sorted(_VALID_COMMITMENT_KINDS))}"
+            )
+        execution_policy = str(tool.get("execution_policy") or "").lower()
+        if execution_policy not in _VALID_EXECUTION_POLICIES:
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp_tools[{i}].execution_policy {execution_policy!r} is not valid; "
+                f"must be one of: auto_execute, operious_approval"
+            )
+
+
+def _validate_mcp_oauth_token_sentinel(payload: Mapping[str, Any]) -> None:
+    """Validate MCP_OAUTH_TOKEN sentinel payload.
+
+    Only mcp_server_id and token_hash (SHA-256 hex) are permitted.
+    Actual access_token / refresh_token must NEVER appear here.
+    """
+    forbidden = sorted(k for k in _CREDENTIAL_SENTINEL_FORBIDDEN_KEYS if k in payload)
+    if forbidden:
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_oauth_token payload must not contain token fields; "
+            "forbidden field(s): " + ", ".join(forbidden)
+        )
+    mcp_server_id = payload.get("mcp_server_id")
+    if not isinstance(mcp_server_id, str) or not mcp_server_id.strip():
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_oauth_token mcp_server_id must be a non-empty string"
+        )
+    token_hash = payload.get("token_hash")
+    if not isinstance(token_hash, str):
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_oauth_token token_hash must be a string"
+        )
+    if len(token_hash) != 64 or not all(c in "0123456789abcdef" for c in token_hash):
+        raise TenantConfigChangeRequestLifecycleError(
+            "mcp_oauth_token token_hash must be a 64-character hex SHA-256"
         )
 
 

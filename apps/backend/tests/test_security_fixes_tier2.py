@@ -137,7 +137,6 @@ class TestAutoExecuteMoneyGoodsAlert:
         policy = parse_action_tools_policy(record)
         # Simulate the evaluation by calling _evaluate_custom_tool indirectly
         from app.agents.tools.action_governance import _evaluate_custom_tool
-        from app.agents.tools.operation_metadata import ExecutionPolicy
         with caplog.at_level(logging.WARNING, logger="app.agents.tools.action_governance"):
             _evaluate_custom_tool(tool_name="pay.account", policy=policy)
         assert any(
@@ -212,7 +211,6 @@ class TestKnowledgeDualControlCapability:
         assert TENANT_KNOWLEDGE_WRITE_CAPABILITY == "tenant.knowledge.write"
 
     def test_cognition_separation_error_exists(self) -> None:
-        from app.cognition.exceptions import CognitionSeparationError
         err = CognitionSeparationError("test")
         assert isinstance(err, Exception)
 
@@ -272,7 +270,6 @@ class TestQueueStatusOperatorGate:
         pytest.fail("get_queue_status function not found in queue_operations router")
 
     def test_get_queue_status_no_longer_depends_on_observability_read(self) -> None:
-        import ast
         import pathlib
         src = pathlib.Path(
             "apps/backend/app/api/v1/routers/queue_operations.py"
@@ -290,7 +287,6 @@ class TestCommitmentKindStampedForCustomTools:
         assert COMMITMENT_KIND_METADATA_KEY == "operation_commitment_kind"
 
     def test_commitment_kind_metadata_key_imported_in_orchestration(self) -> None:
-        import ast
         import pathlib
         src = pathlib.Path(
             "apps/backend/app/agents/tools/orchestration.py"
