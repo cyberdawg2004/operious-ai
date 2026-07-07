@@ -58,7 +58,7 @@ def tenant_id() -> str:
     return f"live-test-assistant-{uuid.uuid4().hex[:8]}"
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="function")
 async def live_service(tenant_id: str) -> Any:
     """Build a real ManagerAssistantService against the test DB and Bedrock."""
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine

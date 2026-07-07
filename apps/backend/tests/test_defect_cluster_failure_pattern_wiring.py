@@ -52,10 +52,10 @@ from tests.conftest import requires_postgres
 @pytest.mark.asyncio
 @requires_postgres
 async def test_defect_cluster_scan_tenant_empty_returns_empty(
-    async_session: AsyncSession,
+    pg_session: AsyncSession,
 ) -> None:
     """scan_tenant returns an empty list when there are no diagnostic executions."""
-    runtime = DefectClusterDetectionRuntime(session=async_session)
+    runtime = DefectClusterDetectionRuntime(session=pg_session)
     candidates = await runtime.scan_tenant(
         tenant_id="tenant-defect-wiring",
         expected_tenant_id="tenant-defect-wiring",
@@ -68,12 +68,12 @@ async def test_defect_cluster_scan_tenant_empty_returns_empty(
 @pytest.mark.asyncio
 @requires_postgres
 async def test_scan_for_defect_clusters_runtime_returns_correct_shape(
-    async_session: AsyncSession,
+    pg_session: AsyncSession,
 ) -> None:
     """scan_for_defect_clusters_runtime returns the expected dict structure."""
     result = await scan_for_defect_clusters_runtime(
         tenant_ids=("tenant-defect-wiring-rt",),
-        session=async_session,
+        session=pg_session,
         synthesis_agent=_NoopSynthesis(),
         sku_extraction_service=_NoopSKU(),
         shopify_enrichment_service=_NoopShopify(),
@@ -90,10 +90,10 @@ async def test_scan_for_defect_clusters_runtime_returns_correct_shape(
 @pytest.mark.asyncio
 @requires_postgres
 async def test_failure_pattern_detect_dlq_empty_returns_empty(
-    async_session: AsyncSession,
+    pg_session: AsyncSession,
 ) -> None:
     """detect_dlq_patterns returns an empty list when no DLQ rows exist."""
-    runtime = FailurePatternDetectionRuntime(session=async_session)
+    runtime = FailurePatternDetectionRuntime(session=pg_session)
     patterns = await runtime.detect_dlq_patterns(
         tenant_ids=("tenant-failure-wiring",),
         window_hours=DLQ_WINDOW_HOURS,
@@ -105,12 +105,12 @@ async def test_failure_pattern_detect_dlq_empty_returns_empty(
 @pytest.mark.asyncio
 @requires_postgres
 async def test_detect_sop_failure_patterns_runtime_returns_correct_shape(
-    async_session: AsyncSession,
+    pg_session: AsyncSession,
 ) -> None:
     """detect_sop_failure_patterns_runtime returns a dict without raising."""
     result = await detect_sop_failure_patterns_runtime(
         tenant_ids=("tenant-failure-wiring-rt",),
-        session=async_session,
+        session=pg_session,
         sop_runtime=None,
     )
     assert isinstance(result, dict)
