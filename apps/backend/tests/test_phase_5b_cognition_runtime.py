@@ -17,6 +17,7 @@ from app.cognition import (
 )
 from app.dependencies.authority import (
     require_tenant_cognition_read,
+    require_tenant_knowledge_approve,
     require_tenant_knowledge_write,
 )
 from app.dependencies.database import get_db_session
@@ -326,6 +327,12 @@ async def cognition_client(
         AuthorityContext(
             tenant_id=_TENANT_ID,
             capabilities=("tenant.knowledge.write",),
+        )
+    )
+    app.dependency_overrides[require_tenant_knowledge_approve] = lambda: (
+        AuthorityContext(
+            tenant_id=_TENANT_ID,
+            capabilities=("tenant.knowledge.approve",),
         )
     )
     transport = httpx.ASGITransport(app=app)

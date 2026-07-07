@@ -16,6 +16,7 @@ from app.auth.providers import StaticTokenProvider
 from app.core.config import get_settings
 from app.dependencies.authority import (
     TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES,
+    TENANT_CONFIG_READ_CAPABILITY,
     TENANT_CONNECTOR_READ_CAPABILITY,
 )
 from app.dependencies.database import get_db_session
@@ -53,7 +54,9 @@ async def tenant_client(
             "tenant-acme-admin": VerifiedIdentity(
                 tenant_id="tenant-acme",
                 principal_id="principal-a",
-                capabilities=frozenset(TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES),
+                capabilities=frozenset(
+                    (*TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES, TENANT_CONFIG_READ_CAPABILITY)
+                ),
             ),
             "tenant-acme-reader": VerifiedIdentity(
                 tenant_id="tenant-acme",
@@ -68,7 +71,9 @@ async def tenant_client(
             "tenant-other-admin": VerifiedIdentity(
                 tenant_id="tenant-other",
                 principal_id="principal-a",
-                capabilities=frozenset(TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES),
+                capabilities=frozenset(
+                    (*TENANT_CONFIG_DOMAIN_WRITE_CAPABILITIES, TENANT_CONFIG_READ_CAPABILITY)
+                ),
             ),
             "tenant-other-reader": VerifiedIdentity(
                 tenant_id="tenant-other",
