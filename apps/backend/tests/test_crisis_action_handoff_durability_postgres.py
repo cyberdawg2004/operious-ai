@@ -26,7 +26,7 @@ from app.agents.identity import (
 from app.agents.results import ToolInvocationRequest
 from app.agents.tools import ToolInvoker
 from app.agents.tools.action_governance import build_action_tool_governance_runtime
-from app.agents.tools.actions import build_action_tool_registry
+from tests.support.stub_tools import build_action_tool_registry
 from app.agents.value_objects import CausalityMetadata
 from app.escalation import DeferredEscalationPublisher, EscalationAgentRuntime
 from app.escalation.celery_publisher import CeleryEscalationPublisher

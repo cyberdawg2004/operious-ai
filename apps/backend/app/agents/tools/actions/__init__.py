@@ -25,10 +25,6 @@ import ssl
 from typing import cast
 
 from app.agents.tools.actions.fail_closed import FailClosedActionTool
-from app.agents.tools.actions.refund_request import RefundRequestTool
-from app.agents.tools.actions.replacement_order import ReplacementOrderTool
-from app.agents.tools.actions.warehouse_repair import WarehouseRepairReportTool
-from app.agents.tools.actions.warranty_claim import WarrantyClaimTool
 from app.agents.tools.connectors import (
     ChannelBridgedConnectorCredentialRuntime,
     ConnectorConfigRepository,
@@ -74,24 +70,6 @@ _CONNECTOR_TYPE_COMMITMENT: dict[str, tuple[CommitmentKind, ApprovalPolicy]] = {
     "read": (CommitmentKind.NONE, ApprovalPolicy.TENANT_POLICY),
 }
 
-
-def build_action_tool_registry() -> ToolRegistry:
-    """Build a registry with legacy stub tool instances.
-
-    Used only in direct-construction tests where no DB config is available.
-    These are the pre-2.2 tool classes (RefundRequestTool, WarrantyClaimTool,
-    etc.) that simulate success. In production, build_tenant_action_tool_registry
-    is used, which reads ConnectorConfigRecord rows from the DB.
-    """
-    registry = ToolRegistry()
-    for tool_cls in (
-        RefundRequestTool,
-        ReplacementOrderTool,
-        WarehouseRepairReportTool,
-        WarrantyClaimTool,
-    ):
-        registry.register(tool_cls())
-    return registry
 
 
 async def build_tenant_action_tool_registry(
@@ -373,11 +351,6 @@ __all__ = [
     "McpConnectorTool",
     "McpCredentialRuntime",
     "McpToolDeclaration",
-    "RefundRequestTool",
-    "ReplacementOrderTool",
-    "WarehouseRepairReportTool",
-    "WarrantyClaimTool",
-    "build_action_tool_registry",
     "build_tenant_action_tool_registry",
     "ConnectorScopedCredentialRuntime",
 ]

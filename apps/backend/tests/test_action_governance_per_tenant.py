@@ -22,7 +22,7 @@ from app.agents.tools.action_governance import (
     TenantActionPolicy,
     build_action_tool_governance_runtime,
 )
-from app.agents.tools.actions import (
+from tests.support.stub_tools import (
     RefundRequestTool,
     ReplacementOrderTool,
     WarehouseRepairReportTool,

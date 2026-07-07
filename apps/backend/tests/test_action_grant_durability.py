@@ -25,7 +25,7 @@ from app.agents.identity import (
 from app.agents.results import ToolInvocationRequest, ToolInvocationResult
 from app.agents.tools import BaseTool, ToolCapability, ToolInvoker, ToolRegistry
 from app.agents.tools.action_governance import build_action_tool_governance_runtime
-from app.agents.tools.actions import build_action_tool_registry
+from tests.support.stub_tools import build_action_tool_registry
 from app.agents.tools.approvals import (
     PostgresActionApprovalRepository,
     build_pending_action_approval,

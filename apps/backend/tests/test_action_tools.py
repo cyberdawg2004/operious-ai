@@ -19,7 +19,7 @@ from app.agents.exceptions import ToolConfigurationError
 from app.agents.identity import AgentIdentity, ExecutionIdentity
 from app.agents.results import ToolInvocationRequest, ToolInvocationResult
 from app.agents.tools import ToolInvoker, ToolRegistry
-from app.agents.tools.actions import (
+from tests.support.stub_tools import (
     RefundRequestTool,
     WarrantyClaimTool,
 )
