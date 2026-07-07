@@ -263,7 +263,9 @@ def _connector_tool_from_config(
         config.connector_type
     )
     raw_type = config.connector_type.lower()
-    if raw_type.startswith("repair") and work_order_repository is not None:
+    raw_tool = config.tool_name.lower()
+    is_repair = raw_type.startswith("repair") or raw_tool.startswith("repair")
+    if is_repair and work_order_repository is not None:
         return GenericRestRepairDispatchConnector(
             config_repository=config_repository,
             credential_runtime=credential_runtime,
