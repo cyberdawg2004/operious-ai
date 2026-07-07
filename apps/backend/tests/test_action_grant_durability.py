@@ -447,7 +447,21 @@ def _context(*, actor: str) -> AgentExecutionContext:
     )
 
 
+async def _ensure_tenant(session: AsyncSession, tenant_id: str) -> None:
+    await session.execute(
+        text(
+            """
+            INSERT INTO public.tenants (tenant_id)
+            VALUES (:tenant_id)
+            ON CONFLICT (tenant_id) DO NOTHING
+            """
+        ),
+        {"tenant_id": tenant_id},
+    )
+
+
 async def _seed_session(session: AsyncSession) -> None:
+    await _ensure_tenant(session, _TENANT_ID)
     sid = SessionId(uuid.UUID(_session_id()))
     await PostgresSessionPersistence(session).save_session(
         SessionRecord(

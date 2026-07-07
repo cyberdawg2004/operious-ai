@@ -20,7 +20,10 @@ from app.agents.tools.approvals import (
     PostgresActionApprovalRepository,
     build_pending_action_approval,
 )
-from app.agents.tools.grants import AGENT_ACTION_ACTOR_KEY
+from app.agents.tools.grants import (
+    AGENT_ACTION_ACTOR_KEY,
+    PostgresAgentActionGrantRepository,
+)
 from app.agents.tools.invoker import (
     AGENT_ACTION_BINDING_KEY,
     compute_agent_action_binding,
@@ -73,24 +76,6 @@ def pg_tenant_id() -> str:
     return _TENANT_ID
 
 
-async def _executed_outcome(
-    self: object,
-    *,
-    approval_record: ActionApprovalRecord,
-    approved_decision_id: str,
-    execution_context: object,
-    expected_tenant_id: str,
-) -> ActionOutcome:
-    """Test double: always returns executed without a real connector call."""
-    return ActionOutcome(
-        tool_name=approval_record.tool_name,
-        idempotency_key=approval_record.idempotency_key,
-        status="executed",
-        governance_decision_id=approved_decision_id,
-        approval_record_id=approval_record.approval_id,
-    )
-
-
 @pytest_asyncio.fixture
 async def approval_client(
     pg_session: AsyncSession,
@@ -100,6 +85,52 @@ async def approval_client(
     monkeypatch.setattr(redis_module, "_redis_client", redis)
     monkeypatch.setattr(main_module, "get_redis_client", lambda: redis)
     monkeypatch.setattr(service_dependencies, "get_redis_client", lambda: redis)
+
+    async def _executed_outcome(
+        self: object,
+        *,
+        approval_record: ActionApprovalRecord,
+        approved_decision_id: str,
+        execution_context: object,
+        expected_tenant_id: str,
+    ) -> ActionOutcome:
+        """Test double: consume grant + record event without a real connector."""
+        await PostgresAgentActionGrantRepository(pg_session).consume_grant(
+            decision_id=uuid.UUID(approved_decision_id),
+            tenant_id=expected_tenant_id,
+            actor=_ACTION_ACTOR,
+        )
+        dispatch_id = (
+            approval_record.metadata.get("dispatch_id")
+            or approval_record.execution_id
+            or approval_record.approval_id
+        )
+        await TimelineRuntime(
+            persistence=PostgresSessionPersistence(pg_session)
+        ).append_event(
+            session_id=approval_record.session_id,
+            dispatch_id=dispatch_id,
+            tenant_id=expected_tenant_id,
+            event_type="action_executed",
+            payload={
+                "approval_id": approval_record.approval_id,
+                "tool_name": approval_record.tool_name,
+                "action_type": approval_record.metadata.get("action_type") or "unknown",
+                "idempotency_key": approval_record.idempotency_key,
+                "governance_decision_id": approved_decision_id,
+                "result": {"status": "success"},
+            },
+            timestamp=datetime.now(timezone.utc),
+            idempotency_key=f"action:approved-executed:{approval_record.idempotency_key}",
+        )
+        return ActionOutcome(
+            tool_name=approval_record.tool_name,
+            idempotency_key=approval_record.idempotency_key,
+            status="executed",
+            governance_decision_id=approved_decision_id,
+            approval_record_id=approval_record.approval_id,
+        )
+
     # Patch re_invoke_approved_action so the test doesn't need a real connector
     # config in the DB. The test verifies governance wiring, not connector execution.
     monkeypatch.setattr(

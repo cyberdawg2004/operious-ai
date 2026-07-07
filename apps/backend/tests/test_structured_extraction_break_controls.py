@@ -119,6 +119,10 @@ def _refund_taxonomy() -> ResolutionTaxonomyPolicy:
                         "type": "refund_request",
                         "tool_name": "refund.request",
                         "requires_execution": True,
+                        "payload_template": {
+                            "order_id": "{order_id}",
+                            "amount": "{amount}",
+                        },
                     },
                 ),
             ),
