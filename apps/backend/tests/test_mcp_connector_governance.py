@@ -629,7 +629,8 @@ async def test_fail_closed_on_transport_error() -> None:
     context = _context()
     request = _send_email_request()
 
-    result = await tool.invoke(request, context)
+    with patch("app.mcp_integration.client._get_mcp_session_classes", return_value=(MagicMock(), MagicMock())):
+        result = await tool.invoke(request, context)
     assert result.status != "success", "transport error must not produce success"
     assert "error" in result.status.lower() or result.output.get("status") != "success"
 
@@ -669,6 +670,7 @@ async def test_fail_closed_on_mcp_server_error_response() -> None:
     )
 
     with (
+        patch("app.mcp_integration.client._get_mcp_session_classes", return_value=(MagicMock(), MagicMock())),
         patch("app.agents.tools.connectors.mcp.validate_connector_endpoint_url"),
         patch("app.agents.tools.connectors.mcp.create_isolated_http_client") as mock_http,
         patch("app.agents.tools.connectors.mcp.PinnedIPAsyncHTTPTransport"),
@@ -712,6 +714,7 @@ async def test_fail_closed_on_non_json_response() -> None:
     )
 
     with (
+        patch("app.mcp_integration.client._get_mcp_session_classes", return_value=(MagicMock(), MagicMock())),
         patch("app.agents.tools.connectors.mcp.validate_connector_endpoint_url"),
         patch("app.agents.tools.connectors.mcp.create_isolated_http_client") as mock_http,
         patch("app.agents.tools.connectors.mcp.PinnedIPAsyncHTTPTransport"),

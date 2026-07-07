@@ -95,7 +95,8 @@ async def test_failure_pattern_detect_dlq_empty_returns_empty(
     """detect_dlq_patterns returns an empty list when no DLQ rows exist."""
     runtime = FailurePatternDetectionRuntime(session=pg_session)
     patterns = await runtime.detect_dlq_patterns(
-        tenant_ids=("tenant-failure-wiring",),
+        tenant_id="tenant-failure-wiring",
+        expected_tenant_id="tenant-failure-wiring",
         window_hours=DLQ_WINDOW_HOURS,
         threshold=DLQ_THRESHOLD,
     )
