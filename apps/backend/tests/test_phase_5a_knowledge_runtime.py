@@ -21,6 +21,8 @@ from app.dependencies.authority import (
     TENANT_OPERATIONS_READ_CAPABILITY,
 )
 from app.dependencies.database import get_db_session
+from app.dependencies.services import get_knowledge_service
+from app.services.knowledge_service import KnowledgeService
 from app.knowledge import (
     DeterministicHashEmbeddingProvider,
     DeterministicKnowledgeChunker,
@@ -788,6 +790,32 @@ async def knowledge_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
+
+    settings = get_settings()
+
+    def _knowledge_service_override() -> KnowledgeService:
+        tenant_config_repo = PostgresTenantConfigurationRepository(pg_session)
+        runtime = KnowledgeRuntime(
+            repository=PostgresKnowledgeRepository(pg_session),
+            tenant_configuration_repository=tenant_config_repo,
+            embedding_provider=DeterministicHashEmbeddingProvider(),
+            chunker=DeterministicKnowledgeChunker(
+                target_size=settings.CHUNK_TARGET_SIZE,
+                overlap=settings.CHUNK_OVERLAP,
+                min_size=settings.CHUNK_MIN_SIZE,
+            ),
+            vector_index_name=settings.VECTOR_DEFAULT_INDEX,
+            sop_contradiction_agent=None,
+        )
+        return KnowledgeService(
+            runtime=runtime,
+            session=pg_session,
+            tenant_configuration_repository=tenant_config_repo,
+            sop_contradiction_agent=None,
+        )
+
+    app.dependency_overrides[get_knowledge_service] = _knowledge_service_override
+
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
