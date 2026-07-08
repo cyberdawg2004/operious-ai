@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 from starlette.testclient import TestClient
 
 from app.agents.tools.approvals import ActionApprovalRecord
+from app.api.router import build_api_router
 from app.auth import AuthProvider, VerifiedIdentity
 from app.auth.providers import StaticTokenProvider
 from app.core.config import get_settings
@@ -40,11 +41,11 @@ from app.dependencies.services import (
     get_trainer_recommendation_service,
 )
 from app.dependencies.database import get_db_session
-from app.main import create_app
 from app.data_protection.crypto import (
     DataProtectionErasureRequestRecord,
     ErasureRequestStatus,
 )
+from app.main import create_app
 from app.services.quarantine_service import SemanticQuarantineRecord
 from app.trainer.records import TrainingRecommendationRecord
 
@@ -114,9 +115,8 @@ def _test_settings(  # pyright: ignore[reportUnusedFunction]
 
 
 def test_every_tenant_scoped_route_has_object_rbac_gate() -> None:
-    app = create_app()
     missing: list[str] = []
-    for route in app.routes:
+    for route in build_api_router().routes:
         if not isinstance(route, APIRoute):
             continue
         if route.endpoint.__module__ not in _SWEEP_ROUTER_MODULES:
