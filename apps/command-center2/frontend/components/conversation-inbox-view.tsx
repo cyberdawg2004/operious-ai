@@ -319,6 +319,12 @@ function ThreadPanel({ conversation }: { conversation: InboxConversationSummary 
     );
   }
 
+  const messages = thread?.messages ?? [];
+  const hasInbound = messages.some((m) => m.role === "customer");
+  const hasOutbound = messages.some((m) => m.role === "assistant");
+  const heldAtGovernance =
+    conversation.has_governance_context && hasInbound && !hasOutbound;
+
   return (
     <section className="cc-panel-tight flex min-h-[520px] flex-col overflow-hidden">
       <ThreadHeader
@@ -328,16 +334,40 @@ function ThreadPanel({ conversation }: { conversation: InboxConversationSummary 
         onToggleSiblings={() => setIncludeSiblings((v) => !v)}
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {!thread || thread.messages.length === 0 ? (
-          <EmptyState
-            title="No messages yet"
-            message="No inbound or outbound messages have been recorded for this session."
-          />
+        {messages.length === 0 ? (
+          conversation.has_governance_context ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+              <ShieldAlert className="h-8 w-8 text-amber-500" strokeWidth={1.5} />
+              <div>
+                <p className="text-[13px] font-medium text-ink-primary">
+                  Awaiting agent response
+                </p>
+                <p className="mt-1 text-[12px] text-ink-tertiary">
+                  This session has governance context but no recorded messages
+                  yet — the agent response may be held for approval.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <EmptyState
+              title="No messages yet"
+              message="No inbound or outbound messages have been recorded for this session."
+            />
+          )
         ) : (
           <div className="space-y-3">
-            {thread.messages.map((msg) => (
+            {messages.map((msg) => (
               <MessageBubble key={msg.event_id} message={msg} />
             ))}
+            {heldAtGovernance && (
+              <div className="flex items-center gap-2 rounded-md border border-amber-400/40 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-700 dark:border-amber-500/30 dark:bg-amber-950/20 dark:text-amber-400">
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+                <span>
+                  Agent response held for approval — the AI's reply has not been
+                  sent to the customer yet.
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>

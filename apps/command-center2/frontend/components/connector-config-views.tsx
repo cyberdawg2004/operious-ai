@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import Link from "next/link";
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -16,10 +17,12 @@ import {
   PlugZap,
   RefreshCw,
   Shield,
+  Sliders,
   TestTubeDiagonal,
   X,
 } from "lucide-react";
 import {
+  ApiError,
   formatApiError,
   getConfiguredTenantId,
   listChannelConfigurations,
@@ -173,6 +176,18 @@ type ExistingActionPolicy = {
   warehouseRequireApprovalSeverities?: string[];
 };
 
+async function fetchConnectorHistory(
+  toolName: string
+): Promise<TenantConnectorConfiguration[]> {
+  try {
+    const page = await listConnectorConfigurationHistory(toolName, { limit: 25, offset: 0 });
+    return page.items;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return [];
+    throw err;
+  }
+}
+
 export function ConnectorConfigView() {
   const { principal } = useAuthSession();
   const [modal, setModal] = useState<ConnectorModal>({ type: "none" });
@@ -196,12 +211,7 @@ export function ConnectorConfigView() {
           CONNECTOR_TOOLS.map(
             async (tool): Promise<[string, TenantConnectorConfiguration[]]> => [
               tool.toolName,
-              (
-                await listConnectorConfigurationHistory(tool.toolName, {
-                  limit: 25,
-                  offset: 0,
-                })
-              ).items,
+              await fetchConnectorHistory(tool.toolName),
             ]
           )
         ),
@@ -217,12 +227,7 @@ export function ConnectorConfigView() {
       customToolNames.map(
         async (toolName): Promise<[string, TenantConnectorConfiguration[]]> => [
           toolName,
-          (
-            await listConnectorConfigurationHistory(toolName, {
-              limit: 25,
-              offset: 0,
-            })
-          ).items,
+          await fetchConnectorHistory(toolName),
         ]
       )
     );
@@ -475,6 +480,85 @@ export function ConnectorConfigView() {
               </p>
             </div>
             <McpConnectorView tenantId={tenantId} canWrite={canWrite} />
+          </section>
+
+          <section>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[20px] font-semibold text-ink-primary">Policies</h2>
+                <p className="text-[13px] text-ink-secondary">
+                  Execution policies govern when connectors may fire autonomously.
+                  All policy changes are dual-controlled.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Link
+                href="/dashboard/action-policy"
+                className="group flex flex-col gap-2 rounded-lg border border-border-subtle bg-surface p-4 transition-colors hover:border-border-defined hover:bg-surface-raised"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
+                    <span className="text-[13px] font-semibold text-ink-primary">
+                      Action Policy
+                    </span>
+                  </div>
+                  <ArrowUpRight
+                    className="h-3.5 w-3.5 text-ink-tertiary transition-colors group-hover:text-ink-secondary"
+                    strokeWidth={1.8}
+                  />
+                </div>
+                <p className="text-[12px] text-ink-secondary">
+                  View and propose changes to the action_tools policy — governs
+                  refund, warranty, replacement, and repair execution rules.
+                </p>
+                <StatusBadge
+                  label={
+                    (data?.policies ?? []).some(
+                      (p) => p.policy_type === ACTION_TOOLS_POLICY_TYPE && p.status === "active"
+                    )
+                      ? "Active"
+                      : "Not configured"
+                  }
+                  tone={
+                    (data?.policies ?? []).some(
+                      (p) => p.policy_type === ACTION_TOOLS_POLICY_TYPE && p.status === "active"
+                    )
+                      ? "success"
+                      : "warning"
+                  }
+                  icon={Shield}
+                />
+              </Link>
+
+              <Link
+                href="/dashboard/governance"
+                className="group flex flex-col gap-2 rounded-lg border border-border-subtle bg-surface p-4 transition-colors hover:border-border-defined hover:bg-surface-raised"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
+                    <span className="text-[13px] font-semibold text-ink-primary">
+                      AI Behavior Rules
+                    </span>
+                  </div>
+                  <ArrowUpRight
+                    className="h-3.5 w-3.5 text-ink-tertiary transition-colors group-hover:text-ink-secondary"
+                    strokeWidth={1.8}
+                  />
+                </div>
+                <p className="text-[12px] text-ink-secondary">
+                  Manage all governance policies — resolution autonomy, taxonomy,
+                  extraction schema, and more. All changes are governed by dual control.
+                </p>
+                <StatusBadge
+                  label={`${(data?.policies ?? []).length} polic${(data?.policies ?? []).length === 1 ? "y" : "ies"} configured`}
+                  tone="info"
+                  icon={Sliders}
+                />
+              </Link>
+            </div>
           </section>
 
           <section>

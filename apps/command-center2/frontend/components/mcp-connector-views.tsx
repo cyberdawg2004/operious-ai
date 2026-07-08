@@ -19,6 +19,7 @@ import {
   KeyRound,
   Loader2,
   PlugZap,
+  PowerOff,
   RefreshCw,
   Server,
   X,
@@ -39,6 +40,7 @@ import {
   MCP_COMMITMENT_KIND_OPTIONS,
   MCP_EXECUTION_POLICY_OPTIONS,
   MCP_MONEY_GOODS_KINDS,
+  buildConnectorChangePayload,
   buildMcpServerChangePayload,
   type McpCommitmentKind,
   type McpExecutionPolicy,
@@ -252,6 +254,12 @@ export function McpConnectorView({
               canWrite={resolvedCanWrite}
               tenantId={resolvedTenantId}
               onManageTools={() => setViewState({ kind: "add_server" })}
+              onDeactivated={(serverId) => {
+                setNotice(
+                  `Deactivation of "${serverId}" proposed. It now awaits approval in Pending Approvals.`
+                );
+                reload();
+              }}
             />
           ))}
         </div>
@@ -951,12 +959,14 @@ function McpServerCard({
   canWrite,
   tenantId,
   onManageTools,
+  onDeactivated,
 }: {
   connector: TenantConnectorConfiguration;
   pendingRequests: TenantConfigChangeRequest[];
   canWrite: boolean;
   tenantId: string | null;
   onManageTools: () => void;
+  onDeactivated?: (mcpServerId: string) => void;
 }) {
   const mcpServerId =
     typeof connector.field_mappings?.mcp_server_id === "string"
@@ -984,6 +994,39 @@ function McpServerCard({
   const autoExecuteMoneyTools = mcpTools.filter(
     (t) => t.execution_policy === "auto_execute" && MCP_MONEY_GOODS_KINDS.has(t.commitment_kind)
   );
+
+  const [deactivating, setDeactivating] = useState(false);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
+
+  const proposeDeactivate = async () => {
+    setDeactivating(true);
+    setDeactivateError(null);
+    try {
+      const body = buildConnectorChangePayload({
+        connector_type: "mcp_server",
+        tool_name: connector.tool_name,
+        http_method: connector.http_method ?? "GET",
+        endpoint_template: connector.endpoint_template ?? "",
+        endpoint_host: (() => {
+          try {
+            return new URL(connector.endpoint_template ?? "https://placeholder").host;
+          } catch {
+            return "";
+          }
+        })(),
+        field_mappings: connector.field_mappings ?? {},
+        response_parse: connector.response_parse ?? {},
+        idempotency_header_name: connector.idempotency_header_name ?? "Idempotency-Key",
+        success_status_codes: connector.success_status_codes ?? [200],
+        status: "inactive",
+      });
+      await proposeConfigChangeRequest(body);
+      onDeactivated?.(mcpServerId);
+    } catch (err) {
+      setDeactivateError(formatApiError(err));
+      setDeactivating(false);
+    }
+  };
 
   return (
     <Card hover>
@@ -1051,6 +1094,12 @@ function McpServerCard({
         </div>
       )}
 
+      {deactivateError && (
+        <div className="mt-3 rounded-lg border border-red-alert/30 bg-red-alert/5 px-3 py-2 text-[12px] text-red-alert">
+          {deactivateError}
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -1070,6 +1119,18 @@ function McpServerCard({
           <KeyRound size={14} strokeWidth={1.8} />
           Manage credentials
         </button>
+        {connector.status === "active" && (
+          <button
+            type="button"
+            onClick={() => void proposeDeactivate()}
+            disabled={!canWrite || deactivating}
+            title="Propose governed deactivation via dual-control change request"
+            className="cc-btn cc-btn-secondary disabled:opacity-50"
+          >
+            <PowerOff size={14} strokeWidth={1.8} />
+            {deactivating ? "Proposing..." : "Deactivate"}
+          </button>
+        )}
       </div>
     </Card>
   );
