@@ -47,7 +47,19 @@ class _FakeRuntime:
 
 
 def _service(owner: str | None) -> ConversationService:
-    return ConversationService(runtime=_FakeRuntime(owner), redis_client=None)
+    return ConversationService(
+        runtime=_FakeRuntime(owner),
+        session_repository=_UnusedSessionRepository(),
+        redis_client=None,
+    )
+
+
+class _UnusedSessionRepository:
+    async def list_events(self, *args, **kwargs) -> object:  # pragma: no cover
+        raise AssertionError("session repository should not be used in ownership tests")
+
+    async def get_session(self, *args, **kwargs) -> object:  # pragma: no cover
+        raise AssertionError("session repository should not be used in ownership tests")
 
 
 async def test_owner_principal_can_submit() -> None:

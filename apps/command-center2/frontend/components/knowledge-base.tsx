@@ -359,7 +359,7 @@ export function KnowledgeBase() {
               setModal({
                 type: "pending",
                 message:
-                  "The backend exposes create, update, list, ingest, and version read operations for knowledge documents, but no delete endpoint is currently available.",
+                  "This screen can add, update, and review knowledge documents, but deleting a document is not available here yet.",
               })
             }
           />
@@ -627,7 +627,7 @@ export function KnowledgeBase() {
               <div className="p-6">
                 <EmptyState
                   title="No knowledge documents"
-                  message="The tenant knowledge endpoint returned no documents for the selected filters."
+                  message="No documents match the filters you selected."
                   actionLabel="Refresh"
                   onAction={reload}
                 />
@@ -1010,7 +1010,7 @@ function VersionHistoryState({
       {modal.versions.length === 0 ? (
         <EmptyState
           title="No versions returned"
-          message="The cognition version endpoint returned no historical versions for this document."
+          message="No earlier saved versions were found for this document."
         />
       ) : (
         <div className="space-y-3">

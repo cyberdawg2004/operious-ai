@@ -12,7 +12,8 @@ import {
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 import {
   listSessions,
-  submitConversationMessage,
+  getInboxThread,
+  sendOperatorConversationReply,
   type SessionRecord,
 } from "@/lib/api";
 import { getApiBaseUrl, getConfiguredTenantId } from "@/lib/api-client";
@@ -23,7 +24,7 @@ const REFRESH_INTERVAL_MS = 10_000;
 
 type ConversationEvent = {
   type: "turn" | "status" | "error";
-  role?: "customer" | "assistant" | "system";
+  role?: "customer" | "assistant" | "operator" | "system";
   content?: string;
   turn_id?: string;
   phase?: "A" | "B" | "processing" | "complete" | string;
@@ -34,7 +35,7 @@ type ConversationEvent = {
 
 type ThreadMessage = {
   id: string;
-  role: "customer" | "assistant" | "system";
+  role: "customer" | "assistant" | "operator" | "system";
   content: string;
   phase?: string;
   executionId?: string;
@@ -64,12 +65,12 @@ export function ConversationsView() {
   );
 
   if (isLoading && sessions.length === 0) {
-    return <LoadingState label="Loading active conversations" />;
+    return <LoadingState label="Loading live customer chat" />;
   }
   if (error) {
     return (
       <ErrorState
-        title="Conversations unavailable"
+        title="Live customer chat is unavailable"
         message={error}
         onAction={reload}
       />
@@ -93,8 +94,8 @@ export function ConversationsView() {
         ) : (
           <div className="cc-panel-tight flex min-h-[420px] items-center justify-center">
             <EmptyState
-              title="No active conversations"
-              message="Active sessions will appear here as customers continue a case."
+              title="No live customer conversations"
+              message="Active customer conversations will appear here when someone needs help right now."
             />
           </div>
         )}
@@ -119,7 +120,7 @@ function ConversationList({
       <div className="flex h-12 items-center justify-between border-b border-border-subtle px-3">
         <div className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
-          <span className="text-[13px] font-semibold text-ink-primary">Active Sessions</span>
+          <span className="text-[13px] font-semibold text-ink-primary">Live Customer Chat</span>
         </div>
         <button
           type="button"
@@ -151,16 +152,19 @@ function ConversationList({
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[12px] font-semibold text-ink-primary">
-                        {shortId(session.session_id)}
+                      <span className="truncate text-[12px] font-semibold text-ink-primary">
+                        {session.external_handle || "Customer conversation"}
                       </span>
-                      <span className="rounded border border-border-subtle px-1.5 py-0.5 font-mono text-[10px] uppercase text-ink-tertiary">
-                        {session.lifecycle_phase}
+                      <span className="rounded border border-border-subtle px-1.5 py-0.5 text-[10px] uppercase text-ink-tertiary">
+                        {formatLifecycle(session.lifecycle_phase)}
                       </span>
+                    </div>
+                    <div className="truncate text-[11px] text-ink-secondary">
+                      {session.context_notes?.trim() || "Open this chat to watch the live back-and-forth and step in if needed."}
                     </div>
                     <div className="flex items-center justify-between gap-3 text-[11.5px] text-ink-tertiary">
                       <span>{formatTime(session.opened_at)}</span>
-                      <span>{Math.max(0, session.sequence_head + 1)} events</span>
+                      <span>{Math.max(0, session.sequence_head + 1)} updates</span>
                     </div>
                   </button>
                 </li>
@@ -176,10 +180,37 @@ function ConversationList({
 function ConversationThread({ session }: { session: SessionRecord }) {
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [status, setStatus] = useState<string>("connecting");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [operatorMode, setOperatorMode] = useState(false);
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMessages([]);
+    setHistoryError(null);
+    void getInboxThread(session.session_id)
+      .then((thread) => {
+        if (cancelled) return;
+        setMessages(
+          thread.messages.map((message) => ({
+            id: message.event_id,
+            role: message.role,
+            content: message.content,
+            governanceDecisionId: message.governance_decision_id ?? undefined,
+          }))
+        );
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setHistoryError(error instanceof Error ? error.message : "Conversation history could not be loaded.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.session_id]);
 
   useEffect(() => {
     const source = new EventSource(streamUrl(session.session_id), {
@@ -212,24 +243,24 @@ function ConversationThread({ session }: { session: SessionRecord }) {
     if (!content || submitting) return;
     setSubmitting(true);
     setDraft("");
+    setSendError(null);
     const optimisticId = `operator:${Date.now()}`;
     setMessages((current) => [
       ...current,
-      { id: optimisticId, role: "customer", content },
+      { id: optimisticId, role: "operator", content },
     ]);
     try {
-      const response = await submitConversationMessage(session.session_id, content);
-      setMessages((current) => [
-        ...current,
-        {
-          id: response.turn_id,
-          role: "assistant",
-          content: response.phase_a_response,
-          phase: "A",
-          executionId: response.execution_id,
-        },
-      ]);
-      setStatus("processing");
+      const response = await sendOperatorConversationReply(session.session_id, content);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === optimisticId ? { ...message, id: response.turn_id } : message
+        )
+      );
+      setStatus("operator_reply_sent");
+      setOperatorMode(true);
+    } catch {
+      setMessages((current) => current.filter((message) => message.id !== optimisticId));
+      setSendError("Your reply could not be sent.");
     } finally {
       setSubmitting(false);
     }
@@ -239,21 +270,29 @@ function ConversationThread({ session }: { session: SessionRecord }) {
     <section className="cc-panel-tight flex min-h-[520px] min-w-0 flex-col overflow-hidden">
       <div className="flex h-12 items-center justify-between gap-3 border-b border-border-subtle px-4">
         <div className="min-w-0">
-          <div className="font-mono text-[11px] uppercase text-ink-tertiary">Session</div>
-          <div className="truncate font-mono text-[13px] font-semibold text-ink-primary">
-            {session.session_id}
+          <div className="text-[11px] uppercase text-ink-tertiary">Live customer conversation</div>
+          <div className="truncate text-[13px] font-semibold text-ink-primary">
+            {session.external_handle || "Customer conversation"}
+          </div>
+          <div className="text-[11px] text-ink-tertiary">
+            Step in here when you want your team to reply directly to the customer.
           </div>
         </div>
-        <span className="shrink-0 rounded border border-border-subtle px-2 py-1 font-mono text-[11px] uppercase text-ink-secondary">
-          {status}
+        <span className="shrink-0 rounded border border-border-subtle px-2 py-1 text-[11px] uppercase text-ink-secondary">
+          {formatLiveStatus(status)}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {historyError && (
+          <div className="mb-3 rounded-md border border-amber-400/30 bg-amber-50 px-3 py-2 text-[12px] text-amber-700">
+            {historyError}
+          </div>
+        )}
         {messages.length === 0 ? (
           <EmptyState
-            title="Stream connected"
-            message="New turns for this session will render as they arrive."
+            title="Waiting for messages"
+            message="Past messages will load here first, then new live updates will appear as they arrive."
           />
         ) : (
           <div className="space-y-3">
@@ -274,29 +313,39 @@ function ConversationThread({ session }: { session: SessionRecord }) {
             className="flex h-9 items-center gap-2 rounded-md border border-border-subtle px-3 text-[12.5px] font-medium text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary"
           >
             <Hand className="h-3.5 w-3.5" strokeWidth={1.8} />
-            <span>Operator Takeover</span>
+            <span>Reply as your team</span>
           </button>
         ) : (
-          <div className="flex gap-2">
-            <input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void send();
-              }}
-              className="min-w-0 flex-1 rounded-md border border-border-subtle bg-surface px-3 text-[13px] text-ink-primary outline-none transition-colors focus:border-border-defined"
-              placeholder="Type response..."
-            />
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={submitting || !draft.trim()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border-subtle text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="Send operator message"
-              title="Send"
-            >
-              <Send className="h-4 w-4" strokeWidth={1.8} />
-            </button>
+          <div className="space-y-2">
+            <div className="text-[11px] text-ink-tertiary">
+              Your message will be sent directly to the customer as a human reply. It will not ask the AI to answer for you.
+            </div>
+            {sendError && (
+              <div className="rounded-md border border-red-alert/25 bg-red-alert/5 px-3 py-2 text-[12px] text-red-alert">
+                {sendError}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void send();
+                }}
+                className="min-w-0 flex-1 rounded-md border border-border-subtle bg-surface px-3 text-[13px] text-ink-primary outline-none transition-colors focus:border-border-defined"
+                placeholder="Write the message you want the customer to receive..."
+              />
+              <button
+                type="button"
+                onClick={() => void send()}
+                disabled={submitting || !draft.trim()}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border-subtle text-ink-secondary transition-colors hover:border-border-defined hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Send customer reply"
+                title="Send"
+              >
+                <Send className="h-4 w-4" strokeWidth={1.8} />
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -306,6 +355,7 @@ function ConversationThread({ session }: { session: SessionRecord }) {
 
 function MessageBubble({ message }: { message: ThreadMessage }) {
   const assistant = message.role === "assistant";
+  const operator = message.role === "operator";
   return (
     <div className={cn("flex gap-2", assistant ? "justify-start" : "justify-end")}>
       {assistant && (
@@ -318,13 +368,20 @@ function MessageBubble({ message }: { message: ThreadMessage }) {
           "max-w-[min(680px,82%)] rounded-md border px-3 py-2 text-[13px] leading-5",
           assistant
             ? "border-border-subtle bg-surface text-ink-body"
-            : "border-blue-system/25 bg-blue-system/10 text-ink-primary"
+            : operator
+              ? "border-emerald-500/25 bg-emerald-500/10 text-ink-primary"
+              : "border-blue-system/25 bg-blue-system/10 text-ink-primary"
         )}
       >
+        {operator && (
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-700">
+            Sent by your team
+          </div>
+        )}
         <div className="whitespace-pre-wrap break-words">{message.content}</div>
         {message.phase && (
-          <div className="mt-1 font-mono text-[10px] uppercase text-ink-tertiary">
-            Phase {message.phase}
+          <div className="mt-1 text-[10px] uppercase text-ink-tertiary">
+            {formatPhase(message.phase)}
           </div>
         )}
       </div>
@@ -341,7 +398,7 @@ function TypingIndicator() {
   return (
     <div className="flex items-center gap-2 text-[12px] text-ink-tertiary">
       <span className="h-2 w-2 animate-pulse rounded-full bg-gold-primary" />
-      <span>Processing governed response</span>
+      <span>Preparing the AI reply</span>
     </div>
   );
 }
@@ -380,6 +437,27 @@ function streamUrl(sessionId: string): string {
 
 function shortId(sessionId: string): string {
   return `${sessionId.slice(0, 8)}...${sessionId.slice(-4)}`;
+}
+
+function formatLifecycle(value: string): string {
+  if (value === "active") return "Live";
+  if (value === "terminated") return "Resolved";
+  return value.replace(/_/g, " ");
+}
+
+function formatLiveStatus(value: string): string {
+  if (value === "connecting") return "Connecting";
+  if (value === "waiting") return "Waiting";
+  if (value === "processing") return "AI replying";
+  if (value === "operator_reply_sent") return "Reply sent";
+  if (value === "complete") return "Up to date";
+  return value.replace(/_/g, " ");
+}
+
+function formatPhase(value: string): string {
+  if (value === "A") return "AI received the message";
+  if (value === "B") return "AI reply ready";
+  return value;
 }
 
 function formatTime(value: string): string {

@@ -11,10 +11,13 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.v1.schemas.conversation import (
     ConversationMessageRequest,
     ConversationMessageResponse,
+    ConversationOperatorReplyRequest,
+    ConversationOperatorReplyResponse,
 )
 from app.dependencies.authority import (
     OPERATOR_CAPABILITY,
     require_authority,
+    require_operator_authority,
     require_tenant_scope,
 )
 from app.dependencies.services import get_conversation_service
@@ -42,6 +45,39 @@ async def submit_conversation_message(
     try:
         return ConversationMessageResponse.from_submission(
             await service.submit_message(
+                session_id=session_id,
+                tenant_id=expected_tenant_id,
+                content=request.content,
+                expected_tenant_id=expected_tenant_id,
+                calling_principal_id=(
+                    str(authority.principal_id) if authority.principal_id else None
+                ),
+                is_operator=OPERATOR_CAPABILITY in authority.capabilities,
+            )
+        )
+    except ConversationAccessDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "session_access_denied", "message": str(exc)},
+        ) from exc
+    except ConversationServiceError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post(
+    "/{session_id}/operator-reply",
+    response_model=ConversationOperatorReplyResponse,
+)
+async def send_operator_reply(
+    session_id: str,
+    request: ConversationOperatorReplyRequest,
+    expected_tenant_id: str = Depends(require_tenant_scope),
+    authority: AuthorityContext = Depends(require_operator_authority),
+    service: ConversationService = Depends(get_conversation_service),
+) -> ConversationOperatorReplyResponse:
+    try:
+        return ConversationOperatorReplyResponse.from_submission(
+            await service.send_operator_reply(
                 session_id=session_id,
                 tenant_id=expected_tenant_id,
                 content=request.content,

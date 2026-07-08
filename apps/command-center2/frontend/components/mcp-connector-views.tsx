@@ -212,7 +212,7 @@ export function McpConnectorView({
               className="cc-btn cc-btn-secondary"
             >
               <PlugZap size={14} strokeWidth={1.8} />
-              Add MCP Server
+              Add Connected MCP Service
             </button>
           )}
           <button
@@ -237,9 +237,9 @@ export function McpConnectorView({
 
       {!isLoading && !error && (data?.mcpConnectors ?? []).length === 0 && (
         <EmptyState
-          title="Connect your first MCP server"
-          message="Connect any MCP-compatible server. Tools are classified and governed per the existing approval model."
-          actionLabel={resolvedCanWrite ? "Add MCP Server" : undefined}
+          title="Connect your first MCP service"
+          message="Connect an MCP service and decide which actions can run automatically and which should wait for review."
+          actionLabel={resolvedCanWrite ? "Add MCP Service" : undefined}
           onAction={resolvedCanWrite ? () => setViewState({ kind: "add_server" }) : undefined}
         />
       )}
@@ -409,9 +409,7 @@ function AddMcpServerForm({
       setFetchStatus("idle");
       onFetchedTools(mcpServerId.trim(), endpointUrl.trim(), authMethod, result.tools);
     } catch (caught: unknown) {
-      setFetchError(
-        `Could not fetch tools from ${endpointUrl.trim()}: ${formatApiError(caught)}`
-      );
+      setFetchError(`We couldn't load the actions for this service. ${formatApiError(caught)}`);
       setFetchStatus("error");
     }
   };
@@ -421,10 +419,10 @@ function AddMcpServerForm({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-            Add MCP Server
+            Add MCP Service
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-            Connect any MCP-compatible server. Classify and govern each tool it exposes.
+            Connect an MCP service, then choose how each action should be handled.
           </p>
         </div>
         <button
@@ -439,9 +437,9 @@ function AddMcpServerForm({
 
       {formError && <FormError message={formError} />}
 
-      <McpFieldset legend="Server identity">
+      <McpFieldset legend="Service details">
         <McpText
-          label="MCP Server ID (letters, numbers, underscores)"
+          label="Service name"
           value={mcpServerId}
           onChange={setMcpServerId}
           placeholder="gmail_mcp"
@@ -449,11 +447,11 @@ function AddMcpServerForm({
         />
         {mcpServerId.trim() && !serverIdValid && (
           <p className="text-[12px] text-red-alert">
-            Server ID must only contain letters, numbers, and underscores.
+            Use letters, numbers, and underscores only.
           </p>
         )}
         <McpText
-          label="Endpoint URL (must start with https://)"
+          label="Service address"
           value={endpointUrl}
           onChange={setEndpointUrl}
           placeholder="https://gmail.mcp.example.com"
@@ -461,7 +459,7 @@ function AddMcpServerForm({
         />
         {endpointUrl.trim() && !endpointValid && (
           <p className="text-[12px] text-red-alert">
-            Endpoint URL must start with https://.
+            The address must start with `https://`.
           </p>
         )}
       </McpFieldset>
@@ -481,7 +479,7 @@ function AddMcpServerForm({
                 }}
                 className="accent-gold-primary"
               />
-              {method === "oauth" ? "OAuth 2.0" : method === "api_key" ? "API Key" : "None / Public"}
+              {method === "oauth" ? "OAuth 2.0" : method === "api_key" ? "API Key" : "No sign-in needed"}
             </label>
           ))}
         </div>
@@ -491,25 +489,25 @@ function AddMcpServerForm({
             <McpText label="Client ID" value={clientId} onChange={setClientId} placeholder="your-client-id" />
             <McpWriteOnlyInput label="Client secret" value={clientSecret} onChange={setClientSecret} />
             <McpText
-              label="Authorization endpoint"
+              label="Sign-in page"
               value={authEndpoint}
               onChange={setAuthEndpoint}
               placeholder="https://accounts.google.com/o/oauth2/v2/auth"
             />
             <McpText
-              label="Token endpoint"
+              label="Token address"
               value={tokenEndpoint}
               onChange={setTokenEndpoint}
               placeholder="https://oauth2.googleapis.com/token"
             />
             <McpText
-              label="Scopes (comma-separated)"
+              label="Access scopes"
               value={scopes}
               onChange={setScopes}
               placeholder="https://mail.google.com/, openid"
             />
             <McpText
-              label="Redirect URI"
+              label="Return address"
               value={redirectUri}
               onChange={setRedirectUri}
               placeholder="https://app.operious.ai/api/v1/mcp/oauth/callback"
@@ -523,7 +521,7 @@ function AddMcpServerForm({
                 className="cc-btn cc-btn-secondary disabled:opacity-50"
               >
                 <ExternalLink size={13} strokeWidth={1.8} />
-                Authorize with OAuth
+                Connect with OAuth
               </button>
             )}
             {oauthFlow.status === "opening" && (
@@ -536,7 +534,7 @@ function AddMcpServerForm({
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-[13px] text-ink-secondary">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for OAuth consent… (complete in the popup)
+                  Waiting for sign-in approval in the popup…
                 </div>
                 <a
                   href={oauthFlow.authorizationUrl}
@@ -551,7 +549,7 @@ function AddMcpServerForm({
             {oauthFlow.status === "done" && (
               <div className="flex items-center gap-2 text-[13px] text-green-600">
                 <CheckCircle2 className="h-4 w-4" />
-                OAuth authorized — credential stored
+                Connected successfully
               </div>
             )}
             {oauthFlow.status === "error" && (
@@ -577,7 +575,7 @@ function AddMcpServerForm({
 
         {authMethod === "none" && (
           <p className="pt-1 text-[12px] text-ink-tertiary">
-            No credential required — server accepts unauthenticated calls.
+            No saved sign-in details are needed for this service.
           </p>
         )}
       </McpFieldset>
@@ -599,7 +597,7 @@ function AddMcpServerForm({
           ) : (
             <>
               <Server size={14} strokeWidth={1.8} />
-              Fetch available tools
+              Load available actions
             </>
           )}
         </button>
@@ -673,8 +671,7 @@ function McpToolClassificationTable({
     event.preventDefault();
     if (!canSubmit) {
       setFormError(
-        "All enabled tools must have commitment_kind and execution_policy set, " +
-        "and all auto-execute money/goods warnings must be acknowledged."
+        "Every enabled action needs an action type and an approval setting. Any automatic money or goods action must also be confirmed."
       );
       return;
     }
@@ -716,10 +713,10 @@ function McpToolClassificationTable({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-            Classify Tools — {mcpServerId}
+            Review Actions for {mcpServerId}
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-            {endpointUrl} · {tools.length} tool{tools.length === 1 ? "" : "s"} fetched
+            {tools.length} action{tools.length === 1 ? "" : "s"} found
           </p>
         </div>
         <button type="button" onClick={onBack} className="cc-btn cc-btn-secondary">
@@ -728,18 +725,15 @@ function McpToolClassificationTable({
       </div>
 
       <div className="rounded-md border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
-        Classify each tool before submission.{" "}
-        <code>commitment_kind</code> describes what the tool commits.{" "}
-        <code>execution_policy</code> determines whether Operious holds for approval or fires immediately.
-        Suggested values are pre-filled from tool metadata — confirm each one.
+        Choose what each action does and whether it can run automatically or should wait for your approval.
       </div>
 
       {autoExecuteMoneyRows.length > 0 && (
         <div className="rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-950/30 dark:text-amber-300">
           <strong>{autoExecuteMoneyRows.length}</strong> tool
           {autoExecuteMoneyRows.length === 1 ? " is" : "s are"} set to{" "}
-          <strong>auto_execute</strong> on a money/goods commitment.
-          Each requires acknowledgment below before submission is enabled.
+          <strong>run automatically</strong> for money or physical goods.
+          Confirm each one below before you submit.
         </div>
       )}
 
@@ -764,7 +758,7 @@ function McpToolClassificationTable({
 
       {!allClassified && enabledRows.length > 0 && (
         <div className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
-          All enabled tools need commitment_kind and execution_policy before submitting.
+          Every enabled action needs an action type and an approval setting before you can submit.
         </div>
       )}
 
@@ -777,7 +771,7 @@ function McpToolClassificationTable({
           {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Proposing…
+              Saving…
             </>
           ) : (
             "Submit for approval"
@@ -849,9 +843,9 @@ function ToolClassificationRow({
             )}
             Input schema ({totalSchemaKeys} field{totalSchemaKeys === 1 ? "" : "s"})
           </button>
-          {row.schemaExpanded && (
-            <div className="mt-1 rounded border border-border-subtle bg-surface px-2 py-2 text-[11px] font-mono text-ink-secondary">
-              {schemaKeys.map((key) => <div key={key}>{key}</div>)}
+            {row.schemaExpanded && (
+              <div className="mt-1 rounded border border-border-subtle bg-surface px-2 py-2 text-[11px] font-mono text-ink-secondary">
+                {schemaKeys.map((key) => <div key={key}>{key}</div>)}
               {totalSchemaKeys > 5 && (
                 <div className="text-ink-tertiary">+{totalSchemaKeys - 5} more…</div>
               )}
@@ -863,7 +857,7 @@ function ToolClassificationRow({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Commitment kind{" "}
+            Action type{" "}
             {isSuggested && (
               <span className="normal-case text-gold-primary">(suggested)</span>
             )}
@@ -882,7 +876,7 @@ function ToolClassificationRow({
             <option value="">— Select —</option>
             {MCP_COMMITMENT_KIND_OPTIONS.map((opt) => (
               <option key={opt} value={opt}>
-                {opt}
+                {formatCommitmentKind(opt)}
               </option>
             ))}
           </select>
@@ -890,7 +884,7 @@ function ToolClassificationRow({
 
         <label className="block">
           <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Execution policy
+            Approval setting
           </span>
           <select
             value={row.execution_policy}
@@ -906,7 +900,7 @@ function ToolClassificationRow({
             <option value="">— Select —</option>
             {MCP_EXECUTION_POLICY_OPTIONS.map((opt) => (
               <option key={opt} value={opt}>
-                {opt === "operious_approval" ? "operious_approval (recommended)" : "auto_execute"}
+                {opt === "operious_approval" ? "Wait for approval" : "Run automatically"}
               </option>
             ))}
           </select>
@@ -920,11 +914,10 @@ function ToolClassificationRow({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <div className="space-y-2">
               <p className="text-[13px] font-semibold text-amber-800 dark:text-amber-300">
-                Auto-execute {row.commitment_kind} action — NO Operious approval gate
+                This action will run automatically
               </p>
               <p className="text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
-                This tool fires WITHOUT Operious approval. Your system must authorize all{" "}
-                [{row.commitment_kind}] operations. This choice is audited.
+                This action can move money or physical goods without stopping for review. Make sure that is truly what you want.
               </p>
               <label className="flex cursor-pointer items-center gap-2">
                 <input
@@ -934,7 +927,7 @@ function ToolClassificationRow({
                   className="accent-amber-600"
                 />
                 <span className="text-[12px] font-medium text-amber-800 dark:text-amber-300">
-                  I confirm this tool will auto-execute without Operious approval
+                  I understand this action will run automatically
                 </span>
               </label>
             </div>
@@ -1033,7 +1026,7 @@ function McpServerCard({
       <CardHeader>
         <div>
           <CardTitle>{mcpServerId}</CardTitle>
-          <CardDescription>{endpointUrl || connector.endpoint_template}</CardDescription>
+          <CardDescription>{mcpTools.length} action{mcpTools.length === 1 ? "" : "s"} connected</CardDescription>
         </div>
         <StatusBadge
           label={statusMeta.label}
@@ -1043,8 +1036,8 @@ function McpServerCard({
       </CardHeader>
 
       <div className="grid gap-2 text-[13px] md:grid-cols-2">
-        <McpField label="Server ID" value={mcpServerId} />
-        <McpField label="Tool count" value={mcpTools.length > 0 ? String(mcpTools.length) : "—"} />
+        <McpField label="Service name" value={mcpServerId} />
+        <McpField label="Action count" value={mcpTools.length > 0 ? String(mcpTools.length) : "—"} />
         <McpField label="Version" value={`v${connector.version}`} />
         <McpField label="Configured by" value={connector.configured_by} />
       </div>
@@ -1053,14 +1046,14 @@ function McpServerCard({
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-50 px-3 py-2 text-[12px] text-amber-700 dark:border-amber-500/30 dark:bg-amber-950/20 dark:text-amber-400">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           {autoExecuteMoneyTools.length} auto-execute money/goods tool
-          {autoExecuteMoneyTools.length === 1 ? "" : "s"} — fires without approval
+          {autoExecuteMoneyTools.length === 1 ? "" : "s"} running without approval
         </div>
       )}
 
       {mcpTools.length > 0 && (
         <div className="mt-3 space-y-1">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
-            Tools
+            Actions
           </div>
           <div className="flex flex-wrap gap-2">
             {mcpTools.map((tool) => (
@@ -1070,7 +1063,7 @@ function McpServerCard({
               >
                 <span className="font-mono font-medium text-ink-primary">{tool.tool_name}</span>
                 <span className="text-ink-tertiary">·</span>
-                <span>{tool.commitment_kind}</span>
+                <span>{formatCommitmentKind(tool.commitment_kind)}</span>
                 <span className="text-ink-tertiary">·</span>
                 <span
                   className={
@@ -1079,7 +1072,7 @@ function McpServerCard({
                       : "text-ink-secondary"
                   }
                 >
-                  {tool.execution_policy}
+                  {tool.execution_policy === "auto_execute" ? "Run automatically" : "Wait for approval"}
                 </span>
               </div>
             ))}
@@ -1108,7 +1101,7 @@ function McpServerCard({
           className="cc-btn cc-btn-secondary disabled:opacity-50"
         >
           <PlugZap size={14} strokeWidth={1.8} />
-          Manage tools
+          Manage actions
         </button>
         <button
           type="button"
@@ -1124,11 +1117,11 @@ function McpServerCard({
             type="button"
             onClick={() => void proposeDeactivate()}
             disabled={!canWrite || deactivating}
-            title="Propose governed deactivation via dual-control change request"
+            title="Request deactivation for approval"
             className="cc-btn cc-btn-secondary disabled:opacity-50"
           >
             <PowerOff size={14} strokeWidth={1.8} />
-            {deactivating ? "Proposing..." : "Deactivate"}
+            {deactivating ? "Requesting..." : "Deactivate"}
           </button>
         )}
       </div>
@@ -1246,4 +1239,12 @@ function mcpConnectionStatusMeta(status: McpConnectionStatus): {
   if (status === "active") return { label: "Active", tone: "success", icon: CheckCircle2 };
   if (status === "pending_approval") return { label: "Pending approval", tone: "warning", icon: CircleAlert };
   return { label: "OAuth expired", tone: "warning", icon: CircleAlert };
+}
+
+function formatCommitmentKind(value: McpCommitmentKind): string {
+  if (value === "money") return "Money";
+  if (value === "goods") return "Physical goods";
+  if (value === "record_update") return "Information update";
+  if (value === "service_commitment") return "Service commitment";
+  return "No customer impact";
 }

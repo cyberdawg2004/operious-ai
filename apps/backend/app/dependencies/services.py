@@ -805,6 +805,14 @@ async def get_conversation_service(
     )
     execution_persistence = PostgresExecutionPersistence(session)
     execution_runtime = ExecutionRuntime(persistence=execution_persistence)
+    coordination_persistence = PostgresCoordinationPersistence(
+        session,
+        data_protection=data_protection,
+    )
+    tenant_runtime = TenantConfigurationRuntime(
+        repository=PostgresTenantConfigurationRepository(session),
+        credential_encryptor=_tenant_credential_codec_or_503(get_settings()),
+    )
     deferred_execution_publisher = _DeferredExecutionPublisher(
         delegate=execution_publisher,
         execution_runtime=execution_runtime,
@@ -823,12 +831,10 @@ async def get_conversation_service(
             governance_runtime=_dispatch_governance_runtime(
                 PostgresGovernanceRepository(session)
             ),
-            persistence=PostgresCoordinationPersistence(
-                session,
-                data_protection=data_protection,
-            ),
+            persistence=coordination_persistence,
             registry=_dispatch_coordination_registry(),
         ),
+        coordination_repository=coordination_persistence,
         execution_runtime=execution_runtime,
         execution_governance_runtime=ExecutionGovernanceRuntime(
             tenant_configuration_repository=PostgresTenantConfigurationRepository(
@@ -841,6 +847,7 @@ async def get_conversation_service(
         ),
         execution_publisher=deferred_execution_publisher,
         redis_client=get_redis_client(),
+        tenant_runtime=tenant_runtime,
         translation_runtime=cast(
             TranslationRuntime,
             request.app.state.translation_runtime,

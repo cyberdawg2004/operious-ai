@@ -99,10 +99,10 @@ export function ConversationInboxView() {
       <div className="mb-4 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-[15px] font-semibold text-ink-primary">
-            Conversation Inbox
+            Conversation History
           </h1>
           <p className="text-[12px] text-ink-tertiary">
-            Agent–customer conversations — read-only audit view
+            Review the full customer thread, including customer, AI, and human follow-up messages.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -206,7 +206,7 @@ function InboxList({
       <div className="flex h-11 items-center gap-2 border-b border-border-subtle px-3">
         <MessageSquare className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
         <span className="text-[13px] font-semibold text-ink-primary">
-          Conversations
+          Threads
         </span>
         <span className="ml-auto rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-medium text-ink-tertiary">
           {conversations.length}
@@ -269,7 +269,7 @@ function InboxListItem({
           <PhaseDot phase={conversation.lifecycle_phase} />
           <span>{phaseLabel}</span>
           <span className="mx-1 text-border-defined">·</span>
-          <span>{conversation.message_count} msg</span>
+          <span>{conversation.message_count} messages</span>
           {conversation.has_governance_context && (
             <>
               <span className="mx-1 text-border-defined">·</span>
@@ -288,6 +288,9 @@ function InboxListItem({
             {formatRelative(conversation.last_message_at)}
           </div>
         )}
+        <div className="truncate text-[11px] text-ink-secondary">
+          {conversation.external_handle || "Customer conversation"}
+        </div>
       </button>
     </li>
   );
@@ -340,11 +343,10 @@ function ThreadPanel({ conversation }: { conversation: InboxConversationSummary 
               <ShieldAlert className="h-8 w-8 text-amber-500" strokeWidth={1.5} />
               <div>
                 <p className="text-[13px] font-medium text-ink-primary">
-                  Awaiting agent response
+                  Waiting for a reply
                 </p>
                 <p className="mt-1 text-[12px] text-ink-tertiary">
-                  This session has governance context but no recorded messages
-                  yet — the agent response may be held for approval.
+                  A response is being reviewed before it is sent to the customer.
                 </p>
               </div>
             </div>
@@ -373,7 +375,7 @@ function ThreadPanel({ conversation }: { conversation: InboxConversationSummary 
       </div>
       <div className="border-t border-border-subtle px-4 py-2">
         <p className="text-[11px] text-ink-quaternary">
-          Read-only view — replies are sent via the agent pipeline.
+          History only. Use Live Customer Chat when you need to step in and reply yourself.
         </p>
       </div>
     </section>
@@ -451,21 +453,27 @@ function ThreadHeader({
 
 function MessageBubble({ message }: { message: InboxThreadMessage }) {
   const isAssistant = message.role === "assistant";
+  const isOperator = message.role === "operator";
+  const isRightAligned = !isAssistant;
   const [governanceOpen, setGovernanceOpen] = useState(false);
 
   return (
-    <div className={cn("flex flex-col gap-1", isAssistant ? "items-start" : "items-end")}>
-      <div className={cn("flex items-end gap-2", isAssistant ? "flex-row" : "flex-row-reverse")}>
+    <div className={cn("flex flex-col gap-1", isRightAligned ? "items-end" : "items-start")}>
+      <div className={cn("flex items-end gap-2", isRightAligned ? "flex-row-reverse" : "flex-row")}>
         <div
           className={cn(
             "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border-subtle",
             isAssistant
               ? "bg-surface-raised text-gold-primary"
-              : "bg-surface-raised text-blue-system"
+              : isOperator
+                ? "bg-emerald-500/10 text-emerald-700"
+                : "bg-surface-raised text-blue-system"
           )}
         >
           {isAssistant ? (
             <Bot className="h-3.5 w-3.5" strokeWidth={1.8} />
+          ) : isOperator ? (
+            <UserRound className="h-3.5 w-3.5" strokeWidth={1.8} />
           ) : (
             <UserRound className="h-3.5 w-3.5" strokeWidth={1.8} />
           )}
@@ -475,11 +483,18 @@ function MessageBubble({ message }: { message: InboxThreadMessage }) {
             "max-w-[min(640px,78%)] rounded-md border px-3 py-2 text-[13px] leading-5",
             isAssistant
               ? "border-border-subtle bg-surface text-ink-body"
-              : "border-blue-system/25 bg-blue-system/10 text-ink-primary"
+              : isOperator
+                ? "border-emerald-500/25 bg-emerald-500/10 text-ink-primary"
+                : "border-blue-system/25 bg-blue-system/10 text-ink-primary"
           )}
         >
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
           <div className="mt-1 flex items-center gap-2">
+            {isOperator && (
+              <span className="text-[10px] font-medium text-emerald-700">
+                Sent by your team
+              </span>
+            )}
             <span className="font-mono text-[10px] text-ink-quaternary">
               {formatTime(message.occurred_at)}
             </span>

@@ -201,10 +201,10 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
             type="button"
             onClick={() => onOpenTrace?.(session.session_id)}
             className="cc-btn cc-btn-secondary"
-            aria-label={`View trace for session ${session.session_id}`}
+            aria-label={`Review history for session ${session.session_id}`}
           >
             <Eye size={13} strokeWidth={1.8} />
-            View trace
+            Review history
           </button>
           <button
             type="button"
@@ -214,7 +214,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
               )
             }
             className="cc-btn cc-btn-ghost"
-            aria-label={`Toggle technical details for session ${session.session_id}`}
+            aria-label={`Toggle more details for session ${session.session_id}`}
             aria-expanded={expandedSessionId === session.session_id}
           >
             {expandedSessionId === session.session_id ? (
@@ -222,7 +222,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
             ) : (
               <ChevronRight size={14} strokeWidth={1.8} />
             )}
-            Details
+            More
           </button>
         </div>
       ),
@@ -232,7 +232,7 @@ export function OperationsQueue({ className, onOpenTrace }: OperationsQueueProps
   return (
     <main className={cn("min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8", className)}>
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <p className="text-meta">Pilot deployment &middot; Consumer electronics</p>
+        <p className="text-meta">Current workspace</p>
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <label className="flex flex-col gap-1">

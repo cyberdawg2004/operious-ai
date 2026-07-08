@@ -502,12 +502,12 @@ export function GovernancePoliciesView({
       {notice && <ProposedNotice message={notice} onDismiss={() => setNotice(null)} />}
       {isLoading && <LoadingState />}
       {error && !isLoading && (
-        <ErrorState title="Governance policies unavailable" message={error} onAction={reload} />
+        <ErrorState title="AI behavior rules are unavailable" message={error} onAction={reload} />
       )}
       {data && !isLoading && !error && data.items.length === 0 && (
         <EmptyState
-          title="No governance policies configured"
-          message="The tenant policy endpoint returned no records for the current tenant."
+          title="No AI behavior rules yet"
+          message="No AI behavior rules have been added for this workspace yet."
           actionLabel="Refresh"
           onAction={reload}
         />
@@ -664,7 +664,7 @@ export function ChannelsView() {
       {data && !isLoading && !error && data.items.length === 0 && (
         <EmptyState
           title="No channels configured"
-          message="The tenant channel endpoint returned no configured ingress or response channels."
+          message="No customer message channels are connected for this workspace yet."
           actionLabel="Refresh"
           onAction={reload}
         />
@@ -749,7 +749,7 @@ export function AuditExportsView() {
       title="Audit & Exports"
       load={load}
       emptyTitle="No audit exceptions returned"
-      emptyMessage="The observability alert and dead-letter endpoints returned no records for the current window."
+      emptyMessage="No alerts or retried items were recorded during this time window."
       renderItem={(entry: { kind: "alert"; item: OperationalAlert } | { kind: "dead-letter"; item: DeadLetterExecution }) =>
         entry.kind === "alert" ? (
           <RecordCard
@@ -784,7 +784,7 @@ export function TeamRolesView() {
     <main className="min-w-0 flex-1 bg-canvas p-4 sm:p-6 lg:p-8">
       <PendingIntegrationState
         title="Team directory pending integration"
-        message="No user or role-management endpoint exists in the current backend router set. The command center will render tenant team data here once an identity administration endpoint is available."
+        message="Team member management is not connected here yet. Once it is available, your workspace roster will appear on this screen."
       />
     </main>
   );
@@ -1924,11 +1924,11 @@ function WarrantyRefundEditor({ policy }: { policy?: TenantGovernancePolicy }) {
       )}
       <details className="group">
         <summary className="cursor-pointer text-[11px] text-ink-tertiary hover:text-ink-secondary">
-          Advanced: edit raw parameters JSON
+          Advanced: enter custom rule details
         </summary>
         <div className="mt-2 space-y-1">
           <p className="text-[11px] text-ink-tertiary">
-            When non-empty, this value overrides the field selectors above and is used as the parameters payload.
+            If you fill this in, it replaces the selections above and uses your custom rule details instead.
           </p>
           <textarea
             value={rawOverride}

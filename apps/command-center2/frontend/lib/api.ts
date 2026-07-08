@@ -879,11 +879,29 @@ async function buildHeaders(extra?: HeadersInit): Promise<Headers> {
 
 function errorMessage(status: number, payload: ApiErrorPayload | null): string {
   const detail = payload?.detail;
-  if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && "code" in detail) {
-    return String((detail as { code: unknown }).code);
+    const code = String((detail as { code: unknown }).code);
+    if (code === "session_access_denied") return "You do not have access to this conversation.";
+    if (code === "session_not_found") return "This conversation could not be found.";
+    if (code === "session_terminal") return "This conversation is already closed.";
+    if (code === "conversation_governance_denied") {
+      return "This message could not be sent right now.";
+    }
   }
-  return payload?.code || payload?.error || payload?.title || `API request failed (${status})`;
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+  if (status === 401) return "Your session expired. Please sign in again.";
+  if (status === 403) return "You do not have permission to do that.";
+  if (status === 404) return "We couldn't find what you requested.";
+  if (status >= 500) return "Operious is having trouble completing that request.";
+  if (payload?.title) return payload.title;
+  if (payload?.error) return payload.error;
+  if (payload?.code) return payload.code.replace(/_/g, " ");
+  if (status > 0) {
+    return "We couldn't complete that request.";
+  }
+  return "We couldn't complete that request.";
 }
 
 async function parsePayload(response: Response): Promise<unknown> {
@@ -945,9 +963,25 @@ export type ConversationMessageResponse = {
   execution_id: string;
 };
 
+export type ConversationOperatorReplyResponse = {
+  turn_id: string;
+  channel: string;
+  provider_message_id: string | null;
+};
+
 export function submitConversationMessage(sessionId: string, content: string) {
   return apiRequest<ConversationMessageResponse>(
     `/conversation/${sessionId}/message`,
+    {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }
+  );
+}
+
+export function sendOperatorConversationReply(sessionId: string, content: string) {
+  return apiRequest<ConversationOperatorReplyResponse>(
+    `/conversation/${sessionId}/operator-reply`,
     {
       method: "POST",
       body: JSON.stringify({ content }),
@@ -1768,7 +1802,7 @@ export type InboxGovernanceContext = {
 export type InboxThreadMessage = {
   event_id: string;
   sequence: number;
-  role: "customer" | "assistant" | "system";
+  role: "customer" | "assistant" | "operator" | "system";
   content: string;
   occurred_at: string;
   governance: InboxGovernanceContext | null;
@@ -1824,10 +1858,10 @@ export function getInboxThread(sessionId: string, includeSiblings = false) {
 
 export function formatApiError(error: unknown): string {
   if (error instanceof ApiError) {
-    return `${error.message} (${error.status})`;
+    return error.message;
   }
   if (error instanceof Error) {
     return error.message;
   }
-  return "Unknown API failure";
+  return "Something went wrong.";
 }

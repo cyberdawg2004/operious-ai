@@ -106,8 +106,8 @@ export function OnboardingWizard() {
       <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
         <WizardHeader />
         <EmptyState
-          title="A tenant-scoped session is required"
-          message="Command Center onboarding configures the tenant your session is scoped to. Your current session is not scoped to a tenant. Creating a tenant is a platform operation — it is done in the Platform Console, not here."
+          title="Open a workspace first"
+          message="Workspace setup is only available after you open a specific workspace."
         />
       </main>
     );
@@ -118,10 +118,9 @@ export function OnboardingWizard() {
       <WizardHeader />
 
       <div className="mb-5 rounded-lg border border-border-subtle bg-surface-raised p-4 text-[13px] text-ink-secondary">
-        Configuring the tenant your session is scoped to:{" "}
+        You are setting up this workspace:{" "}
         <strong className="text-ink-primary">{tenantId}</strong>. Each step is a
-        governed change — proposed here, then approved and applied by a different
-        principal.
+        requested change that must be approved by another teammate before it goes live.
       </div>
 
       <OperationalBanner operational={operational} target={tenantId ?? ""} />
@@ -139,13 +138,13 @@ export function OnboardingWizard() {
       )}
 
       {error && <ErrorState title="Onboarding state unavailable" message={error} onAction={refreshAll} />}
-      {isLoading && <LoadingState label="Deriving onboarding state from backend..." />}
+      {isLoading && <LoadingState label="Loading workspace setup..." />}
 
       {!isLoading && (
         <div className="space-y-6">
           <PhaseBlock
-            label="Configure this tenant"
-            hint="Governed dual-control — each step is proposed, then approved and applied by a different principal"
+            label="Set up this workspace"
+            hint="Each requested change is reviewed before it becomes active."
           >
             {steps.map((step) => (
               <StepCard key={step.id} step={step} index={stepIndex(step.id)}>
@@ -165,7 +164,7 @@ export function OnboardingWizard() {
         <ChannelCreateModal
           onClose={() => setChannelModalOpen(false)}
           onProposed={() => {
-            setNotice("Channel create proposed (governed) — pending approval, then apply.");
+            setNotice("Channel setup requested. It will go live after approval.");
             setChannelModalOpen(false);
             reload();
           }}
@@ -194,7 +193,7 @@ function PhaseBAction({
   if (step.state === "blocked") {
     return (
       <p className="text-[12px] text-ink-tertiary">
-        Blocked — complete the prerequisite step first.
+        Finish the earlier step first.
       </p>
     );
   }
@@ -203,9 +202,9 @@ function PhaseBAction({
     <div className="space-y-2">
       {step.pendingChange && (
         <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[12px] text-ink-secondary">
-          Governed change pending · status{" "}
-          <strong className="text-ink-primary">{step.pendingChange.status}</strong>. Approve and
-          apply it (as a different principal) in Configuration Approvals to complete this step.
+          Change request pending. Status{" "}
+          <strong className="text-ink-primary">{step.pendingChange.status}</strong>. Open Change
+          Approvals to review it and make it active.
         </div>
       )}
       {step.id === "channel" && step.state !== "complete" && (
@@ -213,7 +212,7 @@ function PhaseBAction({
           onClick={onOpenChannelModal}
           className="inline-flex h-9 items-center gap-2 rounded bg-gold-primary px-3 text-[12px] font-semibold text-white hover:bg-gold-muted"
         >
-          Propose channel (governed) <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+          Request channel setup <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
         </button>
       )}
       {(step.id === "connector" || step.id === "connector-credential") &&
@@ -222,19 +221,19 @@ function PhaseBAction({
             onClick={() => router.push(dashboardRoutes.connectors)}
             className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
           >
-            Open Connector editor <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+            Open Connected Systems <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
           </button>
         )}
       {step.id === "action-policy" && step.state !== "complete" && (
-        <button
-          onClick={() => router.push(dashboardRoutes["action-policy"])}
-          className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
-        >
-          Open Action Policy editor <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
-        </button>
+          <button
+            onClick={() => router.push(dashboardRoutes["action-policy"])}
+            className="inline-flex h-9 items-center gap-2 rounded border border-border-subtle px-3 text-[12px] text-ink-secondary hover:border-border-defined hover:text-ink-primary"
+          >
+          Open Action Rules <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
+          </button>
       )}
       {step.state === "complete" && (
-        <p className="text-[12px] text-green-success">Applied — confirmed by backend read.</p>
+        <p className="text-[12px] text-green-success">Active.</p>
       )}
     </div>
   );
@@ -245,14 +244,13 @@ function ApproverLink() {
   return (
     <div className="rounded-lg border border-border-subtle bg-surface p-4">
       <p className="text-[13px] leading-relaxed text-ink-secondary">
-        Every Phase B step is a governed change request. A <strong>different principal</strong>{" "}
-        (the approver) must approve and apply it. No single user completes onboarding alone.
+        Every setup change needs a second person to approve it before it goes live.
       </p>
       <button
         onClick={() => router.push(dashboardRoutes["config-approvals"])}
         className="mt-3 inline-flex h-9 items-center gap-2 rounded border border-gold-primary/40 px-3 text-[12px] text-gold-primary hover:bg-gold-primary/10"
       >
-        Open Configuration Approvals (approver) <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
+        Open Change Approvals <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.8} />
       </button>
     </div>
   );
@@ -308,9 +306,8 @@ function ChannelCreateModal({
           </button>
         </div>
         <p className="mb-4 text-[13px] leading-relaxed text-ink-secondary">
-          In production, direct channel create is disabled. This proposes a governed
-          channel change request (proposed → approved → applied). Credentials are
-          write-only.
+          In production, channels are added through a review step. Request the
+          change here, then another manager approves it before it goes live.
         </p>
         <form onSubmit={submit} className="space-y-4">
           {error && <FormError message={error} />}

@@ -283,7 +283,7 @@ export function CognitionHub({ onOpenTrace, onOpenKnowledge }: CognitionHubProps
                   onApply={() => void runLifecycleAction(record.approval_id, "apply")}
                   onReject={() =>
                     setPendingNotice(
-                      "The backend exposes approval and apply endpoints, but no rejection endpoint is currently available for SOP intelligence records."
+                      "Rejecting these suggestions is not available in this screen yet."
                     )
                   }
                   onOpenTrace={onOpenTrace}

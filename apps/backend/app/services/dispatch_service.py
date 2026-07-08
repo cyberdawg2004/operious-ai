@@ -81,6 +81,7 @@ from app.session.enums import (
     SessionScope,
 )
 from app.session.identity import SessionId, as_session_id, derive_session_id
+from app.session.models.context import SessionContext
 from app.session.persistence import SessionPersistenceProtocol
 from app.session.runtime import SessionRuntime
 
@@ -395,6 +396,10 @@ class DispatchService:
                     external_handle=session_external_handle,
                     tenant_id=tenant_id,
                     parent_session_id=parent_session_id,
+                    context=_initial_session_context(
+                        canonical_payload,
+                        ingress=ingress,
+                    ),
                     session_id_override=session_id,
                     correlation_id=_correlation_id_text(ingress),
                     request_id=ingress.request_id,
@@ -435,6 +440,13 @@ class DispatchService:
             session = session_result.session
             if session is None:
                 raise DispatchServiceError("session runtime returned an empty session")
+        await _append_customer_message_event(
+            session_runtime=session_runtime,
+            session_id=session.identity.session_id,
+            canonical_payload=canonical_payload,
+            ingress=ingress,
+            tenant_id=tenant_id,
+        )
         execution_request = await self._execution_runtime.request_diagnostic_execution(
             dispatch_id=str(coordination_result.coordination_id),
             session_id=str(session.identity.session_id),
@@ -850,6 +862,10 @@ def _extract_ingress_text(ingress: BoundaryIngressRecord) -> str:
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+        if isinstance(value, Mapping):
+            nested_body = _optional_text(value.get("body"))
+            if nested_body is not None:
+                return nested_body
     # WhatsApp text lives in nested canonical_payload
     nested = payload.get("canonical_payload")
     if isinstance(nested, dict):
@@ -858,7 +874,122 @@ def _extract_ingress_text(ingress: BoundaryIngressRecord) -> str:
             inner = nested_typed.get(key)
             if isinstance(inner, str) and inner.strip():
                 return inner.strip()
+            if isinstance(inner, Mapping):
+                nested_body = _optional_text(inner.get("body"))
+                if nested_body is not None:
+                    return nested_body
     return ""
+
+
+async def _append_customer_message_event(
+    *,
+    session_runtime: SessionRuntime,
+    session_id: SessionId,
+    canonical_payload: Mapping[str, Any],
+    ingress: BoundaryIngressRecord,
+    tenant_id: str,
+) -> None:
+    content = _customer_message_content(canonical_payload)
+    if not content:
+        return
+    envelope = await session_runtime.append_event(
+        AppendEventRequest(
+            session_id=session_id,
+            kind=SessionEventKind.CUSTOMER_MESSAGE,
+            occurred_at=ingress.external_emitted_at or ingress.received_at,
+            continuity_mode=SessionContinuityMode.SYNCHRONOUS,
+            payload=_customer_message_payload(
+                canonical_payload,
+                content=content,
+                ingress=ingress,
+            ),
+            annotation="customer_message_ingress",
+            correlation_id=_correlation_id_text(ingress),
+            request_id=ingress.request_id,
+            idempotency_key=f"customer_message:{ingress.ingress_id}",
+            metadata={
+                "boundary.ingress_id": str(ingress.ingress_id),
+                "tenant_id": tenant_id,
+            },
+        )
+    )
+    if not envelope.is_ok or envelope.result is None:
+        raise DispatchServiceError("customer message event append failed")
+    if not isinstance(envelope.result, AppendEventResult):
+        raise DispatchServiceError(
+            "session runtime returned an unexpected customer message append result"
+        )
+
+
+def _initial_session_context(
+    payload: Mapping[str, Any],
+    *,
+    ingress: BoundaryIngressRecord,
+) -> SessionContext | None:
+    attributes: dict[str, Any] = {}
+    source_channel = _optional_text(payload.get("channel")) or ingress.source_type.value
+    if source_channel is not None:
+        attributes["source_channel"] = source_channel
+    recipient = _optional_text(payload.get("from"))
+    if recipient is not None:
+        attributes["reply_recipient"] = recipient
+    thread_context = _optional_text(payload.get("conversation_id")) or _optional_text(
+        payload.get("message_id")
+    )
+    if thread_context is not None:
+        attributes["reply_thread_context"] = thread_context
+    if not attributes:
+        return None
+    return SessionContext(attributes=attributes)
+
+
+def _customer_message_content(payload: Mapping[str, Any]) -> str:
+    for key in ("content", "text", "message", "comment", "body", "description", "transcript"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, Mapping):
+            nested_body = _optional_text(value.get("body"))
+            if nested_body is not None:
+                return nested_body
+    nested = payload.get("canonical_payload")
+    if isinstance(nested, Mapping):
+        return _customer_message_content(cast("Mapping[str, Any]", nested))
+    return ""
+
+
+def _customer_message_payload(
+    payload: Mapping[str, Any],
+    *,
+    content: str,
+    ingress: BoundaryIngressRecord,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "content": content,
+        "channel": _optional_text(payload.get("channel")) or ingress.source_type.value,
+        "source_channel": _optional_text(payload.get("channel")) or ingress.source_type.value,
+    }
+    for source_key, target_key in (
+        ("from", "from"),
+        ("to", "to"),
+        ("subject", "subject"),
+        ("conversation_id", "conversation_id"),
+        ("message_id", "message_id"),
+        ("phone_number_id", "phone_number_id"),
+        ("from_display_name", "from_display_name"),
+        ("source_language", "source_language"),
+    ):
+        value = _optional_text(payload.get(source_key))
+        if value is not None:
+            result[target_key] = value
+    return result
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
 
 
 def _correlation_id_text(ingress: BoundaryIngressRecord) -> str:

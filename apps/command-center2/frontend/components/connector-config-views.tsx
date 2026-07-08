@@ -71,7 +71,7 @@ const CONNECTOR_TOOLS = [
   {
     toolName: "refund.request",
     label: "Refund Request",
-    summary: "Execute outbound refund remedies against the tenant's endpoint.",
+    summary: "Send refund requests to the destination your workspace uses.",
     defaultConnectorType: "oms",
   },
   {
@@ -89,7 +89,7 @@ const CONNECTOR_TOOLS = [
   {
     toolName: "repair.dispatch",
     label: "Repair Dispatch",
-    summary: "Dispatch repair work to the tenant's selected repair provider endpoint.",
+    summary: "Send repair work to the repair service your workspace uses.",
     defaultConnectorType: "zendesk",
   },
 ] as const;
@@ -330,7 +330,7 @@ export function ConnectorConfigView() {
 
   return (
     <main className="min-w-0 flex-1 overflow-auto bg-canvas px-4 py-5 sm:px-6 lg:px-8">
-      <Header eyebrow="BOUNDARY · CONNECTORS" title="Connector Command Center" />
+      <Header eyebrow="CONNECTED SYSTEMS" title="Connected Systems" />
 
       <div className="mb-6 grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_1fr]">
         <Card>
@@ -338,9 +338,8 @@ export function ConnectorConfigView() {
             <div>
               <CardTitle>Execution Safety</CardTitle>
               <CardDescription>
-                Connector writes remain dual-controlled. A connector executes only
-                when configuration, action-policy authority, and taxonomy execution
-                intent are all present.
+                Actions only run after the connected system, approval rules, and
+                customer-impact setting are all in place.
               </CardDescription>
             </div>
             <StatusBadge
@@ -476,7 +475,7 @@ export function ConnectorConfigView() {
             <div className="mb-3">
               <h2 className="text-[20px] font-semibold text-ink-primary">MCP Servers</h2>
               <p className="text-[13px] text-ink-secondary">
-                Connect any MCP-compatible server your tenant uses. Tools are classified and governed per the existing approval model.
+                Connect other systems that already support MCP and choose how much approval each action needs.
               </p>
             </div>
             <McpConnectorView tenantId={tenantId} canWrite={canWrite} />
@@ -487,8 +486,7 @@ export function ConnectorConfigView() {
               <div>
                 <h2 className="text-[20px] font-semibold text-ink-primary">Policies</h2>
                 <p className="text-[13px] text-ink-secondary">
-                  Execution policies govern when connectors may fire autonomously.
-                  All policy changes are dual-controlled.
+                  Choose which actions can run on their own and which should wait for review.
                 </p>
               </div>
             </div>
@@ -501,7 +499,7 @@ export function ConnectorConfigView() {
                   <div className="flex items-center gap-2">
                     <Shield className="h-4 w-4 text-gold-primary" strokeWidth={1.8} />
                     <span className="text-[13px] font-semibold text-ink-primary">
-                      Action Policy
+                      Action Rules
                     </span>
                   </div>
                   <ArrowUpRight
@@ -510,8 +508,7 @@ export function ConnectorConfigView() {
                   />
                 </div>
                 <p className="text-[12px] text-ink-secondary">
-                  View and propose changes to the action_tools policy — governs
-                  refund, warranty, replacement, and repair execution rules.
+                  Review or request changes to the rules that control refunds, warranties, replacements, and repair steps.
                 </p>
                 <StatusBadge
                   label={
@@ -549,8 +546,7 @@ export function ConnectorConfigView() {
                   />
                 </div>
                 <p className="text-[12px] text-ink-secondary">
-                  Manage all governance policies — resolution autonomy, taxonomy,
-                  extraction schema, and more. All changes are governed by dual control.
+                  Manage the rules that shape AI behavior, case handling, and reviews across this workspace.
                 </p>
                 <StatusBadge
                   label={`${(data?.policies ?? []).length} polic${(data?.policies ?? []).length === 1 ? "y" : "ies"} configured`}
@@ -703,13 +699,10 @@ function AddCustomConnectorForm({
     <form onSubmit={submit} className="space-y-4">
       <div>
         <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-          Add Custom Connector
+          Add Connected System
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-          Define a governed connector for any integration your tenant needs.
-          Domain-agnostic: bank account.freeze, telecom service.suspend, or any
-          custom HTTP endpoint. The tool name you choose here becomes the
-          identifier the agent uses to call this action.
+          Set up a new connected system for any workflow your team needs. Choose a short action name so your team can recognize what this connection does.
         </p>
       </div>
 
@@ -733,32 +726,32 @@ function AddCustomConnectorForm({
         />
       </Fieldset>
 
-      <Fieldset legend="Endpoint">
+      <Fieldset legend="Destination">
         <Select
-          label="HTTP method"
+          label="Request type"
           name="http_method"
           value={httpMethod}
           options={[...HTTP_METHOD_OPTIONS]}
           onChange={setHttpMethod}
         />
         <Text
-          label="Endpoint URL"
+          label="Destination address"
           name="endpoint_template"
           value={endpointTemplate}
           onChange={setEndpointTemplate}
           placeholder="https://api.tenant.example/accounts/freeze"
           required
         />
-        <Field label="Validated host preview" value={endpointPreview} />
+        <Field label="Destination website" value={endpointPreview} />
         <Text
-          label="Idempotency header"
+          label="Repeat-send safeguard"
           name="idempotency_header_name"
           value={idempotencyHeader}
           onChange={setIdempotencyHeader}
           required
         />
         <Text
-          label="Success status codes"
+          label="Success response codes"
           name="success_status_codes"
           value={successStatusCodes}
           onChange={setSuccessStatusCodes}
@@ -769,19 +762,19 @@ function AddCustomConnectorForm({
 
       <Fieldset legend="Field mappings">
         <p className="text-[13px] text-ink-secondary">
-          Map Operious action payload fields to the target API schema.
+          Match Operious details to the field names used by the other system.
         </p>
         <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
       </Fieldset>
 
       <Fieldset legend="Response parsing">
         <p className="text-[13px] text-ink-secondary">
-          Map tenant response fields for provider id, status, and errors.
+          Choose which fields tell Operious whether the action worked and what reference number to keep.
         </p>
         <MappingEditor rows={responseParse} onChange={setResponseParse} />
       </Fieldset>
 
-      <Submit isSubmitting={isSubmitting} label="Propose custom connector" />
+      <Submit isSubmitting={isSubmitting} label="Request connected system" />
     </form>
   );
 }
@@ -834,12 +827,10 @@ function ConnectorCredentialForm({
     <form onSubmit={submit} className="space-y-4">
       <div>
         <h2 className="font-display text-[24px] font-semibold text-ink-primary">
-          Manage Credential: {label}
+          Save Access Details: {label}
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-          Write-only. The credential is encrypted via OPCRED2 immediately on
-          submission and stored per-connector. Values are never returned by the
-          API. A separate approver must approve this change request.
+          For security, saved secrets are hidden after you submit them. Another approved teammate must review this change before it goes live.
         </p>
       </div>
 
@@ -949,10 +940,8 @@ function OmsCredentialCard({
         />
       </div>
       <div className="mt-4 rounded-lg border border-gold-primary/30 bg-gold-bg px-3 py-2 text-[12px] leading-relaxed text-ink-primary">
-        This UI is write-only by design. The current backend exposes OMS
-        credential lifecycle storage and apply logic, but the tenant propose route
-        for <code>credential_update</code> is not yet published at the HTTP layer,
-        so submission remains blocked from the browser.
+        OMS sign-in details can be stored safely, but this screen cannot submit
+        updates yet. Finish that step outside the browser for now.
       </div>
       <div className="mt-4">
         <button
@@ -962,7 +951,7 @@ function OmsCredentialCard({
           className="cc-btn cc-btn-secondary disabled:opacity-50"
         >
           <KeyRound size={14} strokeWidth={1.8} />
-          Manage OMS credential
+          Manage OMS sign-in
         </button>
       </div>
     </Card>
@@ -1004,18 +993,18 @@ function ConnectorToolCard({
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="Tool name" value={card.tool.toolName} />
         <Field
-          label="Connector type"
+          label="System type"
           value={connector?.connector_type ?? card.tool.defaultConnectorType}
         />
-        <Field label="Endpoint host" value={card.endpointPreview} />
-        <Field label="HTTP method" value={connector?.http_method ?? "POST"} />
+        <Field label="Destination website" value={card.endpointPreview} />
+        <Field label="Request type" value={connector?.http_method ?? "POST"} />
         <Field
           label="Idempotency header"
           value={connector?.idempotency_header_name ?? "Idempotency-Key"}
         />
         <Field label="Version" value={connector ? `v${connector.version}` : "—"} />
         <Field label="Last configured by" value={connector?.configured_by ?? "—"} />
-        <Field label="Source approval" value={connector?.source_approval_id ?? "—"} />
+        <Field label="Approval record" value={connector?.source_approval_id ?? "—"} />
       </div>
 
       <div className="mt-4 grid gap-2 md:grid-cols-3">
@@ -1151,7 +1140,7 @@ function ConnectorTestResult({ result }: { result: TestState }) {
           label="Config valid"
           value={result.data.config_valid ? "Yes" : "No"}
         />
-        <Field label="HTTP probe" value={result.data.http_probe} />
+        <Field label="Connection check" value={result.data.http_probe} />
         <Field
           label="Validated host"
           value={result.data.validated_host ?? "No host validated"}
@@ -1229,8 +1218,7 @@ function ConnectorProposeForm({
           {connector ? `Update ${tool.label}` : `Configure ${tool.label}`}
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-          This creates a governed connector change request. It is applied only
-          after approval by a different principal.
+          This sends a setup change for review. It becomes active after approval.
         </p>
       </div>
 
@@ -1247,32 +1235,32 @@ function ConnectorProposeForm({
         />
       </Fieldset>
 
-      <Fieldset legend="Endpoint">
+      <Fieldset legend="Destination">
         <Select
-          label="HTTP method"
+          label="Request type"
           name="http_method"
           value={httpMethod}
           options={[...HTTP_METHOD_OPTIONS]}
           onChange={setHttpMethod}
         />
         <Text
-          label="Endpoint URL"
+          label="Destination address"
           name="endpoint_template"
           value={endpointTemplate}
           onChange={setEndpointTemplate}
           placeholder="https://api.tenant.example/remedies/refunds"
           required
         />
-        <Field label="Validated host preview" value={endpointPreview} />
+        <Field label="Destination website" value={endpointPreview} />
         <Text
-          label="Idempotency header"
+          label="Repeat-send safeguard"
           name="idempotency_header_name"
           value={idempotencyHeader}
           onChange={setIdempotencyHeader}
           required
         />
         <Text
-          label="Success status codes"
+          label="Success response codes"
           name="success_status_codes"
           value={successStatusCodes}
           onChange={setSuccessStatusCodes}
@@ -1280,7 +1268,7 @@ function ConnectorProposeForm({
           required
         />
         <Select
-          label="Record status"
+          label="Connection status"
           name="status"
           value={status}
           options={[...CONNECTOR_STATUS_OPTIONS]}
@@ -1290,16 +1278,14 @@ function ConnectorProposeForm({
 
       <Fieldset legend="Field mappings">
         <p className="text-[13px] text-ink-secondary">
-          Map Operious action payload fields to the tenant API schema using
-          dot-paths such as <code>payload.order_id</code>.
+          Match Operious details to the field names used by the other system.
         </p>
         <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
       </Fieldset>
 
       <Fieldset legend="Response parsing">
         <p className="text-[13px] text-ink-secondary">
-          Map tenant response fields used for provider id, provider status, and
-          provider errors.
+          Choose which fields tell Operious whether the action worked and what reference number to keep.
         </p>
         <MappingEditor rows={responseParse} onChange={setResponseParse} />
       </Fieldset>
@@ -1366,8 +1352,7 @@ function OmsCredentialForm({
           OMS Credential
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-          The form is write-only. Existing values are never displayed, never
-          pre-populated, and never returned from the API.
+          For security, saved secrets are never shown again after you submit them.
         </p>
       </div>
 
@@ -1392,17 +1377,12 @@ function OmsCredentialForm({
       {error && <FormError message={error} />}
 
       <div className="rounded-lg border border-gold-primary/30 bg-gold-bg px-3 py-2 text-[13px] leading-relaxed text-ink-primary">
-        Pending approvals: {pendingCount}. Submission creates a governed
-        <code>credential_update</code> proposal only. A separate approver still
-        approves it through the existing dual-control flow, and the credential
-        value is never read back to the browser.
+        Pending approvals: {pendingCount}. Saving new access details creates a review request first. The secret stays hidden in your browser after submission.
       </div>
 
       {rotationBlocked && (
         <div className="rounded-lg border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
-          An active OMS credential already exists for this tenant. The existing
-          backend service still blocks active-credential rotation, so this form
-          only supports the pending-validation onboarding path.
+          This connection already has active access details. Updating them while the connection is live is not available in this build yet.
         </div>
       )}
 
@@ -1484,21 +1464,21 @@ export function ActionPolicyView() {
   return (
     <main className="min-w-0 flex-1 overflow-auto bg-canvas p-4 sm:p-6 lg:p-8">
       <Header
-        eyebrow="GOVERNANCE · ACTION POLICY"
-        title="Action Policy"
-        actionLabel="Propose policy change"
+        eyebrow="ACTION RULES"
+        title="Action Rules"
+        actionLabel="Request rule change"
         onAction={() => setModal(true)}
       />
       <GovernedNotice />
       {notice && <ProposedNotice message={notice} onDismiss={() => setNotice(null)} />}
       {isLoading && <LoadingState />}
       {error && !isLoading && (
-        <ErrorState title="Action policy unavailable" message={error} onAction={reload} />
+        <ErrorState title="Action rules are unavailable" message={error} onAction={reload} />
       )}
       {!isLoading && !error && !actionPolicy && (
         <EmptyState
-          title="No action_tools policy configured"
-          message="Propose an action_tools policy to govern warranty, replacement, refund, and warehouse tools."
+          title="No action rules yet"
+          message="Set rules for warranty, replacement, refund, and warehouse actions."
           actionLabel="Refresh"
           onAction={reload}
         />
@@ -1511,7 +1491,7 @@ export function ActionPolicyView() {
             policy={actionPolicy}
             onProposed={() => {
               setNotice(
-                "Action policy change proposed. It now awaits approval by another principal."
+                "Action rule change requested. It now awaits approval from another manager."
               );
               setModal(false);
               reload();
@@ -1528,10 +1508,10 @@ function ActionPolicyCard({ policy }: { policy: TenantGovernancePolicy }) {
     <Card>
       <CardHeader>
         <div>
-          <CardTitle>action_tools</CardTitle>
+          <CardTitle>Action Rules</CardTitle>
           <CardDescription>
-            Governs whether autonomous execution is allowed, denied, or requires
-            approval for each action tool.
+            Decides whether each action can run automatically, must wait for
+            approval, or should stay off.
           </CardDescription>
         </div>
         <StatusBadge label={`v${policy.version} · ${policy.status}`} tone="info" />
@@ -1946,7 +1926,7 @@ function MappingEditor({
           <input
             value={row.value}
             onChange={(event) => updateRow(row.id, "value", event.target.value)}
-            placeholder="payload.order_id"
+            placeholder="order_id"
             className="h-10 rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none"
           />
           <button
@@ -2045,7 +2025,7 @@ function buildConnectorCardView({
         ? pendingProposal.endpoint_template
         : null
     ) ??
-    "No endpoint configured";
+    "No destination set";
 
   return {
     tool,
@@ -2257,7 +2237,7 @@ function parseStatusCodes(value: string): number[] {
     .map((part) => Number(part.trim()))
     .filter((code) => Number.isInteger(code));
   if (codes.length === 0) {
-    throw new Error("Enter at least one integer HTTP status code.");
+    throw new Error("Enter at least one whole-number success code.");
   }
   return codes;
 }

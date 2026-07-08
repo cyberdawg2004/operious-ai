@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from app.resolution.persistence.models import ResolutionProposalQuery
-from app.resolution.persistence.postgres import PostgresResolutionProposalPersistence
+from app.resolution.persistence.repository import ResolutionProposalPersistenceProtocol
 from app.session.enums import SessionEventKind, SessionLifecyclePhase
 from app.session.identity import SessionId
 from app.session.persistence import (
@@ -105,8 +105,26 @@ def _content_from_payload(payload: dict[str, Any]) -> str:
         payload.get("content")
         or payload.get("text")
         or payload.get("message")
+        or payload.get("comment")
+        or payload.get("body")
         or ""
     )
+
+
+def _channel_from_event_payload(payload: dict[str, Any]) -> str | None:
+    for key in ("source_channel", "channel"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _message_role(event_kind: SessionEventKind, payload: dict[str, Any]) -> str:
+    if event_kind == SessionEventKind.CUSTOMER_MESSAGE:
+        return "customer"
+    if payload.get("author") == "operator":
+        return "operator"
+    return "assistant"
 
 
 # ── Service ──────────────────────────────────────────────────────────────────
@@ -119,7 +137,7 @@ class InboxService:
         self,
         *,
         session_repo: SessionPersistenceProtocol,
-        resolution_repo: PostgresResolutionProposalPersistence,
+        resolution_repo: ResolutionProposalPersistenceProtocol,
     ) -> None:
         self._session_repo = session_repo
         self._resolution_repo = resolution_repo
@@ -145,15 +163,6 @@ class InboxService:
 
         items: list[InboxConversationSummaryRecord] = []
         for s in session_page.sessions:
-            detected_channel = _channel_from_session(s)
-            if channel and detected_channel != channel:
-                continue
-            if customer_identity_id and (
-                s.customer_identity_id is None
-                or str(s.customer_identity_id) != customer_identity_id
-            ):
-                continue
-
             events_page = await self._session_repo.list_events(
                 SessionEventQuery(
                     session_id=s.session_id,
@@ -165,6 +174,20 @@ class InboxService:
             conv_events = [
                 e for e in events_page.events if e.kind in _CONVERSATION_KINDS
             ]
+            detected_channel = _channel_from_session(s)
+            if detected_channel == "unknown":
+                for event in conv_events:
+                    event_channel = _channel_from_event_payload(dict(event.payload))
+                    if event_channel is not None:
+                        detected_channel = event_channel
+                        break
+            if channel and detected_channel != channel:
+                continue
+            if customer_identity_id and (
+                s.customer_identity_id is None
+                or str(s.customer_identity_id) != customer_identity_id
+            ):
+                continue
             last_message_at: datetime | None = None
             if conv_events:
                 last = max(conv_events, key=lambda e: e.sequence)
@@ -243,6 +266,7 @@ class InboxService:
                         session_ids_to_fetch.append(sid_str)
 
         all_messages: list[InboxMessage] = []
+        event_channels: list[str] = []
         for sid_str in session_ids_to_fetch:
             from uuid import UUID as _UUID
 
@@ -284,6 +308,9 @@ class InboxService:
             }
 
             for event in conv_events:
+                event_channel = _channel_from_event_payload(dict(event.payload))
+                if event_channel is not None:
+                    event_channels.append(event_channel)
                 governance: InboxGovernanceContext | None = None
                 if (
                     event.kind == SessionEventKind.ASSISTANT_RESPONSE
@@ -296,11 +323,7 @@ class InboxService:
                     InboxMessage(
                         event_id=str(event.event_id),
                         sequence=event.sequence,
-                        role=(
-                            "customer"
-                            if event.kind == SessionEventKind.CUSTOMER_MESSAGE
-                            else "assistant"
-                        ),
+                        role=_message_role(event.kind, dict(event.payload)),
                         content=_content_from_payload(dict(event.payload)),
                         occurred_at=event.occurred_at,
                         governance=governance,
@@ -313,11 +336,14 @@ class InboxService:
                 )
 
         all_messages.sort(key=lambda m: m.sequence)
+        detected_channel = _channel_from_session(session)
+        if detected_channel == "unknown" and event_channels:
+            detected_channel = event_channels[0]
 
         return InboxThreadRecord(
             session_id=str(session.session_id),
             external_handle=session.external_handle,
-            channel=_channel_from_session(session),
+            channel=detected_channel,
             lifecycle_phase=session.lifecycle_phase.value,
             opened_at=session.opened_at,
             customer_identity_id=(

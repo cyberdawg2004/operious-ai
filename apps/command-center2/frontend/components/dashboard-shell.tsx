@@ -38,22 +38,22 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   operations: {
     eyebrow: "Operations",
     title: "Operations Queue",
-    description: "Live execution sessions, lifecycle state, latency, and governance outcomes.",
+    description: "Track active customer work, progress, timing, and items that need review.",
   },
   conversations: {
     eyebrow: "Operations",
-    title: "Conversations",
-    description: "Active customer sessions, live turns, and operator takeover.",
+    title: "Live Customer Chat",
+    description: "Watch active customer conversations and step in to reply directly when needed.",
   },
   escalations: {
     eyebrow: "Governance",
     title: "Escalation Queue",
-    description: "Cases the agent could not auto-resolve within governance, awaiting human review.",
+    description: "Cases the agent could not safely finish on its own, waiting for human review.",
   },
   "case-approvals": {
     eyebrow: "Governance",
     title: "Case Approvals",
-    description: "SME-AI-recommended resolutions awaiting human sign-off — approve to proceed, or guide a bounded re-proposal.",
+    description: "Recommended resolutions waiting for a human decision before they move forward.",
   },
   "queue-status": {
     eyebrow: "Operations",
@@ -73,7 +73,7 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   trace: {
     eyebrow: "Operations",
     title: "Decision History",
-    description: "Replay how a decision was reached, step by step, with full evidence.",
+    description: "Review how a case was handled and what information supported the outcome.",
   },
   supervisor: {
     eyebrow: "Operations",
@@ -93,12 +93,12 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   knowledge: {
     eyebrow: "Knowledge",
     title: "Knowledge Base",
-    description: "Tenant-scoped source material and SOP intelligence.",
+    description: "Reference articles, playbooks, and source material used to guide customer replies.",
   },
   governance: {
     eyebrow: "Governance",
-    title: "Governance Policies",
-    description: "Policy records, approval status, and effective runtime configuration.",
+    title: "AI Behavior Rules",
+    description: "Review the rules that guide approvals, safety checks, and customer-facing actions.",
   },
   crisis: {
     eyebrow: "Governance",
@@ -113,27 +113,27 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   channels: {
     eyebrow: "Boundary",
     title: "Channels",
-    description: "Ingress and response channel configuration returned by the tenant API.",
+    description: "Manage where customer conversations come in and where replies are sent back out.",
   },
   connectors: {
     eyebrow: "Boundary",
-    title: "Connector Config",
-    description: "Active connector configurations and governed config-change proposals.",
+    title: "Connected Systems",
+    description: "Connect business systems and request updates to how Operious works with them.",
   },
   "action-policy": {
     eyebrow: "Governance",
-    title: "Action Policy",
-    description: "Action-tools policy editor — refund, warranty, replacement, and warehouse rules.",
+    title: "Action Rules",
+    description: "Choose which customer actions can run automatically and which should wait for approval.",
   },
   "config-approvals": {
     eyebrow: "Governance",
     title: "Configuration Approvals",
-    description: "Approve or reject proposed connector and action-policy changes (dual control).",
+    description: "Review requested setup changes before they go live.",
   },
   onboarding: {
     eyebrow: "Tenant",
-    title: "Configure Tenant",
-    description: "Governed, state-driven configuration of the tenant your session is scoped to — inert to operational (channel → connector → credential → policy).",
+    title: "Workspace Setup",
+    description: "Set up channels, connected systems, access details, and action rules for this workspace.",
   },
   team: {
     eyebrow: "Identity",
@@ -148,12 +148,12 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
   settings: {
     eyebrow: "Runtime",
     title: "Settings",
-    description: "Client runtime, tenant scope, principal scope, and operator context.",
+    description: "Review your current workspace, sign-in, and local app settings.",
   },
   inbox: {
     eyebrow: "Operations",
-    title: "Conversation Inbox",
-    description: "Incoming customer conversations awaiting operator review or assignment.",
+    title: "Conversation History",
+    description: "Read full customer threads and review what has already been sent and received.",
   },
   assistant: {
     eyebrow: "Intelligence",

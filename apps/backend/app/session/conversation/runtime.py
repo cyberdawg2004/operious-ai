@@ -53,7 +53,7 @@ _TEMPLATE_BY_CATEGORY = {
 class ConversationTurn:
     turn_id: str
     sequence: int
-    role: Literal["customer", "assistant", "system"]
+    role: Literal["customer", "assistant", "operator", "system"]
     content: str
     timestamp: datetime
     governance_decision_id: str | None
@@ -140,8 +140,7 @@ class ConversationSessionRuntime:
         if tenant_id != expected_tenant_id:
             raise ConversationRuntimeError("tenant scope mismatch")
         content = customer_message.strip()
-        if not content:
-            raise ConversationRuntimeError("customer_message is required")
+        self._require_non_empty_content(content)
 
         sid = as_session_id(session_id)
         session = await self._require_live_session(
@@ -223,6 +222,37 @@ class ConversationSessionRuntime:
             phase_a_turn=phase_a_turn,
             execution=execution,
         )
+
+    async def record_operator_reply(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        content: str,
+        expected_tenant_id: str,
+        source_channel: str,
+        provider_message_id: str | None = None,
+    ) -> ConversationTurn:
+        sid = as_session_id(session_id)
+        normalized_content = content.strip()
+        self._require_non_empty_content(normalized_content)
+        turn = await self._append_operator_turn(
+            sid=sid,
+            content=normalized_content,
+            source_channel=source_channel,
+            provider_message_id=provider_message_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        await self._publish(
+            session_id=session_id,
+            event=_turn_event(
+                tenant_id=tenant_id,
+                turn=turn,
+                session_id=session_id,
+                phase=None,
+            ),
+        )
+        return turn
 
     async def get_conversation_state(
         self,
@@ -392,6 +422,40 @@ class ConversationSessionRuntime:
         )
         return _turn_from_append_result(result, role="assistant")
 
+    async def _append_operator_turn(
+        self,
+        *,
+        sid: SessionId,
+        content: str,
+        source_channel: str,
+        provider_message_id: str | None,
+        expected_tenant_id: str,
+    ) -> ConversationTurn:
+        session = await self._require_session(
+            sid,
+            expected_tenant_id=expected_tenant_id,
+        )
+        turn_id = derive_conversation_turn_id(
+            session_id=str(sid),
+            sequence=session.sequence_head + 1,
+        )
+        payload: dict[str, Any] = {
+            "content": content,
+            "turn_id": turn_id,
+            "author": "operator",
+            "source_channel": source_channel,
+        }
+        if provider_message_id is not None:
+            payload["provider_message_id"] = provider_message_id
+        result = await self._append_turn_event(
+            sid=sid,
+            kind=SessionEventKind.ASSISTANT_RESPONSE,
+            payload=payload,
+            annotation="assistant_response_operator",
+            idempotency_key=None,
+        )
+        return _turn_from_append_result(result, role="operator")
+
     async def _append_turn_event(
         self,
         *,
@@ -417,6 +481,10 @@ class ConversationSessionRuntime:
         if not isinstance(envelope.result, AppendEventResult):
             raise ConversationRuntimeError("unexpected append result")
         return envelope.result
+
+    def _require_non_empty_content(self, content: str) -> None:
+        if not content:
+            raise ConversationRuntimeError("message content is required")
 
     async def _phase_a_template(
         self,
@@ -468,7 +536,7 @@ def phase_a_templates() -> frozenset[str]:
 def _turn_from_append_result(
     result: AppendEventResult,
     *,
-    role: Literal["customer", "assistant"],
+    role: Literal["customer", "assistant", "operator"],
 ) -> ConversationTurn:
     if result.event is None:
         raise ConversationRuntimeError("append returned no event")
@@ -478,12 +546,14 @@ def _turn_from_append_result(
 def _turn_from_event(
     event: SessionEventRecord | Any,
     *,
-    role_override: Literal["customer", "assistant"] | None = None,
+    role_override: Literal["customer", "assistant", "operator"] | None = None,
 ) -> ConversationTurn:
     payload = dict(event.payload)
     role = role_override or (
         "customer"
         if event.kind is SessionEventKind.CUSTOMER_MESSAGE
+        else "operator"
+        if payload.get("author") == "operator"
         else "assistant"
     )
     return ConversationTurn(
