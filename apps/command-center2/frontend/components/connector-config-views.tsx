@@ -914,8 +914,8 @@ function OmsCredentialCard({
         <div>
           <CardTitle>OMS Credentials</CardTitle>
           <CardDescription>
-            Write-only credential state for OMS-backed execution tools. Credential
-            values are never read back into the browser.
+            Save the OMS sign-in details these actions need. For safety, the
+            saved values are never shown in the browser again.
           </CardDescription>
         </div>
         <StatusBadge

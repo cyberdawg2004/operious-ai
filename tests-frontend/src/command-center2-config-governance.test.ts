@@ -401,7 +401,7 @@ test('three config-governance routes are registered', () => {
   ok(sidebar.includes('dashboardRoutes["config-approvals"]'));
 });
 
-// ─── Constraint A: credential never rendered back in the editors ───────────
+// ─── Constraint A: saved credentials are never rendered back in the editors ─
 
 test('connector editor drives the credential-free builder and a separate credential step', () => {
   const src = readText(join(CC2, 'components', 'connector-config-views.tsx'));
@@ -415,8 +415,9 @@ test('connector editor drives the credential-free builder and a separate credent
     'connector credential UX should reflect the credential_update dual-control flow',
   );
   ok(
-    src.includes('write-only'),
-    'credential step must remain explicitly write-only',
+    src.includes('never shown in the browser again') ||
+      src.includes('never read back into the browser'),
+    'credential step must make clear that saved values are never shown back in the browser',
   );
   ok(
     src.includes('testConnectorConfiguration'),
