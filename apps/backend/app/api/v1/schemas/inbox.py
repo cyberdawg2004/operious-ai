@@ -17,6 +17,14 @@ from app.services.inbox_service import (
 )
 
 
+def _empty_thread_messages() -> list["InboxThreadMessageResponse"]:
+    return []
+
+
+def _empty_conversation_items() -> list["InboxConversationSummaryResponse"]:
+    return []
+
+
 class InboxGovernanceContextResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -80,7 +88,9 @@ class InboxThreadResponse(BaseModel):
     lifecycle_phase: str
     opened_at: str
     customer_identity_id: str | None = None
-    messages: list[InboxThreadMessageResponse] = Field(default_factory=list)
+    messages: list[InboxThreadMessageResponse] = Field(
+        default_factory=_empty_thread_messages
+    )
     total: int
 
     @classmethod
@@ -135,7 +145,9 @@ class InboxConversationSummaryResponse(BaseModel):
 class InboxConversationsPageResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    items: list[InboxConversationSummaryResponse] = Field(default_factory=list)
+    items: list[InboxConversationSummaryResponse] = Field(
+        default_factory=_empty_conversation_items
+    )
     total: int
     limit: int
     offset: int

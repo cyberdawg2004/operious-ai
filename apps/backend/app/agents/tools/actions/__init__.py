@@ -21,8 +21,9 @@ Money/goods commitment rule:
 
 from __future__ import annotations
 
+import logging
 import ssl
-from typing import cast
+from typing import Any, cast
 
 from app.agents.tools.actions.fail_closed import FailClosedActionTool
 from app.agents.tools.connectors import (
@@ -56,6 +57,7 @@ from app.work_orders.persistence.repository import WorkOrderRepositoryProtocol
 
 # connector_type value for MCP servers registered via the MCP_SERVER change type.
 MCP_SERVER_CONNECTOR_TYPE = "mcp_server"
+logger = logging.getLogger(__name__)
 
 # connector_type prefix → (CommitmentKind, ApprovalPolicy).
 # Any prefix not listed falls through to the GOODS/ALWAYS_REQUIRE_APPROVAL
@@ -166,14 +168,26 @@ def _register_mcp_tools(
 
     mcp_server_id = config.tool_name  # tool_name IS the mcp_server_id for MCP configs
     endpoint_url = config.endpoint_template
-    raw_tools = config.field_mappings.get("mcp_tools")
-    if not isinstance(raw_tools, list) or not raw_tools:
+    raw_tools_raw = config.field_mappings.get("mcp_tools")
+    if not isinstance(raw_tools_raw, list) or not raw_tools_raw:
+        return
+    raw_tools = cast(list[object], raw_tools_raw)
+    typed_raw_tools: list[dict[str, Any]] = []
+    for tool in raw_tools:
+        if not isinstance(tool, dict):
+            logger.warning(
+                "mcp_tools_skipped_malformed_payload",
+                extra={"connector_type": config.connector_type, "tool_name": config.tool_name},
+            )
+            return
+        typed_raw_tools.append(cast(dict[str, Any], tool))
+    if not typed_raw_tools:
         return
 
     mcp_config = parse_mcp_server_config(
         mcp_server_id=mcp_server_id,
         endpoint_url=endpoint_url,
-        raw_tools=list(raw_tools),
+        raw_tools=typed_raw_tools,
         timeout_seconds=float(config.field_mappings.get("timeout_seconds", 15.0)),
     )
     mcp_credential_runtime = McpCredentialRuntime(

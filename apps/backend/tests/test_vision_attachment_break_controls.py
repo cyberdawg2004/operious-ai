@@ -60,24 +60,35 @@ from app.core.config import Settings
 from app.data_protection.crypto import DataProtectionService
 from app.knowledge.models import KnowledgeRetrievalResult
 from tests._png_text_renderer import render_text_png
-from tests.conftest import requires_postgres
+from tests.conftest import (
+    LIVE_EXTERNAL_TESTS_ENV,
+    live_external_tests_enabled,
+    requires_postgres,
+)
 
 pytestmark = [requires_postgres]
 
 requires_s3 = pytest.mark.skipif(
-    not os.environ.get("ATTACHMENTS_S3_BUCKET"),
+    not (
+        live_external_tests_enabled()
+        and os.environ.get("ATTACHMENTS_S3_BUCKET")
+    ),
     reason=(
-        "requires ATTACHMENTS_S3_BUCKET (+ region/credentials) pointed at "
-        "a real S3 bucket to exercise the real-S3 break-controls."
+        f"requires {LIVE_EXTERNAL_TESTS_ENV}=1 and ATTACHMENTS_S3_BUCKET "
+        "(+ region/credentials) pointed at a real S3 bucket to exercise "
+        "the real-S3 break-controls."
     ),
 )
 requires_live_anthropic = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
+    not (
+        live_external_tests_enabled() and os.environ.get("ANTHROPIC_API_KEY")
+    ),
     reason=(
-        "requires ANTHROPIC_API_KEY pointed at a real Anthropic account to "
-        "exercise the live vision break-control — the deterministic test "
-        "client never looks at bytes, so only a real model call can prove "
-        "vision wiring actually works."
+        f"requires {LIVE_EXTERNAL_TESTS_ENV}=1 and ANTHROPIC_API_KEY "
+        "pointed at a real Anthropic account to exercise the live vision "
+        "break-control — the deterministic test client never looks at "
+        "bytes, so only a real model call can prove vision wiring "
+        "actually works."
     ),
 )
 

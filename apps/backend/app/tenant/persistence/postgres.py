@@ -1317,9 +1317,12 @@ def _document_row_to_record(
     row: TenantKnowledgeDocumentRow,
 ) -> TenantKnowledgeDocumentRecord:
     raw_contradiction = getattr(row, "contradiction_metadata", None)
-    contradiction_metadata: dict[str, Any] | None = (
-        dict(raw_contradiction) if isinstance(raw_contradiction, dict) else None
-    )
+    contradiction_metadata: dict[str, Any] | None = None
+    if isinstance(raw_contradiction, dict):
+        typed_raw_contradiction = cast(dict[object, Any], raw_contradiction)
+        contradiction_metadata = {
+            str(key): value for key, value in typed_raw_contradiction.items()
+        }
     return TenantKnowledgeDocumentRecord(
         document_id=TenantKnowledgeDocumentId(row.document_id),
         tenant_id=row.tenant_id,

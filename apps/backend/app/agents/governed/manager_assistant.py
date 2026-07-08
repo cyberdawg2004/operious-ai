@@ -32,7 +32,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from app.agents.governed.base import AgentInput, BaseGovernedLLMAgent
 from app.agents.governed.policy import AgentPolicyRecord
@@ -40,6 +40,7 @@ from app.cognition.llm import DiagnosticLLMClient, DiagnosticLLMMessage
 from app.events.substrates import OperationalSubstrate
 from app.governance.capability.acts import OperationalAct
 from app.tenant.persistence import TenantConfigurationRepository
+from app.types.json import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -395,7 +396,7 @@ class ManagerAssistantAgent(BaseGovernedLLMAgent):
 
 # ── Parsing helpers ───────────────────────────────────────────────────────────
 
-def _parse_json_strict(raw: str) -> dict[str, Any] | None:
+def _parse_json_strict(raw: str) -> JsonObject | None:
     text = raw.strip()
     # Strip markdown fences
     if text.startswith("```"):
@@ -407,7 +408,7 @@ def _parse_json_strict(raw: str) -> dict[str, Any] | None:
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
-            return obj
+            return cast(JsonObject, obj)
     except (json.JSONDecodeError, ValueError):
         pass
     # Try extracting first {...} block
@@ -416,7 +417,7 @@ def _parse_json_strict(raw: str) -> dict[str, Any] | None:
         try:
             obj = json.loads(match.group())
             if isinstance(obj, dict):
-                return obj
+                return cast(JsonObject, obj)
         except (json.JSONDecodeError, ValueError):
             pass
     return None

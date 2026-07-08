@@ -89,6 +89,29 @@ _CHANGE_EVENT_NAMESPACE = uuid.UUID("01f77264-1518-5a56-9327-0472414e7dc0")
 _SCHEMA_VERSION = "1"
 
 
+def _validated_mcp_tools(
+    raw_tools: object,
+    *,
+    missing_reason: str,
+    empty_reason: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_tools, list):
+        raise TenantConfigChangeRequestLifecycleError(missing_reason)
+    typed_raw_tools = cast(list[object], raw_tools)
+    if not typed_raw_tools:
+        raise TenantConfigChangeRequestLifecycleError(
+            empty_reason
+        )
+    typed_mcp_tools: list[dict[str, Any]] = []
+    for i, tool in enumerate(typed_raw_tools):
+        if not isinstance(tool, dict):
+            raise TenantConfigChangeRequestLifecycleError(
+                f"mcp_tools[{i}] must be an object"
+            )
+        typed_mcp_tools.append(cast(dict[str, Any], tool))
+    return typed_mcp_tools
+
+
 class _KnowledgeReindexPublisherProtocol(Protocol):
     def publish_reindex(self, *, document_id: str, tenant_id: str) -> None: ...
 
@@ -1016,23 +1039,13 @@ class TenantConfigChangeRequestService:
         mcp_server_id = _str(payload, "mcp_server_id")
         endpoint_url = _str(payload, "endpoint_url")
         mcp_tools_raw = payload.get("mcp_tools")
-        if not isinstance(mcp_tools_raw, list):
-            raise TenantConfigChangeRequestLifecycleError(
-                "mcp_server payload must include mcp_tools as a list"
-            )
-        if not mcp_tools_raw:
-            raise TenantConfigChangeRequestLifecycleError(
-                "mcp_server payload must include at least one tool declaration"
-            )
-        typed_mcp_tools: list[dict[str, Any]] = []
+        typed_mcp_tools = _validated_mcp_tools(
+            mcp_tools_raw,
+            missing_reason="mcp_server payload must include mcp_tools as a list",
+            empty_reason="mcp_server payload must include at least one tool declaration",
+        )
         # Validate each tool entry has required fields.
-        for i, tool in enumerate(mcp_tools_raw):
-            if not isinstance(tool, dict):
-                raise TenantConfigChangeRequestLifecycleError(
-                    f"mcp_tools[{i}] must be an object"
-                )
-            typed_tool = cast(dict[str, Any], tool)
-            typed_mcp_tools.append(typed_tool)
+        for i, typed_tool in enumerate(typed_mcp_tools):
             if not typed_tool.get("tool_name"):
                 raise TenantConfigChangeRequestLifecycleError(
                     f"mcp_tools[{i}].tool_name is required"
@@ -1937,19 +1950,12 @@ def _validate_mcp_server_payload(payload: Mapping[str, Any]) -> None:
         raise TenantConfigChangeRequestLifecycleError(
             "mcp_server endpoint_url must use HTTPS"
         )
-    mcp_tools = payload.get("mcp_tools")
-    if not isinstance(mcp_tools, list) or not mcp_tools:
-        raise TenantConfigChangeRequestLifecycleError(
-            "mcp_server payload mcp_tools must be a non-empty list"
-        )
-    typed_mcp_tools: list[dict[str, Any]] = []
-    for i, tool in enumerate(mcp_tools):
-        if not isinstance(tool, dict):
-            raise TenantConfigChangeRequestLifecycleError(
-                f"mcp_tools[{i}] must be an object"
-            )
-        typed_tool = cast(dict[str, Any], tool)
-        typed_mcp_tools.append(typed_tool)
+    typed_mcp_tools = _validated_mcp_tools(
+        payload.get("mcp_tools"),
+        missing_reason="mcp_server payload mcp_tools must be a non-empty list",
+        empty_reason="mcp_server payload mcp_tools must be a non-empty list",
+    )
+    for i, typed_tool in enumerate(typed_mcp_tools):
         tool_name = typed_tool.get("tool_name")
         if not isinstance(tool_name, str) or not tool_name.strip():
             raise TenantConfigChangeRequestLifecycleError(

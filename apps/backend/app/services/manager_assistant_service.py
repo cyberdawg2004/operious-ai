@@ -22,8 +22,9 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
+from app.agents.tools.approvals import ActionApprovalRepository
 from app.agents.governed.manager_assistant import (
     SAFE_QUERIES,
     ManagerAssistantAgent,
@@ -40,9 +41,28 @@ from app.observability.persistence.repository import OperationalObservabilityPer
 from app.session.persistence import SessionPersistenceProtocol, SessionQuery
 from app.tenant.persistence import TenantConfigurationRepository
 from app.tenant.persistence.models import TenantKnowledgeDocumentQuery
+from app.types.json import JsonArray, JsonValue
 
 logger = logging.getLogger(__name__)
 _VALID_MANAGER_QUERY_KEYS = frozenset(query.key for query in SAFE_QUERIES)
+
+
+def _contradiction_count(metadata: dict[str, Any] | None) -> int:
+    if metadata is None:
+        return 0
+    raw = metadata.get("contradiction_count", 0)
+    return raw if isinstance(raw, int) else 0
+
+
+def _contradiction_types(metadata: dict[str, Any] | None) -> JsonArray:
+    if metadata is None:
+        return []
+    raw = metadata.get("contradiction_types", [])
+    if not isinstance(raw, list):
+        return []
+    raw_values = cast(list[object], raw)
+    typed_values: JsonArray = [value for value in raw_values if isinstance(value, str)]
+    return typed_values
 
 
 # ── Result contract ───────────────────────────────────────────────────────────
@@ -76,7 +96,7 @@ class ManagerQueryRunner:
         observability_persistence: OperationalObservabilityPersistence,
         escalation_persistence: EscalationPersistenceProtocol,
         case_approval_persistence: CaseApprovalPersistenceProtocol,
-        action_approval_persistence: Any,  # ActionApprovalRepository
+        action_approval_persistence: ActionApprovalRepository,
         session_persistence: SessionPersistenceProtocol,
         tenant_config_repo: TenantConfigurationRepository,
     ) -> None:
@@ -233,7 +253,7 @@ class ManagerQueryRunner:
             limit=200,
             offset=0,
         )
-        count = len(items) if isinstance(items, (list, tuple)) else 0
+        count = len(items)
         return {
             "query": "pending_action_approvals",
             "pending_count": count,
@@ -330,6 +350,7 @@ class ManagerQueryRunner:
         }
 
     async def _sop_conflicts(self, *, tenant_id: str) -> dict[str, Any]:
+        conflicts: list[dict[str, JsonValue]]
         try:
             from app.tenant.enums import TenantKnowledgeReviewStatus
 
@@ -341,25 +362,19 @@ class ManagerQueryRunner:
                 ),
                 expected_tenant_id=tenant_id,
             )
-            conflicts = [
-                {
-                    "document_id": doc.document_id,
-                    "title": doc.title,
-                    "contradiction_count": (
-                        doc.contradiction_metadata.get("contradiction_count", 0)
-                        if doc.contradiction_metadata
-                        else 0
-                    ),
-                    "contradiction_types": (
-                        doc.contradiction_metadata.get("contradiction_types", [])
-                        if doc.contradiction_metadata
-                        else []
-                    ),
-                }
-                for doc in quarantined_page.items
-                if doc.contradiction_metadata
-                and doc.contradiction_metadata.get("contradiction_flagged")
-            ]
+            conflicts = []
+            for doc in quarantined_page.items:
+                metadata = doc.contradiction_metadata
+                if not metadata or not metadata.get("contradiction_flagged"):
+                    continue
+                conflicts.append(
+                    {
+                        "document_id": str(doc.document_id),
+                        "title": doc.title,
+                        "contradiction_count": _contradiction_count(metadata),
+                        "contradiction_types": _contradiction_types(metadata),
+                    }
+                )
         except Exception:
             logger.warning(
                 "manager_assistant_sop_conflicts_fetch_failed tenant=%s", tenant_id,

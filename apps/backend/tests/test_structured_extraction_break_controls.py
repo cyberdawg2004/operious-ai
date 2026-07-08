@@ -84,20 +84,33 @@ from app.runtime.warranty_refund_eligibility import (
     _parse_date,  # pyright: ignore[reportPrivateUsage]
 )
 from tests._png_text_renderer import render_text_png
-from tests.conftest import requires_postgres
+from tests.conftest import (
+    LIVE_EXTERNAL_TESTS_ENV,
+    live_external_tests_enabled,
+    requires_postgres,
+)
 
 pytestmark = [requires_postgres]
 
 requires_s3 = pytest.mark.skipif(
-    not os.environ.get("ATTACHMENTS_S3_BUCKET"),
-    reason="requires ATTACHMENTS_S3_BUCKET (+ region/credentials) for the real-S3 vision break-control.",
+    not (
+        live_external_tests_enabled()
+        and os.environ.get("ATTACHMENTS_S3_BUCKET")
+    ),
+    reason=(
+        f"requires {LIVE_EXTERNAL_TESTS_ENV}=1 and ATTACHMENTS_S3_BUCKET "
+        "(+ region/credentials) for the real-S3 vision break-control."
+    ),
 )
 requires_live_anthropic = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
+    not (
+        live_external_tests_enabled() and os.environ.get("ANTHROPIC_API_KEY")
+    ),
     reason=(
-        "requires ANTHROPIC_API_KEY for the live-model extraction break-controls — "
-        "the deterministic test client never looks at ticket content, so only a "
-        "real model call can prove extraction (and ambiguity-honesty) actually works."
+        f"requires {LIVE_EXTERNAL_TESTS_ENV}=1 and ANTHROPIC_API_KEY for "
+        "the live-model extraction break-controls — the deterministic "
+        "test client never looks at ticket content, so only a real model "
+        "call can prove extraction (and ambiguity-honesty) actually works."
     ),
 )
 

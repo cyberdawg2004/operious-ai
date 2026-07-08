@@ -16,16 +16,20 @@ import pytest
 
 from app.cognition.llm import AnthropicMessagesClient, DiagnosticLLMMessage
 from app.core.config import Settings
+from tests.conftest import LIVE_EXTERNAL_TESTS_ENV, live_external_tests_enabled
 
 # Confirmed retired via a direct Anthropic API call returning
 # {"type":"error","error":{"type":"not_found_error", ...}}.
 _RETIRED_MODEL_IDS = frozenset({"claude-sonnet-4-20250514"})
 
 requires_live_anthropic = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
+    not (
+        live_external_tests_enabled() and os.environ.get("ANTHROPIC_API_KEY")
+    ),
     reason=(
-        "requires ANTHROPIC_API_KEY to prove the code-level default model "
-        "id is actually live against the real Anthropic API."
+        f"requires {LIVE_EXTERNAL_TESTS_ENV}=1 and ANTHROPIC_API_KEY to "
+        "prove the code-level default model id is actually live against "
+        "the real Anthropic API."
     ),
 )
 

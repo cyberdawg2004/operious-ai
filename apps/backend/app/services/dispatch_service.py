@@ -853,7 +853,7 @@ def _extract_ingress_text(ingress: BoundaryIngressRecord) -> str:
     # WhatsApp text lives in nested canonical_payload
     nested = payload.get("canonical_payload")
     if isinstance(nested, dict):
-        nested_typed: dict[str, Any] = nested
+        nested_typed = cast(Mapping[str, Any], nested)
         for key in ("text", "message", "comment"):
             inner = nested_typed.get(key)
             if isinstance(inner, str) and inner.strip():

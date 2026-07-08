@@ -79,6 +79,10 @@ MCP_ARGS_HASH_METADATA_KEY = "mcp_args_hash"
 MCP_DESCRIPTION_SNAPSHOT_HASH_KEY = "mcp_description_snapshot_hash"
 
 
+def _empty_input_schema_snapshot() -> dict[str, Any]:
+    return {}
+
+
 class McpTransportError(RuntimeError):
     """MCP server unreachable, returned non-200, or response is not valid JSON-RPC."""
 
@@ -113,7 +117,9 @@ class McpToolDeclaration:
     commitment_kind: CommitmentKind
     execution_policy: ExecutionPolicy
     description_snapshot: str = ""
-    input_schema_snapshot: dict[str, Any] = field(default_factory=dict)
+    input_schema_snapshot: dict[str, Any] = field(
+        default_factory=_empty_input_schema_snapshot
+    )
     enabled: bool = True
 
     def description_snapshot_hash(self) -> str:

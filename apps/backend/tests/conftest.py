@@ -92,6 +92,7 @@ os.environ["RABBITMQ_MANAGEMENT_PASSWORD"] = ""
 
 
 TEST_DATABASE_URL_ENV = "TEST_DATABASE_URL"
+LIVE_EXTERNAL_TESTS_ENV = "ENABLE_LIVE_EXTERNAL_TESTS"
 """Env var holding the test Postgres DSN.
 
 Set this in CI / integration environments to a dedicated test
@@ -174,6 +175,11 @@ _MISSING_TEST_DATABASE_URL_REASON = (
 )
 _OWNER_DATABASE_USERNAME = "operious"
 _OWNER_DATABASE_PASSWORD = "operious"
+
+
+def live_external_tests_enabled() -> bool:
+    raw = os.environ.get(LIVE_EXTERNAL_TESTS_ENV, "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def database_url_skip_reason() -> str | None:
