@@ -51,7 +51,7 @@ async def fetch_mcp_tools(
         {
             "name": t.name,
             "description": t.description or "",
-            "inputSchema": t.inputSchema.model_dump() if t.inputSchema else {},
+            "inputSchema": dict(t.inputSchema),
         }
         for t in result.tools
     ]
@@ -77,7 +77,7 @@ async def invoke_mcp_tool(
     from app.core.http import create_isolated_http_client
     from app.core.ssrf import PinnedIPAsyncHTTPTransport
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     _transport = PinnedIPAsyncHTTPTransport(pinned_ip=validated.pinned_ip)
     _http_client = create_isolated_http_client(
@@ -85,11 +85,10 @@ async def invoke_mcp_tool(
         timeout_seconds=timeout,
         follow_redirects=False,
     )
-    extra_headers = auth_headers or {}
-    async with streamablehttp_client(
+    if auth_headers:
+        _http_client.headers.update(auth_headers)
+    async with streamable_http_client(
         server_url,
-        timeout=timeout,
-        headers=extra_headers,
         http_client=_http_client,
     ) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -97,13 +96,38 @@ async def invoke_mcp_tool(
             call_result = await session.call_tool(tool_name, arguments=arguments)
 
     content = call_result.content
-    if isinstance(content, list) and content:
+    if content:
         first = content[0]
-        if hasattr(first, "text"):
-            return {"result": first.text, "is_error": getattr(call_result, "isError", False)}
-        if hasattr(first, "data"):
-            return {"result": first.data, "is_error": getattr(call_result, "isError", False)}
-    return {"result": str(content), "is_error": getattr(call_result, "isError", False)}
+        return {
+            "result": _coerce_mcp_content_block(first),
+            "is_error": call_result.isError,
+        }
+    return {"result": str(content), "is_error": call_result.isError}
+
+
+def _coerce_mcp_content_block(content: Any) -> Any:
+    from mcp.types import (
+        AudioContent,
+        EmbeddedResource,
+        ImageContent,
+        ResourceLink,
+        TextContent,
+    )
+
+    if isinstance(content, TextContent):
+        return content.text
+    if isinstance(content, (ImageContent, AudioContent)):
+        return content.data
+    if isinstance(content, EmbeddedResource):
+        from mcp.types import TextResourceContents
+
+        resource = content.resource
+        if isinstance(resource, TextResourceContents):
+            return resource.text
+        return resource.blob
+    if isinstance(content, ResourceLink):
+        return content.model_dump(mode="json")
+    return str(content)
 
 
 def _get_mcp_session_classes() -> tuple[Any, Any]:
@@ -113,8 +137,9 @@ def _get_mcp_session_classes() -> tuple[Any, Any]:
     (e.g., for inline error handling) without importing mcp themselves.
     """
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
-    return ClientSession, streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
+
+    return ClientSession, streamable_http_client
 
 
 __all__ = ["fetch_mcp_tools", "invoke_mcp_tool", "_get_mcp_session_classes"]

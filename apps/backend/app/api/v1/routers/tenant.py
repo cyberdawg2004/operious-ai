@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Final
 
@@ -143,6 +144,8 @@ from app.api.v1.schemas.mcp import (
     McpOAuthStartRequest,
     McpOAuthStartResponse,
     McpServerRegisterRequest,
+    McpToolEntry,
+    McpToolInfo,
     McpToolManifestResponse,
     McpToolPreviewRequest,
 )
@@ -201,6 +204,23 @@ _DEFAULT_LIMIT = 25
 _OMS_CREDENTIAL_TOOL_NAMES: Final[frozenset[str]] = frozenset(
     {"refund.request", "warranty.claim", "replacement.order"}
 )
+
+
+def _serialize_mcp_tool_entries(
+    tools: Sequence[McpToolEntry],
+) -> list[dict[str, object]]:
+    return [tool.model_dump(mode="python") for tool in tools]
+
+
+def _build_mcp_tool_manifest(
+    *,
+    mcp_server_id: str,
+    tools: Sequence[Mapping[str, object]],
+) -> McpToolManifestResponse:
+    return McpToolManifestResponse(
+        mcp_server_id=mcp_server_id,
+        tools=[McpToolInfo.model_validate(tool) for tool in tools],
+    )
 
 
 @router.post(
@@ -1476,7 +1496,7 @@ async def preview_mcp_tools(
             },
         ) from exc
 
-    return McpToolManifestResponse(mcp_server_id="preview", tools=tools)
+    return _build_mcp_tool_manifest(mcp_server_id="preview", tools=tools)
 
 
 @router.post(
@@ -1504,6 +1524,7 @@ async def register_mcp_server(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "tenant_not_found"},
         )
+    mcp_tools_payload = _serialize_mcp_tool_entries(request.mcp_tools)
     try:
         record = await service.propose(
             tenant_id=expected_tenant_id,
@@ -1511,7 +1532,7 @@ async def register_mcp_server(
             payload={
                 "mcp_server_id": request.mcp_server_id,
                 "endpoint_url": request.endpoint_url,
-                "mcp_tools": request.mcp_tools,
+                "mcp_tools": mcp_tools_payload,
                 **({"oauth_config": request.oauth_config} if request.oauth_config else {}),
                 "timeout_seconds": request.timeout_seconds,
             },
@@ -1578,7 +1599,7 @@ async def list_mcp_server_tools(
             },
         ) from exc
 
-    return McpToolManifestResponse(mcp_server_id=mcp_server_id, tools=tools)
+    return _build_mcp_tool_manifest(mcp_server_id=mcp_server_id, tools=tools)
 
 
 @router.post(
@@ -1697,7 +1718,7 @@ async def mcp_oauth_callback(
     redis = get_redis_client()
     _secret = settings.MCP_OAUTH_STATE_SECRET
     # F18: use COMMAND_CENTER_BASE_URL so redirects work across environments.
-    _cc_base = settings.command_center_url
+    _cc_base = settings.command_center_base_url_normalized
 
     # Validate HMAC on the state token.
     state_token = params.state

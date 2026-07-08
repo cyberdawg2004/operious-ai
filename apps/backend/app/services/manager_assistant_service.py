@@ -27,7 +27,6 @@ from typing import Any
 from app.agents.governed.manager_assistant import (
     SAFE_QUERIES,
     ManagerAssistantAgent,
-    _VALID_QUERY_KEYS,
     cannot_answer_response,
 )
 from app.agents.governed.base import AgentInput
@@ -43,6 +42,7 @@ from app.tenant.persistence import TenantConfigurationRepository
 from app.tenant.persistence.models import TenantKnowledgeDocumentQuery
 
 logger = logging.getLogger(__name__)
+_VALID_MANAGER_QUERY_KEYS = frozenset(query.key for query in SAFE_QUERIES)
 
 
 # ── Result contract ───────────────────────────────────────────────────────────
@@ -385,7 +385,7 @@ class ManagerQueryRunner:
                     "escalation_id": r.escalation_id,
                     "reason": r.reason,
                     "priority": r.priority,
-                    "created_at": r.created_at.isoformat(),
+                    "created_at": r.created_at,
                 }
                 for r in page.items[:10]
             ],
@@ -501,7 +501,7 @@ class ManagerAssistantService:
         query_key = str(intent.get("query_key") or "")
         window_days = int(intent.get("window_days") or 7)
 
-        if cannot_answer or query_key not in _VALID_QUERY_KEYS:
+        if cannot_answer or query_key not in _VALID_MANAGER_QUERY_KEYS:
             resp = cannot_answer_response(question)
             return AssistantAnswer(
                 answer=resp["answer"],

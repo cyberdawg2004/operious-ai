@@ -259,6 +259,8 @@ from app.work_orders.persistence import PostgresWorkOrderRepository
 
 if TYPE_CHECKING:
     from app.services.batch_ingest_service import BatchIngestService
+    from app.services.inbox_service import InboxService
+    from app.services.manager_assistant_service import ManagerAssistantService
     from app.services.work_order_fulfillment_receipt_service import (
         WorkOrderFulfillmentReceiptService,
     )
@@ -450,7 +452,7 @@ def get_inbox_service(
     resolution_repo: PostgresResolutionProposalPersistence = Depends(
         get_resolution_proposal_repository
     ),
-) -> "InboxService":  # noqa: F821
+) -> InboxService:
     """Return the read-only inbox service for conversation thread views."""
     from app.services.inbox_service import InboxService
 
@@ -462,7 +464,7 @@ def get_inbox_service(
 
 def get_manager_assistant_service(
     session: AsyncSession = Depends(get_db_session),
-) -> "ManagerAssistantService":  # noqa: F821
+) -> ManagerAssistantService:
     """Return the Manager Assistant service for natural-language analytics queries."""
     from app.services.manager_assistant_service import (
         ManagerAssistantService,
@@ -475,17 +477,14 @@ def get_manager_assistant_service(
         session,
         data_protection=data_protection,
     )
-    try:
-        llm_client = build_llm_client(settings)
-    except Exception:
-        llm_client = None  # type: ignore[assignment]
+    llm_client = build_llm_client(settings)
 
     from app.agents.governed.manager_assistant import ManagerAssistantAgent
 
     agent = ManagerAssistantAgent(
         llm_client=llm_client,
         tenant_configuration_repository=tenant_config_repo,
-    ) if llm_client is not None else None  # type: ignore[assignment]
+    )
 
     runner = ManagerQueryRunner(
         observability_persistence=PostgresOperationalObservabilityPersistence(session),
@@ -498,7 +497,7 @@ def get_manager_assistant_service(
         ),
         tenant_config_repo=tenant_config_repo,
     )
-    return ManagerAssistantService(agent=agent, query_runner=runner)  # type: ignore[arg-type]
+    return ManagerAssistantService(agent=agent, query_runner=runner)
 
 
 def get_work_order_fulfillment_receipt_service(

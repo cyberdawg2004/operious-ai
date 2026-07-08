@@ -137,6 +137,38 @@ def _connector_payload(
     }
 
 
+def _mcp_server_payload() -> dict[str, Any]:
+    return {
+        "mcp_server_id": "gmail-mcp",
+        "endpoint_url": "https://mcp.example.com",
+        "mcp_tools": [
+            {
+                "tool_name": "gmail.send_email",
+                "commitment_kind": "none",
+                "execution_policy": "operious_approval",
+                "description_snapshot": "Send a governed email",
+                "input_schema_snapshot": {
+                    "type": "object",
+                    "properties": {"to": {"type": "string"}},
+                },
+                "enabled": True,
+            },
+            {
+                "tool_name": "gmail.read_thread",
+                "commitment_kind": "none",
+                "execution_policy": "auto_execute",
+                "description_snapshot": "Read a thread",
+                "input_schema_snapshot": {
+                    "type": "object",
+                    "properties": {"thread_id": {"type": "string"}},
+                },
+                "enabled": True,
+            },
+        ],
+        "timeout_seconds": 15.0,
+    }
+
+
 def _valid_action_tools_parameters() -> dict[str, Any]:
     return {
         "phase": "2.4",
@@ -734,6 +766,37 @@ async def test_connector_active_apply_requires_action_tools_policy(
             expected_tenant_id=tenant_id,
             applied_by="principal-b",
         )
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_proposal_persists_hashable_serialized_tools(
+    pg_session: AsyncSession,
+) -> None:
+    tenant_id = _tenant()
+    await set_pg_rls_tenant(pg_session, tenant_id)
+    service = _service(pg_session)
+    payload = _mcp_server_payload()
+
+    proposed = await service.propose(
+        tenant_id=tenant_id,
+        change_type=TenantConfigChangeType.MCP_SERVER,
+        payload=payload,
+        proposed_by="principal-a",
+    )
+    fetched = await PostgresTenantConfigChangeRequestRepository(pg_session).get(
+        proposed.change_request_id,
+        expected_tenant_id=tenant_id,
+    )
+
+    assert fetched is not None
+    assert fetched.proposed_payload["mcp_tools"] == payload["mcp_tools"]
+    assert canonical_sha256(fetched.proposed_payload)
+    assert proposed.change_request_id == derive_tenant_config_change_request_id(
+        tenant_id=tenant_id,
+        change_type=TenantConfigChangeType.MCP_SERVER,
+        proposed_payload=fetched.proposed_payload,
+        proposed_by="principal-a",
+    )
 
 
 @pytest.mark.asyncio

@@ -29,11 +29,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} h-full antialiased bg-canvas`}
-      suppressHydrationWarning
-    >
+    <html lang="en" className={`${inter.variable} h-full antialiased bg-canvas`}>
       <body className="min-h-full flex flex-col bg-canvas text-ink-primary font-sans">
         <Auth0Provider>
           <ThemeProvider>{children}</ThemeProvider>

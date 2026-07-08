@@ -41,6 +41,7 @@ from app.tenant.change_requests import (
     TenantConfigChangeRequestStatus,
     TenantConfigChangeType,
 )
+from app.tenant.chronology import canonical_sha256
 from app.tenant.enums import (
     TenantChannelStatus,
     TenantChannelType,
@@ -535,6 +536,24 @@ def test_read_only_operator_cannot_propose_connector_config(
     ]
 
 
+def test_connector_admin_can_register_mcp_server_with_serialized_tools(
+    domain_client: _Harness,
+) -> None:
+    response = domain_client.client.post(
+        f"/api/v1/tenant/{_TENANT_ID}/mcp/servers",
+        headers=_headers("connector"),
+        json=_mcp_server_payload(),
+    )
+
+    assert response.status_code == 201
+    proposed_payload = domain_client.change_service.records[-1].proposed_payload
+    assert proposed_payload["mcp_server_id"] == "gmail-mcp"
+    assert canonical_sha256(proposed_payload)
+    tool_entry = proposed_payload["mcp_tools"][0]
+    assert isinstance(tool_entry, dict)
+    assert tool_entry == _mcp_server_payload()["mcp_tools"][0]
+
+
 def test_config_approver_can_list_and_approve_without_write(
     domain_client: _Harness,
 ) -> None:
@@ -678,6 +697,27 @@ def _connector_payload() -> dict[str, Any]:
         "idempotency_header_name": "X-Idempotency-Key",
         "response_parse": {"provider_id": "refund.id"},
         "success_status_codes": [200, 201, 202],
+    }
+
+
+def _mcp_server_payload() -> dict[str, Any]:
+    return {
+        "mcp_server_id": "gmail-mcp",
+        "endpoint_url": "https://mcp.example.com",
+        "mcp_tools": [
+            {
+                "tool_name": "gmail.send_email",
+                "commitment_kind": "none",
+                "execution_policy": "operious_approval",
+                "description_snapshot": "Send a governed email",
+                "input_schema_snapshot": {
+                    "type": "object",
+                    "properties": {"to": {"type": "string"}},
+                },
+                "enabled": True,
+            }
+        ],
+        "timeout_seconds": 15.0,
     }
 
 

@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useUser } from "@auth0/nextjs-auth0/client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { dashboardRoutes } from "@/lib/dashboard-routes";
@@ -107,14 +106,9 @@ export function Sidebar({
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const { user, isLoading } = useUser();
 
-  const resolvedUserName =
-    !isLoading && user
-      ? user.name || user.email || user.nickname || "Authenticated operator"
-      : userName;
-  const resolvedUserRole =
-    !isLoading && user ? user.email || "Authenticated session" : userRole;
+  const resolvedUserName = userName;
+  const resolvedUserRole = userRole;
   const initials = resolvedUserName
     .split(" ")
     .map((part) => part[0])
@@ -128,18 +122,20 @@ export function Sidebar({
     window.localStorage.removeItem("operious_operator_label");
   };
 
-  const [intelligenceOpen, setIntelligenceOpen] = useState<boolean>(() => {
-    const stored = readLocalBool("Intelligence");
-    if (stored !== null) return stored;
-    // Auto-open if the current route lives in this group
-    return intelligenceItems.some((item) => item.href === (typeof window !== "undefined" ? window.location.pathname : ""));
-  });
+  const routeMatchesIntelligence = intelligenceItems.some((item) => item.href === pathname);
+  const routeMatchesSetup = setupItems.some((item) => item.href === pathname);
+  const [intelligenceOpen, setIntelligenceOpen] = useState<boolean>(routeMatchesIntelligence);
+  const [setupOpen, setSetupOpen] = useState<boolean>(routeMatchesSetup);
 
-  const [setupOpen, setSetupOpen] = useState<boolean>(() => {
+  useEffect(() => {
+    const stored = readLocalBool("Intelligence");
+    setIntelligenceOpen(stored ?? routeMatchesIntelligence);
+  }, [routeMatchesIntelligence]);
+
+  useEffect(() => {
     const stored = readLocalBool("Setup");
-    if (stored !== null) return stored;
-    return setupItems.some((item) => item.href === (typeof window !== "undefined" ? window.location.pathname : ""));
-  });
+    setSetupOpen(stored ?? routeMatchesSetup);
+  }, [routeMatchesSetup]);
 
   const toggleIntelligence = () => {
     const next = !intelligenceOpen;

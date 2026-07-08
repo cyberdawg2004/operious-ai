@@ -150,6 +150,16 @@ const viewMeta: Record<DashboardViewId, { eyebrow: string; title: string; descri
     title: "Settings",
     description: "Client runtime, tenant scope, principal scope, and operator context.",
   },
+  inbox: {
+    eyebrow: "Operations",
+    title: "Conversation Inbox",
+    description: "Incoming customer conversations awaiting operator review or assignment.",
+  },
+  assistant: {
+    eyebrow: "Intelligence",
+    title: "Ask the Assistant",
+    description: "Query the AI assistant for operational insights, summaries, and guided decisions.",
+  },
 };
 
 interface DashboardActions {
@@ -158,6 +168,12 @@ interface DashboardActions {
   openTrace: (value: string, mode?: TraceLookup["mode"]) => void;
   selectedTraceLookup: TraceLookup | null;
 }
+
+type BrowserAuthoritySnapshot = {
+  operatorLabel: string | null;
+  principalId: string | null;
+  tenantId: string | null;
+};
 
 const DashboardActionsContext = createContext<DashboardActions | null>(null);
 
@@ -175,6 +191,14 @@ function getActiveItem(pathname: string | null): DashboardViewId {
   return (match?.[0] as DashboardViewId | undefined) ?? "operations";
 }
 
+function readBrowserAuthoritySnapshot(): BrowserAuthoritySnapshot {
+  return {
+    operatorLabel: getConfiguredOperatorLabel(),
+    principalId: getConfiguredPrincipalId(),
+    tenantId: getConfiguredTenantId(),
+  };
+}
+
 export function DashboardShell({ children }: { children: ReactNode }) {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [selectedTraceLookup, setSelectedTraceLookup] = useState<TraceLookup | null>(null);
@@ -183,14 +207,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [approvalCount, setApprovalCount] = useState<number | null>(null);
   const [crisisActive, setCrisisActive] = useState(false);
   const [fraudActive, setFraudActive] = useState(false);
+  const [browserAuthority, setBrowserAuthority] = useState<BrowserAuthoritySnapshot>({
+    operatorLabel: null,
+    principalId: null,
+    tenantId: null,
+  });
   const router = useRouter();
   const pathname = usePathname();
   const activeItem = getActiveItem(pathname);
   const authSession = useAuthSession();
-  const operatorLabel = authSession.operatorLabel || getConfiguredOperatorLabel();
-  const principalId = authSession.principal?.principal_id ?? getConfiguredPrincipalId();
-  const tenantId = authSession.principal?.tenant_id ?? getConfiguredTenantId();
+  const operatorLabel =
+    authSession.operatorLabel ??
+    browserAuthority.operatorLabel ??
+    "Authenticated operator";
+  const principalId =
+    authSession.principal?.principal_id ??
+    browserAuthority.principalId;
+  const tenantId =
+    authSession.principal?.tenant_id ??
+    browserAuthority.tenantId;
   const activeMeta = viewMeta[activeItem] ?? viewMeta.operations;
+
+  useEffect(() => {
+    setBrowserAuthority(readBrowserAuthoritySnapshot());
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

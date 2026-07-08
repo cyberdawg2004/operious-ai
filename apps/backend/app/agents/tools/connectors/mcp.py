@@ -488,19 +488,6 @@ def _extract_host(url: str) -> str:
     return (parsed.hostname or "").lower()
 
 
-def _deterministic_call_id(
-    *,
-    tenant_id: str,
-    tool_name: str,
-    payload: dict[str, Any],
-) -> str:
-    material = json.dumps(
-        {"tenant_id": tenant_id, "tool_name": tool_name, "payload": payload},
-        sort_keys=True,
-    )
-    return hashlib.sha256(material.encode()).hexdigest()[:32]
-
-
 __all__ = [
     "McpConnectorTool",
     "McpCredentialRuntime",

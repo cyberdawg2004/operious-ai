@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.manager_assistant_service import AssistantAnswer
@@ -19,7 +21,7 @@ class ManagerAssistantResponse(BaseModel):
 
     answer: str
     chart_type: str
-    chart_data: dict = Field(default_factory=dict)
+    chart_data: dict[str, Any] = Field(default_factory=dict)
     query_key: str
     cannot_answer: bool
     invocation_id: str

@@ -1024,21 +1024,24 @@ class TenantConfigChangeRequestService:
             raise TenantConfigChangeRequestLifecycleError(
                 "mcp_server payload must include at least one tool declaration"
             )
+        typed_mcp_tools: list[dict[str, Any]] = []
         # Validate each tool entry has required fields.
         for i, tool in enumerate(mcp_tools_raw):
             if not isinstance(tool, dict):
                 raise TenantConfigChangeRequestLifecycleError(
                     f"mcp_tools[{i}] must be an object"
                 )
-            if not tool.get("tool_name"):
+            typed_tool = cast(dict[str, Any], tool)
+            typed_mcp_tools.append(typed_tool)
+            if not typed_tool.get("tool_name"):
                 raise TenantConfigChangeRequestLifecycleError(
                     f"mcp_tools[{i}].tool_name is required"
                 )
-            if not tool.get("commitment_kind"):
+            if not typed_tool.get("commitment_kind"):
                 raise TenantConfigChangeRequestLifecycleError(
                     f"mcp_tools[{i}].commitment_kind is required"
                 )
-            if not tool.get("execution_policy"):
+            if not typed_tool.get("execution_policy"):
                 raise TenantConfigChangeRequestLifecycleError(
                     f"mcp_tools[{i}].execution_policy is required "
                     "(auto_execute or operious_approval)"
@@ -1054,7 +1057,7 @@ class TenantConfigChangeRequestService:
 
         timeout_seconds = float(payload.get("timeout_seconds") or 15.0)
         field_mappings: dict[str, Any] = {
-            "mcp_tools": list(mcp_tools_raw),
+            "mcp_tools": list(typed_mcp_tools),
             "timeout_seconds": timeout_seconds,
         }
 
@@ -1079,7 +1082,7 @@ class TenantConfigChangeRequestService:
             "kind": "mcp_server",
             "operation": "configure",
             "mcp_server_id": mcp_server_id,
-            "tool_count": len(mcp_tools_raw),
+            "tool_count": len(typed_mcp_tools),
             "version": result.version,
             "content_sha256": result.content_sha256,
         }
@@ -1939,23 +1942,26 @@ def _validate_mcp_server_payload(payload: Mapping[str, Any]) -> None:
         raise TenantConfigChangeRequestLifecycleError(
             "mcp_server payload mcp_tools must be a non-empty list"
         )
+    typed_mcp_tools: list[dict[str, Any]] = []
     for i, tool in enumerate(mcp_tools):
         if not isinstance(tool, dict):
             raise TenantConfigChangeRequestLifecycleError(
                 f"mcp_tools[{i}] must be an object"
             )
-        tool_name = tool.get("tool_name")
+        typed_tool = cast(dict[str, Any], tool)
+        typed_mcp_tools.append(typed_tool)
+        tool_name = typed_tool.get("tool_name")
         if not isinstance(tool_name, str) or not tool_name.strip():
             raise TenantConfigChangeRequestLifecycleError(
                 f"mcp_tools[{i}].tool_name is required and must be a non-empty string"
             )
-        commitment_kind = str(tool.get("commitment_kind") or "").lower()
+        commitment_kind = str(typed_tool.get("commitment_kind") or "").lower()
         if commitment_kind not in _VALID_COMMITMENT_KINDS:
             raise TenantConfigChangeRequestLifecycleError(
                 f"mcp_tools[{i}].commitment_kind {commitment_kind!r} is not valid; "
                 f"must be one of: {', '.join(sorted(_VALID_COMMITMENT_KINDS))}"
             )
-        execution_policy = str(tool.get("execution_policy") or "").lower()
+        execution_policy = str(typed_tool.get("execution_policy") or "").lower()
         if execution_policy not in _VALID_EXECUTION_POLICIES:
             raise TenantConfigChangeRequestLifecycleError(
                 f"mcp_tools[{i}].execution_policy {execution_policy!r} is not valid; "

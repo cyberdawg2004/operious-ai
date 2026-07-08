@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect } from "react";
 import {
-  getConfiguredOperatorLabel,
   readCurrentPrincipal,
   type AuthPrincipal,
 } from "@/lib/api";
@@ -13,7 +12,7 @@ export type AuthSessionState = {
   error: string | null;
   isLoading: boolean;
   reload: () => void;
-  operatorLabel: string;
+  operatorLabel: string | null;
 };
 
 export function useAuthSession(): AuthSessionState {
@@ -34,6 +33,6 @@ export function useAuthSession(): AuthSessionState {
     error,
     isLoading,
     reload,
-    operatorLabel: data?.principal_id ?? getConfiguredOperatorLabel(),
+    operatorLabel: data?.principal_id ?? null,
   };
 }

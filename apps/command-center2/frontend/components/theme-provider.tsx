@@ -12,7 +12,7 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-function getInitialTheme(): Theme {
+function resolveBrowserTheme(): Theme {
   if (typeof window === "undefined") return "dark";
   const stored = window.localStorage.getItem("operious-theme");
   if (stored === "dark" || stored === "light") return stored;
@@ -22,7 +22,11 @@ function getInitialTheme(): Theme {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
+  const [theme, setThemeState] = useState<Theme>("dark");
+
+  useEffect(() => {
+    setThemeState(resolveBrowserTheme());
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
