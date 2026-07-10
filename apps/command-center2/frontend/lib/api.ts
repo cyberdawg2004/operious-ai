@@ -887,6 +887,18 @@ function errorMessage(status: number, payload: ApiErrorPayload | null): string {
     if (code === "conversation_governance_denied") {
       return "This message could not be sent right now.";
     }
+    if (code === "escalation_not_found") {
+      return "This escalation could not be found.";
+    }
+    if (code === "escalation_not_resolvable") {
+      return "This escalation was already resolved or can no longer be changed.";
+    }
+    if (code === "escalation_approval_failed") {
+      return "The override could not be recorded.";
+    }
+    if (code === "escalation_rejection_failed") {
+      return "The denial could not be upheld.";
+    }
   }
   if (typeof detail === "string" && detail.trim()) {
     return detail;

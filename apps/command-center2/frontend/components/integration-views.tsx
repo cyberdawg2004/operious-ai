@@ -39,6 +39,7 @@ import {
   PendingIntegrationState,
 } from "@/components/data-state";
 import { GovernedNotice, ProposedNotice } from "@/components/connector-config-views";
+import { TechnicalDetails } from "@/components/technical-details";
 
 type RecordListProps<T> = {
   eyebrow: string;
@@ -1057,43 +1058,68 @@ function ChannelForm({
     ? CHANNEL_TYPE_OPTIONS
     : [channelType, ...CHANNEL_TYPE_OPTIONS];
 
+  const essentialFields = credentialFields.filter((field) => field.required);
+  const advancedFields = credentialFields.filter((field) => !field.required);
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <h2 className="font-display text-[24px] font-semibold text-ink-primary">
         {channel ? "Edit Channel" : "New Channel"}
       </h2>
       {error && <FormError message={error} />}
-      <label className="block">
-        <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
-          Channel type
-        </span>
-        <select
-          name="channel_type"
-          value={channelType}
-          disabled={Boolean(channel)}
-          onChange={(event) => {
-            setChannelType(event.target.value);
-            setCredentialValues({});
-          }}
-          className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
-        >
-          {channelTypeOptions.map((option) => (
-            <option key={option} value={option}>
-              {CHANNEL_TYPE_LABELS[option] ?? formatLabel(option)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <TextInput name="routing_address" label="Routing address" defaultValue={channel?.routing_address ?? ""} required />
+
+      {/* Step 1: Choose the channel type */}
+      <div>
+        <label className="block">
+          <span className="mb-1 block font-mono text-[11px] uppercase tracking-[0.12em] text-ink-tertiary">
+            Channel type
+          </span>
+          <select
+            name="channel_type"
+            value={channelType}
+            disabled={Boolean(channel)}
+            onChange={(event) => {
+              setChannelType(event.target.value);
+              setCredentialValues({});
+            }}
+            className="h-11 w-full rounded border border-border-subtle bg-surface-raised px-3 text-[14px] text-ink-primary focus:outline-none focus:border-gold-primary disabled:opacity-60 sm:h-10"
+          >
+            {channelTypeOptions.map((option) => (
+              <option key={option} value={option}>
+                {CHANNEL_TYPE_LABELS[option] ?? formatLabel(option)}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-tertiary">
+            The type of messaging platform or helpdesk system you want to connect.
+          </p>
+        </label>
+      </div>
+
+      {/* Step 2: Address */}
+      <div>
+        <TextInput
+          name="routing_address"
+          label="Routing address"
+          defaultValue={channel?.routing_address ?? ""}
+          required
+        />
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-tertiary">
+          The email address, phone number, or identifier that messages will arrive on. Found in your channel provider's settings.
+        </p>
+      </div>
+
       <SelectInput
         name="status"
         label="Status"
         defaultValue={channel?.status ?? "pending_validation"}
         options={["draft", "pending_validation", "validation_failed", "disabled"]}
       />
+
+      {/* Step 3: Connect it — required credentials */}
       {channel && (
         <div className="rounded border border-border-subtle bg-surface-raised px-3 py-2 text-[13px] text-ink-secondary">
-          Credentials are set. Enter new values to rotate.
+          Credentials are set. Enter new values to rotate them.
         </div>
       )}
       {usesGenericCredentials ? (
@@ -1111,26 +1137,61 @@ function ChannelForm({
           />
         </label>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <>
           <input type="hidden" name="credentials" value={credentialJson} />
-          {credentialFields.map((field) => (
-            <CredentialInput
-              key={field.key}
-              field={field}
-              value={credentialValues[field.key] ?? ""}
-              isEditMode={Boolean(channel)}
-              required={field.required && requiresCredentialSet}
-              onChange={(value) =>
-                setCredentialValues((previous) => ({
-                  ...previous,
-                  [field.key]: value,
-                }))
-              }
-            />
-          ))}
-        </div>
+          {essentialFields.length > 0 && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {essentialFields.map((field) => (
+                <CredentialInput
+                  key={field.key}
+                  field={field}
+                  value={credentialValues[field.key] ?? ""}
+                  isEditMode={Boolean(channel)}
+                  required={field.required && requiresCredentialSet}
+                  onChange={(value) =>
+                    setCredentialValues((previous) => ({
+                      ...previous,
+                      [field.key]: value,
+                    }))
+                  }
+                />
+              ))}
+            </div>
+          )}
+          {advancedFields.length > 0 && (
+            <TechnicalDetails label="Advanced settings" openLabel="Hide advanced settings">
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                {advancedFields.map((field) => (
+                  <CredentialInput
+                    key={field.key}
+                    field={field}
+                    value={credentialValues[field.key] ?? ""}
+                    isEditMode={Boolean(channel)}
+                    required={false}
+                    onChange={(value) =>
+                      setCredentialValues((previous) => ({
+                        ...previous,
+                        [field.key]: value,
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+            </TechnicalDetails>
+          )}
+        </>
       )}
-      <TextInput name="webhook_secret" label="Webhook secret" type="password" required={!channel} />
+
+      {/* Webhook secret — advanced */}
+      <TechnicalDetails label="Webhook security settings" openLabel="Hide webhook security settings">
+        <div className="mt-3">
+          <TextInput name="webhook_secret" label="Webhook secret" type="password" required={!channel} />
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-tertiary">
+            A secret token used to verify that incoming messages really came from your channel provider. Provided by the channel provider — found in their developer or webhook settings.
+          </p>
+        </div>
+      </TechnicalDetails>
+
       <SubmitButton isSubmitting={isSubmitting} label={channel ? "Save channel" : "Create channel"} />
     </form>
   );

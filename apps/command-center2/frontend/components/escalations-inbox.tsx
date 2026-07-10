@@ -55,6 +55,9 @@ export function EscalationsInbox({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [resolvedEscalationIds, setResolvedEscalationIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
 
   const load = useCallback(
     () => listEscalations({ status: "pending", limit: 50, offset: 0 }),
@@ -63,13 +66,15 @@ export function EscalationsInbox({
   const { data, error, isLoading, reload } = useApiResource(load);
   const escalations = useMemo(
     () =>
-      [...(data?.items ?? [])].sort((left, right) => {
-        if (left.priority !== right.priority) {
-          return left.priority === "high" ? -1 : 1;
-        }
-        return Date.parse(left.created_at) - Date.parse(right.created_at);
-      }),
-    [data]
+      [...(data?.items ?? [])]
+        .filter((item) => !resolvedEscalationIds.has(item.escalation_id))
+        .sort((left, right) => {
+          if (left.priority !== right.priority) {
+            return left.priority === "high" ? -1 : 1;
+          }
+          return Date.parse(left.created_at) - Date.parse(right.created_at);
+        }),
+    [data, resolvedEscalationIds]
   );
 
   useEffect(() => {
@@ -101,6 +106,7 @@ export function EscalationsInbox({
 
   const runResolution = async () => {
     if (!selectedId || !confirmMode) return;
+    const resolvingId = selectedId;
     if (selected && !isDenyOverrideEligible(selected)) {
       setActionError("This handoff is read-only in the DENY override workflow.");
       return;
@@ -110,13 +116,23 @@ export function EscalationsInbox({
     try {
       if (confirmMode === "approve") {
         await approveEscalation(
-          selectedId,
+          resolvingId,
           note.trim() || "Human override: governance DENY approved by operator."
         );
-        setNotice("Escalation approved — human-override ALLOW recorded.");
+        setResolvedEscalationIds((current) => {
+          const next = new Set(current);
+          next.add(resolvingId);
+          return next;
+        });
+        setNotice("Escalation approved and removed from the pending queue.");
       } else {
-        await rejectEscalation(selectedId, note.trim());
-        setNotice("Escalation rejected — denial lineage preserved.");
+        await rejectEscalation(resolvingId, note.trim());
+        setResolvedEscalationIds((current) => {
+          const next = new Set(current);
+          next.add(resolvingId);
+          return next;
+        });
+        setNotice("Escalation rejected and removed from the pending queue.");
       }
       closeDetail();
       reload();
@@ -383,25 +399,31 @@ function DetailPanel({
               operator holds tenant.actions.approve. Without it, the panel is
               read-only evidence. */}
           {canResolve && confirmMode === null && (
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => onBeginConfirm("approve")}
-                disabled={busy}
-                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-green-success px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-white disabled:opacity-60"
-              >
-                <Check className="h-4 w-4" strokeWidth={1.8} />
-                Override DENY
-              </button>
-              <button
-                type="button"
-                onClick={() => onBeginConfirm("reject")}
-                disabled={busy}
-                className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-red-alert bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-red-alert transition-colors hover:bg-surface-raised disabled:opacity-50"
-              >
-                <X className="h-4 w-4" strokeWidth={1.8} />
-                Uphold DENY
-              </button>
+            <div className="space-y-3">
+              <p className="text-[12px] leading-relaxed text-ink-secondary">
+                Choose a path below. The next step asks you to confirm before
+                any state changes are recorded.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => onBeginConfirm("approve")}
+                  disabled={busy}
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-green-success px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-white disabled:opacity-60"
+                >
+                  <Check className="h-4 w-4" strokeWidth={1.8} />
+                  Review override
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onBeginConfirm("reject")}
+                  disabled={busy}
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-red-alert bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-red-alert transition-colors hover:bg-surface-raised disabled:opacity-50"
+                >
+                  <X className="h-4 w-4" strokeWidth={1.8} />
+                  Review denial
+                </button>
+              </div>
             </div>
           )}
 
@@ -441,7 +463,7 @@ function DetailPanel({
                   className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-green-success px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-white disabled:opacity-60"
                 >
                   <Check className="h-4 w-4" strokeWidth={1.8} />
-                  Confirm override
+                  Override DENY now
                 </button>
                 <button
                   type="button"
@@ -476,17 +498,24 @@ function DetailPanel({
                 id="escalation-reject-reason"
                 value={note}
                 onChange={(event) => onNoteChange(event.target.value)}
+                placeholder="Enter a reason to enable the confirm button…"
                 className="mt-2 min-h-[72px] w-full resize-y rounded-md border border-border-subtle bg-surface px-3 py-2 text-[13px] text-ink-primary outline-none transition-colors focus:border-red-alert"
               />
+              {!note.trim() && (
+                <p className="mt-1 text-[11px] text-ink-tertiary">
+                  A rejection reason is required before you can confirm.
+                </p>
+              )}
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
                   onClick={onConfirm}
                   disabled={rejectDisabled}
-                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-red-alert bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-red-alert transition-colors hover:bg-surface-raised disabled:opacity-50"
+                  title={!note.trim() ? "Enter a rejection reason above to enable this button" : undefined}
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-red-alert bg-surface px-4 text-[13px] font-semibold uppercase tracking-[0.08em] text-red-alert transition-colors hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <X className="h-4 w-4" strokeWidth={1.8} />
-                  Confirm reject
+                  Uphold DENY now
                 </button>
                 <button
                   type="button"

@@ -708,14 +708,16 @@ function AddCustomConnectorForm({
 
       {error && <FormError message={error} />}
 
-      <Fieldset legend="Identity">
+      {/* Step 1: Name it */}
+      <Fieldset legend="1. Name it">
         <Text
-          label="Tool name (e.g. account.freeze)"
+          label="Action name (e.g. account.freeze)"
           name="tool_name"
           value={toolName}
           onChange={setToolName}
           placeholder="account.freeze"
           required
+          helpText="A short internal name for what this connection does — use dot notation like 'account.freeze' or 'order.cancel'."
         />
         <Select
           label="Connector type"
@@ -723,56 +725,68 @@ function AddCustomConnectorForm({
           value={connectorType}
           options={[...CONNECTOR_TYPE_OPTIONS]}
           onChange={setConnectorType}
+          helpText="What kind of system you're connecting to. Use 'oms' for order-management systems; 'record' for general APIs."
         />
       </Fieldset>
 
-      <Fieldset legend="Destination">
-        <Select
-          label="Request type"
-          name="http_method"
-          value={httpMethod}
-          options={[...HTTP_METHOD_OPTIONS]}
-          onChange={setHttpMethod}
-        />
+      {/* Step 2: Connect it */}
+      <Fieldset legend="2. Connect it">
         <Text
           label="Destination address"
           name="endpoint_template"
           value={endpointTemplate}
           onChange={setEndpointTemplate}
-          placeholder="https://api.tenant.example/accounts/freeze"
+          placeholder="https://api.yourplatform.com/accounts/freeze"
           required
+          helpText="The web address your system gave you for this action — usually found in their API or developer settings."
         />
-        <Field label="Destination website" value={endpointPreview} />
-        <Text
-          label="Repeat-send safeguard"
-          name="idempotency_header_name"
-          value={idempotencyHeader}
-          onChange={setIdempotencyHeader}
-          required
-        />
-        <Text
-          label="Success response codes"
-          name="success_status_codes"
-          value={successStatusCodes}
-          onChange={setSuccessStatusCodes}
-          placeholder="200, 201, 202"
-          required
-        />
+        <Field label="Destination website" value={endpointPreview} helpText="Parsed from the address above. Confirms the domain Operious will contact." />
       </Fieldset>
 
-      <Fieldset legend="Field mappings">
-        <p className="text-[13px] text-ink-secondary">
-          Match Operious details to the field names used by the other system.
-        </p>
-        <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
-      </Fieldset>
-
-      <Fieldset legend="Response parsing">
-        <p className="text-[13px] text-ink-secondary">
-          Choose which fields tell Operious whether the action worked and what reference number to keep.
-        </p>
-        <MappingEditor rows={responseParse} onChange={setResponseParse} />
-      </Fieldset>
+      {/* Advanced settings */}
+      <TechnicalDetails label="Advanced settings" openLabel="Hide advanced settings">
+        <div className="mt-3 space-y-4">
+          <Fieldset legend="Request details">
+            <Select
+              label="Request type"
+              name="http_method"
+              value={httpMethod}
+              options={[...HTTP_METHOD_OPTIONS]}
+              onChange={setHttpMethod}
+              helpText="How Operious sends data to the destination. POST is standard for creating records; GET for lookups."
+            />
+            <Text
+              label="Repeat-send safeguard"
+              name="idempotency_header_name"
+              value={idempotencyHeader}
+              onChange={setIdempotencyHeader}
+              required
+              helpText="A header name that prevents Operious from accidentally sending the same action twice. Default 'Idempotency-Key' works for most systems."
+            />
+            <Text
+              label="Success response codes"
+              name="success_status_codes"
+              value={successStatusCodes}
+              onChange={setSuccessStatusCodes}
+              placeholder="200, 201, 202"
+              required
+              helpText="The numeric codes the other system sends back when an action succeeds. Ask the system's support team if you're unsure."
+            />
+          </Fieldset>
+          <Fieldset legend="Field mappings">
+            <p className="text-[13px] text-ink-secondary">
+              Match Operious field names to the names used by the other system. Leave blank if the names already match.
+            </p>
+            <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
+          </Fieldset>
+          <Fieldset legend="Response parsing">
+            <p className="text-[13px] text-ink-secondary">
+              Tell Operious which fields in the system's response confirm success and which field contains the reference number to keep.
+            </p>
+            <MappingEditor rows={responseParse} onChange={setResponseParse} />
+          </Fieldset>
+        </div>
+      </TechnicalDetails>
 
       <Submit isSubmitting={isSubmitting} label="Request connected system" />
     </form>
@@ -1224,71 +1238,91 @@ function ConnectorProposeForm({
 
       {error && <FormError message={error} />}
 
-      <Fieldset legend="Identity">
-        <Field label="Tool name" value={tool.toolName} />
+      {/* Step 1: Name it */}
+      <Fieldset legend="1. Name it">
+        <Field
+          label="Tool name"
+          value={tool.toolName}
+          helpText="The internal action this connector handles (set when the tool was created, not editable here)."
+        />
         <Select
           label="Connector type"
           name="connector_type"
           value={connectorType}
           options={[...CONNECTOR_TYPE_OPTIONS]}
           onChange={setConnectorType}
+          helpText="What kind of system you're connecting to. Use 'oms' for order-management systems; 'record' for general APIs."
         />
       </Fieldset>
 
-      <Fieldset legend="Destination">
-        <Select
-          label="Request type"
-          name="http_method"
-          value={httpMethod}
-          options={[...HTTP_METHOD_OPTIONS]}
-          onChange={setHttpMethod}
-        />
+      {/* Step 2: Connect it */}
+      <Fieldset legend="2. Connect it">
         <Text
           label="Destination address"
           name="endpoint_template"
           value={endpointTemplate}
           onChange={setEndpointTemplate}
-          placeholder="https://api.tenant.example/remedies/refunds"
+          placeholder="https://api.yourplatform.com/actions/refunds"
           required
+          helpText="The web address your system gave you for this action — usually found in their API or developer settings."
         />
-        <Field label="Destination website" value={endpointPreview} />
-        <Text
-          label="Repeat-send safeguard"
-          name="idempotency_header_name"
-          value={idempotencyHeader}
-          onChange={setIdempotencyHeader}
-          required
-        />
-        <Text
-          label="Success response codes"
-          name="success_status_codes"
-          value={successStatusCodes}
-          onChange={setSuccessStatusCodes}
-          placeholder="200, 201, 202"
-          required
-        />
+        <Field label="Destination website" value={endpointPreview} helpText="Parsed from the address above. Confirms the domain Operious will contact." />
         <Select
           label="Connection status"
           name="status"
           value={status}
           options={[...CONNECTOR_STATUS_OPTIONS]}
           onChange={setStatus}
+          helpText="Set to Active once you've verified the address above is correct and you're ready for live use."
         />
       </Fieldset>
 
-      <Fieldset legend="Field mappings">
-        <p className="text-[13px] text-ink-secondary">
-          Match Operious details to the field names used by the other system.
-        </p>
-        <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
-      </Fieldset>
+      {/* Advanced settings (collapsed by default) */}
+      <TechnicalDetails label="Advanced settings" openLabel="Hide advanced settings">
+        <div className="mt-3 space-y-4">
+          <Fieldset legend="Request details">
+            <Select
+              label="Request type"
+              name="http_method"
+              value={httpMethod}
+              options={[...HTTP_METHOD_OPTIONS]}
+              onChange={setHttpMethod}
+              helpText="How Operious sends data to the destination. POST is standard for creating records; GET for lookups."
+            />
+            <Text
+              label="Repeat-send safeguard"
+              name="idempotency_header_name"
+              value={idempotencyHeader}
+              onChange={setIdempotencyHeader}
+              required
+              helpText="A header name that prevents Operious from accidentally sending the same action twice. Default 'Idempotency-Key' works for most systems."
+            />
+            <Text
+              label="Success response codes"
+              name="success_status_codes"
+              value={successStatusCodes}
+              onChange={setSuccessStatusCodes}
+              placeholder="200, 201, 202"
+              required
+              helpText="The numeric codes the other system sends back when an action succeeds. Ask the system's support team if you're unsure."
+            />
+          </Fieldset>
 
-      <Fieldset legend="Response parsing">
-        <p className="text-[13px] text-ink-secondary">
-          Choose which fields tell Operious whether the action worked and what reference number to keep.
-        </p>
-        <MappingEditor rows={responseParse} onChange={setResponseParse} />
-      </Fieldset>
+          <Fieldset legend="Field mappings">
+            <p className="text-[13px] text-ink-secondary">
+              Match Operious field names to the names used by the other system. Leave blank if the names already match.
+            </p>
+            <MappingEditor rows={fieldMappings} onChange={setFieldMappings} />
+          </Fieldset>
+
+          <Fieldset legend="Response parsing">
+            <p className="text-[13px] text-ink-secondary">
+              Tell Operious which fields in the system's response confirm success and which field contains the reference number to keep.
+            </p>
+            <MappingEditor rows={responseParse} onChange={setResponseParse} />
+          </Fieldset>
+        </div>
+      </TechnicalDetails>
 
       <Submit isSubmitting={isSubmitting} label="Propose config change" />
     </form>
@@ -1743,7 +1777,7 @@ function GateBadge({ label, active }: { label: string; active: boolean }) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, helpText }: { label: string; value: string; helpText?: string }) {
   return (
     <div>
       <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-tertiary">
@@ -1752,6 +1786,9 @@ function Field({ label, value }: { label: string; value: string }) {
       <div className="mt-1 break-words text-[13px] leading-relaxed text-ink-secondary">
         {value || "—"}
       </div>
+      {helpText && (
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-tertiary">{helpText}</p>
+      )}
     </div>
   );
 }
@@ -1796,6 +1833,7 @@ function Text({
   onChange,
   placeholder,
   required = false,
+  helpText,
 }: {
   label: string;
   name: string;
@@ -1805,6 +1843,7 @@ function Text({
   onChange?: (value: string) => void;
   placeholder?: string;
   required?: boolean;
+  helpText?: string;
 }) {
   return (
     <label className="block">
@@ -1822,6 +1861,9 @@ function Text({
         required={required}
         className="h-11 w-full rounded border border-border-subtle bg-surface px-3 text-[14px] text-ink-primary focus:border-gold-primary focus:outline-none sm:h-10"
       />
+      {helpText && (
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-tertiary">{helpText}</p>
+      )}
     </label>
   );
 }
@@ -1861,6 +1903,7 @@ function Select({
   defaultValue,
   options,
   onChange,
+  helpText,
 }: {
   label: string;
   name: string;
@@ -1868,6 +1911,7 @@ function Select({
   defaultValue?: string;
   options: string[];
   onChange?: (value: string) => void;
+  helpText?: string;
 }) {
   return (
     <label className="block">
@@ -1887,6 +1931,9 @@ function Select({
           </option>
         ))}
       </select>
+      {helpText && (
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-tertiary">{helpText}</p>
+      )}
     </label>
   );
 }

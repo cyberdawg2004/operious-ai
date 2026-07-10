@@ -600,12 +600,18 @@ def _conversation_id(
     in_reply_to: str | None,
     references: str | None,
 ) -> str:
-    if in_reply_to:
-        return in_reply_to
+    # WHY: the References header starts with the thread root (RFC 5322 §3.6.4).
+    # Using the root anchors every reply in the chain to the same external_handle
+    # as the original inbound message, so CaseContinuityRuntime.evaluate() finds
+    # the existing session.  in_reply_to points to the most-recent message (the
+    # agent's outbound reply), which is NOT in the session table, so using it as
+    # the primary anchor breaks continuity on every customer follow-up.
     if references:
         parts = references.split()
         if parts:
-            return parts[-1]
+            return parts[0]
+    if in_reply_to:
+        return in_reply_to
     return message_id
 
 

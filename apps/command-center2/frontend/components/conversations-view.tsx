@@ -270,12 +270,16 @@ function ConversationThread({ session }: { session: SessionRecord }) {
     <section className="cc-panel-tight flex min-h-[520px] min-w-0 flex-col overflow-hidden">
       <div className="flex h-12 items-center justify-between gap-3 border-b border-border-subtle px-4">
         <div className="min-w-0">
-          <div className="text-[11px] uppercase text-ink-tertiary">Live customer conversation</div>
+          <div className="text-[11px] uppercase text-ink-tertiary">
+            {operatorMode ? "Operator takeover — your team is replying" : "Live customer conversation"}
+          </div>
           <div className="truncate text-[13px] font-semibold text-ink-primary">
             {session.external_handle || "Customer conversation"}
           </div>
           <div className="text-[11px] text-ink-tertiary">
-            Step in here when you want your team to reply directly to the customer.
+            {operatorMode
+              ? "Messages you send go directly to the customer. AI replies shown here go to the customer, not to you."
+              : "Step in here when you want your team to reply directly to the customer."}
           </div>
         </div>
         <span className="shrink-0 rounded border border-border-subtle px-2 py-1 text-[11px] uppercase text-ink-secondary">
@@ -297,9 +301,9 @@ function ConversationThread({ session }: { session: SessionRecord }) {
         ) : (
           <div className="space-y-3">
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble key={message.id} message={message} showAiDestinationLabel={operatorMode} />
             ))}
-            {status === "processing" && <TypingIndicator />}
+            {status === "processing" && !operatorMode && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
         )}
@@ -353,7 +357,7 @@ function ConversationThread({ session }: { session: SessionRecord }) {
   );
 }
 
-function MessageBubble({ message }: { message: ThreadMessage }) {
+function MessageBubble({ message, showAiDestinationLabel }: { message: ThreadMessage; showAiDestinationLabel?: boolean }) {
   const assistant = message.role === "assistant";
   const operator = message.role === "operator";
   return (
@@ -373,6 +377,11 @@ function MessageBubble({ message }: { message: ThreadMessage }) {
               : "border-blue-system/25 bg-blue-system/10 text-ink-primary"
         )}
       >
+        {assistant && showAiDestinationLabel && (
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-gold-primary">
+            AI reply → sent to customer
+          </div>
+        )}
         {operator && (
           <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-700">
             Sent by your team
