@@ -1016,6 +1016,17 @@ def get_escalation_service(
                 session,
                 data_protection=data_protection,
             ),
+            resolution_persistence=PostgresResolutionProposalPersistence(
+                session,
+                data_protection=data_protection,
+            ),
+            coordination_persistence=PostgresCoordinationPersistence(
+                session,
+                data_protection=data_protection,
+            ),
+            outbound_send_outbox_persistence=PostgresOutboundSendOutboxPersistence(
+                session
+            ),
         ),
         session=session,
     )

@@ -12,7 +12,7 @@ outbound_send_outbox row.
 Denied/unclassified path: a ticket whose diagnostic category falls outside
 the tenant's configured taxonomy is clamped to "unclassified" (FIX4
 defense-in-depth), never becomes send-eligible, produces a no-send draft, and
-yields no outbound_send_outbox row (governance_miss handoff).
+yields no outbound_send_outbox row with an explicit require_approval hold.
 """
 
 from __future__ import annotations
@@ -592,7 +592,7 @@ async def test_critical_path_unclassified_category_never_reaches_outbound_outbox
 
     assert result.outbox is None
     assert result.reason is not None
-    assert result.reason.code == "governance_miss"
+    assert result.reason.code == "require_approval"
 
     page = await outbox_persistence.list_outbound_send_outbox(
         OutboundSendOutboxQuery(tenant_id=TENANT_ID, proposal_id=proposal.proposal_id)

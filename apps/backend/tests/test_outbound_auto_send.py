@@ -251,6 +251,25 @@ async def test_non_exact_or_non_allow_governance_returns_terminal_refusal_reason
 
 
 @pytest.mark.asyncio
+async def test_pending_human_approval_returns_explicit_require_approval_reason() -> (
+    None
+):
+    service, _ = await _service()
+
+    result = await service.request_auto_send(
+        draft=_draft(status=ResolutionOutboundDraftStatus.PENDING_HUMAN_APPROVAL),
+        proposal=_proposal(status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL),
+        target=_target(),
+        expected_tenant_id=TENANT_ID,
+        created_at=NOW,
+    )
+
+    assert result.outbox is None
+    assert result.reason is not None
+    assert result.reason.code == "require_approval"
+
+
+@pytest.mark.asyncio
 async def test_governance_denied_proposal_surfaces_upstream_reason_not_lineage_miss() -> None:
     """A DENIED proposal must return proposal_governance_denied (not governance_miss).
 
@@ -541,7 +560,10 @@ async def _runtime_with_intent(
     )
 
 
-def _proposal() -> ResolutionProposalRecord:
+def _proposal(
+    *,
+    status: ResolutionProposalStatus = ResolutionProposalStatus.SEND_ELIGIBLE,
+) -> ResolutionProposalRecord:
     return ResolutionProposalRecord(
         proposal_id=as_resolution_proposal_id(PROPOSAL_ID),
         tenant_id=TENANT_ID,
@@ -555,7 +577,7 @@ def _proposal() -> ResolutionProposalRecord:
         supervisor_verdict=ResolutionSupervisorVerdict.PASS,
         governance_verdict=ResolutionGovernanceVerdict.ALLOW,
         autonomy_decision=ResolutionAutonomyDecision.AUTO_APPROVED,
-        status=ResolutionProposalStatus.SEND_ELIGIBLE,
+        status=status,
         created_at=NOW,
         updated_at=NOW,
         governance_decision_id=DECISION_ID,
@@ -565,7 +587,10 @@ def _proposal() -> ResolutionProposalRecord:
     )
 
 
-def _draft() -> ResolutionOutboundDraftRecord:
+def _draft(
+    *,
+    status: ResolutionOutboundDraftStatus = ResolutionOutboundDraftStatus.READY,
+) -> ResolutionOutboundDraftRecord:
     return ResolutionOutboundDraftRecord(
         draft_id=as_resolution_outbound_draft_id(DRAFT_ID),
         tenant_id=TENANT_ID,
@@ -575,7 +600,7 @@ def _draft() -> ResolutionOutboundDraftRecord:
         dispatch_id=DISPATCH_ID,
         diagnostic_event_id=None,
         governance_decision_id=DECISION_ID,
-        status=ResolutionOutboundDraftStatus.READY,
+        status=status,
         draft_body=REPLY,
         draft_body_sha256=_sha256(REPLY),
         resolution_category="technical_support",

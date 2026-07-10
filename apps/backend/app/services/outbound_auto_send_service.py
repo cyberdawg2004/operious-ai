@@ -131,7 +131,16 @@ class OutboundAutoSendService:
                     governance_repository=self._governance_repository,
                     draft=draft,
                     tenant_id=tenant_id,
-                ),
+                    ),
+            )
+        non_sendable_reason = _non_sendable_reason(
+            draft=draft,
+            proposal=proposal,
+        )
+        if non_sendable_reason is not None:
+            return OutboundAutoSendRequestResult(
+                outbox=None,
+                reason=non_sendable_reason,
             )
         if not _draft_and_proposal_are_exact(
             draft=draft,
@@ -285,6 +294,30 @@ def _draft_and_proposal_are_exact(
             proposal_id=proposal.proposal_id,
         )
     )
+
+
+def _non_sendable_reason(
+    *,
+    draft: ResolutionOutboundDraftRecord,
+    proposal: ResolutionProposalRecord,
+) -> OutboundAutoSendRefusalReason | None:
+    if (
+        proposal.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+        or draft.status is ResolutionOutboundDraftStatus.PENDING_HUMAN_APPROVAL
+    ):
+        return OutboundAutoSendRefusalReason(
+            code="require_approval",
+            message="governed auto-send is waiting for human approval",
+        )
+    if (
+        proposal.status is ResolutionProposalStatus.FAILED
+        or draft.status is ResolutionOutboundDraftStatus.FAILED
+    ):
+        return OutboundAutoSendRefusalReason(
+            code="delivery_unavailable",
+            message="governed auto-send cannot proceed from a failed draft",
+        )
+    return None
 
 
 def _decision_is_exact_send_allow(

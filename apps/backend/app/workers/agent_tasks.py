@@ -859,6 +859,7 @@ async def _load_diagnostic_reasoning_snapshot(
                     worker_id=worker_id,
                     source_language=work_item.source_language,
                     attachment_ids=work_item.attachment_ids,
+                    conversation_history=work_item.conversation_history,
                 )
                 circuit_snapshot = await ProviderCircuitBreaker(
                     session=session,

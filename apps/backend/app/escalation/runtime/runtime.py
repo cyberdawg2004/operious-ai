@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 
+from app.boundary.outbound import outbound_reply_context_from_dispatch_body
+from app.boundary.outbound.send_outbox import (
+    OutboundSendOutboxPersistenceProtocol,
+)
+from app.coordination.persistence import CoordinationPersistenceProtocol
 from app.escalation.enums import (
     EscalationHandoffKind,
     EscalationOutboxStatus,
@@ -41,11 +48,29 @@ from app.governance.persistence import (
     GovernanceTraceRecord,
     PolicyEvaluationResultRecord,
 )
+from app.resolution.enums import (
+    ResolutionOutboundDraftStatus,
+    ResolutionProposalStatus,
+)
+from app.resolution.persistence import (
+    ResolutionOutboundDraftQuery,
+    ResolutionOutboundDraftRecord,
+    ResolutionProposalPersistenceProtocol,
+    ResolutionProposalRecord,
+)
 from app.session.contracts.requests import AppendEventRequest
 from app.session.enums import SessionContinuityMode, SessionEventKind
 from app.session.identity import as_session_id
 from app.session.persistence import SessionPersistenceProtocol
 from app.session.runtime import SessionRuntime
+from app.services.outbound_auto_send_service import (
+    COMMUNICATION_SUBJECT_KIND,
+    CUSTOMER_REPLY_SEND_ACTION,
+    SUPPORTED_AUTO_SEND_CHANNELS,
+    OutboundAutoSendService,
+    OutboundSendTarget,
+    canonical_reply_for_governance,
+)
 
 _SESSION_METADATA_KEYS = (
     "session_id",
@@ -57,6 +82,16 @@ _OVERRIDE_POLICY_CHAIN_ID = "escalation.manager_override"
 _OVERRIDE_POLICY_NAME = "escalation.human_approval"
 _OVERRIDE_RULE_ID = "manager_override"
 _OVERRIDE_HANDLER = "human_manager_override"
+_DELIVERY_AUTHORIZATION_NAMESPACE = uuid.UUID(
+    "fd3f1f07-9b61-4d43-93fa-31e881a4cf75"
+)
+_DELIVERY_AUTHORIZATION_CHAIN_ID = (
+    "escalation.override_delivery_authorization.v1"
+)
+_DELIVERY_AUTHORIZATION_POLICY_VERSION = (
+    "escalation.override_delivery_authorization.v1"
+)
+_DELIVERY_AUTHORIZATION_REASON = "escalation_override_delivery_authorized"
 _logger = logging.getLogger(__name__)
 
 
@@ -99,10 +134,17 @@ class EscalationAgentRuntime:
         escalation_persistence: EscalationPersistenceProtocol,
         governance_repository: BaseGovernanceRepository,
         session_persistence: SessionPersistenceProtocol,
+        resolution_persistence: ResolutionProposalPersistenceProtocol | None = None,
+        coordination_persistence: CoordinationPersistenceProtocol | None = None,
+        outbound_send_outbox_persistence: OutboundSendOutboxPersistenceProtocol
+        | None = None,
     ) -> None:
         self._escalations = escalation_persistence
         self._governance = governance_repository
         self._sessions = session_persistence
+        self._resolutions = resolution_persistence
+        self._coordination = coordination_persistence
+        self._outbound_send_outbox = outbound_send_outbox_persistence
 
     async def create_for_governance_denial(
         self,
@@ -645,6 +687,14 @@ class EscalationAgentRuntime:
             resolution=resolution,
             resolved_by=resolved_by,
         )
+        release_metadata = await self._release_resolution_after_override(
+            record=record,
+            denied=denied,
+            override_decision_id=override_decision_id,
+            resolution=resolution,
+            resolved_by=resolved_by,
+            expected_tenant_id=expected_tenant_id,
+        )
         now = datetime.now(timezone.utc)
         updated = replace(
             record,
@@ -659,6 +709,7 @@ class EscalationAgentRuntime:
                 "resolved_by": resolved_by,
                 "resolved_at": now.isoformat(),
                 "resolution": resolution,
+                **release_metadata,
             },
         )
         await self._escalations.update_escalation(
@@ -861,6 +912,263 @@ class EscalationAgentRuntime:
         await self._governance.record_enforcement_action(action_record)
         return override_decision_id
 
+    async def _release_resolution_after_override(
+        self,
+        *,
+        record: EscalationRecord,
+        denied: GovernanceDecisionRecord,
+        override_decision_id: str,
+        resolution: str,
+        resolved_by: str,
+        expected_tenant_id: str,
+    ) -> dict[str, Any]:
+        proposal_id = _resolution_proposal_id_from_decision(denied)
+        if proposal_id is None:
+            return {}
+        if (
+            self._resolutions is None
+            or self._coordination is None
+            or self._outbound_send_outbox is None
+        ):
+            raise EscalationRuntimeError(
+                "resolution override release dependencies are unavailable"
+            )
+        proposal = await self._resolutions.get_resolution_proposal(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if proposal is None:
+            raise EscalationRuntimeError(
+                "resolution proposal for override is missing"
+            )
+        draft = await _resolution_draft_for_proposal(
+            persistence=self._resolutions,
+            proposal_id=proposal_id,
+            tenant_id=expected_tenant_id,
+        )
+        if draft is None:
+            raise EscalationRuntimeError(
+                "resolution draft for override is missing"
+            )
+        target = await self._derive_outbound_send_target(
+            proposal=proposal,
+            expected_tenant_id=expected_tenant_id,
+        )
+        delivery_decision_id = await self._record_delivery_authorization_decision(
+            record=record,
+            denied=denied,
+            override_decision_id=override_decision_id,
+            proposal=proposal,
+            draft=draft,
+            target=target,
+            resolution=resolution,
+            resolved_by=resolved_by,
+        )
+        released_proposal = await self._resolutions.update_resolution_proposal_status(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+            status=ResolutionProposalStatus.SEND_ELIGIBLE,
+            governance_decision_id=delivery_decision_id,
+        )
+        released_draft = await self._resolutions.update_resolution_outbound_draft_status_for_proposal(
+            proposal_id,
+            expected_tenant_id=expected_tenant_id,
+            status=ResolutionOutboundDraftStatus.READY,
+            governance_decision_id=delivery_decision_id,
+        )
+        if released_draft is None:
+            raise EscalationRuntimeError(
+                "resolution draft for override could not be updated"
+            )
+        auto_send = await OutboundAutoSendService(
+            governance_repository=self._governance,
+            outbox_persistence=self._outbound_send_outbox,
+        ).request_auto_send(
+            draft=released_draft,
+            proposal=released_proposal,
+            target=target,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if auto_send.reason is not None or auto_send.outbox is None:
+            reason = (
+                "unknown release failure"
+                if auto_send.reason is None
+                else f"{auto_send.reason.code}: {auto_send.reason.message}"
+            )
+            raise EscalationRuntimeError(
+                f"override release failed: {reason}"
+            )
+        return {
+            "released_resolution_proposal_id": str(released_proposal.proposal_id),
+            "released_resolution_draft_id": str(released_draft.draft_id),
+            "released_delivery_governance_decision_id": str(
+                delivery_decision_id
+            ),
+            "released_outbound_send_outbox_id": str(auto_send.outbox.outbox_id),
+        }
+
+    async def _derive_outbound_send_target(
+        self,
+        *,
+        proposal: ResolutionProposalRecord,
+        expected_tenant_id: str,
+    ) -> OutboundSendTarget:
+        assert self._coordination is not None
+        dispatch_id = proposal.dispatch_id
+        if not dispatch_id:
+            raise EscalationRuntimeError(
+                "resolution override release requires dispatch lineage"
+            )
+        dispatch = await self._coordination.get_envelope(
+            dispatch_id,
+            expected_tenant_id=expected_tenant_id,
+        )
+        if dispatch is None:
+            raise EscalationRuntimeError(
+                "resolution override release dispatch is unavailable"
+            )
+        reply_context = outbound_reply_context_from_dispatch_body(
+            dispatch.payload_body
+        )
+        if (
+            reply_context.source_channel not in SUPPORTED_AUTO_SEND_CHANNELS
+            or reply_context.recipient is None
+            or reply_context.thread_context is None
+        ):
+            raise EscalationRuntimeError(
+                "resolution override release target is unavailable"
+            )
+        target_metadata: dict[str, Any] = {}
+        if reply_context.phone_number_id is not None:
+            target_metadata["phone_number_id"] = reply_context.phone_number_id
+        if reply_context.recipient_display_name is not None:
+            target_metadata["recipient_display_name"] = (
+                reply_context.recipient_display_name
+            )
+        return OutboundSendTarget(
+            channel=reply_context.source_channel,
+            recipient=reply_context.recipient,
+            source=reply_context.source,
+            subject=reply_context.subject,
+            thread_context=reply_context.thread_context,
+            in_reply_to_message_id=reply_context.in_reply_to_message_id,
+            references_header=reply_context.references_header,
+            metadata=target_metadata,
+        )
+
+    async def _record_delivery_authorization_decision(
+        self,
+        *,
+        record: EscalationRecord,
+        denied: GovernanceDecisionRecord,
+        override_decision_id: str,
+        proposal: ResolutionProposalRecord,
+        draft: ResolutionOutboundDraftRecord,
+        target: OutboundSendTarget,
+        resolution: str,
+        resolved_by: str,
+    ) -> uuid.UUID:
+        decision_id = str(
+            uuid.uuid5(
+                _DELIVERY_AUTHORIZATION_NAMESPACE,
+                f"{record.tenant_id}|{proposal.proposal_id}|"
+                f"{_DELIVERY_AUTHORIZATION_CHAIN_ID}",
+            )
+        )
+        existing = await self._governance.get_decision(
+            decision_id,
+            expected_tenant_id=record.tenant_id,
+        )
+        if existing is not None:
+            return uuid.UUID(decision_id)
+        now = datetime.now(timezone.utc)
+        metadata: dict[str, Any] = {
+            "escalation_id": record.escalation_id,
+            "source_governance_decision_id": denied.decision_id,
+            "governance_override_decision_id": override_decision_id,
+            "proposal_id": str(proposal.proposal_id),
+            "draft_id": str(draft.draft_id),
+            "session_id": draft.session_id,
+            "execution_id": draft.execution_id,
+            "dispatch_id": draft.dispatch_id,
+            "source_channel": target.channel,
+            "reply_recipient": target.recipient,
+            "reply_thread_context": target.thread_context,
+            "proposed_reply_sha256": hashlib.sha256(
+                canonical_reply_for_governance(draft).encode("utf-8")
+            ).hexdigest(),
+            "governed_action": CUSTOMER_REPLY_SEND_ACTION,
+            "actor": resolved_by,
+            "resolution": resolution,
+        }
+        rule = PolicyEvaluationResultRecord(
+            policy_name=_DELIVERY_AUTHORIZATION_CHAIN_ID,
+            rule_id=_DELIVERY_AUTHORIZATION_REASON,
+            decision=Decision.ALLOW.value,
+            severity=10,
+            reason=_DELIVERY_AUTHORIZATION_REASON,
+            evaluated_at=now.isoformat(),
+            metadata=metadata,
+            policy_version=_DELIVERY_AUTHORIZATION_POLICY_VERSION,
+        )
+        decision_record = GovernanceDecisionRecord(
+            decision_id=decision_id,
+            decision=Decision.ALLOW.value,
+            stage=denied.stage,
+            policy_chain_id=_DELIVERY_AUTHORIZATION_CHAIN_ID,
+            reason=_DELIVERY_AUTHORIZATION_REASON,
+            decided_at=now.isoformat(),
+            correlation_id=denied.correlation_id,
+            request_id=f"resolution:{proposal.proposal_id}",
+            tenant_id=record.tenant_id,
+            subject_kind=COMMUNICATION_SUBJECT_KIND,
+            governance_version=_DELIVERY_AUTHORIZATION_POLICY_VERSION,
+            evaluated_rules=(rule,),
+            metadata=metadata,
+        )
+        trace_record = GovernanceTraceRecord(
+            decision_id=decision_id,
+            request_id=decision_record.request_id,
+            correlation_id=decision_record.correlation_id,
+            stage=decision_record.stage,
+            action="resolution.customer_reply.send",
+            resource=f"resolution_proposal:{proposal.proposal_id}",
+            actor=resolved_by,
+            tenant_id=record.tenant_id,
+            subject_kind=COMMUNICATION_SUBJECT_KIND,
+            started_at=now.isoformat(),
+            ended_at=now.isoformat(),
+            latency_ms=0.0,
+            status="ok",
+            final_decision=Decision.ALLOW.value,
+            policy_chain_id=_DELIVERY_AUTHORIZATION_CHAIN_ID,
+            rule_count=1,
+            violation_count=0,
+            restriction_count=0,
+            enforcement_handler="escalation_override_release",
+            enforcement_status="recorded",
+            enforcement_latency_ms=0.0,
+            metadata=metadata,
+        )
+        action_record = EnforcementActionRecord(
+            action_id=str(
+                uuid.uuid5(
+                    _DELIVERY_AUTHORIZATION_NAMESPACE,
+                    f"action|{proposal.proposal_id}|{decision_id}",
+                )
+            ),
+            handler_name="escalation_override_release",
+            decision_id=decision_id,
+            outcome="recorded",
+            applied_at=now.isoformat(),
+            detail=_DELIVERY_AUTHORIZATION_REASON,
+            metadata=metadata,
+        )
+        await self._governance.record_decision(decision_record)
+        await self._governance.record_trace(trace_record)
+        await self._governance.record_enforcement_action(action_record)
+        return uuid.UUID(decision_id)
+
 
 def _session_id_from_metadata(metadata: Mapping[str, Any]) -> str | None:
     for key in _SESSION_METADATA_KEYS:
@@ -995,6 +1303,35 @@ def _handoff_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
             cast(Mapping[str, Any], grounding_trace)
         )
     return extracted
+
+
+def _resolution_proposal_id_from_decision(
+    decision: GovernanceDecisionRecord,
+) -> str | None:
+    proposal_id = decision.metadata.get("proposal_id")
+    if proposal_id is not None:
+        text = str(proposal_id).strip()
+        if text:
+            return text
+    request_id = (decision.request_id or "").strip()
+    if request_id.startswith("resolution:"):
+        candidate = request_id.removeprefix("resolution:").strip()
+        if candidate:
+            return candidate
+    return None
+
+
+async def _resolution_draft_for_proposal(
+    *,
+    persistence: ResolutionProposalPersistenceProtocol,
+    proposal_id: str,
+    tenant_id: str,
+) -> ResolutionOutboundDraftRecord | None:
+    page = await persistence.list_resolution_outbound_drafts(
+        query=ResolutionOutboundDraftQuery(proposal_id=proposal_id, limit=1),
+        expected_tenant_id=tenant_id,
+    )
+    return page.items[0] if page.items else None
 
 
 def _ensure_resolvable(record: EscalationRecord) -> None:

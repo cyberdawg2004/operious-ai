@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import uuid
 from datetime import datetime, timezone
@@ -9,6 +10,15 @@ from pathlib import Path
 
 import pytest
 
+from app.boundary.outbound.send_outbox import (
+    InMemoryOutboundSendOutboxPersistence,
+    OutboundSendOutboxQuery,
+    OutboundSendOutboxStatus,
+)
+from app.coordination.persistence import (
+    CoordinationRecord,
+    InMemoryCoordinationPersistence,
+)
 from app.escalation import (
     EscalationAgentRuntime,
     EscalationHandoffKind,
@@ -20,11 +30,29 @@ from app.escalation import (
     derive_escalation_id,
     derive_escalation_override_decision_id,
 )
+from app.governance.enums import Decision
 from app.governance.persistence import (
     DecisionQuery,
     GovernanceDecisionRecord,
     InMemoryGovernanceRepository,
     PolicyEvaluationResultRecord,
+)
+from app.resolution.enums import (
+    ResolutionAutonomyDecision,
+    ResolutionGovernanceVerdict,
+    ResolutionOutboundDraftStatus,
+    ResolutionProposalStatus,
+    ResolutionSupervisorVerdict,
+)
+from app.resolution.identity import (
+    as_resolution_proposal_id,
+    derive_resolution_outbound_draft_id,
+)
+from app.resolution.persistence import InMemoryResolutionProposalPersistence
+from app.resolution.persistence.models import ResolutionOutboundDraftQuery
+from app.resolution.persistence.records import (
+    ResolutionOutboundDraftRecord,
+    ResolutionProposalRecord,
 )
 from app.session.enums import SessionEventKind, SessionLifecyclePhase, SessionScope
 from app.session.identity import (
@@ -45,6 +73,13 @@ _ALLOW_ID = "00000000-0000-0000-0000-000000003c03"
 _ESCALATE_ID = "00000000-0000-0000-0000-000000003c04"
 _CRISIS_DENY_ID = "00000000-0000-0000-0000-000000003c05"
 _NOW = datetime(2026, 5, 22, 10, tzinfo=timezone.utc)
+_PROPOSAL_ID = "00000000-0000-0000-0000-000000003c11"
+_DISPATCH_ID = "00000000-0000-0000-0000-000000003c12"
+_EXECUTION_ID = "00000000-0000-0000-0000-000000003c13"
+_RECIPIENT = "customer@example.com"
+_SUBJECT = "Re: Warranty request"
+_THREAD = "<thread-override@example.com>"
+_REPLY = "Please share your order number so we can verify the next step."
 
 
 def _session(*, tenant_id: str = _TENANT) -> SessionRecord:
@@ -75,8 +110,26 @@ def _decision(
     decision: str = "deny",
     tenant_id: str = _TENANT,
     session_id: str | None = _SESSION_ID,
+    include_resolution_metadata: bool = False,
 ) -> GovernanceDecisionRecord:
     metadata = {"session_id": session_id} if session_id is not None else {}
+    if include_resolution_metadata:
+        metadata = {
+            **metadata,
+            "proposal_id": _PROPOSAL_ID,
+            "draft_id": str(
+                derive_resolution_outbound_draft_id(
+                    tenant_id=_TENANT,
+                    proposal_id=_PROPOSAL_ID,
+                )
+            ),
+            "source_channel": "email",
+            "reply_recipient": _RECIPIENT,
+            "reply_thread_context": _THREAD,
+            "session_id": _SESSION_ID,
+            "execution_id": _EXECUTION_ID,
+            "dispatch_id": _DISPATCH_ID,
+        }
     return GovernanceDecisionRecord(
         decision_id=decision_id,
         decision=decision,
@@ -85,7 +138,11 @@ def _decision(
         reason="deny: policy.fixture",
         decided_at=_NOW.isoformat(),
         correlation_id="corr-3c",
-        request_id="req-3c",
+        request_id=(
+            f"resolution:{_PROPOSAL_ID}"
+            if include_resolution_metadata
+            else "req-3c"
+        ),
         tenant_id=tenant_id,
         subject_kind="communication",
         metadata=metadata,
@@ -200,6 +257,129 @@ async def _runtime() -> tuple[
         escalations,
         governance,
         sessions,
+    )
+
+
+async def _runtime_with_resolution_release() -> tuple[
+    EscalationAgentRuntime,
+    InMemoryEscalationPersistence,
+    InMemoryGovernanceRepository,
+    InMemoryResolutionProposalPersistence,
+    InMemoryOutboundSendOutboxPersistence,
+]:
+    escalations = InMemoryEscalationPersistence()
+    governance = InMemoryGovernanceRepository()
+    sessions = InMemorySessionPersistence()
+    resolutions = InMemoryResolutionProposalPersistence()
+    outbox = InMemoryOutboundSendOutboxPersistence()
+    coordination = InMemoryCoordinationPersistence()
+    await sessions.save_session(_session())
+    await governance.record_decision(
+        _decision(include_resolution_metadata=True)
+    )
+    proposal_id = as_resolution_proposal_id(_PROPOSAL_ID)
+    draft_id = derive_resolution_outbound_draft_id(
+        tenant_id=_TENANT,
+        proposal_id=proposal_id,
+    )
+    await resolutions.create_resolution_proposal(
+        ResolutionProposalRecord(
+            proposal_id=proposal_id,
+            tenant_id=_TENANT,
+            session_id=_SESSION_ID,
+            execution_id=_EXECUTION_ID,
+            dispatch_id=_DISPATCH_ID,
+            diagnostic_event_id=None,
+            proposed_customer_reply=_REPLY,
+            source_language="en",
+            resolution_category="warranty_replacement_inquiry",
+            confidence=0.82,
+            recommended_actions=(),
+            evidence=({"rank": 1, "source": "manual"},),
+            supervisor_verdict=ResolutionSupervisorVerdict.FAIL,
+            governance_verdict=ResolutionGovernanceVerdict.DENY,
+            autonomy_decision=ResolutionAutonomyDecision.DENIED,
+            status=ResolutionProposalStatus.DENIED,
+            created_at=_NOW,
+            updated_at=_NOW,
+            governance_decision_id=uuid.UUID(_DENY_ID),
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    await resolutions.create_resolution_outbound_draft(
+        ResolutionOutboundDraftRecord(
+            draft_id=draft_id,
+            tenant_id=_TENANT,
+            proposal_id=proposal_id,
+            session_id=_SESSION_ID,
+            execution_id=_EXECUTION_ID,
+            dispatch_id=_DISPATCH_ID,
+            diagnostic_event_id=None,
+            governance_decision_id=uuid.UUID(_DENY_ID),
+            status=ResolutionOutboundDraftStatus.DENIED,
+            draft_body=_REPLY,
+            draft_body_sha256=hashlib.sha256(
+                _REPLY.encode("utf-8")
+            ).hexdigest(),
+            metadata={"canonical_reply": _REPLY, "localized_reply": _REPLY},
+            resolution_category="warranty_replacement_inquiry",
+            confidence=0.82,
+            created_at=_NOW,
+            updated_at=_NOW,
+        ),
+        expected_tenant_id=_TENANT,
+    )
+    await coordination.record_envelope(
+        CoordinationRecord(
+            coordination_id=_DISPATCH_ID,
+            message_id="msg-inbound-override",
+            sender_id="support@example.com",
+            recipient_id="agent:diagnostic",
+            recipient_kind="agent",
+            direction="inbound",
+            message_type="ticket",
+            priority=5,
+            status="dispatched",
+            sequence=1,
+            runtime_instance_id=str(uuid.uuid4()),
+            correlation_id=_DISPATCH_ID,
+            parent_coordination_id=None,
+            parent_message_id=None,
+            in_reply_to=None,
+            request_id=_DISPATCH_ID,
+            tenant_id=_TENANT,
+            governance_decision_id=None,
+            governance_chain_id=None,
+            payload_content_type="application/json",
+            payload_schema_version="1",
+            payload_body={
+                "canonical_payload": {
+                    "channel": "email",
+                    "from": _RECIPIENT,
+                    "to": "support@example.com",
+                    "subject": _SUBJECT,
+                    "message_id": "msg-inbound-override",
+                    "conversation_id": _THREAD,
+                }
+            },
+            created_at=_NOW.isoformat(),
+            dispatched_at=_NOW.isoformat(),
+            tenant_authority_source="test",
+        )
+    )
+    return (
+        EscalationAgentRuntime(
+            escalation_persistence=escalations,
+            governance_repository=governance,
+            session_persistence=sessions,
+            resolution_persistence=resolutions,
+            coordination_persistence=coordination,
+            outbound_send_outbox_persistence=outbox,
+        ),
+        escalations,
+        governance,
+        resolutions,
+        outbox,
     )
 
 
@@ -470,6 +650,56 @@ async def test_manager_approval_creates_governance_override_provenance() -> None
     )
     assert len(actions) == 1
     assert actions[0].handler_name == "human_manager_override"
+
+
+@pytest.mark.asyncio
+async def test_manager_approval_releases_denied_resolution_to_outbound_send() -> None:
+    runtime, _escalations, governance, resolutions, outbox = (
+        await _runtime_with_resolution_release()
+    )
+    record = await runtime.create_for_governance_denial(
+        governance_decision_id=_DENY_ID,
+        expected_tenant_id=_TENANT,
+    )
+
+    approved = await runtime.approve_escalation(
+        escalation_id=record.escalation_id,
+        expected_tenant_id=_TENANT,
+        resolution="manager approves this reply",
+        resolved_by="principal-manager",
+    )
+
+    proposal = await resolutions.get_resolution_proposal(
+        _PROPOSAL_ID,
+        expected_tenant_id=_TENANT,
+    )
+    assert proposal is not None
+    assert proposal.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert proposal.governance_decision_id is not None
+    assert (
+        approved.metadata["released_resolution_proposal_id"] == _PROPOSAL_ID
+    )
+    draft_page = await resolutions.list_resolution_outbound_drafts(
+        query=ResolutionOutboundDraftQuery(proposal_id=_PROPOSAL_ID, limit=1),
+        expected_tenant_id=_TENANT,
+    )
+    assert draft_page.items
+    draft = draft_page.items[0]
+    assert draft.status is ResolutionOutboundDraftStatus.READY
+    assert draft.governance_decision_id == proposal.governance_decision_id
+    delivery_allow = await governance.get_decision(
+        str(proposal.governance_decision_id),
+        expected_tenant_id=_TENANT,
+    )
+    assert delivery_allow is not None
+    assert delivery_allow.decision == Decision.ALLOW.value
+    assert delivery_allow.metadata["proposal_id"] == _PROPOSAL_ID
+    page = await outbox.list_outbound_send_outbox(
+        OutboundSendOutboxQuery(tenant_id=_TENANT, proposal_id=proposal.proposal_id)
+    )
+    assert page.total == 1
+    assert page.records[0].status is OutboundSendOutboxStatus.PENDING
+    assert page.records[0].recipient == _RECIPIENT
 
 
 @pytest.mark.asyncio

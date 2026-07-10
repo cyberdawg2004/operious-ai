@@ -9,6 +9,7 @@ import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from pydantic import ValidationError
@@ -295,6 +296,7 @@ class DiagnosticCognitionRuntime:
         worker_id: str | None = None,
         source_language: str = "en",
         attachment_ids: tuple[str, ...] = (),
+        conversation_history: Sequence[Mapping[str, Any]] = (),
     ) -> DiagnosticReasoningResult:
         snapshot = await self.load_reasoning_snapshot(
             tenant_id=tenant_id,
@@ -307,6 +309,7 @@ class DiagnosticCognitionRuntime:
             worker_id=worker_id,
             source_language=source_language,
             attachment_ids=attachment_ids,
+            conversation_history=conversation_history,
         )
         try:
             completion = await self.complete_reasoning_snapshot(snapshot)
@@ -340,10 +343,14 @@ class DiagnosticCognitionRuntime:
         worker_id: str | None = None,
         source_language: str = "en",
         attachment_ids: tuple[str, ...] = (),
+        conversation_history: Sequence[Mapping[str, Any]] = (),
     ) -> DiagnosticReasoningSnapshot:
         retrieval = await self._knowledge_runtime.retrieve(
             tenant_id=tenant_id,
-            query=content,
+            query=_knowledge_query(
+                content=content,
+                conversation_history=conversation_history,
+            ),
             top_k=self._config.context_top_k,
             max_tokens=self._config.context_token_budget,
         )
@@ -359,6 +366,7 @@ class DiagnosticCognitionRuntime:
             content=content,
             retrieval=retrieval,
             taxonomy=resolved_taxonomy,
+            conversation_history=conversation_history,
         )
         usage_id = derive_llm_usage_id(
             tenant_id=tenant_id,
@@ -1763,13 +1771,17 @@ def _render_user_prompt(
     content: str,
     retrieval: KnowledgeRetrievalResult,
     taxonomy: ResolutionTaxonomyPolicy,
+    conversation_history: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     category_values = ", ".join(_category_values(taxonomy))
+    history_text = _conversation_history_prompt(conversation_history)
     return "\n\n".join(
         (
             f"tenant_id: {tenant_id}",
             f"dispatch_id: {dispatch_id}",
             f"session_id: {session_id}",
+            "recent_conversation_history:",
+            history_text,
             "ticket:",
             content,
             "tenant_sop_citations:",
@@ -1787,6 +1799,38 @@ def _render_user_prompt(
             _build_extraction_instruction(taxonomy),
         )
     )
+
+
+def _knowledge_query(
+    *,
+    content: str,
+    conversation_history: Sequence[Mapping[str, Any]],
+) -> str:
+    history = _conversation_history_prompt(conversation_history)
+    if history == "(no prior conversation history)":
+        return content
+    return "\n".join(
+        (
+            content,
+            "Recent conversation context:",
+            history,
+        )
+    )
+
+
+def _conversation_history_prompt(
+    conversation_history: Sequence[Mapping[str, Any]],
+) -> str:
+    if not conversation_history:
+        return "(no prior conversation history)"
+    lines: list[str] = []
+    for turn in conversation_history[-8:]:
+        role = str(turn.get("role") or "unknown").strip() or "unknown"
+        content = str(turn.get("content") or "").strip()
+        if not content:
+            continue
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines) if lines else "(no prior conversation history)"
 
 
 def _context_text(retrieval: KnowledgeRetrievalResult) -> str:
