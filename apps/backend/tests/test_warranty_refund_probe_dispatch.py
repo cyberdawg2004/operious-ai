@@ -261,8 +261,7 @@ async def test_cannot_determine_with_approved_template_drafts_filled_probe() -> 
 @pytest.mark.asyncio
 async def test_single_missing_field_renders_friendly_label_not_raw_field_name() -> None:
     """Break-control (i): {missing_fields} must render a customer-facing
-    label ("the store or seller you purchased from"), not the raw
-    extraction field name ("seller")."""
+    label, not a tenant-specific hardcoded phrase or raw underscore form."""
     repository = await _repository_with_policies()
     await repository.save_knowledge_document(
         _approved_template(
@@ -287,11 +286,8 @@ async def test_single_missing_field_renders_friendly_label_not_raw_field_name() 
         _request(extracted_fields=fields_missing_seller)
     )
 
-    assert (
-        "we still need: the store or seller you purchased from."
-        in record.proposed_customer_reply
-    )
-    assert "we still need: seller." not in record.proposed_customer_reply
+    assert "we still need: seller." in record.proposed_customer_reply
+    assert "we still need: seller_name." not in record.proposed_customer_reply
 
 
 @pytest.mark.asyncio
@@ -299,7 +295,7 @@ async def test_multiple_missing_fields_render_as_numbered_list_with_friendly_lab
     None
 ):
     """Break-control (ii): 2+ missing fields render as a numbered list of
-    friendly labels, not a comma-joined blob of raw field names."""
+    display labels, not a comma-joined blob."""
     repository = await _repository_with_policies()
     await repository.save_knowledge_document(
         _approved_template(
@@ -323,10 +319,7 @@ async def test_multiple_missing_fields_render_as_numbered_list_with_friendly_lab
         _request(extracted_fields=fields_missing_order_id_and_seller)
     )
 
-    assert (
-        "1. your order number\n2. the store or seller you purchased from"
-        in record.proposed_customer_reply
-    )
+    assert "1. order id\n2. seller" in record.proposed_customer_reply
     assert "order id, seller" not in record.proposed_customer_reply
 
     # Break-control (iii): deterministic -- same input twice, identical text.

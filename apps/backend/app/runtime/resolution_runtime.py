@@ -61,7 +61,10 @@ from app.runtime.conversation_generation import (
     GroundedReplySegment,
     render_grounded_reply,
 )
-from app.runtime.money_goods_commitment import money_or_goods_commitment_kinds
+from app.runtime.money_goods_commitment import (
+    has_money_or_goods_commitment,
+    money_or_goods_commitment_kinds,
+)
 from app.runtime.resolution_autonomy_policy import (
     ResolutionAutonomyPolicy,
     resolve_resolution_autonomy_policy,
@@ -434,6 +437,18 @@ class ResolutionRuntime:
             tenant_id=request.tenant_id,
             channel=request.source_channel,
         )
+        collection_reply = None
+        if verdict_reply is None:
+            collection_reply = await _apply_collection_template_override(
+                recommended_actions=recommended_actions,
+                tenant_configuration_repository=self._tenant_configuration_repository,
+                tenant_id=request.tenant_id,
+                category=category,
+                channel=request.source_channel,
+                reply_segments=reply_segments,
+                extracted_fields=request.extracted_fields,
+                extraction_schema=taxonomy.extraction_schema,
+            )
         verdict_summary = _first_resolution_verdict(recommended_actions)
         # An APPROVED verdict's whole purpose is to state the exact
         # commitment ("approved for replacement") the baseline
@@ -459,7 +474,9 @@ class ResolutionRuntime:
         # catch LLM-INVENTED claims; an authored template has none. Wider
         # than reply_is_approved_verdict_override (which stays scoped to
         # APPROVED for the unrelated local promise-pattern guard above).
-        reply_is_verdict_override_template = verdict_reply is not None
+        reply_is_preapproved_template = (
+            verdict_reply is not None or collection_reply is not None
+        )
         if verdict_reply is not None:
             # reply_segments was captured from the ORIGINAL LLM draft above
             # (line ~367), before this override exists. Recompute it from
@@ -471,6 +488,13 @@ class ResolutionRuntime:
             reply_segments = (
                 GroundedReplySegment(
                     kind="claim", text=verdict_reply, citation_ranks=()
+                ).to_dict(),
+            )
+        elif collection_reply is not None:
+            reply = collection_reply
+            reply_segments = (
+                GroundedReplySegment(
+                    kind="acknowledgment", text=collection_reply, citation_ranks=()
                 ).to_dict(),
             )
         autonomy_policy = await resolve_resolution_autonomy_policy(
@@ -503,6 +527,15 @@ class ResolutionRuntime:
             extracted_fields=request.extracted_fields,
             skip_unsupported_commitment_check=reply_is_approved_verdict_override,
             extra_reasons=fraud_extra_reasons,
+            allow_non_committing_collection_auto_send=(
+                _non_committing_collection_auto_send_candidate(
+                    recommended_actions=recommended_actions,
+                    reply=reply,
+                    reply_segments=reply_segments,
+                    verdict_summary=verdict_summary,
+                    used_collection_template=collection_reply is not None,
+                )
+            ),
         )
         proposal_id = derive_resolution_proposal_id(
             tenant_id=request.tenant_id,
@@ -546,7 +579,7 @@ class ResolutionRuntime:
                 source_channel=request.source_channel,
                 reply_recipient=request.reply_recipient,
                 reply_thread_context=request.reply_thread_context,
-                reply_is_preapproved_template=reply_is_verdict_override_template,
+                reply_is_preapproved_template=reply_is_preapproved_template,
             )
         )
 
@@ -1375,6 +1408,67 @@ async def _apply_resolution_verdict_override(
     return substitute_placeholders(template.content, values)
 
 
+async def _apply_collection_template_override(
+    *,
+    recommended_actions: tuple[Mapping[str, Any], ...],
+    tenant_configuration_repository: TenantConfigurationRepository | None,
+    tenant_id: str,
+    category: str,
+    channel: str | None,
+    reply_segments: tuple[Mapping[str, Any], ...],
+    extracted_fields: ExtractedOrderFields | None,
+    extraction_schema: ExtractionSchema | None,
+) -> str | None:
+    """Render a tenant-authored collection template when a stage asks for info.
+
+    The template content lives in the tenant's approved Templates KB under
+    ``resolution.collect_context.<category>``. This helper only provides
+    substitution values derived from the tenant-configured extraction schema.
+    """
+    if (
+        tenant_configuration_repository is None
+        or channel is None
+        or extraction_schema is None
+    ):
+        return None
+    if not _has_non_executable_action(recommended_actions):
+        return None
+    if not any(
+        str(segment.get("kind") or "").strip().lower() == "question"
+        for segment in reply_segments
+    ):
+        return None
+    required_fields = list(extraction_schema.required_for_auto())
+    if not required_fields:
+        return None
+    missing_fields = [
+        field_name
+        for field_name in required_fields
+        if _field_requires_collection(extracted_fields, field_name)
+    ]
+    if not missing_fields:
+        return None
+    template = await TenantConfigurationRuntime(
+        repository=tenant_configuration_repository
+    ).get_approved_template(
+        tenant_id=tenant_id,
+        purpose=f"resolution.collect_context.{category}",
+        channel=channel,
+    )
+    if template is None:
+        return None
+    return substitute_placeholders(
+        template.content,
+        _probe_substitution_values(
+            claim_type=None,
+            missing_fields=missing_fields,
+            required_fields=required_fields,
+            extracted_fields=extracted_fields,
+            extraction_schema=extraction_schema,
+        ),
+    )
+
+
 def _first_resolution_verdict(
     recommended_actions: tuple[Mapping[str, Any], ...],
 ) -> Mapping[str, Any] | None:
@@ -1389,12 +1483,17 @@ def _probe_substitution_values(
     *,
     claim_type: str | None,
     missing_fields: list[str],
+    required_fields: list[str] | None = None,
     extracted_fields: ExtractedOrderFields | None,
     extraction_schema: ExtractionSchema | None = None,
 ) -> dict[str, str | None]:
+    resolved_required_fields = required_fields if required_fields is not None else []
     values: dict[str, str | None] = {
         "missing_fields": _render_missing_fields(
             missing_fields, extraction_schema=extraction_schema
+        ),
+        "required_fields": _render_missing_fields(
+            resolved_required_fields, extraction_schema=extraction_schema
         ),
     }
     if claim_type is not None:
@@ -1418,18 +1517,6 @@ def _humanize_field(name: str) -> str:
     return name.replace("_", " ")
 
 
-# Customer-facing labels for the legacy e-commerce extraction field names.
-# A field outside this map falls back to _humanize_field rather than raising.
-_MISSING_FIELD_FRIENDLY_LABELS: Mapping[str, str] = {
-    "order_id": "your order number",
-    "product_sku": "the product model or SKU",
-    "purchase_date": "the purchase date",
-    "seller": "the store or seller you purchased from",
-    "amount": "the purchase amount",
-    "currency": "the purchase currency",
-}
-
-
 def _friendly_missing_field_label(
     name: str,
     extraction_schema: ExtractionSchema | None = None,
@@ -1438,7 +1525,7 @@ def _friendly_missing_field_label(
         spec = extraction_schema.get(name)
         if spec is not None:
             return spec.effective_display_name()
-    return _MISSING_FIELD_FRIENDLY_LABELS.get(name, _humanize_field(name))
+    return _humanize_field(name)
 
 
 def _render_missing_fields(
@@ -1582,6 +1669,63 @@ def _extraction_completeness_reasons(
     return tuple(reasons)
 
 
+def _has_non_executable_action(
+    recommended_actions: tuple[Mapping[str, Any], ...],
+) -> bool:
+    return any(action.get("requires_execution") is False for action in recommended_actions)
+
+
+def _field_requires_collection(
+    extracted_fields: ExtractedOrderFields | None,
+    field_name: str,
+) -> bool:
+    field = _extracted_field_or_none(extracted_fields, field_name)
+    return (
+        field is None
+        or field.value is None
+        or field.confidence in _INSUFFICIENT_CONFIDENCE
+    )
+
+
+def _non_committing_collection_auto_send_candidate(
+    *,
+    recommended_actions: tuple[Mapping[str, Any], ...],
+    reply: str,
+    reply_segments: tuple[Mapping[str, Any], ...],
+    verdict_summary: Mapping[str, Any] | None,
+    used_collection_template: bool,
+) -> bool:
+    if has_money_or_goods_commitment(
+        recommended_actions=recommended_actions,
+        reply=reply,
+    ):
+        return False
+    if used_collection_template:
+        return True
+    if (
+        verdict_summary is not None
+        and verdict_summary.get("outcome") == ResolutionVerdictOutcome.NEEDS_MORE_INFO.value
+    ):
+        return True
+    return _has_non_executable_action(recommended_actions) and any(
+        str(segment.get("kind") or "").strip().lower() == "question"
+        for segment in reply_segments
+    )
+
+
+def _only_non_committing_collection_reasons(
+    reasons: Sequence[str],
+) -> bool:
+    allowed_prefixes = (
+        "missing_required_extraction_field:",
+        "warranty_refund_eligibility_cannot_determine:",
+    )
+    return bool(reasons) and all(
+        any(reason.startswith(prefix) for prefix in allowed_prefixes)
+        for reason in reasons
+    )
+
+
 def _warranty_refund_cannot_determine_reasons(
     recommended_actions: tuple[Mapping[str, Any], ...],
 ) -> tuple[str, ...]:
@@ -1629,6 +1773,7 @@ def _evaluate_gate(
     extracted_fields: ExtractedOrderFields | None = None,
     skip_unsupported_commitment_check: bool = False,
     extra_reasons: tuple[str, ...] = (),
+    allow_non_committing_collection_auto_send: bool = False,
 ) -> _GateDecision:
     reasons: list[str] = list(extra_reasons)
     text = f"{original_content} {reply}".lower()
@@ -1698,6 +1843,18 @@ def _evaluate_gate(
             autonomy_decision=ResolutionAutonomyDecision.NEEDS_HUMAN_APPROVAL,
             status=ResolutionProposalStatus.PENDING_HUMAN_APPROVAL,
             reasons=tuple(reasons),
+        )
+    if (
+        allow_non_committing_collection_auto_send
+        and category in autonomy_policy.reply_auto_send_categories
+        and _only_non_committing_collection_reasons(reasons)
+    ):
+        return _GateDecision(
+            supervisor_verdict=ResolutionSupervisorVerdict.PASS,
+            governance_verdict=ResolutionGovernanceVerdict.ALLOW,
+            autonomy_decision=ResolutionAutonomyDecision.AUTO_APPROVED,
+            status=ResolutionProposalStatus.AUTO_APPROVED,
+            reasons=("auto_approval_criteria_met",),
         )
     if reasons or category not in autonomy_policy.reply_auto_send_categories:
         return _GateDecision(
