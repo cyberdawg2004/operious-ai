@@ -99,7 +99,7 @@ packaging==26.2
 pathspec==1.1.1
 pdfminer.six==20251230
 pdfplumber==0.11.9
-pillow==12.2.0
+pillow==12.3.0
 platformdirs==4.9.6
 portalocker==2.7.0
 postgrest==2.30.0
