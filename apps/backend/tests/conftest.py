@@ -53,6 +53,11 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import NullPool
 
 from app.db.url import build_database_engine_config
+from app.db.test_target import (
+    LocalTestDatabaseTargetError,
+    create_checked_test_resource,
+    validate_local_postgres_test_target,
+)
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -187,11 +192,14 @@ def database_url_skip_reason() -> str | None:
     if raw is None:
         return _MISSING_TEST_DATABASE_URL_REASON
     try:
+        validate_local_postgres_test_target(raw)
         engine_config = build_database_engine_config(
             raw,
             connect_timeout=30.0,
         )
         url = make_url(engine_config.async_url)
+    except LocalTestDatabaseTargetError as exc:
+        return f"{TEST_DATABASE_URL_ENV} is unsafe for local integration tests: {exc}."
     except Exception as exc:
         return (
             f"{TEST_DATABASE_URL_ENV} is not a valid SQLAlchemy "
@@ -374,12 +382,15 @@ async def pg_engine() -> AsyncIterator[AsyncEngine]:
         dsn,
         connect_timeout=30.0,
     )
-    engine = create_async_engine(
-        engine_config.async_url,
-        future=True,
-        pool_pre_ping=True,
-        poolclass=NullPool,
-        connect_args=engine_config.connect_args,
+    engine = create_checked_test_resource(
+        dsn,
+        lambda _: create_async_engine(
+            engine_config.async_url,
+            future=True,
+            pool_pre_ping=True,
+            poolclass=NullPool,
+            connect_args=engine_config.connect_args,
+        ),
     )
     try:
         yield engine
@@ -406,12 +417,15 @@ async def pg_seed_engine(
         owner_dsn,
         connect_timeout=30.0,
     )
-    engine = create_async_engine(
-        engine_config.async_url,
-        future=True,
-        pool_pre_ping=True,
-        poolclass=NullPool,
-        connect_args=engine_config.connect_args,
+    engine = create_checked_test_resource(
+        owner_dsn or dsn,
+        lambda _: create_async_engine(
+            engine_config.async_url,
+            future=True,
+            pool_pre_ping=True,
+            poolclass=NullPool,
+            connect_args=engine_config.connect_args,
+        ),
     )
     try:
         yield engine
