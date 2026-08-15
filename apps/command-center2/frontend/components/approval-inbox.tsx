@@ -21,10 +21,12 @@ import {
 import { TechnicalDetails } from "@/components/technical-details";
 import { CodeAsReadableText, DownloadableLog } from "@/components/ui/readable-data";
 import { useApiResource } from "@/lib/use-api-resource";
+import { useAuthSession } from "@/lib/use-auth-session";
 import { cn } from "@/lib/utils";
 import { EmptyState, ErrorState, LoadingState } from "@/components/data-state";
 
 const REFRESH_MS = 30_000;
+const APPROVE_CAPABILITY = "tenant.actions.approve";
 
 export function ApprovalInbox({
   embedded = false,
@@ -36,6 +38,10 @@ export function ApprovalInbox({
   /** Reports the current pending-approval count, e.g. for a tab badge. */
   onCountChange?: (count: number) => void;
 } = {}) {
+  const { principal } = useAuthSession();
+  // `/auth/me` is the canonical, verified frontend authority source. Missing
+  // or failed hydration intentionally fails closed.
+  const canApprove = (principal?.capabilities ?? []).includes(APPROVE_CAPABILITY);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ActionApprovalDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -104,7 +110,7 @@ export function ApprovalInbox({
   };
 
   const runApprove = async () => {
-    if (!selectedId) return;
+    if (!selectedId || !canApprove) return;
     setBusyAction("approve");
     setActionError(null);
     try {
@@ -120,7 +126,7 @@ export function ApprovalInbox({
   };
 
   const runDeny = async () => {
-    if (!selectedId || !denyReason.trim()) return;
+    if (!selectedId || !denyReason.trim() || !canApprove) return;
     setBusyAction("deny");
     setActionError(null);
     try {
@@ -215,6 +221,7 @@ export function ApprovalInbox({
           onConfirmApprove={setConfirmApprove}
           onApprove={runApprove}
           onDeny={runDeny}
+          canApprove={canApprove}
         />
       )}
     </div>
@@ -286,6 +293,7 @@ function ApprovalDetailPanel({
   onConfirmApprove,
   onApprove,
   onDeny,
+  canApprove,
 }: {
   detail: ActionApprovalDetail | null;
   summary: ActionApprovalSummary | null;
@@ -300,6 +308,7 @@ function ApprovalDetailPanel({
   onConfirmApprove: (value: boolean) => void;
   onApprove: () => void;
   onDeny: () => void;
+  canApprove: boolean;
 }) {
   const record = detail ?? summary;
   return (
@@ -405,6 +414,8 @@ function ApprovalDetailPanel({
                 />
               </DetailSection>
 
+              {canApprove ? (
+                <>
               <div className="rounded-lg border border-border-subtle bg-surface-raised p-4">
                 <label
                   htmlFor="approval-deny-reason"
@@ -467,6 +478,12 @@ function ApprovalDetailPanel({
                   Deny
                 </button>
               </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-border-subtle bg-surface-raised px-4 py-3 text-[13px] text-ink-secondary">
+                  Read-only — approval authority not granted
+                </div>
+              )}
             </>
           )}
         </div>
