@@ -93,6 +93,7 @@ def test_select_auth_provider_maps_namespaced_tenant_claim() -> None:
     assert mapping.tenant_id == "https://operious.com/tenant_id"
     assert mapping.organization_id == "https://operious.com/org_id"
     assert mapping.environment_id == "https://operious.com/env"
+    assert mapping.capabilities == "https://operious.com/capabilities"
     assert mapping.roles_claim == "https://operious.com/roles"
     # The standard subject claim stays canonical (never namespaced).
     assert mapping.principal_id == "sub"

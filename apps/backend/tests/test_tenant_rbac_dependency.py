@@ -41,44 +41,48 @@ def _request(authority: AuthorityContext | None = None) -> Request:
     return req
 
 
-def test_require_capability_returns_authority_when_held() -> None:
+@pytest.mark.asyncio
+async def test_require_capability_returns_authority_when_held() -> None:
     authority = AuthorityContext(
         tenant_id=TenantId("acme"),
         capabilities=frozenset({TENANT_POLICY_WRITE_CAPABILITY}),
     )
     dep = require_capability(TENANT_POLICY_WRITE_CAPABILITY)
-    assert dep(_request(authority)) is authority
+    assert await dep(_request(authority)) is authority
 
 
-def test_require_capability_rejects_missing_capability() -> None:
+@pytest.mark.asyncio
+async def test_require_capability_rejects_missing_capability() -> None:
     authority = AuthorityContext(
         tenant_id=TenantId("acme"),
         capabilities=frozenset({"session:open"}),
     )
     dep = require_capability(TENANT_POLICY_WRITE_CAPABILITY)
     with pytest.raises(HTTPException) as exc:
-        dep(_request(authority))
+        await dep(_request(authority))
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == ERROR_CODE_CAPABILITY_REQUIRED
     assert exc.value.detail["capability"] == TENANT_POLICY_WRITE_CAPABILITY
 
 
-def test_require_capability_rejects_anonymous() -> None:
+@pytest.mark.asyncio
+async def test_require_capability_rejects_anonymous() -> None:
     dep = require_capability(TENANT_POLICY_WRITE_CAPABILITY)
     with pytest.raises(HTTPException) as exc:
-        dep(_request(AuthorityContext()))
+        await dep(_request(AuthorityContext()))
     assert exc.value.status_code == 401
     assert exc.value.detail["code"] == ERROR_CODE_AUTHORITY_REQUIRED
 
 
-def test_legacy_require_tenant_admin_enforces_tenant_admin_capability() -> None:
+@pytest.mark.asyncio
+async def test_legacy_require_tenant_admin_enforces_tenant_admin_capability() -> None:
     held = AuthorityContext(
         tenant_id=TenantId("acme"),
         capabilities=frozenset({TENANT_ADMIN_CAPABILITY}),
     )
-    assert require_tenant_admin(_request(held)) is held
+    assert await require_tenant_admin(_request(held)) is held
 
     missing = AuthorityContext(tenant_id=TenantId("acme"))
     with pytest.raises(HTTPException) as exc:
-        require_tenant_admin(_request(missing))
+        await require_tenant_admin(_request(missing))
     assert exc.value.status_code == 403

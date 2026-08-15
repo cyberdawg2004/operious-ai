@@ -80,12 +80,14 @@ def _request(
 # ─── require_authority ──────────────────────────────────────────────
 
 
-def test_require_authority_returns_bound_authority() -> None:
+@pytest.mark.asyncio
+async def test_require_authority_returns_bound_authority() -> None:
     authority = AuthorityContext(tenant_id=TenantId("acme"))
-    assert require_authority(_request(authority)) is authority
+    assert await require_authority(_request(authority)) is authority
 
 
-def test_require_authority_allows_verified_platform_admin_without_tenant() -> (
+@pytest.mark.asyncio
+async def test_require_authority_allows_verified_platform_admin_without_tenant() -> (
     None
 ):
     from app.identity.primitives import PrincipalId
@@ -95,12 +97,13 @@ def test_require_authority_allows_verified_platform_admin_without_tenant() -> (
         capabilities=frozenset({PLATFORM_TENANT_ADMIN_CAPABILITY}),
     )
     assert (
-        require_authority(_request(authority, source="verified"))
+        await require_authority(_request(authority, source="verified"))
         is authority
     )
 
 
-def test_require_authority_allows_header_attested_principal_without_tenant() -> (
+@pytest.mark.asyncio
+async def test_require_authority_allows_header_attested_principal_without_tenant() -> (
     None
 ):
     from app.identity.primitives import PrincipalId
@@ -109,14 +112,15 @@ def test_require_authority_allows_header_attested_principal_without_tenant() -> 
         principal_id=PrincipalId("header-principal")
     )
     assert (
-        require_authority(_request(authority, source="header"))
+        await require_authority(_request(authority, source="header"))
         is authority
     )
 
 
-def test_require_authority_raises_401_when_anonymous() -> None:
+@pytest.mark.asyncio
+async def test_require_authority_raises_401_when_anonymous() -> None:
     with pytest.raises(HTTPException) as excinfo:
-        require_authority(_request(None))
+        await require_authority(_request(None))
     assert excinfo.value.status_code == 401
     assert excinfo.value.detail == {
         "code": ERROR_CODE_AUTHORITY_REQUIRED
@@ -127,7 +131,8 @@ def test_require_authority_raises_401_when_anonymous() -> None:
     )
 
 
-def test_require_authority_raises_403_when_verified_scope_missing() -> (
+@pytest.mark.asyncio
+async def test_require_authority_raises_403_when_verified_scope_missing() -> (
     None
 ):
     """A verified bearer without tenant scope or platform-admin
@@ -139,14 +144,15 @@ def test_require_authority_raises_403_when_verified_scope_missing() -> (
         principal_id=PrincipalId("user-1")
     )
     with pytest.raises(HTTPException) as excinfo:
-        require_authority(_request(authority, source="verified"))
+        await require_authority(_request(authority, source="verified"))
     assert excinfo.value.status_code == 403
     assert excinfo.value.detail == {
         "code": ERROR_CODE_AUTHORIZED_SCOPE_REQUIRED
     }
 
 
-def test_require_authority_raises_401_when_bound_but_fully_anonymous() -> None:
+@pytest.mark.asyncio
+async def test_require_authority_raises_401_when_bound_but_fully_anonymous() -> None:
     """PR-D1 contract — match the docstring's "rejects anonymous"
     promise against the middleware's bound-empty state.
 
@@ -162,7 +168,7 @@ def test_require_authority_raises_401_when_bound_but_fully_anonymous() -> None:
     empty = AuthorityContext()
     assert empty.is_fully_anonymous is True
     with pytest.raises(HTTPException) as excinfo:
-        require_authority(_request(empty))
+        await require_authority(_request(empty))
     assert excinfo.value.status_code == 401
     assert excinfo.value.detail == {
         "code": ERROR_CODE_AUTHORITY_REQUIRED
@@ -176,23 +182,26 @@ def test_require_authority_raises_401_when_bound_but_fully_anonymous() -> None:
 # ─── require_tenant_scope ───────────────────────────────────────────
 
 
-def test_require_tenant_scope_returns_string_tenant() -> None:
+@pytest.mark.asyncio
+async def test_require_tenant_scope_returns_string_tenant() -> None:
     authority = AuthorityContext(tenant_id=TenantId("acme"))
-    scope = require_tenant_scope(_request(authority))
+    scope = await require_tenant_scope(_request(authority))
     assert scope == "acme"
     assert isinstance(scope, str)
 
 
-def test_require_tenant_scope_raises_401_when_anonymous() -> None:
+@pytest.mark.asyncio
+async def test_require_tenant_scope_raises_401_when_anonymous() -> None:
     with pytest.raises(HTTPException) as excinfo:
-        require_tenant_scope(_request(None))
+        await require_tenant_scope(_request(None))
     assert excinfo.value.status_code == 401
     assert excinfo.value.detail == {
         "code": ERROR_CODE_AUTHORITY_REQUIRED
     }
 
 
-def test_require_tenant_scope_raises_400_when_tenant_axis_missing() -> (
+@pytest.mark.asyncio
+async def test_require_tenant_scope_raises_400_when_tenant_axis_missing() -> (
     None
 ):
     """An authenticated authority WITHOUT a tenant axis still
@@ -212,7 +221,7 @@ def test_require_tenant_scope_raises_400_when_tenant_axis_missing() -> (
 
     authority = AuthorityContext(principal_id=PrincipalId("user-1"))
     with pytest.raises(HTTPException) as excinfo:
-        require_tenant_scope(_request(authority))
+        await require_tenant_scope(_request(authority))
     assert excinfo.value.status_code == 400
     assert excinfo.value.detail == {
         "code": ERROR_CODE_TENANT_AXIS_MISSING
@@ -234,16 +243,19 @@ def test_request_authority_opt_returns_none_when_anonymous() -> None:
 # ─── request_tenant_scope_opt ───────────────────────────────────────
 
 
-def test_request_tenant_scope_opt_returns_tenant_when_present() -> None:
+@pytest.mark.asyncio
+async def test_request_tenant_scope_opt_returns_tenant_when_present() -> None:
     authority = AuthorityContext(tenant_id=TenantId("acme"))
-    assert request_tenant_scope_opt(_request(authority)) == "acme"
+    assert await request_tenant_scope_opt(_request(authority)) == "acme"
 
 
-def test_request_tenant_scope_opt_returns_none_when_anonymous() -> None:
-    assert request_tenant_scope_opt(_request(None)) is None
+@pytest.mark.asyncio
+async def test_request_tenant_scope_opt_returns_none_when_anonymous() -> None:
+    assert await request_tenant_scope_opt(_request(None)) is None
 
 
-def test_request_tenant_scope_opt_returns_none_when_tenant_missing() -> (
+@pytest.mark.asyncio
+async def test_request_tenant_scope_opt_returns_none_when_tenant_missing() -> (
     None
 ):
     """Tenant-less authority still yields ``None`` — admin
@@ -257,7 +269,7 @@ def test_request_tenant_scope_opt_returns_none_when_tenant_missing() -> (
     from app.identity.primitives import PrincipalId
 
     authority = AuthorityContext(principal_id=PrincipalId("user-1"))
-    assert request_tenant_scope_opt(_request(authority)) is None
+    assert await request_tenant_scope_opt(_request(authority)) is None
 
 
 # ─── Composition-root contract ──────────────────────────────────────

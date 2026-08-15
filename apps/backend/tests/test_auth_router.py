@@ -30,19 +30,28 @@ Pinned contract:
 from __future__ import annotations
 
 import json
+import os
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, cast
 
 import jwt
+import httpx
 import pytest
+import pytest_asyncio
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi.testclient import TestClient
 from jwt import PyJWK, PyJWKClient, PyJWKClientError
 from jwt.algorithms import RSAAlgorithm
 
+# ``app.main`` creates the module-level application at import time.  Keep this
+# isolated router suite offline before importing it; no test should enqueue a
+# Sentry delivery or wait on its retry backoff.
+os.environ["SENTRY_DSN"] = ""
+
 from app.auth.providers import JWKSAuthProvider
+from app.core.config import get_settings
 from app.main import create_app
 
 # ─── Fixtures: JWKS + signing helpers (mirror test_auth_provider_jwks) ──
@@ -161,19 +170,27 @@ def _standard_claims(
     return claims
 
 
-@pytest.fixture
-def keypair_and_app(tmp_path: Path) -> tuple[rsa.RSAPrivateKey, str, TestClient]:
+@pytest_asyncio.fixture
+async def keypair_and_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient]]:
     """Yield (private_key, kid, FastAPI test client wired to JWKS provider)."""
+    monkeypatch.setenv("SENTRY_DSN", "")
+    get_settings.cache_clear()
     private, public = _generate_rsa_keypair()
     kid = "test-key-1"
     provider = _build_jwks_provider(tmp_path, public_key=public, kid=kid)
     app = create_app(auth_provider=provider)
-    client = TestClient(app, raise_server_exceptions=True)
-    return private, kid, client
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield private, kid, client
 
 
-@pytest.fixture
-def anonymous_app() -> TestClient:
+@pytest_asyncio.fixture
+async def anonymous_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[httpx.AsyncClient]:
     """FastAPI test client with NO auth provider configured.
 
     Used to pin the behaviour of legacy ``X-*-ID`` ingress (works
@@ -181,16 +198,22 @@ def anonymous_app() -> TestClient:
     when no provider is configured (must fail-closed with 401
     ``verification_unavailable`` per B5).
     """
-    return TestClient(create_app(), raise_server_exceptions=True)
+    monkeypatch.setenv("SENTRY_DSN", "")
+    get_settings.cache_clear()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app()), base_url="http://test"
+    ) as client:
+        yield client
 
 
 # ─── Anonymous / dependency-level failures ───────────────────────────────
 
 
-def test_get_me_without_authority_returns_401(
-    anonymous_app: TestClient,
+@pytest.mark.asyncio
+async def test_get_me_without_authority_returns_401(
+    anonymous_app: httpx.AsyncClient,
 ) -> None:
-    response = anonymous_app.get("/api/v1/auth/me")
+    response = await anonymous_app.get("/api/v1/auth/me")
     assert response.status_code == 401
     # The handler raises HTTPException; the global handler in
     # main.py wraps it in a ProblemDetails envelope, but the
@@ -200,13 +223,14 @@ def test_get_me_without_authority_returns_401(
     assert "authority_required" in response.text
 
 
-def test_get_me_with_bearer_but_no_provider_returns_401(
-    anonymous_app: TestClient,
+@pytest.mark.asyncio
+async def test_get_me_with_bearer_but_no_provider_returns_401(
+    anonymous_app: httpx.AsyncClient,
 ) -> None:
     """B5 fail-closed: presenting a Bearer token to an app with
     no provider configured MUST return 401 ``verification_unavailable``
     rather than silently passing through."""
-    response = anonymous_app.get(
+    response = await anonymous_app.get(
         "/api/v1/auth/me",
         headers={"Authorization": "Bearer any.jwt.value"},
     )
@@ -217,8 +241,9 @@ def test_get_me_with_bearer_but_no_provider_returns_401(
 # ─── Happy path ──────────────────────────────────────────────────────────
 
 
-def test_get_me_with_valid_token_returns_principal(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_with_valid_token_returns_principal(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     private, kid, client = keypair_and_app
     token = _sign_rs256(
@@ -227,7 +252,7 @@ def test_get_me_with_valid_token_returns_principal(
         claims=_standard_claims(capabilities=["read", "write"]),
     )
 
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -243,8 +268,9 @@ def test_get_me_with_valid_token_returns_principal(
     }
 
 
-def test_get_me_capabilities_are_sorted_for_determinism(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_capabilities_are_sorted_for_determinism(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     """Two requests with the same authority MUST produce byte-equal
     JSON. The capability list is the only collection field, so
@@ -256,7 +282,7 @@ def test_get_me_capabilities_are_sorted_for_determinism(
         claims=_standard_claims(capabilities=["z", "a", "m", "b"]),
     )
 
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -264,8 +290,9 @@ def test_get_me_capabilities_are_sorted_for_determinism(
     assert response.json()["capabilities"] == ["a", "b", "m", "z"]
 
 
-def test_get_me_without_tenant_claim_rejected_when_no_platform_scope(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_without_tenant_claim_rejected_when_no_platform_scope(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     """A verified bearer with no tenant claim and no platform scope
     cannot establish a usable app session."""
@@ -276,7 +303,7 @@ def test_get_me_without_tenant_claim_rejected_when_no_platform_scope(
         claims=_standard_claims(tenant_id=None),
     )
 
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -284,8 +311,9 @@ def test_get_me_without_tenant_claim_rejected_when_no_platform_scope(
     assert "authorized_scope_required" in response.text
 
 
-def test_get_me_platform_admin_without_tenant_claim_still_returns_200(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_platform_admin_without_tenant_claim_still_returns_200(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     private, kid, client = keypair_and_app
     token = _sign_rs256(
@@ -297,7 +325,7 @@ def test_get_me_platform_admin_without_tenant_claim_still_returns_200(
         ),
     )
 
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -312,8 +340,9 @@ def test_get_me_platform_admin_without_tenant_claim_still_returns_200(
 # ─── Token verification failures ─────────────────────────────────────────
 
 
-def test_get_me_rejects_wrong_audience(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_rejects_wrong_audience(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     private, kid, client = keypair_and_app
     token = _sign_rs256(
@@ -321,7 +350,7 @@ def test_get_me_rejects_wrong_audience(
         kid=kid,
         claims=_standard_claims(audience="https://attacker.example/api"),
     )
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -329,8 +358,9 @@ def test_get_me_rejects_wrong_audience(
     assert "verification_failed" in response.text
 
 
-def test_get_me_rejects_wrong_issuer(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_rejects_wrong_issuer(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     private, kid, client = keypair_and_app
     token = _sign_rs256(
@@ -338,7 +368,7 @@ def test_get_me_rejects_wrong_issuer(
         kid=kid,
         claims=_standard_claims(issuer="https://attacker.example/"),
     )
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -346,8 +376,9 @@ def test_get_me_rejects_wrong_issuer(
     assert "verification_failed" in response.text
 
 
-def test_get_me_rejects_expired_token(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_rejects_expired_token(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     private, kid, client = keypair_and_app
     token = _sign_rs256(
@@ -355,7 +386,7 @@ def test_get_me_rejects_expired_token(
         kid=kid,
         claims=_standard_claims(exp_delta_seconds=-3600),
     )
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -363,8 +394,9 @@ def test_get_me_rejects_expired_token(
     assert "verification_failed" in response.text
 
 
-def test_get_me_rejects_token_signed_by_unknown_key(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_rejects_token_signed_by_unknown_key(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     """A token signed by a private key whose public half is NOT in
     the JWKS MUST be rejected — even if every claim is valid."""
@@ -373,7 +405,7 @@ def test_get_me_rejects_token_signed_by_unknown_key(
     token = _sign_rs256(
         attacker_private, kid=kid, claims=_standard_claims()
     )
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -384,11 +416,12 @@ def test_get_me_rejects_token_signed_by_unknown_key(
 # ─── Authorization-header parsing failures ───────────────────────────────
 
 
-def test_get_me_rejects_malformed_authorization_header(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_rejects_malformed_authorization_header(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     _, _, client = keypair_and_app
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={"Authorization": "OnlySingleToken"},
     )
@@ -396,8 +429,9 @@ def test_get_me_rejects_malformed_authorization_header(
     assert "malformed_authorization_header" in response.text
 
 
-def test_get_me_rejects_authorization_plus_legacy_header_conflict(
-    keypair_and_app: tuple[rsa.RSAPrivateKey, str, TestClient],
+@pytest.mark.asyncio
+async def test_get_me_rejects_authorization_plus_legacy_header_conflict(
+    keypair_and_app: tuple[rsa.RSAPrivateKey, str, httpx.AsyncClient],
 ) -> None:
     """Source singularity (Wedge B8 / C2): a request that presents
     both an Authorization header AND an ``X-*-ID`` header is
@@ -405,7 +439,7 @@ def test_get_me_rejects_authorization_plus_legacy_header_conflict(
     ``authority_source_conflict``."""
     private, kid, client = keypair_and_app
     token = _sign_rs256(private, kid=kid, claims=_standard_claims())
-    response = client.get(
+    response = await client.get(
         "/api/v1/auth/me",
         headers={
             "Authorization": f"Bearer {token}",
@@ -419,8 +453,9 @@ def test_get_me_rejects_authorization_plus_legacy_header_conflict(
 # ─── Legacy header-attested path ─────────────────────────────────────────
 
 
-def test_get_me_via_legacy_header_returns_source_header(
-    anonymous_app: TestClient,
+@pytest.mark.asyncio
+async def test_get_me_via_legacy_header_returns_source_header(
+    anonymous_app: httpx.AsyncClient,
 ) -> None:
     """Legacy X-*-ID identity headers are upstream-trusted (the
     network is responsible for stripping them at the edge). The
@@ -428,7 +463,7 @@ def test_get_me_via_legacy_header_returns_source_header(
     the response advertises ``authority_source = "header"`` so
     auditors can tell verified principals apart from
     header-attested ones at trace time."""
-    response = anonymous_app.get(
+    response = await anonymous_app.get(
         "/api/v1/auth/me",
         headers={
             "X-Tenant-ID": "tenant-acme",

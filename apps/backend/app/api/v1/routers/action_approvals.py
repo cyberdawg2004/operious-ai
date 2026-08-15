@@ -14,7 +14,6 @@ from app.api.v1.schemas.action_approvals import (
     DenyActionApprovalRequest,
 )
 from app.dependencies.authority import (
-    require_authority,
     require_tenant_actions_approve,
     require_tenant_operations_read,
     require_tenant_scope,
@@ -103,7 +102,7 @@ async def approve_action_approval(
     approval_id: str,
     request: ApproveActionApprovalRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_actions_approve),
     service: ActionApprovalService = Depends(get_action_approval_service),
 ) -> ActionApprovalSummaryResponse:
     try:
@@ -157,7 +156,7 @@ async def deny_action_approval(
     approval_id: str,
     request: DenyActionApprovalRequest,
     expected_tenant_id: str = Depends(require_tenant_scope),
-    authority: AuthorityContext = Depends(require_authority),
+    authority: AuthorityContext = Depends(require_tenant_actions_approve),
     service: ActionApprovalService = Depends(get_action_approval_service),
 ) -> ActionApprovalSummaryResponse:
     try:

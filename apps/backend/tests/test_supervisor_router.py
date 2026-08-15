@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.authority import require_tenant_supervisor_read
 from app.dependencies.database import get_db_session
+from app.dependencies.services import (
+    get_supervisor_inbox_service,
+    get_supervisor_repository,
+)
 from app.identity import AuthorityContext
 from app.main import create_app
 from app.supervisor.persistence import (
@@ -24,6 +28,9 @@ from app.supervisor.persistence import (
     RuntimeFindingRecord,
     SupervisorDecisionRecord,
 )
+from app.qa.persistence import PostgresQAPersistence
+from app.services.supervisor_inbox_service import SupervisorInboxService
+from app.trainer.persistence import PostgresTrainingRecommendationRepository
 from tests.conftest import requires_postgres
 
 pytestmark = [requires_postgres]
@@ -44,12 +51,25 @@ async def sup_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
-    app.dependency_overrides[require_tenant_supervisor_read] = lambda: (
-        AuthorityContext(
+    async def _supervisor_authority() -> AuthorityContext:
+        return AuthorityContext(
             tenant_id="tenant-acme",
             capabilities=("tenant.supervisor.read",),
         )
-    )
+
+    async def _supervisor_repository() -> PostgresSupervisorRepository:
+        return PostgresSupervisorRepository(pg_session)
+
+    async def _supervisor_inbox_service() -> SupervisorInboxService:
+        return SupervisorInboxService(
+            supervisor_repository=PostgresSupervisorRepository(pg_session),
+            qa_persistence=PostgresQAPersistence(pg_session),
+            training_repository=PostgresTrainingRecommendationRepository(pg_session),
+        )
+
+    app.dependency_overrides[require_tenant_supervisor_read] = _supervisor_authority
+    app.dependency_overrides[get_supervisor_repository] = _supervisor_repository
+    app.dependency_overrides[get_supervisor_inbox_service] = _supervisor_inbox_service
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test"
