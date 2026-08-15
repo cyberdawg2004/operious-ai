@@ -37,6 +37,13 @@ class ResolutionProposalPayload:
     proposal_id: str | None
     governance_decision_id: str | None
     status: str | None
+    proposed_customer_reply: str | None
+    resolution_category: str | None
+    confidence: float | None
+    autonomy_decision: str | None
+    supervisor_verdict: str | None
+    governance_verdict: str | None
+    recommended_actions: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
 
 
@@ -72,10 +79,10 @@ class TimelineEvent(BaseModel):
         if not isinstance(nested_payload, Mapping):
             nested_payload = payload
         event_payload = cast(Mapping[str, Any], nested_payload)
-        event_type = (
-            _payload_str(payload, "event_type")
-            or event.annotation
-            or event.kind.value
+        event_type = _projected_event_type(
+            event=event,
+            wrapper_payload=payload,
+            event_payload=event_payload,
         )
         timestamp = _payload_datetime(payload, "timestamp")
         return cls(
@@ -101,6 +108,53 @@ def _payload_str(payload: Mapping[str, Any], key: str) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _projected_event_type(
+    *,
+    event: SessionTimelineEvent,
+    wrapper_payload: Mapping[str, Any],
+    event_payload: Mapping[str, Any],
+) -> str:
+    """Recognize only the canonical resolution-proposal timeline envelope.
+
+    Session events are operational observations by default.  A payload value is
+    not itself authority to manufacture a different event subtype; the
+    production TimelineRuntime envelope and matching annotation are required.
+    """
+    if _is_resolution_proposal_envelope(
+        event=event,
+        wrapper_payload=wrapper_payload,
+        event_payload=event_payload,
+    ):
+        return "resolution_proposal_created"
+    return event.kind.value
+
+
+def _is_resolution_proposal_envelope(
+    *,
+    event: SessionTimelineEvent,
+    wrapper_payload: Mapping[str, Any],
+    event_payload: Mapping[str, Any],
+) -> bool:
+    if event.annotation != "resolution_proposal_created":
+        return False
+    if _payload_str(wrapper_payload, "event_type") != event.annotation:
+        return False
+    if _payload_str(wrapper_payload, "session_id") != str(event.session_id):
+        return False
+    if not _payload_str(wrapper_payload, "tenant_id"):
+        return False
+    if not _payload_str(wrapper_payload, "dispatch_id"):
+        return False
+    if not _payload_str(wrapper_payload, "timestamp"):
+        return False
+    if not _payload_str(event_payload, "proposal_id"):
+        return False
+    return _payload_str(event_payload, "status") in {
+        "proposed", "auto_approved", "send_eligible",
+        "pending_human_approval", "denied", "failed",
+    }
 
 
 def _project_payload(
@@ -160,6 +214,25 @@ def _project_payload(
                     event_payload, "governance_decision_id"
                 ),
                 status=_payload_str(event_payload, "status"),
+                proposed_customer_reply=_payload_str(
+                    event_payload, "proposed_customer_reply"
+                ),
+                resolution_category=_payload_str(
+                    event_payload, "resolution_category"
+                ),
+                confidence=_payload_float(event_payload, "confidence"),
+                autonomy_decision=_payload_str(
+                    event_payload, "autonomy_decision"
+                ),
+                supervisor_verdict=_payload_str(
+                    event_payload, "supervisor_verdict"
+                ),
+                governance_verdict=_payload_str(
+                    event_payload, "governance_verdict"
+                ),
+                recommended_actions=_payload_list_of_dicts(
+                    event_payload, "recommended_actions"
+                ),
                 evidence=_payload_list_of_dicts(event_payload, "evidence"),
             )
         )
