@@ -12,6 +12,8 @@ from app.resolution.persistence import PostgresResolutionProposalPersistence
 from scripts.northstar_demo.manifest import MANIFEST
 from scripts.northstar_demo.seed import NorthstarDemoSeedService
 
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
 
 async def _assert_0104(session: AsyncSession) -> None:
     assert (
@@ -78,8 +80,8 @@ async def test_resolution_proposal_execution_id_is_nullable_and_serializes_at_01
             )
         ).scalar_one().decode()
         assert constraint == "n"
-        mapper_source = Path(
-            "app/resolution/persistence/postgres.py"
+        mapper_source = (
+            _BACKEND_ROOT / "app/resolution/persistence/postgres.py"
         ).read_text().casefold()
         assert "northstar" not in mapper_source
     finally:

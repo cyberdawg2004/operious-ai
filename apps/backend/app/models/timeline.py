@@ -11,6 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.session.models.timeline_event import SessionTimelineEvent
 
 _PRE_VERSIONED_SCHEMA_VERSION = "0"
+_CANONICAL_OPERATIONAL_OBSERVATION_TYPES = frozenset(
+    {
+        "diagnostic_analysis_completed",
+        "session_opened",
+        "resolution_proposal_created",
+        "action_executed",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,19 +124,44 @@ def _projected_event_type(
     wrapper_payload: Mapping[str, Any],
     event_payload: Mapping[str, Any],
 ) -> str:
-    """Recognize only the canonical resolution-proposal timeline envelope.
+    """Recognize canonical TimelineRuntime subtype envelopes.
 
     Session events are operational observations by default.  A payload value is
     not itself authority to manufacture a different event subtype; the
-    production TimelineRuntime envelope and matching annotation are required.
+    matching immutable annotation and wrapper event type are required.  The
+    resolution-proposal subtype additionally requires its trace fields.
     """
+    event_type = _canonical_operational_observation_type(
+        event=event,
+        wrapper_payload=wrapper_payload,
+    )
+    if event_type is None:
+        return event.kind.value
+    if event_type != "resolution_proposal_created":
+        return event_type
     if _is_resolution_proposal_envelope(
         event=event,
         wrapper_payload=wrapper_payload,
         event_payload=event_payload,
     ):
-        return "resolution_proposal_created"
+        return event_type
     return event.kind.value
+
+
+def _canonical_operational_observation_type(
+    *,
+    event: SessionTimelineEvent,
+    wrapper_payload: Mapping[str, Any],
+) -> str | None:
+    """Return a known subtype only when its immutable and wrapper tags agree."""
+    event_type = _payload_str(wrapper_payload, "event_type")
+    if event.kind.value != "operational_observation":
+        return None
+    if event_type not in _CANONICAL_OPERATIONAL_OBSERVATION_TYPES:
+        return None
+    if event.annotation != event_type:
+        return None
+    return event_type
 
 
 def _is_resolution_proposal_envelope(

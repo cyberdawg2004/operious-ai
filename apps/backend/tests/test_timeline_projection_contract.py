@@ -43,6 +43,30 @@ def _valid_wrapper() -> dict[str, object]:
     }
 
 
+def _canonical_wrapper(event_type: str) -> dict[str, object]:
+    payloads = {
+        "diagnostic_analysis_completed": {
+            "category": "classification",
+            "confidence": 0.9,
+            "summary": "Analysis complete.",
+        },
+        "session_opened": {
+            "scope": "tenant",
+            "external_handle": "case-123",
+            "tenant_id": "tenant-example",
+        },
+        "action_executed": {
+            "tool_name": "tenant-configured-tool",
+            "idempotency_key": "action-123",
+            "status": "executed",
+        },
+    }
+    return {
+        "event_type": event_type,
+        "payload": payloads[event_type],
+    }
+
+
 def test_valid_canonical_resolution_envelope_projects_required_trace_fields() -> None:
     projected = TimelineEvent.from_session_event(_event())
     assert projected.event_type == "resolution_proposal_created"
@@ -50,6 +74,25 @@ def test_valid_canonical_resolution_envelope_projects_required_trace_fields() ->
     assert projected.payload["proposal_id"]
     assert projected.payload["proposed_customer_reply"] == "Held for review."
     assert projected.payload["recommended_actions"] == []
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "diagnostic_analysis_completed",
+        "session_opened",
+        "action_executed",
+    ],
+)
+def test_matching_canonical_operational_subtypes_project(event_type: str) -> None:
+    projected = TimelineEvent.from_session_event(
+        _event(
+            annotation=event_type,
+            wrapper=_canonical_wrapper(event_type),
+        )
+    )
+    assert projected.event_type == event_type
+    assert projected.payload["schema_version"] == "0"
 
 
 @pytest.mark.parametrize("annotation,mutator", [
@@ -65,10 +108,30 @@ def test_malformed_or_conflicting_envelopes_remain_operational_observations(anno
     assert projected.event_type == "operational_observation"
 
 
-def test_arbitrary_embedded_known_type_cannot_override_outer_observation() -> None:
+def test_conflicting_known_type_cannot_override_outer_observation() -> None:
     wrapper = _valid_wrapper()
     wrapper["event_type"] = "session_opened"
-    projected = TimelineEvent.from_session_event(_event(annotation="session_opened", wrapper=wrapper))
+    projected = TimelineEvent.from_session_event(
+        _event(annotation="resolution_proposal_created", wrapper=wrapper)
+    )
+    assert projected.event_type == "operational_observation"
+
+
+@pytest.mark.parametrize(
+    "annotation,wrapper",
+    [
+        ("unrecognized_event", {"event_type": "unrecognized_event"}),
+        ("action_executed", {"payload": {"status": "executed"}}),
+        (None, _canonical_wrapper("diagnostic_analysis_completed")),
+    ],
+)
+def test_unknown_or_malformed_subtypes_remain_operational_observations(
+    annotation: str | None,
+    wrapper: dict[str, object],
+) -> None:
+    projected = TimelineEvent.from_session_event(
+        _event(annotation=annotation, wrapper=wrapper)
+    )
     assert projected.event_type == "operational_observation"
 
 

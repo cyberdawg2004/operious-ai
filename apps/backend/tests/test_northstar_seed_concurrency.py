@@ -11,11 +11,19 @@ import asyncio
 import os
 import subprocess
 import sys
+import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
+import pytest_asyncio
+from sqlalchemy import event, make_url, text
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    create_async_engine,
+)
 
 from app.db.test_target import validate_local_postgres_test_target
 from scripts.northstar_demo import locking
@@ -42,6 +50,53 @@ _DISPOSABLE_PREFIX = "operious_northstar_concurrency_test_"
 _FORBIDDEN_DATABASES = frozenset(
     {"postgres", "operious", "operious_test", "operious_schema_compat_test"}
 )
+
+
+def _quote_identifier(value: str) -> str:
+    return f'"{value.replace('"', '""')}"'
+
+
+@pytest_asyncio.fixture
+async def northstar_disposable_pg_engine(
+    pg_engine: AsyncEngine,
+) -> AsyncIterator[AsyncEngine]:
+    """Clone the migrated shared test target and drop the exact clone after Gate."""
+
+    del pg_engine
+    test_url = os.environ["TEST_DATABASE_URL"]
+    source_target = validate_local_postgres_test_target(test_url)
+    database_name = f"{_DISPOSABLE_PREFIX}{uuid.uuid4().hex[:24]}"
+    database_url = make_url(test_url).set(database=database_name)
+    admin_url = make_url(test_url).set(database="postgres")
+    admin_engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    disposable_engine = create_async_engine(database_url)
+    try:
+        async with admin_engine.connect() as connection:
+            await connection.execute(
+                text(
+                    "CREATE DATABASE "
+                    f"{_quote_identifier(database_name)} "
+                    "TEMPLATE "
+                    f"{_quote_identifier(source_target.database_name)}"
+                )
+            )
+        yield disposable_engine
+    finally:
+        await disposable_engine.dispose()
+        async with admin_engine.connect() as connection:
+            await connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) "
+                    "FROM pg_stat_activity "
+                    "WHERE datname = :database_name "
+                    "AND pid <> pg_backend_pid()"
+                ),
+                {"database_name": database_name},
+            )
+            await connection.execute(
+                text(f"DROP DATABASE IF EXISTS {_quote_identifier(database_name)}")
+            )
+        await admin_engine.dispose()
 
 
 def test_advisory_key_is_deterministic_and_signed() -> None:
@@ -145,7 +200,7 @@ async def _close_fresh_session(session: AsyncSession) -> None:
 @requires_postgres
 @pytest.mark.asyncio
 async def test_gate_b2_real_two_connection_concurrency_contract(
-    pg_engine: AsyncEngine,
+    northstar_disposable_pg_engine: AsyncEngine,
 ) -> None:
     """Execute all committed-state scenarios in one disposable database.
 
@@ -155,9 +210,10 @@ async def test_gate_b2_real_two_connection_concurrency_contract(
     removed by the Gate runner.
     """
 
-    test_url = os.environ["TEST_DATABASE_URL"]
+    pg_engine = northstar_disposable_pg_engine
+    test_url = str(pg_engine.url)
     target = validate_local_postgres_test_target(test_url)
-    assert target.host_kind == "loopback"
+    assert target.host_kind in {"localhost", "loopback"}
     assert target.database_name.startswith(_DISPOSABLE_PREFIX)
     assert target.database_name not in _FORBIDDEN_DATABASES
 
