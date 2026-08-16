@@ -28,7 +28,7 @@ jobs:
         run: npm ci
       - name: Run npm audit
         run: |
-          npm audit --json > /tmp/npm-audit.json
+          npm audit --json --audit-level=high > /tmp/npm-audit.json
           node - <<'NODE'
           const fs = require('fs');
           const report = JSON.parse(fs.readFileSync('/tmp/npm-audit.json', 'utf8'));

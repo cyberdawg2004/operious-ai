@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.cognition.extraction import ExtractedField, ExtractedOrderFields
+from app.cognition.extraction import ExtractedOrderFields
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
     ResolutionGovernanceVerdict,
