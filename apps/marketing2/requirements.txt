@@ -63,7 +63,7 @@ kubernetes==35.0.0
 lance-namespace==0.7.6
 lance-namespace-urllib3-client==0.7.6
 lancedb==0.30.0
-langchain==1.3.0
+langchain==1.3.9
 langchain-core==1.4.0
 langchain-protocol==0.0.15
 langgraph==1.2.0
