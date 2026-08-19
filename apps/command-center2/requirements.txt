@@ -53,7 +53,7 @@ instructor==1.15.1
 Jinja2==3.1.6
 jiter==0.13.0
 json5==0.10.0
-json_repair==0.25.3
+json_repair==0.60.1
 jsonpatch==1.33
 jsonpointer==3.1.1
 jsonref==1.1.0
