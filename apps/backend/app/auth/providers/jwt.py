@@ -106,6 +106,15 @@ TENANT_CASE_APPROVER_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.actions.approve",
 )
 
+# Deliberately narrow recorder role used only for the isolated, synthetic
+# product-demo tenant.  Keep this as two independent grants rather than an
+# Operator-derived bundle: the latter includes broad observability access and
+# would violate the recorder's least-privilege boundary.
+CLUESO_DEMO_RECORDER_CAPABILITIES: Final[tuple[str, ...]] = (
+    "tenant.operations.read",
+    "tenant.supervisor.read",
+)
+
 TENANT_RESOLUTION_GUIDER_CAPABILITIES: Final[tuple[str, ...]] = (
     "tenant.approvals.read",
     "tenant.resolution.guide",
@@ -182,6 +191,7 @@ ROLE_CAPABILITY_MAP: Final[dict[str, CapabilityMappingValue]] = {
     "TenantCognitionViewer": "tenant.cognition.read",
     "TenantActionApprover": "tenant.actions.approve",
     "TenantCaseApprover": TENANT_CASE_APPROVER_CAPABILITIES,
+    "CluesoDemoRecorder": CLUESO_DEMO_RECORDER_CAPABILITIES,
     "TenantResolutionGuider": TENANT_RESOLUTION_GUIDER_CAPABILITIES,
     # Read-only view of the SME approval queue, WITHOUT the approve/guide
     # authority (mirrors the TenantGovernanceViewer/TenantCognitionViewer

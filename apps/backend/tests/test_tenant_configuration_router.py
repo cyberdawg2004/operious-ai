@@ -516,7 +516,12 @@ async def test_knowledge_and_policy_endpoints_increment_versions(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "policy_type",
-    ["resolution_autonomy", "action_tools", "warranty_refund_rules", "resolution_taxonomy"],
+    [
+        "resolution_autonomy",
+        "action_tools",
+        "warranty_refund_rules",
+        "resolution_taxonomy",
+    ],
 )
 async def test_direct_policy_write_rejected_with_clean_403_for_safety_relevant_types(
     tenant_client: httpx.AsyncClient,

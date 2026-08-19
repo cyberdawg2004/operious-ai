@@ -57,6 +57,33 @@ class TenantLifecycleService:
         tenant_id: str,
         created_by: str,
     ) -> TenantLifecycleRecord:
+        """Create a tenant and commit the default request transaction.
+
+        The public lifecycle API preserves its historical ownership of the
+        transaction.  Batch callers which need their tenant lifecycle event
+        to commit atomically with other tenant-scoped records must use
+        :meth:`create_tenant_in_transaction` and own the outer transaction.
+        """
+        record = await self.create_tenant_in_transaction(
+            tenant_id=tenant_id,
+            created_by=created_by,
+        )
+        await self._session.commit()
+        return record
+
+    async def create_tenant_in_transaction(
+        self,
+        *,
+        tenant_id: str,
+        created_by: str,
+    ) -> TenantLifecycleRecord:
+        """Create a tenant and lifecycle event without committing.
+
+        This is deliberately narrow: it retains all canonical validation,
+        platform authority, event construction, and tenant-context handling
+        of :meth:`create_tenant`, while allowing a caller-owned transaction
+        to make a multi-record workflow atomic.
+        """
         canonical_tenant_id = str(coerce_tenant_id(tenant_id))
         canonical_principal_id = str(coerce_principal_id(created_by))
         previous_tenant = get_current_tenant()
@@ -74,7 +101,6 @@ class TenantLifecycleService:
                 ),
                 expected_tenant_id=canonical_tenant_id,
             )
-            await self._session.commit()
             return record
         finally:
             set_current_tenant(previous_tenant)

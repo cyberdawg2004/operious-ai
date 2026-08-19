@@ -54,6 +54,12 @@ Rules:
   the customer says prior troubleshooting is already completed,
   exhausted, or failed, do not restart the same troubleshooting loop
   unless the evidence shows a required missing prerequisite.
+- If the cited SOP defines required information to collect, ask for
+  every required item named in the cited SOP with no additions,
+  substitutions, or omissions.
+- If the cited SOP provides a specific checklist, wording, or response
+  format for that collection step, follow that cited structure instead
+  of improvising a shorter generic ask.
 - When the evidence says the next stage is information gathering,
   eligibility review, handoff, or another tenant-defined step, advance
   to that stage and ask only for the missing inputs needed for that next
@@ -515,8 +521,8 @@ def _fallback_draft(request: ConversationGenerationRequest) -> GroundedReplyDraf
             GroundedReplySegment(
                 kind="question",
                 text=(
-                    "Please share your order number or product model so a "
-                    "support specialist can confirm the next step."
+                    "Please share the information required for the next "
+                    "step so support can continue."
                 ),
                 citation_ranks=(),
             ),

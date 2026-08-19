@@ -442,6 +442,15 @@ async def test_projected_resolution_timeline_payload_carries_span_provenance() -
 
     assert projected.payload["evidence"][0]["char_start"] == 12
     assert projected.payload["evidence"][0]["char_end"] == 69
+    assert projected.payload["proposed_customer_reply"] == record.proposed_customer_reply
+    assert projected.payload["resolution_category"] == record.resolution_category
+    assert projected.payload["confidence"] == record.confidence
+    assert projected.payload["autonomy_decision"] == record.autonomy_decision.value
+    assert projected.payload["supervisor_verdict"] == record.supervisor_verdict.value
+    assert projected.payload["governance_verdict"] == record.governance_verdict.value
+    assert projected.payload["recommended_actions"] == [
+        dict(action) for action in record.recommended_actions
+    ]
 
 
 @pytest.mark.asyncio

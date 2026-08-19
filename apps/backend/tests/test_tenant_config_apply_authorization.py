@@ -50,7 +50,8 @@ def _clear_settings():
     get_settings.cache_clear()
 
 
-def test_non_production_allows_self_approval(
+@pytest.mark.asyncio
+async def test_non_production_allows_self_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "staging")
@@ -59,37 +60,40 @@ def test_non_production_allows_self_approval(
     authority = _admin()
     # Called directly with the resolved authority (FastAPI would resolve
     # it via Depends(require_capability(TENANT_POLICY_WRITE_CAPABILITY))).
-    assert _policy_apply_dependency()(authority) is authority
+    assert await _policy_apply_dependency()(authority) is authority
 
 
-def test_production_requires_distinct_approve_capability(
+@pytest.mark.asyncio
+async def test_production_requires_distinct_approve_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
     get_settings.cache_clear()
     with pytest.raises(HTTPException) as exc:
-        _policy_apply_dependency()(_admin(approver=False))
+        await _policy_apply_dependency()(_admin(approver=False))
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED
 
 
-def test_production_blocks_even_when_approve_capability_held(
+@pytest.mark.asyncio
+async def test_production_blocks_even_when_approve_capability_held(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
     get_settings.cache_clear()
     with pytest.raises(HTTPException) as exc:
-        _policy_apply_dependency()(_admin(approver=True))
+        await _policy_apply_dependency()(_admin(approver=True))
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == ERROR_CODE_INDEPENDENT_APPROVAL_REQUIRED
 
 
-def test_explicit_self_approval_override_in_production_still_blocks(
+@pytest.mark.asyncio
+async def test_explicit_self_approval_override_in_production_still_blocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("TENANT_CONFIG_ALLOW_SELF_APPROVAL", "true")
     get_settings.cache_clear()
     with pytest.raises(HTTPException) as exc:
-        _policy_apply_dependency()(_admin())
+        await _policy_apply_dependency()(_admin())
     assert exc.value.status_code == 403

@@ -517,7 +517,11 @@ def _record_to_row(record: ResolutionProposalRecord) -> ResolutionProposalRow:
         proposal_id=UUID(str(record.proposal_id)),
         tenant_id=record.tenant_id,
         session_id=_required_uuid(record.session_id, "session_id"),
-        execution_id=_required_uuid(record.execution_id, "execution_id"),
+        execution_id=(
+            UUID(record.execution_id)
+            if record.execution_id is not None
+            else None
+        ),
         dispatch_id=UUID(record.dispatch_id),
         diagnostic_event_id=(
             UUID(record.diagnostic_event_id)

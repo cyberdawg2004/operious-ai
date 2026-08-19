@@ -71,6 +71,7 @@ invariant test (``test_tenant_scope_dependency_invariants``).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import Callable, Final
 
 from fastapi import Depends, HTTPException, Request, status
@@ -229,132 +230,132 @@ TENANT_PRIVACY_APPROVE_CAPABILITY: Final[str] = "tenant.privacy.approve"
 TENANT_AUDIT_EXPORT_CAPABILITY: Final[str] = "tenant.audit.export"
 
 
-def _require_capability_from_request(
+async def _require_capability_from_request(
     request: Request,
     *,
     capability: str,
 ) -> AuthorityContext:
-    return require_capability(capability)(request)
+    return await require_capability(capability)(request)
 
 
-def require_tenant_operations_read(request: Request) -> AuthorityContext:
+async def require_tenant_operations_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.operations.read capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_OPERATIONS_READ_CAPABILITY,
     )
 
 
-def require_tenant_supervisor_read(request: Request) -> AuthorityContext:
+async def require_tenant_supervisor_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.supervisor.read capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_SUPERVISOR_READ_CAPABILITY,
     )
 
 
-def require_tenant_governance_read(request: Request) -> AuthorityContext:
+async def require_tenant_governance_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.governance.read capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_GOVERNANCE_READ_CAPABILITY,
     )
 
 
-def require_tenant_cognition_read(request: Request) -> AuthorityContext:
+async def require_tenant_cognition_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.cognition.read capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_COGNITION_READ_CAPABILITY,
     )
 
 
-def require_tenant_actions_approve(request: Request) -> AuthorityContext:
+async def require_tenant_actions_approve(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.actions.approve capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_ACTIONS_APPROVE_CAPABILITY,
     )
 
 
-def require_tenant_approvals_read(request: Request) -> AuthorityContext:
+async def require_tenant_approvals_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require tenant approval-case read access."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_APPROVALS_READ_CAPABILITY,
     )
 
 
-def require_tenant_resolution_guide(request: Request) -> AuthorityContext:
+async def require_tenant_resolution_guide(request: Request) -> AuthorityContext:
     """FastAPI dependency: require resolution guidance authority."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_RESOLUTION_GUIDE_CAPABILITY,
     )
 
 
-def require_tenant_training_write(request: Request) -> AuthorityContext:
+async def require_tenant_training_write(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.training.write capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_TRAINING_WRITE_CAPABILITY,
     )
 
 
-def require_tenant_connector_read(request: Request) -> AuthorityContext:
+async def require_tenant_connector_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.connector.read capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_CONNECTOR_READ_CAPABILITY,
     )
 
 
-def require_tenant_connector_approve(request: Request) -> AuthorityContext:
+async def require_tenant_connector_approve(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.connector.approve capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_CONNECTOR_APPROVE_CAPABILITY,
     )
 
 
-def require_tenant_privacy_admin(request: Request) -> AuthorityContext:
+async def require_tenant_privacy_admin(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.privacy.admin capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_PRIVACY_ADMIN_CAPABILITY,
     )
 
 
-def require_tenant_privacy_approve(request: Request) -> AuthorityContext:
+async def require_tenant_privacy_approve(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.privacy.approve capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_PRIVACY_APPROVE_CAPABILITY,
     )
 
 
-def require_tenant_knowledge_write(request: Request) -> AuthorityContext:
+async def require_tenant_knowledge_write(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.knowledge.write capability."""
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_KNOWLEDGE_WRITE_CAPABILITY,
     )
 
 
-def require_tenant_knowledge_approve(request: Request) -> AuthorityContext:
+async def require_tenant_knowledge_approve(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.knowledge.approve capability.
 
     Used on cognition approve/apply routes to enforce dual-control: the
@@ -362,43 +363,43 @@ def require_tenant_knowledge_approve(request: Request) -> AuthorityContext:
     must hold this capability (not just knowledge.write).
     """
 
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_KNOWLEDGE_APPROVE_CAPABILITY,
     )
 
 
-def require_tenant_observability_read(request: Request) -> AuthorityContext:
+async def require_tenant_observability_read(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.observability.read capability.
 
     Module-level function (not a closure) so ``dependency_overrides`` works
     stably in tests. Protects all operational observability endpoints (#26/#80).
     """
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_OBSERVABILITY_READ_CAPABILITY,
     )
 
 
-def require_tenant_observability_write(request: Request) -> AuthorityContext:
+async def require_tenant_observability_write(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.observability.write capability.
 
     Protects SLO-definition mutation endpoints (F14: observability writes
     must not be gated only by the read capability).
     """
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_OBSERVABILITY_WRITE_CAPABILITY,
     )
 
 
-def require_tenant_audit_export(request: Request) -> AuthorityContext:
+async def require_tenant_audit_export(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant.audit.export capability.
 
     Module-level function (not a closure) so ``dependency_overrides`` works
     stably in tests. Protects the audit-export endpoint (#80).
     """
-    return _require_capability_from_request(
+    return await _require_capability_from_request(
         request,
         capability=TENANT_AUDIT_EXPORT_CAPABILITY,
     )
@@ -435,7 +436,7 @@ def _authority_has_app_scope(authority: AuthorityContext) -> bool:
     )
 
 
-def require_authority(request: Request) -> AuthorityContext:
+async def require_authority(request: Request) -> AuthorityContext:
     """FastAPI dependency: return the request :class:`AuthorityContext`.
 
     Raises :exc:`fastapi.HTTPException` (401
@@ -491,7 +492,7 @@ def require_authority(request: Request) -> AuthorityContext:
     return authority
 
 
-def require_tenant_scope(request: Request) -> str:
+async def require_tenant_scope(request: Request) -> str:
     """FastAPI dependency: return the **canonical tenant scope** for
     forwarding to persistence ``expected_tenant_id`` arguments.
 
@@ -512,7 +513,7 @@ def require_tenant_scope(request: Request) -> str:
     etc. Handlers MUST forward this value verbatim — they MUST
     NOT widen, narrow, or substitute it.
     """
-    authority = require_authority(request)
+    authority = await require_authority(request)
     if authority.tenant_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -521,10 +522,10 @@ def require_tenant_scope(request: Request) -> str:
     return str(authority.tenant_id)
 
 
-def require_operator_authority(request: Request) -> AuthorityContext:
+async def require_operator_authority(request: Request) -> AuthorityContext:
     """FastAPI dependency: require an operator-level authority claim."""
 
-    authority = require_authority(request)
+    authority = await require_authority(request)
     if OPERATOR_CAPABILITY not in authority.capabilities:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -533,7 +534,7 @@ def require_operator_authority(request: Request) -> AuthorityContext:
     return authority
 
 
-def require_platform_tenant_admin(request: Request) -> AuthorityContext:
+async def require_platform_tenant_admin(request: Request) -> AuthorityContext:
     """FastAPI dependency: require platform-level tenant administration.
 
     Unlike :func:`require_tenant_scope`, this gate does not require a tenant
@@ -541,7 +542,7 @@ def require_platform_tenant_admin(request: Request) -> AuthorityContext:
     a tenant can safely own scoped configuration.
     """
 
-    authority = require_authority(request)
+    authority = await require_authority(request)
     if PLATFORM_TENANT_ADMIN_CAPABILITY not in authority.capabilities:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -555,7 +556,7 @@ def require_platform_tenant_admin(request: Request) -> AuthorityContext:
 
 def require_capability(
     capability: str,
-) -> Callable[[Request], AuthorityContext]:
+) -> Callable[[Request], Awaitable[AuthorityContext]]:
     """Build a dependency that requires ``capability`` on the authority.
 
     The returned dependency:
@@ -573,8 +574,8 @@ def require_capability(
     privileged mutations.
     """
 
-    def _dependency(request: Request) -> AuthorityContext:
-        authority = require_authority(request)
+    async def _dependency(request: Request) -> AuthorityContext:
+        authority = await require_authority(request)
         if capability not in authority.capabilities:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -588,7 +589,7 @@ def require_capability(
     return _dependency
 
 
-def require_tenant_admin(request: Request) -> AuthorityContext:
+async def require_tenant_admin(request: Request) -> AuthorityContext:
     """FastAPI dependency: require the tenant-admin capability (S-02).
 
     Default gate for every tenant-configuration MUTATION route.
@@ -597,7 +598,7 @@ def require_tenant_admin(request: Request) -> AuthorityContext:
     ``app.dependency_overrides[require_tenant_admin]``.
     """
 
-    authority = require_authority(request)
+    authority = await require_authority(request)
     if TENANT_ADMIN_CAPABILITY not in authority.capabilities:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -609,7 +610,7 @@ def require_tenant_admin(request: Request) -> AuthorityContext:
     return authority
 
 
-def require_config_apply_authorization(
+async def require_config_apply_authorization(
     authority: AuthorityContext = Depends(require_tenant_admin),
 ) -> AuthorityContext:
     """Authorize the legacy broad direct tenant-config mutation path (S-03).
@@ -633,7 +634,7 @@ def require_config_apply_authorization(
 
 def require_config_apply_authorization_for(
     capability: str,
-) -> Callable[..., AuthorityContext]:
+) -> Callable[..., Awaitable[AuthorityContext]]:
     """Authorize legacy direct apply for one tenant-config domain.
 
     Direct mutation remains disabled in production by the self-approval gate,
@@ -643,7 +644,7 @@ def require_config_apply_authorization_for(
 
     domain_dependency = require_capability(capability)
 
-    def _dependency(
+    async def _dependency(
         authority: AuthorityContext = Depends(domain_dependency),
     ) -> AuthorityContext:
         if get_settings().tenant_config_self_approval_allowed:
@@ -659,7 +660,7 @@ def require_config_apply_authorization_for(
     return _dependency
 
 
-def request_tenant_scope_opt(request: Request) -> str | None:
+async def request_tenant_scope_opt(request: Request) -> str | None:
     """FastAPI dependency: return the request's tenant scope or
     ``None`` (unconstrained).
 

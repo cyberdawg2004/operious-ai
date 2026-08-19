@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
+
+import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from starlette.requests import Request
-from starlette.testclient import TestClient
 
 from app.auth.providers.jwt import PERMISSION_CAPABILITY_MAP, ROLE_CAPABILITY_MAP
 from app.dependencies.authority import (
@@ -60,32 +62,46 @@ def test_capability_constant_values() -> None:
     assert TENANT_PRIVACY_APPROVE_CAPABILITY == "tenant.privacy.approve"
 
 
-def test_observability_dep_passes_with_capability() -> None:
+@pytest.mark.asyncio
+async def test_observability_dep_passes_with_capability() -> None:
     req = _request([TENANT_OBSERVABILITY_READ_CAPABILITY])
-    result = require_tenant_observability_read(req)
+    result = await require_tenant_observability_read(req)
     assert result.tenant_id == "t-1"
 
 
-def test_observability_dep_fails_without_capability() -> None:
+@pytest.mark.asyncio
+async def test_observability_dep_fails_without_capability() -> None:
     req = _request(["tenant_read"])
     with pytest.raises(HTTPException) as exc:
-        require_tenant_observability_read(req)
+        await require_tenant_observability_read(req)
     assert exc.value.status_code == 403
 
 
-def test_audit_export_dep_passes_with_capability() -> None:
+@pytest.mark.asyncio
+async def test_audit_export_dep_passes_with_capability() -> None:
     req = _request([TENANT_AUDIT_EXPORT_CAPABILITY])
-    result = require_tenant_audit_export(req)
+    result = await require_tenant_audit_export(req)
     assert result.tenant_id == "t-1"
 
 
-def test_audit_export_dep_fails_without_capability() -> None:
+@pytest.mark.asyncio
+async def test_audit_export_dep_fails_without_capability() -> None:
     req = _request(["tenant_read"])
     with pytest.raises(HTTPException) as exc:
-        require_tenant_audit_export(req)
+        await require_tenant_audit_export(req)
     assert exc.value.status_code == 403
 
 
+async def _resolve_dependency(dependency, request: Request):  # noqa: ANN001
+    """Invoke either FastAPI dependency shape without a worker thread."""
+
+    result = dependency(request)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("capability", "dependency"),
     [
@@ -100,19 +116,20 @@ def test_audit_export_dep_fails_without_capability() -> None:
         (TENANT_PRIVACY_APPROVE_CAPABILITY, require_tenant_privacy_approve),
     ],
 )
-def test_1aext_capability_deps(capability: str, dependency) -> None:  # noqa: ANN001
-    assert dependency(_request([capability])).tenant_id == "t-1"
+async def test_1aext_capability_deps(capability: str, dependency) -> None:  # noqa: ANN001
+    assert (await _resolve_dependency(dependency, _request([capability]))).tenant_id == "t-1"
     with pytest.raises(HTTPException) as exc:
-        dependency(_request(["tenant_read"]))
+        await _resolve_dependency(dependency, _request(["tenant_read"]))
     assert exc.value.status_code == 403
 
 
-def test_operator_capability_does_not_bypass_domain_gate() -> None:
+@pytest.mark.asyncio
+async def test_operator_capability_does_not_bypass_domain_gate() -> None:
     # The domain gates are capability-based, not role-based.
     # Operators are expected to also hold the explicit domain capability in Auth0.
     req = _request([OPERATOR_CAPABILITY])
     with pytest.raises(HTTPException) as exc:
-        require_tenant_observability_read(req)
+        await require_tenant_observability_read(req)
     assert exc.value.status_code == 403
 
 
@@ -140,6 +157,13 @@ def test_role_map_operator_bundle_excludes_sod_capabilities() -> None:
     assert "tenant.training.write" not in operator_caps
     assert "tenant.privacy.admin" not in operator_caps
     assert "tenant.privacy.approve" not in operator_caps
+
+
+def test_role_map_clueso_demo_recorder_is_exactly_read_only() -> None:
+    assert ROLE_CAPABILITY_MAP.get("CluesoDemoRecorder") == (
+        "tenant.operations.read",
+        "tenant.supervisor.read",
+    )
 
 
 @pytest.mark.parametrize(
@@ -281,12 +305,14 @@ def test_audit_export_endpoint_has_capability_dep() -> None:
 
 # ── Body cap: POST /audit/verify rejects > 256 KiB ───────────────────────────
 
-def test_audit_verify_body_cap_rejects_large_body() -> None:
+@pytest.mark.asyncio
+async def test_audit_verify_body_cap_rejects_large_body() -> None:
     import json
     import os
     from unittest.mock import patch
     from app.core.config import get_settings
-    from app.main import create_app
+    from app.api.v1.routers.audit_export import router as audit_export_router
+    from app.dependencies.services import get_audit_export_service
 
     get_settings.cache_clear()
     try:
@@ -295,7 +321,8 @@ def test_audit_verify_body_cap_rejects_large_body() -> None:
             "RATE_LIMIT_ENABLED": "false",
             "AUDIT_EXPORT_HMAC_SECRET": "s" * 32,
         }):
-            app = create_app()
+            app = FastAPI()
+            app.include_router(audit_export_router, prefix="/api/v1/audit")
     finally:
         get_settings.cache_clear()
 
@@ -304,8 +331,16 @@ def test_audit_verify_body_cap_rejects_large_body() -> None:
     body = json.dumps({"export": large_export}).encode()
     assert len(body) > 256 * 1024
 
-    with TestClient(app, raise_server_exceptions=False) as client:
-        resp = client.post(
+    async def _unused_service() -> object:
+        # FastAPI resolves providers before the handler enforces its
+        # endpoint-local cap; the sentinel's method must remain unreachable.
+        return object()
+
+    app.dependency_overrides[get_audit_export_service] = _unused_service
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
             "/api/v1/audit/verify",
             content=body,
             headers={"content-type": "application/json"},

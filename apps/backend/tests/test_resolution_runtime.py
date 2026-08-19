@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.cognition.extraction import ExtractedOrderFields
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
     ResolutionGovernanceVerdict,
@@ -89,6 +90,7 @@ from app.tenant.enums import (
 from app.tenant.identity import (
     as_knowledge_document_id,
     derive_governance_policy_version_id,
+    derive_knowledge_document_id,
 )
 from app.tenant.persistence import (
     InMemoryTenantConfigurationRepository,
@@ -247,6 +249,8 @@ def _request(
     category: str = "charging_issue",
     confidence: float = 0.91,
     citations: list[dict[str, object]] | None = None,
+    source_channel: str | None = None,
+    extracted_fields: ExtractedOrderFields | None = None,
 ) -> ResolutionProposalRequest:
     return ResolutionProposalRequest(
         tenant_id=TENANT_ID,
@@ -258,7 +262,9 @@ def _request(
         diagnostic_category=category,
         diagnostic_confidence=confidence,
         original_content=content,
+        source_channel=source_channel,
         retrieved_citations=citations if citations is not None else [_citation()],
+        extracted_fields=extracted_fields,
     )
 
 
@@ -322,6 +328,7 @@ async def _save_resolution_taxonomy_policy(
     *,
     tenant_id: str,
     category_ids: frozenset[str],
+    extraction_schema: dict[str, object] | None = None,
     version: int = 1,
 ) -> None:
     parameters: dict[str, object] = {
@@ -342,6 +349,8 @@ async def _save_resolution_taxonomy_policy(
             for category_id in sorted(category_ids)
         ],
     }
+    if extraction_schema is not None:
+        parameters["extraction_schema"] = extraction_schema
     content_sha256 = canonical_sha256(
         {
             "tenant_id": tenant_id,
@@ -373,6 +382,35 @@ async def _save_resolution_taxonomy_policy(
         previous_version_sha256=None,
     )
     await repository.save_governance_policy(record, expected_tenant_id=tenant_id)
+
+
+def _approved_template(
+    *,
+    tenant_id: str = TENANT_ID,
+    purpose: str,
+    channel: str,
+    content: str,
+) -> TenantKnowledgeDocumentRecord:
+    title = f"template-{purpose}-{channel}"
+    return TenantKnowledgeDocumentRecord(
+        document_id=derive_knowledge_document_id(
+            tenant_id=tenant_id,
+            title=title,
+            document_type=TenantKnowledgeDocumentType.TEMPLATE,
+        ),
+        tenant_id=tenant_id,
+        title=title,
+        content=content,
+        document_type=TenantKnowledgeDocumentType.TEMPLATE,
+        status=TenantKnowledgeDocumentStatus.ACTIVE,
+        version=1,
+        uploaded_by="test-setup",
+        vector_indexed_at=None,
+        created_at=_POLICY_NOW,
+        review_status=TenantKnowledgeReviewStatus.APPROVED,
+        template_purpose=purpose,
+        template_channel=channel,
+    )
 
 
 async def _save_governance_policy(
@@ -716,6 +754,185 @@ def test_money_guard_blocks_auto_send_even_when_category_is_allowlisted() -> Non
     )
 
     assert non_monetary_gate.status is ResolutionProposalStatus.AUTO_APPROVED
+
+
+@pytest.mark.asyncio
+async def test_collection_template_override_asks_exact_tenant_defined_bank_fields() -> (
+    None
+):
+    repository = await _resolution_autonomy_repository(
+        category_allowlist=frozenset({"dispute"}),
+    )
+    await _save_resolution_taxonomy_policy(
+        repository,
+        tenant_id=TENANT_ID,
+        category_ids=frozenset({"dispute"}),
+        extraction_schema={
+            "account_number": {
+                "type": "string",
+                "display_name": "account number",
+                "required_for_auto": True,
+            },
+            "dispute_reference": {
+                "type": "string",
+                "display_name": "dispute reference",
+                "required_for_auto": True,
+            },
+            "transaction_date": {
+                "type": "date",
+                "display_name": "transaction date",
+                "required_for_auto": True,
+            },
+        },
+        version=2,
+    )
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.collect_context.dispute",
+            channel="email",
+            content=(
+                "To continue, please reply with:\n{required_fields}\n\n"
+                "Missing right now:\n{missing_fields}"
+            ),
+        ),
+        expected_tenant_id=TENANT_ID,
+    )
+    runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+        conversation_generator=_StaticConversationGenerator(
+            GroundedReplyDraft(
+                language="en",
+                segments=(
+                    GroundedReplySegment(
+                        kind="question",
+                        text="Please share the details needed for the next step.",
+                    ),
+                ),
+            )
+        ),
+        tenant_configuration_repository=repository,
+    )
+
+    record = await runtime.create_proposal(
+        _request(
+            category="dispute",
+            source_channel="email",
+            extracted_fields=ExtractedOrderFields.model_validate(
+                {
+                    "account_number": {
+                        "value": "ACC-123",
+                        "confidence": "high",
+                        "source": "text",
+                    }
+                }
+            ),
+        )
+    )
+
+    assert "account number" in record.proposed_customer_reply
+    assert "dispute reference" in record.proposed_customer_reply
+    assert "transaction date" in record.proposed_customer_reply
+    assert "order number" not in record.proposed_customer_reply
+    assert "purchase date" not in record.proposed_customer_reply
+    assert "seller" not in record.proposed_customer_reply
+
+
+@pytest.mark.asyncio
+async def test_allowlisted_non_committing_collection_reply_auto_sends_but_money_reply_does_not() -> (
+    None
+):
+    repository = await _resolution_autonomy_repository(
+        category_allowlist=frozenset({"dispute"}),
+    )
+    await _save_resolution_taxonomy_policy(
+        repository,
+        tenant_id=TENANT_ID,
+        category_ids=frozenset({"dispute"}),
+        extraction_schema={
+            "account_number": {
+                "type": "string",
+                "display_name": "account number",
+                "required_for_auto": True,
+            },
+            "dispute_reference": {
+                "type": "string",
+                "display_name": "dispute reference",
+                "required_for_auto": True,
+            },
+        },
+        version=2,
+    )
+    await repository.save_knowledge_document(
+        _approved_template(
+            purpose="resolution.collect_context.dispute",
+            channel="email",
+            content="Please send the remaining details:\n{missing_fields}",
+        ),
+        expected_tenant_id=TENANT_ID,
+    )
+
+    info_runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+        conversation_generator=_StaticConversationGenerator(
+            GroundedReplyDraft(
+                language="en",
+                segments=(
+                    GroundedReplySegment(
+                        kind="question",
+                        text="Please share the details needed for the next step.",
+                    ),
+                ),
+            )
+        ),
+        tenant_configuration_repository=repository,
+    )
+    info_record = await info_runtime.create_proposal(
+        _request(
+            category="dispute",
+            source_channel="email",
+            extracted_fields=ExtractedOrderFields(),
+        )
+    )
+    assert info_record.status is ResolutionProposalStatus.SEND_ELIGIBLE
+    assert info_record.autonomy_decision is ResolutionAutonomyDecision.AUTO_APPROVED
+
+    money_runtime = ResolutionRuntime(
+        persistence=InMemoryResolutionProposalPersistence(),
+        governance_gate=_StaticResolutionGovernanceGate(
+            ResolutionGovernanceVerdict.ALLOW
+        ),
+        conversation_generator=_StaticConversationGenerator(
+            GroundedReplyDraft(
+                language="en",
+                segments=(
+                    GroundedReplySegment(
+                        kind="claim",
+                        text="We can offer a $200 refund for this dispute.",
+                        citation_ranks=(1,),
+                    ),
+                ),
+            )
+        ),
+        tenant_configuration_repository=repository,
+    )
+    money_record = await money_runtime.create_proposal(
+        _request(
+            category="dispute",
+            source_channel="email",
+            extracted_fields=ExtractedOrderFields(),
+        )
+    )
+    assert money_record.status is ResolutionProposalStatus.PENDING_HUMAN_APPROVAL
+    assert (
+        "money_or_goods_commitment_requires_human_approval"
+        in money_record.metadata["gate_reasons"]
+    )
 
 
 def test_resolution_category_passthrough_for_known_category() -> None:
@@ -2606,7 +2823,7 @@ def test_friendly_missing_field_label_covers_every_extracted_field_name() -> Non
     order_id/amount/currency get the exact same generic phrasing."""
     for name in ("order_id", "product_sku", "purchase_date", "seller", "amount", "currency"):
         label = _friendly_missing_field_label(name)
-        assert label != name
+        assert label == name.replace("_", " ")
         assert "anker" not in label.lower()
         assert "powercore" not in label.lower()
 
@@ -2618,15 +2835,13 @@ def test_friendly_missing_field_label_falls_back_for_unknown_field() -> None:
 
 
 def test_render_missing_fields_single_field_is_a_plain_phrase() -> None:
-    assert _render_missing_fields(["seller"]) == "the store or seller you purchased from"
+    assert _render_missing_fields(["seller"]) == "seller"
 
 
 def test_render_missing_fields_multiple_fields_render_as_numbered_list() -> None:
     rendered = _render_missing_fields(["order_id", "seller"])
 
-    assert rendered == (
-        "\n1. your order number\n2. the store or seller you purchased from"
-    )
+    assert rendered == "\n1. order id\n2. seller"
 
 
 def test_render_missing_fields_empty_list_is_empty_string() -> None:

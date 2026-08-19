@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -40,7 +41,7 @@ from app.governance.persistence import (
     GovernanceDecisionRecord,
     PostgresGovernanceRepository,
 )
-from app.identity import AuthorityContext
+from app.identity import AuthorityContext, PrincipalId, TenantId
 from app.main import create_app
 from app.resolution.enums import (
     ResolutionAutonomyDecision,
@@ -153,6 +154,7 @@ async def approval_client(
     app.dependency_overrides[require_tenant_actions_approve] = lambda: (
         AuthorityContext(
             tenant_id=_TENANT_ID,
+            principal_id=PrincipalId("principal-manager"),
             capabilities=("tenant.actions.approve",),
         )
     )
@@ -575,6 +577,48 @@ async def test_deny_twice_fails(
 
     assert first.status_code == 200
     assert second.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_approval_authority_without_principal_fails_closed_before_service(
+    approval_client: httpx.AsyncClient,
+    pg_session: AsyncSession,
+) -> None:
+    """A capability alone cannot authorize an attributed approval decision."""
+
+    transport = cast(Any, getattr(approval_client, "_transport"))
+    transport.app.dependency_overrides[require_tenant_actions_approve] = lambda: (
+        AuthorityContext(
+            tenant_id=TenantId(_TENANT_ID),
+            capabilities=frozenset({"tenant.actions.approve"}),
+        )
+    )
+    approval = await _create_approval(pg_session, seed="principal-axis-missing")
+    governance = PostgresGovernanceRepository(pg_session)
+    before = await governance.query_decisions(
+        DecisionQuery(tenant_id=_TENANT_ID, subject_kind="manager_approval")
+    )
+    events_before = await _events(pg_session, approval)
+
+    response = await approval_client.post(
+        f"/api/v1/approvals/actions/{approval.approval_id}/approve",
+        headers=_headers(),
+        json={"note": "must not reach approval service"},
+    )
+
+    after = await governance.query_decisions(
+        DecisionQuery(tenant_id=_TENANT_ID, subject_kind="manager_approval")
+    )
+    persisted = await PostgresActionApprovalRepository(pg_session).get_approval(
+        approval.approval_id,
+        expected_tenant_id=_TENANT_ID,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "{'code': 'principal_axis_missing'}"
+    assert after.total == before.total
+    assert persisted is not None
+    assert persisted.status == "pending"
+    assert await _events(pg_session, approval) == events_before
 
 
 @pytest.mark.asyncio

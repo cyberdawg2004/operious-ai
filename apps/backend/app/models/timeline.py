@@ -11,6 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.session.models.timeline_event import SessionTimelineEvent
 
 _PRE_VERSIONED_SCHEMA_VERSION = "0"
+_CANONICAL_OPERATIONAL_OBSERVATION_TYPES = frozenset(
+    {
+        "diagnostic_analysis_completed",
+        "session_opened",
+        "resolution_proposal_created",
+        "action_executed",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +45,13 @@ class ResolutionProposalPayload:
     proposal_id: str | None
     governance_decision_id: str | None
     status: str | None
+    proposed_customer_reply: str | None
+    resolution_category: str | None
+    confidence: float | None
+    autonomy_decision: str | None
+    supervisor_verdict: str | None
+    governance_verdict: str | None
+    recommended_actions: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
 
 
@@ -72,10 +87,10 @@ class TimelineEvent(BaseModel):
         if not isinstance(nested_payload, Mapping):
             nested_payload = payload
         event_payload = cast(Mapping[str, Any], nested_payload)
-        event_type = (
-            _payload_str(payload, "event_type")
-            or event.annotation
-            or event.kind.value
+        event_type = _projected_event_type(
+            event=event,
+            wrapper_payload=payload,
+            event_payload=event_payload,
         )
         timestamp = _payload_datetime(payload, "timestamp")
         return cls(
@@ -101,6 +116,78 @@ def _payload_str(payload: Mapping[str, Any], key: str) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _projected_event_type(
+    *,
+    event: SessionTimelineEvent,
+    wrapper_payload: Mapping[str, Any],
+    event_payload: Mapping[str, Any],
+) -> str:
+    """Recognize canonical TimelineRuntime subtype envelopes.
+
+    Session events are operational observations by default.  A payload value is
+    not itself authority to manufacture a different event subtype; the
+    matching immutable annotation and wrapper event type are required.  The
+    resolution-proposal subtype additionally requires its trace fields.
+    """
+    event_type = _canonical_operational_observation_type(
+        event=event,
+        wrapper_payload=wrapper_payload,
+    )
+    if event_type is None:
+        return event.kind.value
+    if event_type != "resolution_proposal_created":
+        return event_type
+    if _is_resolution_proposal_envelope(
+        event=event,
+        wrapper_payload=wrapper_payload,
+        event_payload=event_payload,
+    ):
+        return event_type
+    return event.kind.value
+
+
+def _canonical_operational_observation_type(
+    *,
+    event: SessionTimelineEvent,
+    wrapper_payload: Mapping[str, Any],
+) -> str | None:
+    """Return a known subtype only when its immutable and wrapper tags agree."""
+    event_type = _payload_str(wrapper_payload, "event_type")
+    if event.kind.value != "operational_observation":
+        return None
+    if event_type not in _CANONICAL_OPERATIONAL_OBSERVATION_TYPES:
+        return None
+    if event.annotation != event_type:
+        return None
+    return event_type
+
+
+def _is_resolution_proposal_envelope(
+    *,
+    event: SessionTimelineEvent,
+    wrapper_payload: Mapping[str, Any],
+    event_payload: Mapping[str, Any],
+) -> bool:
+    if event.annotation != "resolution_proposal_created":
+        return False
+    if _payload_str(wrapper_payload, "event_type") != event.annotation:
+        return False
+    if _payload_str(wrapper_payload, "session_id") != str(event.session_id):
+        return False
+    if not _payload_str(wrapper_payload, "tenant_id"):
+        return False
+    if not _payload_str(wrapper_payload, "dispatch_id"):
+        return False
+    if not _payload_str(wrapper_payload, "timestamp"):
+        return False
+    if not _payload_str(event_payload, "proposal_id"):
+        return False
+    return _payload_str(event_payload, "status") in {
+        "proposed", "auto_approved", "send_eligible",
+        "pending_human_approval", "denied", "failed",
+    }
 
 
 def _project_payload(
@@ -160,6 +247,25 @@ def _project_payload(
                     event_payload, "governance_decision_id"
                 ),
                 status=_payload_str(event_payload, "status"),
+                proposed_customer_reply=_payload_str(
+                    event_payload, "proposed_customer_reply"
+                ),
+                resolution_category=_payload_str(
+                    event_payload, "resolution_category"
+                ),
+                confidence=_payload_float(event_payload, "confidence"),
+                autonomy_decision=_payload_str(
+                    event_payload, "autonomy_decision"
+                ),
+                supervisor_verdict=_payload_str(
+                    event_payload, "supervisor_verdict"
+                ),
+                governance_verdict=_payload_str(
+                    event_payload, "governance_verdict"
+                ),
+                recommended_actions=_payload_list_of_dicts(
+                    event_payload, "recommended_actions"
+                ),
                 evidence=_payload_list_of_dicts(event_payload, "evidence"),
             )
         )

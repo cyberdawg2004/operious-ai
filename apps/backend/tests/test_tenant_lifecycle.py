@@ -154,7 +154,7 @@ async def test_2_5c_1_platform_capability_required() -> None:
             ),
         )
     )
-    platform_authority = require_platform_tenant_admin(
+    platform_authority = await require_platform_tenant_admin(
         _request(
             AuthorityContext.from_raw(
                 principal_id="platform-principal",
@@ -165,7 +165,7 @@ async def test_2_5c_1_platform_capability_required() -> None:
     service = _FakeTenantLifecycleService()
 
     with pytest.raises(HTTPException) as denied:
-        require_platform_tenant_admin(operator_request)
+        await require_platform_tenant_admin(operator_request)
     response = await create_tenant_lifecycle(
         TenantLifecycleCreateRequest(tenant_id=_ROUTE_TENANT_ID),
         authority=platform_authority,
@@ -197,7 +197,7 @@ async def test_gap6p2_platform_capability_required_for_tenant_admin_provision() 
             capabilities=frozenset({OPERATOR_CAPABILITY}),
         )
     )
-    platform_authority = require_platform_tenant_admin(
+    platform_authority = await require_platform_tenant_admin(
         _request(
             AuthorityContext.from_raw(
                 principal_id="platform-principal",
@@ -208,7 +208,7 @@ async def test_gap6p2_platform_capability_required_for_tenant_admin_provision() 
     service = _FakeTenantLifecycleService()
 
     with pytest.raises(HTTPException) as denied:
-        require_platform_tenant_admin(operator_request)
+        await require_platform_tenant_admin(operator_request)
     response = await provision_tenant_admin(
         _ROUTE_TENANT_ID,
         TenantAdminProvisionRequest(email="Admin@Example.com"),
@@ -299,6 +299,30 @@ async def test_2_5c_3_creation_is_audited(
     assert event.principal_id == "platform-auditor"
     assert event.metadata["projection_source"] == "tenant_lifecycle"
     assert event.metadata["operation"] == "create"
+
+
+@pytest.mark.asyncio
+async def test_create_tenant_in_transaction_does_not_commit(
+    pg_session: AsyncSession,
+) -> None:
+    """Batch workflows own the commit while retaining lifecycle auditing."""
+    tenant_id = _tenant("external-transaction")
+    service = _service(pg_session)
+
+    await service.create_tenant_in_transaction(
+        tenant_id=tenant_id,
+        created_by="platform-principal",
+    )
+    # The row and its canonical lifecycle event are visible inside the
+    # transaction, but the service has not committed the caller's work.
+    assert (await service.list_tenants(limit=100)).total >= 1
+    assert (await _tenant_create_events(pg_session, tenant_id)).total == 1
+    await pg_session.rollback()
+
+    assert tenant_id not in {
+        record.tenant_id
+        for record in (await service.list_tenants(limit=100)).items
+    }
 
 
 @pytest.mark.asyncio

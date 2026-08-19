@@ -159,7 +159,8 @@ async def test_quota_records_scoped_to_tenant(
     assert service.records_calls == [("tenant-acme", "tenant-acme", 25, 0)]
 
 
-def test_non_operator_authority_is_rejected() -> None:
+@pytest.mark.asyncio
+async def test_non_operator_authority_is_rejected() -> None:
     request = _request(
         AuthorityContext.from_raw(
             tenant_id="tenant-acme",
@@ -169,7 +170,7 @@ def test_non_operator_authority_is_rejected() -> None:
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        require_operator_authority(request)
+        await require_operator_authority(request)
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == {

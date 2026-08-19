@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.authority import require_tenant_operations_read
 from app.dependencies.database import get_db_session
+from app.dependencies.services import (
+    get_session_read_service,
+    get_session_repository,
+)
 from app.identity import AuthorityContext
 from app.main import create_app
 from app.session.enums import (
@@ -34,6 +38,8 @@ from app.session.persistence import (
     SessionEventRecord,
     SessionRecord,
 )
+from app.session.runtime import SessionRuntime
+from app.services.session_read_service import SessionReadService
 from tests.conftest import requires_postgres
 
 pytestmark = [requires_postgres]
@@ -54,12 +60,25 @@ async def session_client(
         yield pg_session
 
     app.dependency_overrides[get_db_session] = _override
-    app.dependency_overrides[require_tenant_operations_read] = lambda: (
-        AuthorityContext(
+    async def _operations_authority() -> AuthorityContext:
+        return AuthorityContext(
             tenant_id="tenant-acme",
             capabilities=("tenant.operations.read",),
         )
-    )
+
+    async def _session_repository() -> PostgresSessionPersistence:
+        return PostgresSessionPersistence(pg_session)
+
+    async def _session_read_service() -> SessionReadService:
+        return SessionReadService(
+            session_runtime=SessionRuntime(
+                persistence=PostgresSessionPersistence(pg_session)
+            )
+        )
+
+    app.dependency_overrides[require_tenant_operations_read] = _operations_authority
+    app.dependency_overrides[get_session_repository] = _session_repository
+    app.dependency_overrides[get_session_read_service] = _session_read_service
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test"

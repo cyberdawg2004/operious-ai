@@ -24,10 +24,24 @@
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
   },
+  "overrides": {
+    "next": "16.2.12",
+    "eslint-config-next": "16.2.12",
+    "brace-expansion": "5.0.9",
+    "js-yaml": "4.3.1",
+    "postcss": "8.5.18",
+    "sharp": "0.35.0"
+  },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/react": "^19.2.15",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "brace-expansion": "5.0.9",
+    "js-yaml": "4.3.1",
+    "postcss": "8.5.18",
+    "sharp": "0.35.0"
   }
 }
